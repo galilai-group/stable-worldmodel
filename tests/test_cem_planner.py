@@ -1,5 +1,4 @@
 def test_each_env():
-
     import gymnasium as gym
     import gymnasium_robotics
     import torch

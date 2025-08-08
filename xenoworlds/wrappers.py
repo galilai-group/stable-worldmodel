@@ -5,6 +5,7 @@ from gymnasium.wrappers import (
     ResizeObservation,
     TransformObservation,
     NumpyToTorch,
+    TimeLimit,
 )
 import torchvision.transforms.v2 as transforms
 import torch
@@ -24,13 +25,11 @@ class TransformObservation(gym.ObservationWrapper):
                 t = [transforms.RGB()]
             elif image_shape[0] == 1:
                 t = [transforms.Grayscale()]
-            t.extend(
-                [
-                    transforms.Resize((224, 224)),  # Resize the image
-                    transforms.ToImage(),
-                    transforms.ToDtype(torch.float, scale=True),
-                ]
-            )
+            t.extend([
+                transforms.Resize((224, 224)),  # Resize the image
+                transforms.ToImage(),
+                transforms.ToDtype(torch.float, scale=True),
+            ])
             if mean is not None and std is not None:
                 t.append(transforms.Normalize(mean=mean, std=std))
             t = transforms.Compose(t)

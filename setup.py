@@ -36,6 +36,7 @@ setup(
         "flax",
         "gymnasium>=1.2.0",
         "minigrid",
+        "pymunk",
         "swig",
         "gymnasium[box2d]",
         "minari",
@@ -46,5 +47,7 @@ setup(
         "gymnasium-robotics>=1.3.1",
         "ale-py",
         "ogbench",
+        "shapely",
+        "scikit-image",
     ],
 )
