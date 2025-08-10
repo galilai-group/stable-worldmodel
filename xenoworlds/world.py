@@ -46,18 +46,20 @@ class World:
         self.truncations = np.array([False] * self.num_envs)
         self.rewards = None
         logging.info(f"Resetting the ({self.num_envs}) world(s)!")
-        self.states, finfos = self.envs.reset(seed=self.seed)
+        self.states, self.infos = self.envs.reset(seed=self.seed)
+        self.cur_goals = self.infos["goal"]
+        self.cur_goal_images = self.infos["goal_image"]
         return self
 
     def __next__(self):
         if not all(self.terminations) and not all(self.truncations):
-            return self.states, self.rewards
+            return self.states, self.infos
         else:
             raise StopIteration
 
     def step(self, actions):
         (
-            self.current_states,
+            self.states,
             self.rewards,
             self.terminations,
             self.truncations,
