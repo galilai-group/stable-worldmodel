@@ -208,3 +208,4 @@ logs/
 .vscode/
 *.sh
 multirun/
+outputs/

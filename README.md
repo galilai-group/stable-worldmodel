@@ -1,5 +1,11 @@
 # neoworld
 
+## DinoWM CKPT
+
+```bash
+wget https://osf.io/xvzs4/download -O ckpt.zip && unzip ckpt.zip && rm ckpt.zip
+```
+
 ## Installation
 
 Follow the below isntruction (if you are not using conda, adjust accordingly)
@@ -29,4 +35,6 @@ Follow the below isntruction (if you are not using conda, adjust accordingly)
 export PATH="$MUJOCO_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$MUJOCO_HOME/bin:$LD_LIBRARY_PATH"
 ```
+
+
 
