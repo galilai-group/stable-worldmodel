@@ -1,23 +1,26 @@
+from xml.parsers.expat import model
 import hydra
 import lightning as pl
 import minari
+from omegaconf import OmegaConf
 import stable_ssl as ssl
 import torch
 from einops import rearrange, repeat
+from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from stable_ssl.data import transforms
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModel
-
+from lightning.pytorch.callbacks import ModelCheckpoint
 from xenoworlds.predictor import CausalPredictor
 
 
 class Config:
     """Configuration for the training script"""
 
-    # dummy
     num_workers: int = 4  # 16
+    batch_size: int = 4  # 32 reduce for 8 gpu
 
     # encoder
     encoder_lr: float = 1e-6
@@ -80,27 +83,47 @@ def get_data():
     num_steps = Config.num_hist + Config.num_pred
 
     # -- make transform operations
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
+    # mean = [0.485, 0.456, 0.406]
+    # std = [0.229, 0.224, 0.225]
+    # transform = transforms.Compose(
+    #     transforms.ToImage(
+    #         mean=mean,
+    #         std=std,
+    #         source="observations.pixels",
+    #         target="observations.pixels",
+    #     ),
+    # )
+
+    # from https://github.com/gaoyuezhou/dino_wm/blob/main/datasets/img_transforms.py
+    trans_key = "observations.pixels"
     transform = transforms.Compose(
+        transforms.Resize(Config.img_size, source=trans_key, target=trans_key),
+        transforms.CenterCrop(Config.img_size, source=trans_key, target=trans_key),
         transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="observations.pixels",
-            target="observations.pixels",
+            mean=[0.5, 0.5, 0.5],
+            std=[0.5, 0.5, 0.5],
+            source=trans_key,
+            target=trans_key,
         ),
     )
 
     # -- load dataset
-    minari_dataset = minari.load_dataset("dinowm/pusht_noise-v0", download=True) # xenoworlds/PushT-v1
+    minari_dataset = minari.load_dataset(
+        "dinowm/pusht_noise-v0", download=True
+    )  # xenoworlds/PushT-v1
     dataset = ssl.data.MinariStepsDataset(
         minari_dataset, num_steps=num_steps, transform=transform
     )
     train_set, val_set = ssl.data.random_split(dataset, lengths=[0.9, 0.1])
     train = DataLoader(
-        train_set, batch_size=32, num_workers=Config.num_workers, drop_last=True
+        train_set,
+        batch_size=Config.batch_size,
+        num_workers=Config.num_workers,
+        drop_last=True,
     )
-    val = DataLoader(val_set, batch_size=32, num_workers=Config.num_workers)
+    val = DataLoader(
+        val_set, batch_size=Config.batch_size, num_workers=Config.num_workers
+    )
     data_module = ssl.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
@@ -121,13 +144,14 @@ def forward(self, batch, stage):
     """Forward pass for predictor training"""
 
     def encode(obs, actions, proprio):
-        # -- encode actions
-        actions = self.action_encoder(actions)  # (B,T,A) -> (B,T,A_emb)
-        batch["action_emb"] = actions
+        with torch.amp.autocast(enabled=False, device_type="cuda"):
+            # -- encode actions
+            actions = self.action_encoder(actions)  # (B,T,A) -> (B,T,A_emb)
+            batch["action_emb"] = actions
 
-        # -- encode proprioceptive
-        proprio = self.proprio_encoder(proprio)  # (B,T,P) -> (B,T,P_emb)
-        batch["proprio_emb"] = proprio
+            # -- encode proprioceptive
+            proprio = self.proprio_encoder(proprio)  # (B,T,P) -> (B,T,P_emb)
+            batch["proprio_emb"] = proprio
 
         # -- encode observations to get states
         B, T, C, H, W = obs.shape
@@ -174,7 +198,6 @@ def forward(self, batch, stage):
     z = encode(obs, actions, proprio)
     z_src = z[:, : Config.num_hist, :, :]
     z_tgt = z[:, Config.num_pred :, :, :]
-
     z_preds = predict(z_src)
 
     action_dim = Config.action_emb_dim
@@ -198,10 +221,14 @@ def forward(self, batch, stage):
 
     # NOTE: can add decoder reconstruction here if needed
 
-    batch["loss"] = z_loss
-    batch["visual_loss"] = z_visual_loss
-    batch["proprio_loss"] = z_proprio_loss
+    prefix = "" if self.training else "val_"
+    batch[f"{prefix}loss"] = z_loss
+    batch[f"{prefix}visual_loss"] = z_visual_loss
+    batch[f"{prefix}proprio_loss"] = z_proprio_loss
 
+    # -- log losses
+    losses_dict = {k: v.item() for k, v in batch.items() if "loss" in k}
+    self.log_dict(losses_dict, on_step=True, on_epoch=True)
     return batch
 
 
@@ -257,21 +284,70 @@ def get_world_model(action_dim, proprio_dim):
     return world_model
 
 
+def setup_pl_logger(cfg):
+    if not cfg.wandb.enable:
+        return None
+
+    wandb_run_id = cfg.wandb.get("run_id", None)
+    wandb_logger = WandbLogger(
+        name="dino_wm",
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
+        resume="allow" if wandb_run_id else None,
+        id=wandb_run_id,
+    )
+
+    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
+    return wandb_logger
+
+
 @hydra.main(version_base=None, config_path="./", config_name="slurm")
 def run(cfg):
     """Run training of predictor"""
+
+    wandb_logger = setup_pl_logger(cfg)
     data, action_dim, proprio_dim = get_data()
     world_model = get_world_model(action_dim, proprio_dim)
 
-    trainer = pl.Trainer(
-        max_epochs=100,
-        num_sanity_val_steps=1,
-        precision="16-mixed",
-        logger=False,
-        enable_checkpointing=False,
+    # compute limit_train_size, one epoch 2h so to get 15min we need 1/8 of the epoch
+    num_epochs = 100
+    total_batches = len(data.train_dataloader()) * num_epochs
+    limit_train_size = int(len(data.train_dataloader()) / 8)
+    new_epoch_size = total_batches // limit_train_size
+
+    logging.info(
+        f"Total batches: {total_batches}, limit_train_size: {limit_train_size}, new_epoch_size: {new_epoch_size}"
     )
-    manager = ssl.Manager(trainer=trainer, module=world_model, data=data)
+
+    # checkpoint callback
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints/", save_top_k=1, monitor="val_loss", mode="min"
+    )
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints/",
+        filename="dino_wm",
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=new_epoch_size,
+        num_sanity_val_steps=1,
+        # precision="16-mixed", causes NaN loss
+        logger=wandb_logger,
+        limit_train_batches=limit_train_size,
+        callbacks=[checkpoint_callback],
+        enable_checkpointing=True,
+    )
+
+    manager = ssl.Manager(
+        trainer=trainer,
+        module=world_model,
+        data=data,
+    )
+
     manager()
+
+    # TODO add multiple optimizer
 
 
 if __name__ == "__main__":

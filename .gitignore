@@ -207,5 +207,9 @@ cython_debug/
 logs/
 .vscode/
 *.sh
+
 multirun/
-outputs/
+checkpoints/
+dino_wm_ckpt/
+wandb/
+*.out

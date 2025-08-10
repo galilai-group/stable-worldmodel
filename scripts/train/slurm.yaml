@@ -18,3 +18,8 @@ hydra:
   #   signal_delay_s: 120
   run:
     dir: .
+
+wandb:
+  enable: true
+  project: xenoworlds
+  entity: simon-lacoste-julien
