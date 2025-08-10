@@ -380,6 +380,7 @@ class PushT(gym.Env):
         shape="T",  # shape can be "T" <- the original shape, "I", "L", "Z", "square" and "small_tee"
         color="LightSlateGray",
         render_mode="rgb_array",
+        obs_mode="pixels",  # ["states", "pixels"]
     ):
         self.shape = shape
         self.color = color
@@ -403,27 +404,46 @@ class PushT(gym.Env):
         #     dtype=np.float64,
         # )
 
-        self.observation_space = spaces.Dict({
-            "proprio": spaces.Box(
-                low=0,
-                high=512,
-                shape=(2 if not with_velocity else 4,),
-                dtype=np.float64,
-            ),
-            "state": spaces.Box(
+        self.obs_mode = obs_mode
+        if self.obs_mode == "pixels":
+            # observation space is RGB pixels
+            self.observation_space = gym.spaces.Box(
+                low=0, high=255, shape=(resolution, resolution, 3), dtype=np.uint8
+            )
+        else:
+            self.observation_space = spaces.Box(
                 low=np.array([0, 0, 0, 0, 0]),
                 high=np.array([512, 512, 512, 512, np.pi * 2]),
                 dtype=np.float64,
-            ),
-        })
+            )
+
+        # self.observation_space = spaces.Dict({
+        #     "proprio": spaces.Box(
+        #         low=0,
+        #         high=512,
+        #         shape=(2 if not with_velocity else 4,),
+        #         dtype=np.float64,
+        #     ),
+        #     "state": spaces.Box(
+        #         low=np.array([0, 0, 0, 0, 0]),
+        #         high=np.array([512, 512, 512, 512, np.pi * 2]),
+        #         dtype=np.float64,
+        #     ),
+        # })
 
         # positional goal for agent
-        self.action_space = spaces.Box(
-            low=np.array([0, 0], dtype=np.float64),
-            high=np.array([ws, ws], dtype=np.float64),
+        self.action_space = gym.spaces.Box(
+            low=np.array([-1, -1], dtype=np.float64),
+            high=np.array([1, 1], dtype=np.float64),
             shape=(2,),
             dtype=np.float64,
         )
+        # self.action_space = spaces.Box(
+        #     low=np.array([0, 0], dtype=np.float64),
+        #     high=np.array([ws, ws], dtype=np.float64),
+        #     shape=(2,),
+        #     dtype=np.float64,
+        # )
 
         self.block_cog = block_cog
         self.damping = damping
@@ -458,11 +478,39 @@ class PushT(gym.Env):
             self.block.center_of_gravity = self.block_cog
         if self.damping is not None:
             self.space.damping = self.damping
-
+        
         # use legacy RandomState for compatibility
+        rs = self.random_state
+        
+        # first, force set the current scene to a goal state to obtain the goal observation
+        if self.with_velocity:
+            goal_state = np.array([
+                rs.randint(50, 450),
+                rs.randint(50, 450),
+                rs.randint(100, 400),
+                rs.randint(100, 400),
+                rs.randn() * 2 * np.pi - np.pi,
+                0,  # set random velocity to 0
+                0,  # set random velocity to 0
+            ])
+        else:
+            goal_state = np.array([
+                rs.randint(50, 450),
+                rs.randint(50, 450),
+                rs.randint(100, 400),
+                rs.randint(100, 400),
+                rs.randn() * 2 * np.pi - np.pi,
+            ])
+        self._set_state(goal_state)
+        goal_state = self._get_obs()
+        goal_proprio = goal_state[:2]
+        if self.with_velocity:
+            goal_proprio = np.concatenate((proprio, goal_state[5:]))
+        goal_visual = self._render_frame("rgb_array")
+
+        # get initial state
         state = self.reset_to_state
         if state is None:
-            rs = self.random_state
             if self.with_velocity:
                 state = np.array([
                     rs.randint(50, 450),
@@ -485,15 +533,24 @@ class PushT(gym.Env):
 
         self.coverage_arr = []
         state = self._get_obs()
-        # visual = self._render_frame("rgb_array")
+        visual = self._render_frame("rgb_array")
         proprio = state[:2]
         if self.with_velocity:
             proprio = np.concatenate((proprio, state[5:]))
-        observation = {"proprio": proprio, "state": state}
+        
+        observation = visual if self.obs_mode == "pixels" else state
 
         info = self._get_info()
+        info["proprio"] = proprio
+        info["state"] = state
+        info["image"] = visual
+        info["goal_state"] = goal_state
+        info["goal_proprio"] = goal_proprio
+        info["goal_image"] = goal_visual
+        info["goal"] = goal_visual if self.obs_mode == "pixels" else goal_state
         info["max_coverage"] = 0
         info["final_coverage"] = 0
+
         return observation, info
 
     def step(self, action):
@@ -525,26 +582,30 @@ class PushT(gym.Env):
         goal_area = goal_geom.area
         coverage = intersection_area / goal_area
         reward = np.clip(coverage / self.success_threshold, 0, 1)
-        done = False  # coverage > self.success_threshold
+        terminated = False  # coverage > self.success_threshold
+        truncated = False
 
         self.coverage_arr.append(coverage)
 
         state = self._get_obs()
-        # visual = self._render_frame("rgb_array")
-        # visual = self._render_frame("rgb_array")
         proprio = state[:2]
         if self.with_velocity:
             proprio = np.concatenate((proprio, state[5:]))
-        observation = {"proprio": proprio, "state": state}
+        visual = self._render_frame("rgb_array")
+        
+        observation = visual if self.obs_mode == "pixels" else state
         # observation = (
         #     einops.rearrange(observation, "H W C -> 1 C H W") / 255.0
         # )  # VCHW, range [0, 1]
+
         info = self._get_info()
+        info["proprio"] = proprio
+        info["state"] = state
+        info["image"] = visual
         info["max_coverage"] = 0
         info["final_coverage"] = self.coverage_arr[-1]
 
-        truncated = False
-        return observation, reward, done, truncated, info
+        return observation, reward, terminated, truncated, info
 
     def render(self):
         return self._render_frame(self.render_mode)
@@ -1064,7 +1125,7 @@ class PushT(gym.Env):
             raise ValueError(f"Unknown shape type: {shape}")
 
 
-class PymunkKeypointManager:
+class PymunkKeypointManager:  # TODO: do we need this?
     def __init__(
         self,
         local_keypoint_map: Dict[str, np.ndarray],
@@ -1169,7 +1230,7 @@ class PymunkKeypointManager:
         return self.draw_keypoints(img, kps_map=kp_map, **kwargs)
 
 
-class PushTKeypointsEnv(PushT):
+class PushTKeypointsEnv(PushT):  # TODO: do we need this?
     def __init__(
         self,
         legacy=False,
