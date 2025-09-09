@@ -18,16 +18,15 @@ class EnsureInfoKeys(gym.Wrapper):
     If a key is missing, it is added with a default value.
     """
 
-    def __init__(self, env, required_keys, default_value=None):
+    def __init__(self, env, required_keys):
         super().__init__(env)
         self.required_keys = required_keys
-        self.default_value = default_value
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         for key in self.required_keys:
             if key not in info:
-                info[key] = self.default_value
+                raise RuntimeError(f"Key {key} is not present in the env output")
         return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
@@ -36,11 +35,42 @@ class EnsureInfoKeys(gym.Wrapper):
             obs, info = result
             for key in self.required_keys:
                 if key not in info:
-                    info[key] = self.default_value
+                    raise RuntimeError(f"Key {key} is not present in the env output")
             return obs, info
         else:
-            # For older Gymnasium versions or custom envs
-            return result
+            raise RuntimeError("The output of the env should be a 2-element tuple")
+
+
+class EnsureImageShape(gym.Wrapper):
+    """
+    Gymnasium wrapper to ensure certain keys are present in the info dict.
+    If a key is missing, it is added with a default value.
+    """
+
+    def __init__(self, env, image_key="pixels"):
+        super().__init__(env)
+        self.image_key = image_key
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if obs[self.image_key].shape != self.image_shape:
+            raise RuntimeError(
+                f"Image shape {obs[self.image_key].shape} should be {self.image_shape}"
+            )
+        return obs, reward, terminated, truncated, info
+
+    def reset(self, **kwargs):
+        result = self.env.reset(**kwargs)
+        if isinstance(result, tuple) and len(result) == 2:
+            obs, info = result
+
+            if obs[self.image_key].shape != self.image_shape:
+                raise RuntimeError(
+                    f"Image shape {obs[self.image_key].shape} should be {self.image_shape}"
+                )
+            return obs, info
+        else:
+            raise RuntimeError("The output of the env should be a 2-element tuple")
 
 
 class TransformObservation(gym.ObservationWrapper):
