@@ -12,6 +12,37 @@ import torch
 import numpy as np
 
 
+class EnsureInfoKeys(gym.Wrapper):
+    """
+    Gymnasium wrapper to ensure certain keys are present in the info dict.
+    If a key is missing, it is added with a default value.
+    """
+
+    def __init__(self, env, required_keys, default_value=None):
+        super().__init__(env)
+        self.required_keys = required_keys
+        self.default_value = default_value
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        for key in self.required_keys:
+            if key not in info:
+                info[key] = self.default_value
+        return obs, reward, terminated, truncated, info
+
+    def reset(self, **kwargs):
+        result = self.env.reset(**kwargs)
+        if isinstance(result, tuple) and len(result) == 2:
+            obs, info = result
+            for key in self.required_keys:
+                if key not in info:
+                    info[key] = self.default_value
+            return obs, info
+        else:
+            # For older Gymnasium versions or custom envs
+            return result
+
+
 class TransformObservation(gym.ObservationWrapper):
     def __init__(
         self,
@@ -35,11 +66,13 @@ class TransformObservation(gym.ObservationWrapper):
                 t = [transforms.RGB()]
             elif image_shape[0] == 1:
                 t = [transforms.Grayscale()]
-            t.extend([
-                transforms.Resize((224, 224)),  # Resize the image
-                transforms.ToImage(),
-                transforms.ToDtype(torch.float, scale=True),
-            ])
+            t.extend(
+                [
+                    transforms.Resize((224, 224)),  # Resize the image
+                    transforms.ToImage(),
+                    transforms.ToDtype(torch.float, scale=True),
+                ]
+            )
             if mean is not None and std is not None:
                 t.append(transforms.Normalize(mean=mean, std=std))
             t = transforms.Compose(t)
