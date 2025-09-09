@@ -10,9 +10,11 @@ from gymnasium.wrappers import (
 import torchvision.transforms.v2 as transforms
 import torch
 import numpy as np
+from typing import Optional, Callable, Tuple, Iterable
+import time
 
 
-class EnsureInfoKeys(gym.Wrapper):
+class EnsureObservationKeys(gym.Wrapper):
     """
     Gymnasium wrapper to ensure certain keys are present in the info dict.
     If a key is missing, it is added with a default value.
@@ -23,20 +25,20 @@ class EnsureInfoKeys(gym.Wrapper):
         self.required_keys = required_keys
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs, reward, terminated, truncated = self.env.step(action)
         for key in self.required_keys:
-            if key not in info:
+            if key not in obs:
                 raise RuntimeError(f"Key {key} is not present in the env output")
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncated
 
     def reset(self, **kwargs):
         result = self.env.reset(**kwargs)
         if isinstance(result, tuple) and len(result) == 2:
-            obs, info = result
+            obs = result
             for key in self.required_keys:
-                if key not in info:
+                if key not in obs:
                     raise RuntimeError(f"Key {key} is not present in the env output")
-            return obs, info
+            return obs
         else:
             raise RuntimeError("The output of the env should be a 2-element tuple")
 
@@ -47,30 +49,133 @@ class EnsureImageShape(gym.Wrapper):
     If a key is missing, it is added with a default value.
     """
 
-    def __init__(self, env, image_key="pixels"):
+    def __init__(self, env, image_key, image_shape):
         super().__init__(env)
         self.image_key = image_key
+        self.image_shape = image_shape
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs, reward, terminated, truncated = self.env.step(action)
         if obs[self.image_key].shape != self.image_shape:
             raise RuntimeError(
                 f"Image shape {obs[self.image_key].shape} should be {self.image_shape}"
             )
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncated
 
     def reset(self, **kwargs):
         result = self.env.reset(**kwargs)
         if isinstance(result, tuple) and len(result) == 2:
-            obs, info = result
+            obs = result
 
             if obs[self.image_key].shape != self.image_shape:
                 raise RuntimeError(
                     f"Image shape {obs[self.image_key].shape} should be {self.image_shape}"
                 )
-            return obs, info
+            return obs
         else:
             raise RuntimeError("The output of the env should be a 2-element tuple")
+
+
+class InfoInObservation(gym.Wrapper):
+    """
+    Gymnasium wrapper to ensure the observation is included in the info dict
+    under a specified key after reset and step.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        for key in info:
+            assert key not in obs
+            obs[key] = info[key]
+        return info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        for key in info:
+            assert key not in obs
+            obs[key] = info[key]
+        return obs, reward, terminated, truncated
+
+
+class AddPixelsWrapper(gym.Wrapper):
+    """
+    Gymnasium wrapper that adds a 'pixels' key to the info dict,
+    containing a rendered and resized image of the environment.
+    Optionally applies a torchvision transform to the image.
+    Optionally applies another user-supplied wrapper to the environment.
+    """
+
+    def __init__(
+        self,
+        env,
+        pixels_shape: Tuple[int, int] = (84, 84),
+        torchvision_transform: Optional[Callable] = None,
+    ):
+        super().__init__(env)
+        self.pixels_shape = pixels_shape
+        self.torchvision_transform = torchvision_transform
+        # For resizing, use PIL (required for torchvision transforms)
+        from PIL import Image
+
+        self.Image = Image
+
+    def _get_pixels(self):
+        # Render the environment as an RGB array
+        t0 = time.time()
+        img = self.env.render()
+        t1 = time.time()
+        # Convert to PIL Image for resizing
+        pil_img = self.Image.fromarray(img)
+        pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
+        # Optionally apply torchvision transform
+        if self.torchvision_transform is not None:
+            pixels = self.torchvision_transform(pil_img)
+        else:
+            pixels = np.array(pil_img)
+        return pixels, t1 - t0
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        info = dict(info)
+        info["pixels"], info["render_time"] = self._get_pixels()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info = dict(info)
+        info["pixels"], info["render_time"] = self._get_pixels()
+        return obs, reward, terminated, truncated, info
+
+
+class MegaWrapper(gym.Wrapper):
+    def __init__(
+        self,
+        env,
+        pixels_shape: Tuple[int, int] = (84, 84),
+        torchvision_transform: Optional[Callable] = None,
+        required_keys: Optional[Iterable] = None,
+    ):
+        if required_keys is None:
+            required_keys = []
+        required_keys.append("pixels")
+
+        # this adds `pixels` key to info with optional transform
+        env = AddPixelsWrapper(env, pixels_shape, torchvision_transform)
+        # this removes the info output, everything is in observation!
+        env = InfoInObservation(env)
+        # check that necessary keys are in the observation
+        env = EnsureObservationKeys(env, required_keys)
+        # sanity check image shape
+        self.env = EnsureImageShape(env, "pixels", pixels_shape)
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        return self.env.step(action)
 
 
 class TransformObservation(gym.ObservationWrapper):
