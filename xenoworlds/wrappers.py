@@ -14,9 +14,19 @@ import numpy as np
 
 class TransformObservation(gym.ObservationWrapper):
     def __init__(
-        self, env, transform=None, image_shape=(3, 224, 224), mean=None, std=None
+        self,
+        env,
+        transform=None,
+        image_shape=(3, 224, 224),
+        mean=None,
+        std=None,
+        source_key="pixels",
+        target_key="pixels",
     ):
         super(TransformObservation, self).__init__(env)
+        self.source_key = source_key
+        self.target_key = target_key
+
         assert len(image_shape) == 3
         if transform:
             self.transform = transform
@@ -39,12 +49,12 @@ class TransformObservation(gym.ObservationWrapper):
         transformed_space = gym.spaces.Box(
             low=0, high=1, shape=image_shape, dtype=np.float32
         )
-        original_space["pixels"] = transformed_space
+        original_space[self.source_key] = transformed_space
         self.observation_space = original_space
 
     def observation(self, observation):
-        pixels = torch.from_numpy(observation["pixels"].copy())
+        pixels = torch.from_numpy(observation[self.source_key].copy())
         pixels = pixels.permute(2, 0, 1)
         pixels = self.transform(pixels)
-        observation["pixels"] = pixels
+        observation[self.target_key] = pixels
         return observation

@@ -1,0 +1,94 @@
+ckpt_base_path: /checkpoint/amaia/video/gzhou/exps/wm_robot
+training:
+  seed: 0
+  epochs: 500
+  batch_size: 32
+  save_every_x_epoch: 5
+  reconstruct_every_x_batch: 500
+  num_reconstruct_samples: 6
+  encoder_lr: 1.0e-06
+  decoder_lr: 0.0003
+  predictor_lr: 0.0005
+  action_encoder_lr: 0.0005
+img_size: 224
+frameskip: 5
+concat_dim: 1
+normalize_action: true
+action_emb_dim: 10
+num_action_repeat: 1
+proprio_emb_dim: 10
+num_proprio_repeat: 1
+num_hist: 3
+num_pred: 1
+has_predictor: true
+has_decoder: true
+state_based: false
+model:
+  _target_: models.visual_world_model.VWorldModel
+  image_size: 224
+  num_hist: 3
+  num_pred: 1
+  train_encoder: false
+  train_predictor: true
+  train_decoder: true
+debug: false
+plan_settings:
+  plan_cfg_path: conf/plan.yaml
+  planner:
+  - cem
+  goal_source:
+  - random_state
+  goal_H:
+  - 5
+  alpha:
+  - 0.1
+  - 1
+env:
+  name: point_maze
+  args: []
+  kwargs: {}
+  dataset:
+    _target_: datasets.point_maze_dset.load_point_maze_slice_train_val
+    n_rollout: null
+    normalize_action: true
+    # data_path: /checkpoint/amaia/video/gzhou/wm_datasets/point_maze
+    data_path: ${oc.env:DATASET_DIR}/point_maze
+    split_ratio: 0.9
+    transform:
+      _target_: datasets.img_transforms.default_transform
+      img_size: 224
+  decoder_path: null
+  num_workers: 0
+encoder:
+  _target_: models.dino.DinoV2Encoder
+  name: dinov2_vits14
+  feature_key: x_norm_patchtokens
+action_encoder:
+  _target_: models.proprio.ProprioceptiveEmbedding
+  num_frames: 1
+  tubelet_size: 1
+  use_3d_pos: false
+proprio_encoder:
+  _target_: models.proprio.ProprioceptiveEmbedding
+  num_frames: 1
+  tubelet_size: 1
+  use_3d_pos: false
+decoder:
+  _target_: models.vqvae.VQVAE
+  channel: 384
+  n_embed: 2048
+  n_res_block: 4
+  n_res_channel: 128
+  quantize: false
+predictor:
+  _target_: models.vit.ViTPredictor
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dropout: 0.1
+  emb_dropout: 0
+  pool: mean
+saved_folder: /checkpoint/amaia/video/gzhou/exps/wm_robot/outputs/2025-01-03/12-22-04/0
+effective_batch_size: 32
+gpu_batch_size: 2
+wandb_run_id: fm6twixo

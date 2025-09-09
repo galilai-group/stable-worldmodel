@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from .policy import BasePolicy
 from .world import World
+import numpy as np
 
 
 ## -- Evaluator / Collector
@@ -26,10 +27,11 @@ class Evaluator:
                 pixels = torch.from_numpy(states["pixels"])  # get the state
                 actions = self.policy.get_action(pixels, goals=goals)
                 self.world.step(actions)
-            
-            print(f"Episode {episode + 1} finished ")
 
-        self.world.close()
+            print(f"Episode {episode + 1} finished ")
+            self.world.close()
+
         return data
+
 
 ### DataSetUpload (download using stable_ssl)

@@ -212,4 +212,5 @@ multirun/
 checkpoints/
 dino_wm_ckpt/
 wandb/
+videos/
 *.out

@@ -228,7 +228,7 @@ def forward(self, batch, stage):
 
     # -- log losses
     losses_dict = {k: v.item() for k, v in batch.items() if "loss" in k}
-    self.log_dict(losses_dict, on_step=True, on_epoch=True)
+    self.log_dict(losses_dict, on_step=True, on_epoch=True, sync_dist=True)
     return batch
 
 
@@ -321,10 +321,6 @@ def run(cfg):
 
     # checkpoint callback
     checkpoint_callback = ModelCheckpoint(
-        dirpath="checkpoints/", save_top_k=1, monitor="val_loss", mode="min"
-    )
-
-    checkpoint_callback = ModelCheckpoint(
         dirpath="checkpoints/",
         filename="dino_wm",
     )
@@ -343,6 +339,7 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data,
+        ckpt_path="checkpoints/",
     )
 
     manager()

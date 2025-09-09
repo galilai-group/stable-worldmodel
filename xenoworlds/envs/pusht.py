@@ -362,7 +362,11 @@ def pymunk_to_shapely(body, shapes):
 
 
 class PushT(gym.Env):
-    metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 10}
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "video.frames_per_second": 10,
+        "render_fps": 10,
+    }
     reward_range = (0.0, 1.0)
 
     def __init__(
@@ -375,7 +379,7 @@ class PushT(gym.Env):
         reset_to_state=None,
         relative=True,
         action_scale=100,
-        with_velocity=False,
+        with_velocity=True,
         with_target=True,
         shape="T",  # shape can be "T" <- the original shape, "I", "L", "Z", "square" and "small_tee"
         color="LightSlateGray",
@@ -403,6 +407,9 @@ class PushT(gym.Env):
         #     shape=(5,),
         #     dtype=np.float64,
         # )
+
+        velocity_low_var = 2 * [float("-inf")] if with_velocity else []
+        velocity_high_var = 2 * [float("inf")] if with_velocity else []
 
         self.obs_mode = obs_mode
         if self.obs_mode == "pixels":
@@ -471,6 +478,33 @@ class PushT(gym.Env):
         self.reset_to_state = reset_to_state
         self.coverage_arr = []
 
+    def sample_state(self):
+        # sample a state from the environment
+        rs = self.random_state
+
+        state = [
+            rs.randint(50, 450),  # agent x
+            rs.randint(50, 450),  # agent y
+            rs.randint(100, 400),  # block x
+            rs.randint(100, 400),  # block y
+            # rs.randn() * 2 * np.pi - np.pi,  # block angle
+            rs.uniform(0, 2 * np.pi),  # fix to sample properly in [0, 2pi]
+        ]
+
+        # state = [
+        #     rs.randint(50, 150),  # agent x
+        #     rs.randint(50, 150),  # agent y
+        #     rs.randint(50, 150),  # block x
+        #     rs.randint(50, 150),  # block y
+        #     # rs.randn() * 2 * np.pi - np.pi,  # block angle
+        #     rs.uniform(0, 2 * np.pi),  # fix to sample properly in [0, 2pi]
+        # ]
+
+        if self.with_velocity:
+            state += [0, 0]  # agent velocity x, agent velocity y
+
+        return np.array(state, dtype=np.float64)
+
     def reset(self, seed=None, options=None):
         self.seed(seed)
         self._setup()
@@ -478,29 +512,33 @@ class PushT(gym.Env):
             self.block.center_of_gravity = self.block_cog
         if self.damping is not None:
             self.space.damping = self.damping
-        
+
         # use legacy RandomState for compatibility
         rs = self.random_state
-        
+
         # first, force set the current scene to a goal state to obtain the goal observation
         if self.with_velocity:
-            goal_state = np.array([
-                rs.randint(50, 450),
-                rs.randint(50, 450),
-                rs.randint(100, 400),
-                rs.randint(100, 400),
-                rs.randn() * 2 * np.pi - np.pi,
-                0,  # set random velocity to 0
-                0,  # set random velocity to 0
-            ])
+            goal_state = np.array(
+                [
+                    rs.randint(50, 450),
+                    rs.randint(50, 450),
+                    rs.randint(100, 400),
+                    rs.randint(100, 400),
+                    rs.randn() * 2 * np.pi - np.pi,
+                    0,  # set random velocity to 0
+                    0,  # set random velocity to 0
+                ]
+            )
         else:
-            goal_state = np.array([
-                rs.randint(50, 450),
-                rs.randint(50, 450),
-                rs.randint(100, 400),
-                rs.randint(100, 400),
-                rs.randn() * 2 * np.pi - np.pi,
-            ])
+            goal_state = np.array(
+                [
+                    rs.randint(50, 450),
+                    rs.randint(50, 450),
+                    rs.randint(100, 400),
+                    rs.randint(100, 400),
+                    rs.randn() * 2 * np.pi - np.pi,
+                ]
+            )
         self._set_state(goal_state)
         goal_state = self._get_obs()
         goal_proprio = goal_state[:2]
@@ -512,32 +550,37 @@ class PushT(gym.Env):
         state = self.reset_to_state
         if state is None:
             if self.with_velocity:
-                state = np.array([
-                    rs.randint(50, 450),
-                    rs.randint(50, 450),
-                    rs.randint(100, 400),
-                    rs.randint(100, 400),
-                    rs.randn() * 2 * np.pi - np.pi,
-                    0,  # set random velocity to 0
-                    0,  # set random velocity to 0
-                ])
+                state = np.array(
+                    [
+                        rs.randint(50, 450),
+                        rs.randint(50, 450),
+                        rs.randint(100, 400),
+                        rs.randint(100, 400),
+                        rs.randn() * 2 * np.pi - np.pi,
+                        0,  # set random velocity to 0
+                        0,  # set random velocity to 0
+                    ]
+                )
             else:
-                state = np.array([
-                    rs.randint(50, 450),
-                    rs.randint(50, 450),
-                    rs.randint(100, 400),
-                    rs.randint(100, 400),
-                    rs.randn() * 2 * np.pi - np.pi,
-                ])
+                state = np.array(
+                    [
+                        rs.randint(50, 450),
+                        rs.randint(50, 450),
+                        rs.randint(100, 400),
+                        rs.randint(100, 400),
+                        rs.randn() * 2 * np.pi - np.pi,
+                    ]
+                )
         self._set_state(state)
 
         self.coverage_arr = []
         state = self._get_obs()
         visual = self._render_frame("rgb_array")
         proprio = state[:2]
+
         if self.with_velocity:
             proprio = np.concatenate((proprio, state[5:]))
-        
+
         observation = visual if self.obs_mode == "pixels" else state
 
         info = self._get_info()
@@ -557,6 +600,7 @@ class PushT(gym.Env):
         dt = 1.0 / self.sim_hz
         self.n_contact_points = 0
         n_steps = self.sim_hz // self.control_hz
+
         if action is not None:
             action = np.array(action) * self.action_scale
             if self.relative:
@@ -592,7 +636,7 @@ class PushT(gym.Env):
         if self.with_velocity:
             proprio = np.concatenate((proprio, state[5:]))
         visual = self._render_frame("rgb_array")
-        
+
         observation = visual if self.obs_mode == "pixels" else state
         # observation = (
         #     einops.rearrange(observation, "H W C -> 1 C H W") / 255.0
@@ -626,20 +670,16 @@ class PushT(gym.Env):
         return TeleopAgent(act)
 
     def _get_obs(self):
+        obs = (
+            tuple(self.agent.position)
+            + tuple(self.block.position)
+            + (self.block.angle % (2 * np.pi),)
+        )
+
         if self.with_velocity:
-            obs = np.array(
-                tuple(self.agent.position)
-                + tuple(self.block.position)
-                + (self.block.angle % (2 * np.pi),)
-                + tuple(self.agent.velocity)
-            ).astype(np.float32)
-        else:
-            obs = np.array(
-                tuple(self.agent.position)
-                + tuple(self.block.position)
-                + (self.block.angle % (2 * np.pi),)
-            ).astype(np.float32)
-        return obs
+            obs += tuple(self.agent.velocity)
+
+        return np.array(obs, dtype=np.float64)
 
     def _get_goal_pose_body(self, pose):
         mass = 1
@@ -663,6 +703,32 @@ class PushT(gym.Env):
         }
         return info
 
+    def set_background(self, image):
+        """image can be a file path, pathlib.Path, or a BytesIO"""
+        # Load to a Surface; no display needed
+        self._bg_raw = image
+        self._bg_cache = None  # invalidate cache when a new image is set
+
+    def _get_background_for_canvas(self, canvas):
+        """Convert/scale the raw background to match the canvas only when needed."""
+        if getattr(self, "_bg_raw", None) is None:
+            return None
+        if (
+            getattr(self, "_bg_cache", None) is not None
+            and self._bg_cache.get_size() == canvas.get_size()
+        ):
+            return self._bg_cache
+
+        base = (
+            self._bg_raw.convert_alpha()
+            if self._bg_raw.get_alpha()
+            else self._bg_raw.convert(canvas)
+        )
+        scaled = pygame.transform.smoothscale(base, canvas.get_size())
+        self._bg_cache = scaled.convert(canvas)
+
+        return self._bg_cache
+
     def _render_frame(self, mode):
         if self.window is None and mode == "human":
             pygame.init()
@@ -672,7 +738,13 @@ class PushT(gym.Env):
             self.clock = pygame.time.Clock()
 
         canvas = pygame.Surface((self.window_size, self.window_size))
-        canvas.fill((255, 255, 255))
+
+        bg = self._get_background_for_canvas(canvas)
+        if bg is not None:
+            canvas.blit(bg, (0, 0))
+        else:
+            canvas.fill((255, 255, 255))  # fallback to white
+
         self.screen = canvas
 
         draw_options = DrawOptions(canvas)
@@ -739,7 +811,7 @@ class PushT(gym.Env):
         pos_agent = state[:2]
         pos_block = state[2:4]
         rot_block = state[4]
-        vel_block = tuple(state[5:]) if self.with_velocity else (0, 0)
+        vel_block = tuple(state[-2:]) if self.with_velocity else (0, 0)
         self.agent.velocity = vel_block
         self.agent.position = pos_agent
         # setting angle rotates with respect to center of mass
@@ -793,6 +865,7 @@ class PushT(gym.Env):
             self._add_segment((506, 5), (506, 506), 2),
             self._add_segment((5, 506), (506, 506), 2),
         ]
+
         self.space.add(*walls)
 
         # Add agent, block, and goal zone.
@@ -821,22 +894,22 @@ class PushT(gym.Env):
         )  # https://htmlcolorcodes.com/color-names
         return shape
 
-    def add_circle(self, position, radius):
+    def add_circle(self, position, radius, color="RoyalBlue", scale=1):
         body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         body.position = position
         body.friction = 1
-        shape = pymunk.Circle(body, radius)
-        shape.color = pygame.Color("RoyalBlue")
+        shape = pymunk.Circle(body, radius * scale)
+        shape.color = pygame.Color(color)
         self.space.add(body, shape)
         return body
 
-    def add_box(self, position, height, width):
+    def add_box(self, position, height, width, color="LightSlateGray", scale=1):
         mass = 1
-        inertia = pymunk.moment_for_box(mass, (height, width))
+        inertia = pymunk.moment_for_box(mass, (height * scale, width * scale))
         body = pymunk.Body(mass, inertia)
         body.position = position
-        shape = pymunk.Poly.create_box(body, (height, width))
-        shape.color = pygame.Color("LightSlateGray")
+        shape = pymunk.Poly.create_box(body, (height * scale, width * scale))
+        shape.color = pygame.Color(color)
         self.space.add(body, shape)
         return body
 
@@ -1113,6 +1186,8 @@ class PushT(gym.Env):
             return self.add_tee(*args, **kwargs)
         elif shape == "Z":
             return self.add_Z(*args, **kwargs)
+        elif shape == "o":
+            return self.add_circle(*args, **kwargs)
         elif shape == "square":
             return self.add_square(*args, **kwargs)
         elif shape == "I":

@@ -71,7 +71,7 @@ def get_data():
     """Return data and action space dim for training predictor"""
 
     # -- number of rollout steps to include in the dataset
-    num_steps = 5
+    num_steps = 25
 
     # -- make transform operations
     mean = [0.485, 0.456, 0.406]
@@ -89,7 +89,7 @@ def get_data():
     minari_dataset = minari.load_dataset("dinowm/pusht_noise-v0", download=True)
     dataset = ssl.data.MinariStepsDataset(
         minari_dataset, num_steps=num_steps, transform=transform
-    )
+    )  # TODO add frameskip stuff
     train_set, val_set = ssl.data.random_split(dataset, lengths=[0.9, 0.1])
     train = DataLoader(train_set, batch_size=32, num_workers=16, drop_last=True)
     val = DataLoader(val_set, batch_size=32, num_workers=16)

@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
     dataset = env.create_dataset(
         dataset_id="dinowm/pusht_noise-v0",
-        algorithm_name="Export-Policy",
+        algorithm_name="Expert-Policy",
         code_permalink="https://github.com/gaoyuezhou/dino_wm",
         author="Gaoyue Zhou",
         # author_email="contact@farama.org",
