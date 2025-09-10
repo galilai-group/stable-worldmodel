@@ -4,6 +4,7 @@ import torch
 from loguru import logger as logging
 from torchvision import transforms
 from .wrappers import MegaWrapper
+from pathlib import Path
 
 
 class World:
@@ -110,18 +111,24 @@ class World:
         """
         import cv2
 
-        fourcc = cv2.VideoWriter_fourcc(*"XVID")  # Codec
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Codec
         # Create VideoWriter object
-        out = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
+
+        out = [
+            cv2.VideoWriter(Path(video_path) / f"env_{i}.mp4", fourcc, fps, frame_size)
+            for i in range(self.envs.num_envs)
+        ]
 
         _, infos = self.envs.reset()
-        out.write(infos["pixels"][0])
+        for i, o in enumerate(out):
+            o.write(cv2.cvtColor(infos["pixels"][i], cv2.COLOR_RGBA2BGR))
         for _ in range(max_steps):
             actions = [
                 self.envs.single_action_space.sample()
                 for _ in range(self.envs.num_envs)
             ]
             obs, rewards, terminateds, truncateds, infos = self.envs.step(actions)
-            out.write(infos["pixels"][0])
-        out.release()
+            for i, o in enumerate(out):
+                o.write(cv2.cvtColor(infos["pixels"][i], cv2.COLOR_RGBA2BGR))
+        [o.release() for o in out]
         print(f"Video saved to {video_path}")

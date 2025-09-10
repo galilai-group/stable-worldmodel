@@ -139,8 +139,8 @@ class SimplePointMazeEnv(gym.Env):
         elif mode == "rgb_array":
             self._fig.canvas.draw()
             width, height = self._fig.canvas.get_width_height()
-            img = np.frombuffer(self._fig.canvas.buffer_rgba(), dtype=np.uint8)
-            img = img.reshape(height, width, 4)[..., :3]  # Drop alpha channel
+            img = np.frombuffer(self._fig.canvas.tostring_argb(), dtype=np.uint8)
+            img = img.reshape(height, width, 4)[:, :, [1, 2, 3, 0]]
             return img
         else:
             raise NotImplementedError(f"Render mode {mode} not supported.")
