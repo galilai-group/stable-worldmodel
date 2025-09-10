@@ -91,17 +91,20 @@ class World:
         else:
             raise StopIteration
 
-    def step(self, actions):
-        (
-            self.states,
-            self.states,
-            self.rewards,
-            self.terminations,
-            self.truncations,
-            self.infos,
-        ) = self.envs.step(actions)
+    def step(self):
+        actions = self.policy.get_actions(self.infos)
+        (self.states, self.rewards, self.terminations, self.truncations, self.infos) = (
+            self.envs.step(actions)
+        )
 
-    def record_video(self, video_path, max_steps=500, fps=30, frame_size=(256, 256)):
+    def reset(self, seed=None, options=None):
+        self.states, self.infos = self.envs.reset(seed=seed, options=options)
+
+    def set_policy(self, policy):
+        self.policy = policy
+        self.policy.set_env(self.envs)
+
+    def record_video(self, video_path, max_steps=500, fps=30, seed=None, options=None):
         """
         Records a video of a random policy running in the first environment of a Gymnasium VecEnv.
         Args:
@@ -109,31 +112,26 @@ class World:
             max_steps: Maximum number of steps to record.
             fps: Frames per second for the video.
         """
-        import cv2
         import imageio
-
-        fourcc = cv2.VideoWriter_fourcc(*"H264")  # Codec
-        # Create VideoWriter object
 
         out = [
             imageio.get_writer(
-                Path(video_path) / f"env_{i}.mp4", "output.mp4", fps=30, codec="libx264"
+                Path(video_path) / f"env_{i}.mp4",
+                "output.mp4",
+                fps=fps,
+                codec="libx264",
             )
             for i in range(self.envs.num_envs)
         ]
 
-        _, infos = self.envs.reset()
+        self.reset(seed, options)
         for i, o in enumerate(out):
-            o.append_data(infos["pixels"][i])
+            o.append_data(self.infos["pixels"][i])
         for _ in range(max_steps):
-            actions = [
-                self.envs.single_action_space.sample()
-                for _ in range(self.envs.num_envs)
-            ]
-            obs, rewards, terminateds, truncateds, infos = self.envs.step(actions)
+            self.step()
             for i, o in enumerate(out):
-                o.append_data(infos["pixels"][i])
-            if np.any(terminateds) or np.any(truncateds):
+                o.append_data(self.infos["pixels"][i])
+            if np.any(self.terminateds) or np.any(self.truncateds):
                 break
         [o.close() for o in out]
         print(f"Video saved to {video_path}")

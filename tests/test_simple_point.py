@@ -7,6 +7,7 @@ def test_env():
         image_shape=(224, 224),
         render_mode="rgb_array",
     )
+    world.set_policy(xenoworlds.policy.RandomPolicy())
     world.record_video("./")
     asdf
     world_model = xenoworlds.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)

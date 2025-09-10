@@ -11,31 +11,22 @@ class BasePolicy:
     """Base class for agent policies"""
 
     # a policy takes in an environment and a planner
-    def __init__(self, env, horizon=1, **kwargs):
-        self.env = env
-        self.horizon = horizon
+    def __init__(self, **kwargs):
+        self.env = None
+        for arg, value in kwargs.items():
+            setattr(self, arg, value)
 
-    def get_action(self, obs, goal_obs, **kwargs):
+    def get_action(self, obs, **kwargs):
         """Get action from the policy given the observation"""
         raise NotImplementedError
 
+    def set_env(self, env):
+        self.env = env
+
 
 class RandomPolicy(BasePolicy):
-    def __init__(self, env, **kwargs):
-        super().__init__(env, **kwargs)
-
-    def get_action(self, obs, goal_obs, **kwargs):
-        action_seq = []
-        for step in range(self.horizon):
-            action = self.env.action_space.sample()
-            action_seq.append(action)
-
-        action_seq = np.stack(action_seq, axis=1)
-
-        if action_seq.ndim == 2:
-            action_seq = action_seq[:, np.newaxis, :]
-
-        return action_seq
+    def get_action(self, obs, **kwargs):
+        return self.env.action_space.sample()
 
 
 class OptimalPolicy(BasePolicy):
