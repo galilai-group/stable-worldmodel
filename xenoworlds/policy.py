@@ -13,6 +13,7 @@ class BasePolicy:
     # a policy takes in an environment and a planner
     def __init__(self, **kwargs):
         self.env = None
+        self.type= "base"
         for arg, value in kwargs.items():
             setattr(self, arg, value)
 
@@ -25,23 +26,33 @@ class BasePolicy:
 
 
 class RandomPolicy(BasePolicy):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.type = "random"
+
     def get_action(self, obs, **kwargs):
         return self.env.action_space.sample()
 
 
-class OptimalPolicy(BasePolicy):
-    def __init__(self, env, **kwargs):
-        super().__init__(env, **kwargs)
+class ExpertPolicy(BasePolicy):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.type = "expert"
 
     def get_action(self, obs, goal_obs, **kwargs):
-        # Implement optimal policy logic here
+        # Implement expert policy logic here
         pass
 
-
-class PlanningPolicy(BasePolicy):
-    def __init__(self, env, planning_solver, **kwargs):
-        super().__init__(env, **kwargs)
-        self.solver = planning_solver
-
+class WorldModelPolicy(BasePolicy):
+    def __init__(self, world_model, solver, **kwargs):
+        super().__init__(**kwargs)
+        # TODO add param like horizon
+        # action chunk
+        # mpc etc...
+        self.type = "world_model"
+        self.solver = solver
+        self.world_model = world_model
+        
     def get_action(self, obs, goal_obs, **kwargs):
         return self.solver(obs, self.env.action_space, goal_obs)
+

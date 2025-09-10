@@ -6,6 +6,9 @@ from torchvision import transforms
 from .wrappers import MegaWrapper
 from pathlib import Path
 
+from datasets import Dataset, concatenate_datasets
+
+import os
 
 class World:
     def __init__(
@@ -41,7 +44,6 @@ class World:
         logging.info("WORLD INITIALIZED")
         logging.info(f"ACTION SPACE: {self.envs.action_space}")
         logging.info(f"OBSERVATION SPACE: {self.envs.observation_space}")
-        self.num_envs = num_envs
         self.seed = seed
 
         rng = torch.Generator()
@@ -50,6 +52,10 @@ class World:
 
         # note if sample_goal_every_k_steps is set to -1, will sample goal once per episode
         # TODO implement sample_goal_every_k_steps
+
+    @property
+    def num_envs(self):
+        return self.envs.num_envs   
 
     @property
     def observation_space(self):
@@ -106,7 +112,7 @@ class World:
 
     def record_video(self, video_path, max_steps=500, fps=30, seed=None, options=None):
         """
-        Records a video of a random policy running in the first environment of a Gymnasium VecEnv.
+        Records a video of the current policy running in the first environment of a Gymnasium VecEnv.
         Args:
             video_path: Output path for the video file.
             max_steps: Maximum number of steps to record.
@@ -121,7 +127,7 @@ class World:
                 fps=fps,
                 codec="libx264",
             )
-            for i in range(self.envs.num_envs)
+            for i in range(self.num_envs)
         ]
 
         self.reset(seed, options)
@@ -135,3 +141,69 @@ class World:
                 break
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
+
+
+    def record_dataset(self, dataset_path, episodes=10, max_steps=500, seed=None, options=None, episode_per_shard=100):
+        """
+        Records a dataset with the current policy running in the first environment of a Gymnasium VecEnv.
+        Args:
+            dataset_path: Output path for the dataset files.
+            episodes: Number of episodes to record.
+            max_steps: Maximum number of steps per episode.
+        """
+
+
+        hf_dataset = None
+        dataset_path = Path(dataset_path)
+
+        # REM: max_episodes steps is overriden the max num steps provided in env instantiation
+        # because of the self.truncated condition! 
+
+        # epsiodes // num_envs?
+
+        for episode in range(episodes):
+            self.reset(seed, options)
+
+            episodes_idx = (episode*self.num_envs) + np.arange(self.num_envs)
+
+            # create dict buffer to store episode data
+            data = {
+                'episode_idx': episodes_idx,
+                'step_idx': np.array([0]*self.num_envs),
+                'state': self.states['state'],
+                'pixels': self.infos['pixels'],
+                'policy': np.array([self.policy.type]*self.num_envs)
+            }
+
+            for step in range(max_steps):
+                self.step()
+                
+                # append data
+                data['episode_idx'] = np.concatenate([data['episode_idx'], episodes_idx], axis=0)
+                data['step_idx'] = np.concatenate([data['step_idx'], np.array([step+1]*self.num_envs)], axis=0)
+                data['state'] = np.concatenate([data['state'], self.states['state']], axis=0)
+                data['pixels'] = np.concatenate([data['pixels'], self.infos['pixels']], axis=0)
+                data['policy'] = np.concatenate([data['policy'], np.array([self.policy.type]*self.num_envs)], axis=0)
+
+                # add more data here if needed
+
+                if np.any(self.terminateds) or np.any(self.truncateds):
+                    break
+            
+            # save data
+            if hf_dataset is None:
+                hf_dataset = Dataset.from_dict(data)
+            else:
+                hf_dataset = concatenate_datasets([hf_dataset, Dataset.from_dict(data)])
+
+            # save shard if needed
+            if (episode + 1) % episode_per_shard == 0 or (episode + 1) == episodes:
+                assert hf_dataset is not None, "hf_dataset should not be None here"
+                shard_idx = episode // episode_per_shard
+                shard_path = dataset_path / f"data_shard_{shard_idx:05d}.parquet"
+                hf_dataset.to_parquet(shard_path)
+                hf_dataset = None
+                print(f"Shard {shard_idx} saved to {shard_path}")
+
+            print(f"Data from episode {episode+1}/{episodes} saved.")
+

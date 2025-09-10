@@ -211,6 +211,8 @@ logs/
 multirun/
 checkpoints/
 dino_wm_ckpt/
+pusht_noise/
 wandb/
 videos/
+dataset/
 *.out

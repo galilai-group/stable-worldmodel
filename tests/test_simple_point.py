@@ -8,17 +8,24 @@ def test_env():
         render_mode="rgb_array",
     )
     world.set_policy(xenoworlds.policy.RandomPolicy())
-    world.record_video("./")
-    asdf
-    world_model = xenoworlds.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
+    #world.record_video("./")
+    world.record_dataset('./dataset')
 
-    asdf
-    planner = CEMNevergrad(
-        world_model, n_steps=100, action_space=world.action_space, planning_horizon=3
-    )
-    agent = xenoworlds.Agent(planner, world)
-    # 'FetchPush-v1'
-    agent.run(episodes=5)
+
+    # asdf
+    world_model = xenoworlds.wm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
+    solver = None
+    world.set_policy(xenoworlds.policy.WorldModelPolicy(world_model, solver))
+
+
+
+    # asdf
+    # planner = CEMNevergrad(
+    #     world_model, n_steps=100, action_space=world.action_space, planning_horizon=3
+    # )
+    # agent = xenoworlds.Agent(planner, world)
+    # # 'FetchPush-v1'
+    # agent.run(episodes=5)
 
 
 if __name__ == "__main__":
