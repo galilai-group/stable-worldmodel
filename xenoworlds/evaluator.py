@@ -32,6 +32,3 @@ class Evaluator:
             self.world.close()
 
         return data
-
-
-### DataSetUpload (download using stable_ssl)

@@ -1,12 +1,13 @@
 import gymnasium as gym
 import numpy as np
 import torch
+import datasets
 from loguru import logger as logging
 from torchvision import transforms
 from .wrappers import MegaWrapper
 from pathlib import Path
 
-from datasets import Dataset, concatenate_datasets
+from datasets import Dataset, concatenate_datasets, Features, Value, Image
 
 import os
 
@@ -143,7 +144,7 @@ class World:
         print(f"Video saved to {video_path}")
 
 
-    def record_dataset(self, dataset_path, episodes=10, max_steps=500, seed=None, options=None, episode_per_shard=100):
+    def record_dataset(self, dataset_path, episodes=10, max_steps=500, seed=None, options=None, episode_per_shard=float('inf')):
         """
         Records a dataset with the current policy running in the first environment of a Gymnasium VecEnv.
         Args:
@@ -152,9 +153,11 @@ class World:
             max_steps: Maximum number of steps per episode.
         """
 
-
         hf_dataset = None
         dataset_path = Path(dataset_path)
+
+        if not hasattr(self, 'episode_saved'):
+            self.episode_saved = 0
 
         # REM: max_episodes steps is overriden the max num steps provided in env instantiation
         # because of the self.truncated condition! 
@@ -164,7 +167,7 @@ class World:
         for episode in range(episodes):
             self.reset(seed, options)
 
-            episodes_idx = (episode*self.num_envs) + np.arange(self.num_envs)
+            episodes_idx = self.episode_saved + (episode*self.num_envs) + np.arange(self.num_envs)
 
             # create dict buffer to store episode data
             data = {
@@ -190,20 +193,48 @@ class World:
                 if np.any(self.terminateds) or np.any(self.truncateds):
                     break
             
-            # save data
-            if hf_dataset is None:
-                hf_dataset = Dataset.from_dict(data)
+     
+            # determine feature
+            state_shape = data['state'].shape[1:]
+            state_dtype = data['state'].dtype.name
+            state_ndim = len(state_shape)
+            if 1 < state_ndim <= 6:
+                feature_cls = getattr(datasets, f"Array{state_ndim}D")
+                state_feature = [feature_cls(shape=state_shape, dtype=state_dtype)]
             else:
-                hf_dataset = concatenate_datasets([hf_dataset, Dataset.from_dict(data)])
+                state_feature = [Value(state_dtype)]
 
+            features = Features({
+                "episode_idx": Value("int32"),
+                "step_idx": Value("int32"),
+                "state": state_feature,
+                "pixels": Image(),
+                "policy": Value("string"),
+            })
+
+            # concat data
+            data = Dataset.from_dict(data, features=features)
+            hf_dataset = data if hf_dataset is None else concatenate_datasets([hf_dataset, data])
+     
             # save shard if needed
             if (episode + 1) % episode_per_shard == 0 or (episode + 1) == episodes:
                 assert hf_dataset is not None, "hf_dataset should not be None here"
-                shard_idx = episode // episode_per_shard
-                shard_path = dataset_path / f"data_shard_{shard_idx:05d}.parquet"
+
+                if episode_per_shard < float('inf'):
+                    shard_idx = episode // episode_per_shard if episode_per_shard < float('inf') else 0
+                    shard_path = dataset_path / f"data_shard_{shard_idx:05d}.parquet"
+                else:
+                    shard_path = dataset_path / "data.parquet"
+
+                
                 hf_dataset.to_parquet(shard_path)
+
+                old_episode_saved = self.episode_saved
+                num_episode_saved = len(hf_dataset.unique("episode_idx"))
+                self.episode_saved += num_episode_saved
                 hf_dataset = None
-                print(f"Shard {shard_idx} saved to {shard_path}")
+                print(f"Saved {num_episode_saved-old_episode_saved} episodes to {shard_path} (total episodes saved: {self.episode_saved})")
 
-            print(f"Data from episode {episode+1}/{episodes} saved.")
+            print(f"📹 Episode {episode+1}/{episodes} done.")
 
+        #dataset = load_dataset("parquet", data_files=str(dataset_path/"*.parquet"))
