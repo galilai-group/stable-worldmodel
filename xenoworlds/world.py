@@ -92,7 +92,7 @@ class World:
             raise StopIteration
 
     def step(self):
-        actions = self.policy.get_actions(self.infos)
+        actions = self.policy.get_action(self.infos)
         (self.states, self.rewards, self.terminations, self.truncations, self.infos) = (
             self.envs.step(actions)
         )
