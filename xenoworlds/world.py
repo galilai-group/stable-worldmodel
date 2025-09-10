@@ -155,6 +155,7 @@ class World:
 
         hf_dataset = None
         dataset_path = Path(dataset_path)
+        dataset_path.mkdir(parents=True, exist_ok=True)
 
         if not hasattr(self, 'episode_saved'):
             self.episode_saved = 0
