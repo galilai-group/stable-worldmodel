@@ -17,3 +17,8 @@ register(
     id="xenoworlds/PushT-v1",
     entry_point="xenoworlds.envs.pusht:PushT",
 )
+
+register(
+    id="xenoworlds/SimplePointMaze-v0",
+    entry_point="xenoworlds.envs.simple_point_maze:SimplePointMazeEnv",
+)

@@ -12,9 +12,11 @@ import torch
 import numpy as np
 from typing import Optional, Callable, Tuple, Iterable
 import time
+import gymnasium as gym
+from gymnasium.vector import VectorWrapper
 
 
-class EnsureObservationKeys(gym.Wrapper):
+class EnsureInfoKeysWrapper(gym.Wrapper):
     """
     Gymnasium wrapper to ensure certain keys are present in the info dict.
     If a key is missing, it is added with a default value.
@@ -25,22 +27,48 @@ class EnsureObservationKeys(gym.Wrapper):
         self.required_keys = required_keys
 
     def step(self, action):
-        obs, reward, terminated, truncated = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         for key in self.required_keys:
-            if key not in obs:
+            if key not in info:
                 raise RuntimeError(f"Key {key} is not present in the env output")
-        return obs, reward, terminated, truncated
+        return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
-        result = self.env.reset(**kwargs)
-        if isinstance(result, tuple) and len(result) == 2:
-            obs = result
-            for key in self.required_keys:
-                if key not in obs:
-                    raise RuntimeError(f"Key {key} is not present in the env output")
-            return obs
-        else:
-            raise RuntimeError("The output of the env should be a 2-element tuple")
+        obs, info = self.env.reset(**kwargs)
+        for key in self.required_keys:
+            if key not in info:
+                raise RuntimeError(f"Key {key} is not present in the env output")
+        return obs, info
+
+
+# class VecEnsureInfoKeysWrapper(VectorWrapper):
+#     """
+#     Vectorized Gymnasium wrapper that ensures specific keys are present in each observation dict.
+#     If a key is missing, it is added with a default value.
+#     """
+
+#     def __init__(self, env, required_keys):
+#         super().__init__(env)
+#         self.required_keys = required_keys
+
+#     def reset(self, **kwargs):
+#         obs, info = self.env.reset(**kwargs)
+#         self._ensure_keys(info)
+#         return obs, info
+
+#     def step(self, actions):
+#         obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
+#         self._ensure_keys(infos)
+#         return obs, rewards, terminateds, truncateds, infos
+
+#     def _ensure_keys(self, infos):
+#         # obs: dict of arrays (standard for Dict spaces)
+#         for info in infos:
+#             for key in self.required_keys:
+#                 if key not in info:
+#                     raise RuntimeError(f"Key {key} is not present in the env output")
+#         else:
+#             raise RuntimeError("Obs should be a dict")
 
 
 class EnsureImageShape(gym.Wrapper):
@@ -55,28 +83,23 @@ class EnsureImageShape(gym.Wrapper):
         self.image_shape = image_shape
 
     def step(self, action):
-        obs, reward, terminated, truncated = self.env.step(action)
-        if obs[self.image_key].shape != self.image_shape:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if info[self.image_key].shape[:-1] != self.image_shape:
             raise RuntimeError(
-                f"Image shape {obs[self.image_key].shape} should be {self.image_shape}"
+                f"Image shape {info[self.image_key].shape} should be {self.image_shape}"
             )
-        return obs, reward, terminated, truncated
+        return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
-        result = self.env.reset(**kwargs)
-        if isinstance(result, tuple) and len(result) == 2:
-            obs = result
-
-            if obs[self.image_key].shape != self.image_shape:
-                raise RuntimeError(
-                    f"Image shape {obs[self.image_key].shape} should be {self.image_shape}"
-                )
-            return obs
-        else:
-            raise RuntimeError("The output of the env should be a 2-element tuple")
+        obs, info = self.env.reset(**kwargs)
+        if info[self.image_key].shape[:-1] != self.image_shape:
+            raise RuntimeError(
+                f"Image shape {info[self.image_key].shape} should be {self.image_shape}"
+            )
+        return obs, info
 
 
-class InfoInObservation(gym.Wrapper):
+class ObsToInfoWrapper(gym.Wrapper):
     """
     Gymnasium wrapper to ensure the observation is included in the info dict
     under a specified key after reset and step.
@@ -87,17 +110,59 @@ class InfoInObservation(gym.Wrapper):
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
-        for key in info:
-            assert key not in obs
-            obs[key] = info[key]
-        return info
+        if type(obs) is not dict:
+            _obs = {"observation": obs}
+        else:
+            _obs = obs
+        for key in _obs:
+            assert key not in info
+            info[key] = _obs[key]
+        return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        for key in info:
-            assert key not in obs
-            obs[key] = info[key]
-        return obs, reward, terminated, truncated
+        if type(obs) is not dict:
+            _obs = {"observation": obs}
+        else:
+            _obs = obs
+        for key in _obs:
+            assert key not in info
+            info[key] = _obs[key]
+        return obs, reward, terminated, truncated, info
+
+
+# class VecObsToInfoWrapper(VectorWrapper):
+#     """
+#     Vectorized Gymnasium wrapper that merges each info dict into its corresponding observation dict.
+#     Assumes observations are dicts.
+#     """
+
+#     def reset(self, **kwargs):
+#         obs, infos = self.env.reset(**kwargs)
+#         self._merge_info(obs, infos)
+#         return obs, infos
+
+#     def step(self, actions):
+#         obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
+#         self._merge_info(obs, infos)
+#         return obs, rewards, terminateds, truncateds, infos
+
+#     def _merge_info(self, obs, infos):
+
+#         # We'll assume obs is a dict of arrays (standard for Dict spaces)
+#         if isinstance(obs, dict):
+#             # Convert dict of arrays to list of dicts
+#             obs_list = [
+#                 dict((k, v[i]) for k, v in obs.items()) for i in range(len(infos))
+#             ]
+#         else:
+#             # Already a list of dicts
+#             if type(obs[0]) is not dict:
+#                 obs = [{"observation": o} for o in obs]
+#             obs_list = list(obs)
+#         # Merge info into obs for each env
+#         for i, info in enumerate(infos):
+#             info.update(obs_list[i])
 
 
 class AddPixelsWrapper(gym.Wrapper):
@@ -139,15 +204,61 @@ class AddPixelsWrapper(gym.Wrapper):
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
-        info = dict(info)
         info["pixels"], info["render_time"] = self._get_pixels()
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info = dict(info)
         info["pixels"], info["render_time"] = self._get_pixels()
         return obs, reward, terminated, truncated, info
+
+
+# class VecAddPixelsWrapper(gym.vector.VectorWrapper):
+#     """
+#     Vectorized wrapper that adds a 'pixels' key to each info dict,
+#     containing a rendered and resized image of each environment.
+#     """
+
+#     def __init__(
+#         self,
+#         env,
+#         pixels_shape: Tuple[int, int] = (84, 84),
+#         torchvision_transform: Optional[Callable] = None,
+#     ):
+#         super().__init__(env)
+#         self.pixels_shape = pixels_shape
+#         self.torchvision_transform = torchvision_transform
+#         from PIL import Image
+
+#         self.Image = Image
+
+#     def _get_pixels(self):
+#         # env.envs is a list of the underlying environments
+#         pixels_list = []
+#         for e in self.env.envs:
+#             img = e.render()
+#             pil_img = self.Image.fromarray(img)
+#             pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
+#             if self.torchvision_transform is not None:
+#                 pixels = self.torchvision_transform(pil_img)
+#             else:
+#                 pixels = np.array(pil_img)
+#             pixels_list.append(pixels)
+#         return pixels_list
+
+#     def reset(self, **kwargs):
+#         obs, infos = self.env.reset(**kwargs)
+#         pixels_list = self._get_pixels()
+#         for info, pixels in zip(infos, pixels_list):
+#             info["pixels"] = pixels
+#         return obs, infos
+
+#     def step(self, actions):
+#         obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
+#         pixels_list = self._get_pixels()
+#         for info, pixels in zip(infos, pixels_list):
+#             info["pixels"] = pixels
+#         return obs, rewards, terminateds, truncateds, infos
 
 
 class MegaWrapper(gym.Wrapper):
@@ -158,6 +269,7 @@ class MegaWrapper(gym.Wrapper):
         torchvision_transform: Optional[Callable] = None,
         required_keys: Optional[Iterable] = None,
     ):
+        super().__init__(env)
         if required_keys is None:
             required_keys = []
         required_keys.append("pixels")
@@ -165,9 +277,9 @@ class MegaWrapper(gym.Wrapper):
         # this adds `pixels` key to info with optional transform
         env = AddPixelsWrapper(env, pixels_shape, torchvision_transform)
         # this removes the info output, everything is in observation!
-        env = InfoInObservation(env)
+        env = ObsToInfoWrapper(env)
         # check that necessary keys are in the observation
-        env = EnsureObservationKeys(env, required_keys)
+        env = EnsureInfoKeysWrapper(env, required_keys)
         # sanity check image shape
         self.env = EnsureImageShape(env, "pixels", pixels_shape)
 
@@ -176,6 +288,33 @@ class MegaWrapper(gym.Wrapper):
 
     def step(self, action):
         return self.env.step(action)
+
+
+# class VecMegaWrapper(gym.Wrapper):
+#     def __init__(
+#         self,
+#         env,
+#         pixels_shape: Tuple[int, int] = (84, 84),
+#         torchvision_transform: Optional[Callable] = None,
+#         required_keys: Optional[Iterable] = None,
+#     ):
+#         super().__init__(env)
+#         if required_keys is None:
+#             required_keys = []
+#         required_keys.append("pixels")
+
+#         # this adds `pixels` key to info with optional transform
+#         env = VecAddPixelsWrapper(env, pixels_shape, torchvision_transform)
+#         # this removes the info output, everything is in observation!
+#         env = VecObsToInfoWrapper(env)
+#         # check that necessary keys are in the observation
+#         env = VecEnsureInfoKeysWrapper(env, required_keys)
+
+#     def reset(self, **kwargs):
+#         return self.env.reset(**kwargs)
+
+#     def step(self, action):
+#         return self.env.step(action)
 
 
 class TransformObservation(gym.ObservationWrapper):

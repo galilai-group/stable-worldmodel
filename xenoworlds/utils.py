@@ -9,36 +9,6 @@ from moviepy import ImageSequenceClip
 import numpy as np
 
 
-def visualize_env(env, video_dir):
-    # Set up video recording
-    os.makedirs(video_dir, exist_ok=True)
-    from gymnasium.wrappers import RecordVideo
-
-    env = RecordVideo(env, video_dir, episode_trigger=lambda ep: True)
-    obs = env.reset()
-    done = False
-    total_reward = 0
-    steps = 0
-    while True:
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        total_reward += reward
-        steps += 1
-        if done:
-            break
-    env.close()
-    # Find the video file
-    video_files = [f for f in os.listdir(video_dir) if f.endswith(".mp4")]
-    if video_files:
-        print(
-            f"Video saved to: {os.path.abspath(os.path.join(video_dir, video_files[-1]))}"
-        )
-    else:
-        print("No video file found. Make sure ffmpeg is installed.")
-    print(f"Episode finished in {steps} steps, total reward: {total_reward}")
-
-
 def reshape_video(v, n_cols=5):
     """Helper function to reshape videos."""
     if v.ndim == 4:

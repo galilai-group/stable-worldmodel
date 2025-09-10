@@ -1,52 +1,86 @@
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle, Circle
 
 
-class SimpleMazeEnv(gym.Env):
-    metadata = {"render.modes": ["human"]}
+class SimplePointMazeEnv(gym.Env):
+    metadata = {"render_modes": ["human", "rgb_array"]}
 
     def __init__(
         self,
-        width: float = 5,
-        height: float = 5,
         n_walls=5,
         wall_min_size=0.5,
         wall_max_size=1.5,
         seed=None,
+        render_mode=None,
     ):
-        super(SimpleMazeEnv, self).__init__()
-        # Maze size
-        self.width = width
-        self.height = height
-        # Define maze walls as list of rectangles: (x1, y1, x2, y2)
+        super().__init__()
+        self.width = 5.0
+        self.height = 5.0
         self.n_walls = n_walls
         self.wall_min_size = wall_min_size
         self.wall_max_size = wall_max_size
         self.rng = np.random.default_rng(seed)
-
-        # Start and goal positions
-        self.start_pos = np.array([0.5, 0.5])
-        self.goal_pos = np.array([4.5, 4.5])
+        self.render_mode = render_mode
+        self.start_pos = np.array([0.5, 0.5], dtype=np.float32)
+        self.goal_pos = np.array([4.5, 4.5], dtype=np.float32)
         self.goal_radius = 0.2
-        # Observation: agent's (x, y) position
-        self.observation_space = spaces.Box(
-            low=np.array([0.0, 0.0]),
-            high=np.array([self.width, self.height]),
-            dtype=np.float32,
+        # Use Dict space for easy extension (e.g., adding "pixels" later)
+        self.observation_space = spaces.Dict(
+            {
+                "state": spaces.Box(
+                    low=np.array([0.0, 0.0], dtype=np.float32),
+                    high=np.array([self.width, self.height], dtype=np.float32),
+                    dtype=np.float32,
+                )
+            }
         )
-        # Action: delta x, delta y (continuous)
         self.action_space = spaces.Box(
-            low=np.array([-0.2, -0.2]), high=np.array([0.2, 0.2]), dtype=np.float32
+            low=np.array([-0.2, -0.2], dtype=np.float32),
+            high=np.array([0.2, 0.2], dtype=np.float32),
+            dtype=np.float32,
         )
         self.state = self.start_pos.copy()
         self.walls = []
         self._generate_walls()
+        self._fig = None
+        self._ax = None
 
-    def reset(self):
+    def _generate_walls(self):
+        self.walls = []
+        attempts = 0
+        while len(self.walls) < self.n_walls and attempts < self.n_walls * 10:
+            w = self.rng.uniform(self.wall_min_size, self.wall_max_size)
+            h = self.rng.uniform(self.wall_min_size, self.wall_max_size)
+            x1 = self.rng.uniform(0, self.width - w)
+            y1 = self.rng.uniform(0, self.height - h)
+            x2 = x1 + w
+            y2 = y1 + h
+            # Check if wall overlaps start or goal
+            margin = 0.3
+            if (
+                x1 - margin < self.start_pos[0] < x2 + margin
+                and y1 - margin < self.start_pos[1] < y2 + margin
+            ):
+                attempts += 1
+                continue
+            if (
+                x1 - margin < self.goal_pos[0] < x2 + margin
+                and y1 - margin < self.goal_pos[1] < y2 + margin
+            ):
+                attempts += 1
+                continue
+            self.walls.append((x1, y1, x2, y2))
+            attempts += 1
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
         self.state = self.start_pos.copy()
         self._generate_walls()
-        return self.state.copy()
+        info = {}
+        return {"state": self.state.copy()}, info
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
@@ -56,13 +90,17 @@ class SimpleMazeEnv(gym.Env):
             next_state = self.state  # Stay in place if collision
         # Keep within bounds
         next_state = np.clip(
-            next_state, self.observation_space.low, self.observation_space.high
+            next_state,
+            self.observation_space["state"].low,
+            self.observation_space["state"].high,
         )
         self.state = next_state
         # Check if goal reached
-        done = np.linalg.norm(self.state - self.goal_pos) < self.goal_radius
-        reward = 1.0 if done else -0.01  # Small penalty per step
-        return self.state.copy(), reward, done, {}
+        terminated = np.linalg.norm(self.state - self.goal_pos) < self.goal_radius
+        truncated = False  # You can add a max step count if you want
+        reward = 1.0 if terminated else -0.01  # Small penalty per step
+        info = {}
+        return {"state": self.state.copy()}, reward, terminated, truncated, info
 
     def _collides(self, pos):
         x, y = pos
@@ -71,18 +109,44 @@ class SimpleMazeEnv(gym.Env):
                 return True
         return False
 
-    def render(self, mode="human"):
-        print(f"Agent position: {self.state}")
-        print(f"Walls: {self.walls}")
+    def render(self, mode=None):
+        mode = mode or self.render_mode or "human"
+        if self._fig is None or self._ax is None:
+            self._fig, self._ax = plt.subplots(figsize=(5, 5))
+        self._ax.clear()
+        self._ax.set_xlim(0, self.width)
+        self._ax.set_ylim(0, self.height)
+        self._ax.set_aspect("equal")
+        self._ax.set_xticks([])
+        self._ax.set_yticks([])
+        # Draw walls
+        for x1, y1, x2, y2 in self.walls:
+            rect = Rectangle((x1, y1), x2 - x1, y2 - y1, color="black")
+            self._ax.add_patch(rect)
+        # Draw goal
+        goal = Circle(self.goal_pos, self.goal_radius, color="green", alpha=0.5)
+        self._ax.add_patch(goal)
+        # Draw agent
+        agent = Circle(self.state, 0.1, color="red")
+        self._ax.add_patch(agent)
+        # Draw start
+        start = Circle(self.start_pos, 0.1, color="blue", alpha=0.5)
+        self._ax.add_patch(start)
+        self._fig.tight_layout(pad=0)
+        if mode == "human":
+            plt.pause(0.001)
+            plt.draw()
+        elif mode == "rgb_array":
+            self._fig.canvas.draw()
+            width, height = self._fig.canvas.get_width_height()
+            img = np.frombuffer(self._fig.canvas.buffer_rgba(), dtype=np.uint8)
+            img = img.reshape(height, width, 4)[..., :3]  # Drop alpha channel
+            return img
+        else:
+            raise NotImplementedError(f"Render mode {mode} not supported.")
 
     def close(self):
-        pass
-
-
-# Register the environment (optional, for gym.make)
-from gym.envs.registration import register
-
-register(
-    id="SimpleMaze-v0",
-    entry_point=__name__ + ":SimpleMazeEnv",
-)
+        if self._fig is not None:
+            plt.close(self._fig)
+            self._fig = None
+            self._ax = None

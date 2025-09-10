@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from loguru import logger as logging
 from torchvision import transforms
+from .wrappers import MegaWrapper
 
 
 class World:
@@ -10,28 +11,30 @@ class World:
         self,
         env_name,
         num_envs,
-        wrappers: list,
+        image_shape,
+        image_transform=None,
         goal_wrappers: list = None,
         seed: int = 2349867,
         max_episode_steps: int = 100,
         sample_goal_every_k_steps: int = -1,
+        **kwargs,
     ):
         self.envs = gym.make_vec(
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=wrappers,
-            render_mode="rgb_array",
+            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform)],
             max_episode_steps=max_episode_steps,
+            **kwargs,
         )
 
         self.goal_envs = gym.make_vec(
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=goal_wrappers if goal_wrappers else wrappers,
-            render_mode="rgb_array",
+            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform)],
             max_episode_steps=max_episode_steps,
+            **kwargs,
         )
 
         logging.info("WORLD INITIALIZED")
@@ -96,3 +99,29 @@ class World:
             self.truncations,
             self.infos,
         ) = self.envs.step(actions)
+
+    def record_video(self, video_path, max_steps=500, fps=30, frame_size=(256, 256)):
+        """
+        Records a video of a random policy running in the first environment of a Gymnasium VecEnv.
+        Args:
+            video_path: Output path for the video file.
+            max_steps: Maximum number of steps to record.
+            fps: Frames per second for the video.
+        """
+        import cv2
+
+        fourcc = cv2.VideoWriter_fourcc(*"XVID")  # Codec
+        # Create VideoWriter object
+        out = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
+
+        _, infos = self.envs.reset()
+        out.write(infos["pixels"][0])
+        for _ in range(max_steps):
+            actions = [
+                self.envs.single_action_space.sample()
+                for _ in range(self.envs.num_envs)
+            ]
+            obs, rewards, terminateds, truncateds, infos = self.envs.step(actions)
+            out.write(infos["pixels"][0])
+        out.release()
+        print(f"Video saved to {video_path}")
