@@ -93,7 +93,7 @@ class World:
 
     def step(self):
         actions = self.policy.get_action(self.infos)
-        (self.states, self.rewards, self.terminations, self.truncations, self.infos) = (
+        (self.states, self.rewards, self.terminateds, self.truncateds, self.infos) = (
             self.envs.step(actions)
         )
 
