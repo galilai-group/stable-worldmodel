@@ -140,7 +140,7 @@ class SimplePointMazeEnv(gym.Env):
             self._fig.canvas.draw()
             width, height = self._fig.canvas.get_width_height()
             img = np.frombuffer(self._fig.canvas.tostring_argb(), dtype=np.uint8)
-            img = img.reshape(height, width, 4)[:, :, [1, 2, 3, 0]]
+            img = img.reshape(height, width, 4)[:, :, 1:]
             return img
         else:
             raise NotImplementedError(f"Render mode {mode} not supported.")

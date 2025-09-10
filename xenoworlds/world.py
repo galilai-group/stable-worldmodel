@@ -110,18 +110,21 @@ class World:
             fps: Frames per second for the video.
         """
         import cv2
+        import imageio
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Codec
+        fourcc = cv2.VideoWriter_fourcc(*"H264")  # Codec
         # Create VideoWriter object
 
         out = [
-            cv2.VideoWriter(Path(video_path) / f"env_{i}.mp4", fourcc, fps, frame_size)
+            imageio.get_writer(
+                Path(video_path) / f"env_{i}.mp4", "output.mp4", fps=30, codec="libx264"
+            )
             for i in range(self.envs.num_envs)
         ]
 
         _, infos = self.envs.reset()
         for i, o in enumerate(out):
-            o.write(cv2.cvtColor(infos["pixels"][i], cv2.COLOR_RGBA2BGR))
+            o.append_data(infos["pixels"][i])
         for _ in range(max_steps):
             actions = [
                 self.envs.single_action_space.sample()
@@ -129,6 +132,8 @@ class World:
             ]
             obs, rewards, terminateds, truncateds, infos = self.envs.step(actions)
             for i, o in enumerate(out):
-                o.write(cv2.cvtColor(infos["pixels"][i], cv2.COLOR_RGBA2BGR))
-        [o.release() for o in out]
+                o.append_data(infos["pixels"][i])
+            if np.any(terminateds) or np.any(truncateds):
+                break
+        [o.close() for o in out]
         print(f"Video saved to {video_path}")
