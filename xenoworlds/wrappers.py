@@ -99,6 +99,28 @@ class EnsureImageShape(gym.Wrapper):
         return obs, info
 
 
+class EnsureGoalInfoWrapper(gym.Wrapper):
+    def __init__(self, env, check_step: bool = False):
+        super().__init__(env)
+        self.check_step = check_step
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        if "goal" not in info:
+            raise RuntimeError(
+                "The info dict returned by reset() must contain the key 'goal'."
+            )
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if self.check_step and "goal" not in info:
+            raise RuntimeError(
+                "The info dict returned by step() must contain the key 'goal'."
+            )
+        return obs, reward, terminated, truncated, info
+
+
 class ObsToInfoWrapper(gym.Wrapper):
     """
     Gymnasium wrapper to ensure the observation is included in the info dict
@@ -268,6 +290,7 @@ class MegaWrapper(gym.Wrapper):
         pixels_shape: Tuple[int, int] = (84, 84),
         torchvision_transform: Optional[Callable] = None,
         required_keys: Optional[Iterable] = None,
+        goal_every_step: bool = False,
     ):
         super().__init__(env)
         if required_keys is None:
@@ -280,6 +303,8 @@ class MegaWrapper(gym.Wrapper):
         env = ObsToInfoWrapper(env)
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, required_keys)
+        # check goal is provided
+        env = EnsureGoalInfoWrapper(env, check_step=goal_every_step)
         # sanity check image shape
         self.env = EnsureImageShape(env, "pixels", pixels_shape)
 

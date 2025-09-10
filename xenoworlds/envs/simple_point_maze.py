@@ -43,15 +43,14 @@ class SimplePointMazeEnv(gym.Env):
             dtype=np.float32,
         )
         self.state = self.start_pos.copy()
-        self.walls = []
-        self._generate_walls()
+        self.walls = self._generate_walls()
         self._fig = None
         self._ax = None
 
     def _generate_walls(self):
-        self.walls = []
+        walls = []
         attempts = 0
-        while len(self.walls) < self.n_walls and attempts < self.n_walls * 10:
+        while len(walls) < self.n_walls and attempts < self.n_walls * 10:
             w = self.rng.uniform(self.wall_min_size, self.wall_max_size)
             h = self.rng.uniform(self.wall_min_size, self.wall_max_size)
             x1 = self.rng.uniform(0, self.width - w)
@@ -72,15 +71,28 @@ class SimplePointMazeEnv(gym.Env):
             ):
                 attempts += 1
                 continue
-            self.walls.append((x1, y1, x2, y2))
+            walls.append((x1, y1, x2, y2))
             attempts += 1
+        return walls
 
-    def reset(self, *, seed=None, options=None):
+    def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.state = self.start_pos.copy()
-        self._generate_walls()
+        self.state = options.get("start_pos", self.start_pos).copy()
+        self.walls = options.get("walls", self._generate_walls()).copy()
         info = {}
         return {"state": self.state.copy()}, info
+
+    def reset_and_generate_goal(self, seed=None, options=None):
+        obs, infos = self.reset(seed, options)
+        while True:
+            pos = np.random.randn(2)
+            if not self._collides(pos):
+                break
+        original_start = self.start_pos.copy()
+        self.start_pos = pos
+        goal = self.render()
+        self.start_pos = original_start
+        return obs, infos, goal
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
