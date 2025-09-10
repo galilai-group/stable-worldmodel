@@ -77,13 +77,10 @@ class SimplePointMazeEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        options = options or {}
         self.state = options.get("start_pos", self.start_pos).copy()
         self.walls = options.get("walls", self._generate_walls()).copy()
-        info = {}
-        return {"state": self.state.copy()}, info
 
-    def reset_and_generate_goal(self, seed=None, options=None):
-        obs, infos = self.reset(seed, options)
         while True:
             pos = np.random.randn(2)
             if not self._collides(pos):
@@ -92,7 +89,9 @@ class SimplePointMazeEnv(gym.Env):
         self.start_pos = pos
         goal = self.render()
         self.start_pos = original_start
-        return obs, infos, goal
+        info = {"goal": goal}
+
+        return {"state": self.state.copy()}, info
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
