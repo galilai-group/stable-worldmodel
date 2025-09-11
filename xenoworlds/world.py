@@ -156,7 +156,7 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def record_dataset(
+    def old_record_dataset(
         self,
         dataset_path,
         episodes=10,
@@ -215,9 +215,7 @@ class World:
                 data["step_idx"] = np.concatenate(
                     [data["step_idx"], np.array([step + 1] * self.num_envs)], axis=0
                 )
-                data["state"] = np.concatenate(
-                    [data["state"], self.states], axis=0
-                )
+                data["state"] = np.concatenate([data["state"], self.states], axis=0)
                 data["pixels"] = np.concatenate(
                     [data["pixels"], self.infos["pixels"]], axis=0
                 )
@@ -285,8 +283,85 @@ class World:
 
         # dataset = load_dataset("parquet", data_files=str(dataset_path/"*.parquet"))
 
+    def record_dataset(self, dataset_path, episodes=10, seed=None, options=None):
+        """
+        Records a dataset with the current policy running in the first environment of a Gymnasium VecEnv.
+        Args:
+            dataset_path: Output path for the dataset files.
+            episodes: Number of episodes to record.
+            max_steps: Maximum number of steps per episode.
+        """
 
-    def record_video_from_dataset(self, video_path, dataset_path, episode_idx, max_steps=500, fps=30, num_proc=4):
+        hf_dataset = None
+        dataset_path = Path(dataset_path)
+        dataset_path.mkdir(parents=True, exist_ok=True)
+
+        if not hasattr(self, "episode_saved"):
+            self.episode_saved = 0
+
+        saved_episodes = 0
+
+        self.reset(seed, options)
+        episode_idx = np.arange(self.num_envs)
+        step_idx = np.zeros(self.num_envs)
+        records = {key: [v for v in value] for key, value in self.infos.items()}
+        records["step_idx"] = list(step_idx)
+        records["episode_idx"] = list(episode_idx)
+        records["policy"] = [data["policy"]] * self.num_envs
+
+        while episode_idx.max() < episodes:
+
+            for i in range(self.num_envs):
+                if self.terminateds[i] or self.truncateds[i]:
+                    states, infos = self.envs.envs[i].reset()
+                    for k, v in infos.items():
+                        self.infos[k][i] = v
+                    episode_idx[i] = episode_idx.max() + 1
+                    step_idx[i] = 0
+                else:
+                    step_idx[i] += 1
+
+            self.step()
+            for key in self.infos:
+                records[key].extend(list(self.infos[key]))
+            records["step_idx"].extend(list(step_idx))
+            records["episode_idx"].extend(list(episode_idx))
+            records["policy"] = [data["policy"]] * self.num_envs
+
+        # determine feature
+        features = {
+            "pixels": Image(),
+            "episode_idx": Value("int32"),
+            "step_idx": Value("int32"),
+            "pixels": Image(),
+        }
+        if "goal" in records:
+            features["goal"] = Image()
+        for k in records:
+            if k in features:
+                continue
+            ndim = records[k][0].ndim
+            if 1 < ndim <= 6:
+                feature_cls = getattr(datasets, f"Array{ndim}D")
+                state_feature = feature_cls(
+                    shape=records[k][0].shape, dtype=records[k][0].dtype
+                )
+            else:
+                state_feature = Value(records[k][0].dtype)
+            features[k] = state_feature
+        # concat data
+        data = Dataset.from_dict(data, features=Features(features))
+        shard_idx = 0
+        while True:
+            if not (dataset_path / f"data_shard_{shard_idx:05d}.parquet").is_file():
+                break
+            shard_idx += 1
+
+        hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
+
+    def record_video_from_dataset(
+        self, video_path, dataset_path, episode_idx, max_steps=500, fps=30, num_proc=4
+    ):
         """
         Records a video of the current policy running in the first environment of a Gymnasium VecEnv.
         Args:
@@ -313,10 +388,14 @@ class World:
             for i in episode_idx
         ]
 
-        dataset = load_dataset("parquet", data_files=str(Path(dataset_path, "*.parquet")), split="train")
+        dataset = load_dataset(
+            "parquet", data_files=str(Path(dataset_path, "*.parquet")), split="train"
+        )
 
         for i, o in zip(episode_idx, out):
-            episode = dataset.filter(lambda ex: ex["episode_idx"] == i, num_proc=num_proc)
+            episode = dataset.filter(
+                lambda ex: ex["episode_idx"] == i, num_proc=num_proc
+            )
             episode = episode.sort("step_idx")
             episode_len = len(episode)
 

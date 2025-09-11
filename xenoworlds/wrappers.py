@@ -140,6 +140,19 @@ class EverythingToInfoWrapper(gym.Wrapper):
         for key in _obs:
             assert key not in info
             info[key] = _obs[key]
+
+        assert "reward" not in info
+        info["reward"] = np.nan
+        assert "terminated" not in info
+        info["terminated"] = np.nan
+        assert "truncated" not in info
+        info["truncated"] = np.nan
+        assert "action" not in info
+        info["action"] = self.env.action_space.sample()
+        if type(info["actions"]) is dict:
+            raise NotImplementedError
+        else:
+            info["actions"] *= np.nan
         return obs, info
 
     def step(self, action):
