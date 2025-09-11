@@ -77,6 +77,12 @@ class SimplePointMazeEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        self.rng = np.random.default_rng(seed)
+        if seed is not None:
+            self.observation_space.seed(seed)
+            if hasattr(self, "action_space"):
+                self.action_space.seed(seed)
+
         options = options or {}
         if options.get("start_pos", "random") == "random":
             self.state = self.observation_space.sample()

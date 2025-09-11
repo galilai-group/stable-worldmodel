@@ -22,10 +22,13 @@ class RandomPolicy(BasePolicy):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.type = "random"
-
+    
     def get_action(self, obs, **kwargs):
         return self.env.action_space.sample()
 
+    def set_seed(self, seed):
+        if self.env is not None:
+            self.env.action_space.seed(seed)
 
 class ExpertPolicy(BasePolicy):
     def __init__(self, **kwargs):
