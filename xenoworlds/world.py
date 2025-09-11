@@ -142,7 +142,6 @@ class World:
                 frame = np.vstack([self.infos["pixels"][i], self.infos["goal"][i]])
             else:
                 frame = self.infos["pixels"][i]
-            print(frame.shape)
             o.append_data(frame)
         for _ in range(max_steps):
             self.step()
@@ -151,7 +150,6 @@ class World:
                     frame = np.vstack([self.infos["pixels"][i], self.infos["goal"][i]])
                 else:
                     frame = self.infos["pixels"][i]
-                print(frame.shape)
                 o.append_data(frame)
             if np.any(self.terminateds) or np.any(self.truncateds):
                 break

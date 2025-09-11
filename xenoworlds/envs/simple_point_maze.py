@@ -91,9 +91,12 @@ class SimplePointMazeEnv(gym.Env):
             if not self._collides(pos):
                 break
         original_start = self.start_pos.copy()
+        original_state = self.state.copy()
         self.start_pos = pos
+        self.state = pos
         self._goal = self.render()
         self.start_pos = original_start
+        self.state = original_state
         info = {"goal": self._goal}
 
         return self.state.copy(), info
