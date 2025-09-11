@@ -236,6 +236,43 @@ class AddPixelsWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
+class ResizeGoalWrapper(gym.Wrapper):
+    def __init__(
+        self,
+        env,
+        pixels_shape: Tuple[int, int] = (84, 84),
+        torchvision_transform: Optional[Callable] = None,
+    ):
+        super().__init__(env)
+        self.pixels_shape = pixels_shape
+        self.torchvision_transform = torchvision_transform
+        # For resizing, use PIL (required for torchvision transforms)
+        from PIL import Image
+
+        self.Image = Image
+
+    def _format(self, img):
+        # Convert to PIL Image for resizing
+        pil_img = self.Image.fromarray(img)
+        pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
+        # Optionally apply torchvision transform
+        if self.torchvision_transform is not None:
+            pixels = self.torchvision_transform(pil_img)
+        else:
+            pixels = np.array(pil_img)
+        return pixels
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        info["goal"] = self._format(info["goal"])
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info["goal"] = self._format(info["goal"])
+        return obs, reward, terminated, truncated, info
+
+
 # class VecAddPixelsWrapper(gym.vector.VectorWrapper):
 #     """
 #     Vectorized wrapper that adds a 'pixels' key to each info dict,
@@ -289,7 +326,9 @@ class MegaWrapper(gym.Wrapper):
         self,
         env,
         pixels_shape: Tuple[int, int] = (84, 84),
-        torchvision_transform: Optional[Callable] = None,
+        pixels_transform: Optional[Callable] = None,
+        goal_shape: Tuple[int, int] = (84, 84),
+        goal_transform: Optional[Callable] = None,
         required_keys: Optional[Iterable] = None,
         goal_at_reset: bool = True,
         goal_every_step: bool = False,
@@ -300,7 +339,7 @@ class MegaWrapper(gym.Wrapper):
         required_keys.append("pixels")
 
         # this adds `pixels` key to info with optional transform
-        env = AddPixelsWrapper(env, pixels_shape, torchvision_transform)
+        env = AddPixelsWrapper(env, pixels_shape, pixels_transform)
         # this removes the info output, everything is in observation!
         env = ObsToInfoWrapper(env)
         # check that necessary keys are in the observation
@@ -309,8 +348,7 @@ class MegaWrapper(gym.Wrapper):
         env = EnsureGoalInfoWrapper(
             env, check_reset=goal_at_reset, check_step=goal_every_step
         )
-        # sanity check image shape
-        self.env = EnsureImageShape(env, "pixels", pixels_shape)
+        self.env = ResizeGoalWrapper(env, goal_shape, goal_transform)
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)

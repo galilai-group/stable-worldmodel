@@ -15,8 +15,10 @@ class SimplePointMazeEnv(gym.Env):
         wall_max_size=1.5,
         seed=None,
         render_mode=None,
+        show_goal: bool = True,
     ):
         super().__init__()
+        self.show_goal = show_goal
         self.width = 5.0
         self.height = 5.0
         self.n_walls = n_walls
@@ -28,19 +30,17 @@ class SimplePointMazeEnv(gym.Env):
         self.goal_pos = np.array([4.5, 4.5], dtype=np.float32)
         self.goal_radius = 0.2
         # Use Dict space for easy extension (e.g., adding "pixels" later)
-        self.observation_space = spaces.Dict(
-            {
-                "state": spaces.Box(
-                    low=np.array([0.0, 0.0], dtype=np.float32),
-                    high=np.array([self.width, self.height], dtype=np.float32),
-                    dtype=np.float32,
-                )
-            }
+        self.observation_space = spaces.Box(
+            low=np.array([0.0, 0.0], dtype=np.float32),
+            high=np.array([self.width, self.height], dtype=np.float32),
+            shape=(2,),
+            dtype=np.float32,
         )
         self.action_space = spaces.Box(
             low=np.array([-0.2, -0.2], dtype=np.float32),
             high=np.array([0.2, 0.2], dtype=np.float32),
             dtype=np.float32,
+            shape=(2,),
         )
         self.state = self.start_pos.copy()
         self.walls = self._generate_walls()
@@ -78,20 +78,25 @@ class SimplePointMazeEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         options = options or {}
-        self.state = options.get("start_pos", self.start_pos).copy()
-        self.walls = options.get("walls", self._generate_walls()).copy()
+        if options.get("start_pos", "random") == "random":
+            self.state = self.observation_space.sample()
+        else:
+            self.state = np.array([0.5, 0.5], dtype=np.float32)
+        if options.get("walls", "random") == "random":
+            self.walls = options.get("walls", self._generate_walls()).copy()
 
+        # generate our goal frame
         while True:
-            pos = np.random.randn(2)
+            pos = self.observation_space.sample()
             if not self._collides(pos):
                 break
         original_start = self.start_pos.copy()
         self.start_pos = pos
-        goal = self.render()
+        self._goal = self.render()
         self.start_pos = original_start
-        info = {"goal": goal}
+        info = {"goal": self._goal}
 
-        return {"state": self.state.copy()}, info
+        return self.state.copy(), info
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
@@ -102,16 +107,16 @@ class SimplePointMazeEnv(gym.Env):
         # Keep within bounds
         next_state = np.clip(
             next_state,
-            self.observation_space["state"].low,
-            self.observation_space["state"].high,
+            self.observation_space.low,
+            self.observation_space.high,
         )
         self.state = next_state
         # Check if goal reached
         terminated = np.linalg.norm(self.state - self.goal_pos) < self.goal_radius
         truncated = False  # You can add a max step count if you want
         reward = 1.0 if terminated else -0.01  # Small penalty per step
-        info = {}
-        return {"state": self.state.copy()}, reward, terminated, truncated, info
+        info = {"goal": self._goal}
+        return self.state.copy(), reward, terminated, truncated, info
 
     def _collides(self, pos):
         x, y = pos
@@ -135,14 +140,15 @@ class SimplePointMazeEnv(gym.Env):
             rect = Rectangle((x1, y1), x2 - x1, y2 - y1, color="black")
             self._ax.add_patch(rect)
         # Draw goal
-        goal = Circle(self.goal_pos, self.goal_radius, color="green", alpha=0.5)
-        self._ax.add_patch(goal)
+        if self.show_goal:
+            goal = Circle(self.goal_pos, self.goal_radius, color="green", alpha=0.5)
+            self._ax.add_patch(goal)
         # Draw agent
         agent = Circle(self.state, 0.1, color="red")
         self._ax.add_patch(agent)
-        # Draw start
-        start = Circle(self.start_pos, 0.1, color="blue", alpha=0.5)
-        self._ax.add_patch(start)
+        # # Draw start
+        # start = Circle(self.start_pos, 0.1, color="blue", alpha=0.5)
+        # self._ax.add_patch(start)
         self._fig.tight_layout(pad=0)
         if mode == "human":
             plt.pause(0.001)

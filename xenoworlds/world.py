@@ -11,6 +11,7 @@ from datasets import Dataset, concatenate_datasets, Features, Value, Image
 
 import os
 
+
 class World:
     def __init__(
         self,
@@ -18,17 +19,21 @@ class World:
         num_envs,
         image_shape,
         image_transform=None,
-        goal_wrappers: list = None,
+        goal_shape=None,
+        goal_transform=None,
         seed: int = 2349867,
         max_episode_steps: int = 100,
-        sample_goal_every_k_steps: int = -1,
         **kwargs,
     ):
         self.envs = gym.make_vec(
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform)],
+            wrappers=[
+                lambda x: MegaWrapper(
+                    x, image_shape, image_transform, goal_shape, goal_transform
+                )
+            ],
             max_episode_steps=max_episode_steps,
             **kwargs,
         )
@@ -56,7 +61,7 @@ class World:
 
     @property
     def num_envs(self):
-        return self.envs.num_envs   
+        return self.envs.num_envs
 
     @property
     def observation_space(self):
@@ -133,18 +138,35 @@ class World:
 
         self.reset(seed, options)
         for i, o in enumerate(out):
-            o.append_data(self.infos["pixels"][i])
+            if "goal" in self.infos:
+                frame = np.vstack([self.infos["pixels"][i], self.infos["goal"][i]])
+            else:
+                frame = self.infos["pixels"][i]
+            print(frame.shape)
+            o.append_data(frame)
         for _ in range(max_steps):
             self.step()
             for i, o in enumerate(out):
-                o.append_data(self.infos["pixels"][i])
+                if "goal" in self.infos:
+                    frame = np.vstack([self.infos["pixels"][i], self.infos["goal"][i]])
+                else:
+                    frame = self.infos["pixels"][i]
+                print(frame.shape)
+                o.append_data(frame)
             if np.any(self.terminateds) or np.any(self.truncateds):
                 break
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-
-    def record_dataset(self, dataset_path, episodes=10, max_steps=500, seed=None, options=None, episode_per_shard=float('inf')):
+    def record_dataset(
+        self,
+        dataset_path,
+        episodes=10,
+        max_steps=500,
+        seed=None,
+        options=None,
+        episode_per_shard=float("inf"),
+    ):
         """
         Records a dataset with the current policy running in the first environment of a Gymnasium VecEnv.
         Args:
@@ -157,47 +179,61 @@ class World:
         dataset_path = Path(dataset_path)
         dataset_path.mkdir(parents=True, exist_ok=True)
 
-        if not hasattr(self, 'episode_saved'):
+        if not hasattr(self, "episode_saved"):
             self.episode_saved = 0
 
         # REM: max_episodes steps is overriden the max num steps provided in env instantiation
-        # because of the self.truncated condition! 
+        # because of the self.truncated condition!
 
         # epsiodes // num_envs?
 
         for episode in range(episodes):
             self.reset(seed, options)
 
-            episodes_idx = self.episode_saved + (episode*self.num_envs) + np.arange(self.num_envs)
+            episodes_idx = (
+                self.episode_saved
+                + (episode * self.num_envs)
+                + np.arange(self.num_envs)
+            )
 
             # create dict buffer to store episode data
             data = {
-                'episode_idx': episodes_idx,
-                'step_idx': np.array([0]*self.num_envs),
-                'state': self.states['state'],
-                'pixels': self.infos['pixels'],
-                'policy': np.array([self.policy.type]*self.num_envs)
+                "episode_idx": episodes_idx,
+                "step_idx": np.array([0] * self.num_envs),
+                "state": self.states["state"],
+                "pixels": self.infos["pixels"],
+                "policy": np.array([self.policy.type] * self.num_envs),
             }
 
             for step in range(max_steps):
                 self.step()
-                
+
                 # append data
-                data['episode_idx'] = np.concatenate([data['episode_idx'], episodes_idx], axis=0)
-                data['step_idx'] = np.concatenate([data['step_idx'], np.array([step+1]*self.num_envs)], axis=0)
-                data['state'] = np.concatenate([data['state'], self.states['state']], axis=0)
-                data['pixels'] = np.concatenate([data['pixels'], self.infos['pixels']], axis=0)
-                data['policy'] = np.concatenate([data['policy'], np.array([self.policy.type]*self.num_envs)], axis=0)
+                data["episode_idx"] = np.concatenate(
+                    [data["episode_idx"], episodes_idx], axis=0
+                )
+                data["step_idx"] = np.concatenate(
+                    [data["step_idx"], np.array([step + 1] * self.num_envs)], axis=0
+                )
+                data["state"] = np.concatenate(
+                    [data["state"], self.states["state"]], axis=0
+                )
+                data["pixels"] = np.concatenate(
+                    [data["pixels"], self.infos["pixels"]], axis=0
+                )
+                data["policy"] = np.concatenate(
+                    [data["policy"], np.array([self.policy.type] * self.num_envs)],
+                    axis=0,
+                )
 
                 # add more data here if needed
 
                 if np.any(self.terminateds) or np.any(self.truncateds):
                     break
-            
-     
+
             # determine feature
-            state_shape = data['state'].shape[1:]
-            state_dtype = data['state'].dtype.name
+            state_shape = data["state"].shape[1:]
+            state_dtype = data["state"].dtype.name
             state_ndim = len(state_shape)
             if 1 < state_ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{state_ndim}D")
@@ -205,37 +241,46 @@ class World:
             else:
                 state_feature = [Value(state_dtype)]
 
-            features = Features({
-                "episode_idx": Value("int32"),
-                "step_idx": Value("int32"),
-                "state": state_feature,
-                "pixels": Image(),
-                "policy": Value("string"),
-            })
+            features = Features(
+                {
+                    "episode_idx": Value("int32"),
+                    "step_idx": Value("int32"),
+                    "state": state_feature,
+                    "pixels": Image(),
+                    "policy": Value("string"),
+                }
+            )
 
             # concat data
             data = Dataset.from_dict(data, features=features)
-            hf_dataset = data if hf_dataset is None else concatenate_datasets([hf_dataset, data])
-     
+            hf_dataset = (
+                data if hf_dataset is None else concatenate_datasets([hf_dataset, data])
+            )
+
             # save shard if needed
             if (episode + 1) % episode_per_shard == 0 or (episode + 1) == episodes:
                 assert hf_dataset is not None, "hf_dataset should not be None here"
 
-                if episode_per_shard < float('inf'):
-                    shard_idx = episode // episode_per_shard if episode_per_shard < float('inf') else 0
+                if episode_per_shard < float("inf"):
+                    shard_idx = (
+                        episode // episode_per_shard
+                        if episode_per_shard < float("inf")
+                        else 0
+                    )
                     shard_path = dataset_path / f"data_shard_{shard_idx:05d}.parquet"
                 else:
                     shard_path = dataset_path / "data.parquet"
 
-                
                 hf_dataset.to_parquet(shard_path)
 
                 old_episode_saved = self.episode_saved
                 num_episode_saved = len(hf_dataset.unique("episode_idx"))
                 self.episode_saved += num_episode_saved
                 hf_dataset = None
-                print(f"Saved {num_episode_saved-old_episode_saved} episodes to {shard_path} (total episodes saved: {self.episode_saved})")
+                print(
+                    f"Saved {num_episode_saved-old_episode_saved} episodes to {shard_path} (total episodes saved: {self.episode_saved})"
+                )
 
             print(f"📹 Episode {episode+1}/{episodes} done.")
 
-        #dataset = load_dataset("parquet", data_files=str(dataset_path/"*.parquet"))
+        # dataset = load_dataset("parquet", data_files=str(dataset_path/"*.parquet"))
