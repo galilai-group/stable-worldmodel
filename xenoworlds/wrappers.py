@@ -122,7 +122,7 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
-class ObsToInfoWrapper(gym.Wrapper):
+class EverythingToInfoWrapper(gym.Wrapper):
     """
     Gymnasium wrapper to ensure the observation is included in the info dict
     under a specified key after reset and step.
@@ -151,10 +151,18 @@ class ObsToInfoWrapper(gym.Wrapper):
         for key in _obs:
             assert key not in info
             info[key] = _obs[key]
+        assert "reward" not in info
+        info["reward"] = reward
+        assert "terminated" not in info
+        info["terminated"] = reward
+        assert "truncated" not in info
+        info["truncated"] = reward
+        assert "action" not in info
+        info["action"] = reward
         return obs, reward, terminated, truncated, info
 
 
-# class VecObsToInfoWrapper(VectorWrapper):
+# class VecEverythingToInfoWrapper(VectorWrapper):
 #     """
 #     Vectorized Gymnasium wrapper that merges each info dict into its corresponding observation dict.
 #     Assumes observations are dicts.
@@ -341,7 +349,7 @@ class MegaWrapper(gym.Wrapper):
         # this adds `pixels` key to info with optional transform
         env = AddPixelsWrapper(env, pixels_shape, pixels_transform)
         # this removes the info output, everything is in observation!
-        env = ObsToInfoWrapper(env)
+        env = EverythingToInfoWrapper(env)
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
@@ -373,7 +381,7 @@ class MegaWrapper(gym.Wrapper):
 #         # this adds `pixels` key to info with optional transform
 #         env = VecAddPixelsWrapper(env, pixels_shape, torchvision_transform)
 #         # this removes the info output, everything is in observation!
-#         env = VecObsToInfoWrapper(env)
+#         env = VecEverythingToInfoWrapper(env)
 #         # check that necessary keys are in the observation
 #         env = VecEnsureInfoKeysWrapper(env, required_keys)
 
