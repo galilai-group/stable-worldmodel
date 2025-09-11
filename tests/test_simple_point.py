@@ -5,7 +5,6 @@ def test_env():
         "xenoworlds/SimplePointMaze-v0",
         num_envs=4,
         image_shape=(224, 224),
-        goal_shape=(224, 224),
         render_mode="rgb_array",
     )
     world.set_policy(xenoworlds.policy.RandomPolicy())
@@ -13,9 +12,9 @@ def test_env():
     world.record_video("./", seed=2347)
 
     # asdf
-    #world_model = xenoworlds.wm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
-    #solver = None
-    #world.set_policy(xenoworlds.policy.WorldModelPolicy(world_model, solver))
+    # world_model = xenoworlds.wm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
+    # solver = None
+    # world.set_policy(xenoworlds.policy.WorldModelPolicy(world_model, solver))
     world.set_policy(xenoworlds.policy.RandomPolicy())
     world.policy.set_seed(42)
     world.record_dataset("./dataset", episodes=1, seed=2347)
