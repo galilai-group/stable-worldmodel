@@ -1,15 +1,15 @@
+import os
+from pathlib import Path
+
+import datasets
 import gymnasium as gym
 import numpy as np
 import torch
-import datasets
+from datasets import Dataset, Features, Image, Value, concatenate_datasets, load_dataset
 from loguru import logger as logging
 from torchvision import transforms
+
 from .wrappers import MegaWrapper
-from pathlib import Path
-
-from datasets import Dataset, concatenate_datasets, Features, Value, Image
-
-import os
 
 
 class World:
@@ -182,6 +182,7 @@ class World:
 
         # REM: max_episodes steps is overriden the max num steps provided in env instantiation
         # because of the self.truncated condition!
+        # TODO add train/val split
 
         # epsiodes // num_envs?
 
@@ -195,10 +196,11 @@ class World:
             )
 
             # create dict buffer to store episode data
+
             data = {
                 "episode_idx": episodes_idx,
                 "step_idx": np.array([0] * self.num_envs),
-                "state": self.states["state"],
+                "state": self.states,
                 "pixels": self.infos["pixels"],
                 "policy": np.array([self.policy.type] * self.num_envs),
             }
@@ -214,7 +216,7 @@ class World:
                     [data["step_idx"], np.array([step + 1] * self.num_envs)], axis=0
                 )
                 data["state"] = np.concatenate(
-                    [data["state"], self.states["state"]], axis=0
+                    [data["state"], self.states], axis=0
                 )
                 data["pixels"] = np.concatenate(
                     [data["pixels"], self.infos["pixels"]], axis=0
@@ -235,7 +237,7 @@ class World:
             state_ndim = len(state_shape)
             if 1 < state_ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{state_ndim}D")
-                state_feature = [feature_cls(shape=state_shape, dtype=state_dtype)]
+                state_feature = feature_cls(shape=state_shape, dtype=state_dtype)
             else:
                 state_feature = [Value(state_dtype)]
 
@@ -282,3 +284,51 @@ class World:
             print(f"📹 Episode {episode+1}/{episodes} done.")
 
         # dataset = load_dataset("parquet", data_files=str(dataset_path/"*.parquet"))
+
+
+    def record_video_from_dataset(self, video_path, dataset_path, episode_idx, max_steps=500, fps=30, num_proc=4):
+        """
+        Records a video of the current policy running in the first environment of a Gymnasium VecEnv.
+        Args:
+            video_path: Output path for the video file.
+            dataset_path: Output path for the video file.
+            episode_idx: Episode index to record or list of episode indices.
+            max_steps: Maximum number of steps to record.
+            fps: Frames per second for the video.
+        """
+        import imageio
+
+        # TODO add goal support?
+
+        if isinstance(episode_idx, int):
+            episode_idx = [episode_idx]
+
+        out = [
+            imageio.get_writer(
+                Path(video_path) / f"episode_{i}.mp4",
+                "output.mp4",
+                fps=fps,
+                codec="libx264",
+            )
+            for i in episode_idx
+        ]
+
+        dataset = load_dataset("parquet", data_files=str(Path(dataset_path, "*.parquet")), split="train")
+
+        for i, o in zip(episode_idx, out):
+            episode = dataset.filter(lambda ex: ex["episode_idx"] == i, num_proc=num_proc)
+            episode = episode.sort("step_idx")
+            episode_len = len(episode)
+
+            for step_idx in range(min(episode_len, max_steps)):
+
+                frame = episode[step_idx]["pixels"]
+                frame = np.array(frame.convert("RGB"), dtype=np.uint8)
+
+                if "goal" in episode.column_names:
+                    goal = episode[step_idx]["goal"]
+                    goal = np.array(goal.convert("RGB"), dtype=np.uint8)
+                    frame = np.vstack([frame, goal])
+                o.append_data(frame)
+        [o.close() for o in out]
+        print(f"Video saved to {video_path}")

@@ -10,7 +10,7 @@ def test_env():
     )
     world.set_policy(xenoworlds.policy.RandomPolicy())
     world.record_video("./")
-    asdf
+  
 
     # asdf
     world_model = xenoworlds.wm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
@@ -18,6 +18,11 @@ def test_env():
     world.set_policy(xenoworlds.policy.WorldModelPolicy(world_model, solver))
 
     world.record_dataset("./dataset")
+
+
+    world.record_video_from_dataset(
+        "./", "./dataset", episode_idx=[0, 2, 7], fps=30, num_proc=1
+    )
 
     # asdf
     # planner = CEMNevergrad(

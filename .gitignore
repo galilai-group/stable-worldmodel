@@ -216,3 +216,4 @@ wandb/
 videos/
 dataset/
 *.out
+*.mp4
