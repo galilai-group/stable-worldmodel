@@ -333,13 +333,11 @@ class MegaWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        pixels_shape: Tuple[int, int] = (84, 84),
+        image_shape: Tuple[int, int] = (84, 84),
         pixels_transform: Optional[Callable] = None,
-        goal_shape: Tuple[int, int] = (84, 84),
         goal_transform: Optional[Callable] = None,
         required_keys: Optional[Iterable] = None,
-        goal_at_reset: bool = True,
-        goal_every_step: bool = False,
+        separate_goal: Optional[Iterable] = True,
     ):
         super().__init__(env)
         if required_keys is None:
@@ -347,16 +345,16 @@ class MegaWrapper(gym.Wrapper):
         required_keys.append("pixels")
 
         # this adds `pixels` key to info with optional transform
-        env = AddPixelsWrapper(env, pixels_shape, pixels_transform)
+        env = AddPixelsWrapper(env, image_shape, pixels_transform)
         # this removes the info output, everything is in observation!
         env = EverythingToInfoWrapper(env)
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
         env = EnsureGoalInfoWrapper(
-            env, check_reset=goal_at_reset, check_step=goal_every_step
+            env, check_reset=separate_goal, check_step=separate_goal
         )
-        self.env = ResizeGoalWrapper(env, goal_shape, goal_transform)
+        self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
