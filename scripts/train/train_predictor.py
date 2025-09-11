@@ -1,13 +1,12 @@
 import lightning as pl
-import minari
-import stable_ssl as ssl
+import stable_pretraining as spt
 import torch
 import torchvision
 
-from stable_ssl.data import transforms
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForImageClassification
 
+from pathlib import Path
 
 def get_data():
     """Return data and action space dim for training predictor"""
@@ -18,8 +17,8 @@ def get_data():
     # -- make transform operations
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
-    transform = transforms.Compose(
-        transforms.ToImage(
+    transform = spt.data.transforms.Compose(
+        spt.data.transforms.ToImage(
             mean=mean,
             std=std,
             source="observations.pixels",
@@ -28,21 +27,22 @@ def get_data():
     )
 
     # -- load dataset
-    minari_dataset = minari.load_dataset("dinowm/pusht_noise-v0", download=True)
+    #minari_dataset = minari.load_dataset("dinowm/pusht_noise-v0", download=True)
+    #print(minari_dataset[0])
 
-    print(minari_dataset[0])
+    # dataset = spt.data.MinariStepsDataset(
+    #     minari_dataset, num_steps=num_steps, transform=transform
+    # )
 
-    dataset = ssl.data.MinariStepsDataset(
-        minari_dataset, num_steps=num_steps, transform=transform
-    )
+    dataset = spt.data.HFDataset("parquet", data_files=str(Path('./dataset', "*.parquet")), split="train")
 
-    train_set, val_set = ssl.data.random_split(dataset, lengths=[0.5, 0.5])
+    train_set, val_set = spt.data.random_split(dataset, lengths=[0.5, 0.5])
 
     print(f"Train set size: {len(train_set)}, Val set size: {len(val_set)}")
 
     train = DataLoader(train_set, batch_size=2, num_workers=1, drop_last=True)
     val = DataLoader(val_set, batch_size=2, num_workers=1)
-    data_module = ssl.data.DataModule(train=train, val=val)
+    data_module = spt.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
     action = dataset[0]["actions"]
