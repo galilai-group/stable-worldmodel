@@ -8,6 +8,8 @@ def test_env():
         render_mode="rgb_array",
     )
     world.set_policy(xenoworlds.policy.RandomPolicy())
+    world.record_dataset("./dataset", episodes=1, seed=2347)
+    asdf
     world.policy.set_seed(42)
     world.record_video("./", seed=2347)
 

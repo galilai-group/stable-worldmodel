@@ -132,6 +132,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
         super().__init__(env)
 
     def reset(self, **kwargs):
+        self._step_counter = 0
         obs, info = self.env.reset(**kwargs)
         if type(obs) is not dict:
             _obs = {"observation": obs}
@@ -149,14 +150,18 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["truncated"] = np.nan
         assert "action" not in info
         info["action"] = self.env.action_space.sample()
-        if type(info["actions"]) is dict:
+        assert "step_idx" not in info
+        info["step_idx"] = self._step_counter
+
+        if type(info["action"]) is dict:
             raise NotImplementedError
         else:
-            info["actions"] *= np.nan
+            info["action"] *= np.nan
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
+        self._step_counter += 1
         if type(obs) is not dict:
             _obs = {"observation": obs}
         else:
@@ -167,11 +172,13 @@ class EverythingToInfoWrapper(gym.Wrapper):
         assert "reward" not in info
         info["reward"] = reward
         assert "terminated" not in info
-        info["terminated"] = reward
+        info["terminated"] = terminated
         assert "truncated" not in info
-        info["truncated"] = reward
+        info["truncated"] = truncated
         assert "action" not in info
-        info["action"] = reward
+        info["action"] = action
+        assert "step_idx" not in info
+        info["step_idx"] = self._step_counter
         return obs, reward, terminated, truncated, info
 
 

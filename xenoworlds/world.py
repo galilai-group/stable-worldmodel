@@ -299,34 +299,41 @@ class World:
         if not hasattr(self, "episode_saved"):
             self.episode_saved = 0
 
-        saved_episodes = 0
-
         self.reset(seed, options)
         episode_idx = np.arange(self.num_envs)
-        step_idx = np.zeros(self.num_envs)
-        records = {key: [v for v in value] for key, value in self.infos.items()}
-        records["step_idx"] = list(step_idx)
+        records = {
+            key: [v for v in value]
+            for key, value in self.infos.items()
+            if key[0] != "_"
+        }
         records["episode_idx"] = list(episode_idx)
-        records["policy"] = [data["policy"]] * self.num_envs
+        records["policy"] = [self.policy.type] * self.num_envs
 
-        while episode_idx.max() < episodes:
+        recorded_episodes = 0
+        self.terminateds = np.zeros(self.num_envs)
+        self.truncateds = np.zeros(self.num_envs)
 
+        while True:
+
+            print("Episode index", episode_idx)
             for i in range(self.num_envs):
                 if self.terminateds[i] or self.truncateds[i]:
                     states, infos = self.envs.envs[i].reset()
                     for k, v in infos.items():
                         self.infos[k][i] = v
                     episode_idx[i] = episode_idx.max() + 1
-                    step_idx[i] = 0
-                else:
-                    step_idx[i] += 1
+                    recorded_episodes += 1
+            if recorded_episodes >= episodes:
+                break
 
             self.step()
             for key in self.infos:
+                if key[0] == "_":
+                    continue
                 records[key].extend(list(self.infos[key]))
-            records["step_idx"].extend(list(step_idx))
             records["episode_idx"].extend(list(episode_idx))
-            records["policy"] = [data["policy"]] * self.num_envs
+            records["policy"].extend([self.policy.type] * self.num_envs)
+            print(list(records.keys()))
 
         # determine feature
         features = {
@@ -340,17 +347,22 @@ class World:
         for k in records:
             if k in features:
                 continue
-            ndim = records[k][0].ndim
-            if 1 < ndim <= 6:
-                feature_cls = getattr(datasets, f"Array{ndim}D")
+            if type(records[k][0]) is str:
+                state_feature = Value("string")
+            elif 1 <= records[k][0].ndim <= 6:
+                feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
                 state_feature = feature_cls(
                     shape=records[k][0].shape, dtype=records[k][0].dtype
                 )
             else:
-                state_feature = Value(records[k][0].dtype)
+                state_feature = Value(records[k][0].dtype.name)
             features[k] = state_feature
         # concat data
-        data = Dataset.from_dict(data, features=Features(features))
+        features = Features(features)
+        print(features)
+        for key in records:
+            print(key, np.shape(records[key][0]))
+        hf_dataset = Dataset.from_dict(records, features=features)
         shard_idx = 0
         while True:
             if not (dataset_path / f"data_shard_{shard_idx:05d}.parquet").is_file():
