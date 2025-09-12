@@ -1,4 +1,5 @@
 import numpy as np
+from collections import deque
 
 class BasePolicy:
     """Base class for agent policies"""
@@ -68,6 +69,8 @@ class WorldModelPolicy(BasePolicy):
         # rem: 1 <= receding_horizon <= action_block * horizon
         self.receding_horizon = receding_horizon
 
+        self.action_buffer = deque(maxlen=self.receding_horizon)
+
     @property
     def plan_len(self):
         return self.horizon * self.action_block
@@ -75,12 +78,6 @@ class WorldModelPolicy(BasePolicy):
     @property
     def action_dim(self):
         return np.prod(self.env.single_action_space.shape)
-
-    def set_env(self, env):
-        out = super().set_env(env)
-        # update the action buffer size
-        self.action_buffer = np.empty((self.env.num_envs, 0, self.action_dim))
-        return out
 
     def plan(self, obs, goal):
         # call the solver to get a plan
@@ -95,21 +92,14 @@ class WorldModelPolicy(BasePolicy):
     def get_action(self, obs, goal=None, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
 
-        # base class - worldmodel wrapper
-        # encode goal (frame -> embedding)
-        # predict (sequence actions, init_embedding, frame_step -> embedding)
-        # util for debug by save decoded frames
-        # sanity check (shape, types)
-        # log prediction time etc..
-        # deque instead of np.split
-
         # need to replan if action buffer is empty
-        if self.action_buffer.size == 0:
+        if len(self.action_buffer) == 0:
+            plan = self.plan(obs, goal)
             # keep only the receding horizon steps
-            self.action_buffer = self.plan(obs, goal)[:, :self.receding_horizon]
+            for action in range(self.receding_horizon):
+                self.action_buffer.append(plan[:, action])
 
-        action, self.action_buffer = np.split(self.action_buffer, [1], axis=1) 
+        action = self.action_buffer.popleft()
 
         # TODO: reshape action shape into its original shape if needed
-
-        return action.squeeze() # (num_envs, action_dim)
+        return action # (num_envs, action_dim)
