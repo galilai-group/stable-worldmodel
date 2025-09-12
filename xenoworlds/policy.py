@@ -95,6 +95,14 @@ class WorldModelPolicy(BasePolicy):
     def get_action(self, obs, goal=None, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
 
+        # base class - worldmodel wrapper
+        # encode goal (frame -> embedding)
+        # predict (sequence actions, init_embedding, frame_step -> embedding)
+        # util for debug by save decoded frames
+        # sanity check (shape, types)
+        # log prediction time etc..
+        # deque instead of np.split
+
         # need to replan if action buffer is empty
         if self.action_buffer.size == 0:
             # keep only the receding horizon steps
