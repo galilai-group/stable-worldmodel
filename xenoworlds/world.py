@@ -8,7 +8,6 @@ import torch
 from datasets import Dataset, Features, Image, Value, concatenate_datasets, load_dataset
 from loguru import logger as logging
 from torchvision import transforms
-
 from .wrappers import MegaWrapper
 
 
@@ -314,8 +313,6 @@ class World:
         self.truncateds = np.zeros(self.num_envs)
 
         while True:
-
-            print("Episode index", episode_idx)
             for i in range(self.num_envs):
                 if self.terminateds[i] or self.truncateds[i]:
                     states, infos = self.envs.envs[i].reset()
@@ -333,8 +330,6 @@ class World:
                 records[key].extend(list(self.infos[key]))
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
-            print(list(records.keys()))
-
         # determine feature
         features = {
             "pixels": Image(),
@@ -349,7 +344,11 @@ class World:
                 continue
             if type(records[k][0]) is str:
                 state_feature = Value("string")
-            elif 1 <= records[k][0].ndim <= 6:
+            elif records[k][0].ndim == 1:
+                state_feature = datasets.Sequence(
+                    feature=Value(dtype=records[k][0].dtype.name)
+                )
+            elif 2 <= records[k][0].ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
                 state_feature = feature_cls(
                     shape=records[k][0].shape, dtype=records[k][0].dtype
@@ -360,8 +359,6 @@ class World:
         # concat data
         features = Features(features)
         print(features)
-        for key in records:
-            print(key, np.shape(records[key][0]))
         hf_dataset = Dataset.from_dict(records, features=features)
         shard_idx = 0
         while True:

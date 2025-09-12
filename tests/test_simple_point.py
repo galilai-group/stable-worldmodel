@@ -3,12 +3,12 @@ def test_env():
 
     world = xenoworlds.World(
         "xenoworlds/SimplePointMaze-v0",
-        num_envs=4,
+        num_envs=20,
         image_shape=(224, 224),
         render_mode="rgb_array",
     )
     world.set_policy(xenoworlds.policy.RandomPolicy())
-    world.record_dataset("./dataset", episodes=1, seed=2347)
+    world.record_dataset("./dataset", episodes=100, seed=2347)
     asdf
     world.policy.set_seed(42)
     world.record_video("./", seed=2347)
