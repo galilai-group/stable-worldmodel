@@ -181,6 +181,7 @@ class World:
 
         # init record with post-reset data
         episode_idx = np.arange(self.num_envs)
+
         records = {
             key: [v for v in value]
             for key, value in self.infos.items()
@@ -190,11 +191,11 @@ class World:
         records["policy"] = [self.policy.type] * self.num_envs
 
         recorded_episodes = 0
-        env_stepcount = np.zeros(self.num_envs, dtype=int)
         self.terminateds = np.zeros(self.num_envs)
         self.truncateds = np.zeros(self.num_envs)
+
         hf_dataset = None
-        episodes_len = {}
+        episodes_len = {i: 0 for i in episode_idx}
 
         while True:
             # start new episode for done envs
@@ -204,23 +205,18 @@ class World:
                     for k, v in infos.items():
                         self.infos[k][i] = v
 
-                    # log episode length and reset
-                    current_ep = int(episode_idx[i])
-                    ep_len = int(env_stepcount[i])
-                    episodes_len[current_ep] = ep_len
-                    env_stepcount[i] = 0
-
                     # determine new episode idx
-                    episode_idx[i] = episode_idx.max() + 1
+                    next_ep_idx = episode_idx.max() + 1
+                    episode_idx[i] = next_ep_idx
+                    episodes_len[next_ep_idx] = 0
                     recorded_episodes += 1
 
-            # TODO: should break as soon as episodes is reach!
-            # ie inside the loop and change init of episode_len metadata
             if recorded_episodes >= episodes:
                 break
 
             # increase step counter by one for all envs
-            env_stepcount += 1
+            for i in episode_idx:
+                episodes_len[int(i)] += 1
 
             self.step()
             for key in self.infos:
@@ -230,9 +226,8 @@ class World:
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
         
-
         # add the episode length
-        records["episode_len"] = [episodes_len[ep] for ep in records["episode_idx"]]
+        records["episode_len"] = [episodes_len[int(ep)] for ep in records["episode_idx"]]
 
         # determine feature
         features = {
@@ -264,6 +259,26 @@ class World:
         features = Features(features)
         print(features)
         hf_dataset = Dataset.from_dict(records, features=features)
+
+        # flush extra data
+        # incomplete episode
+        ep_col = np.array(hf_dataset["episode_idx"])
+        non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
+        keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
+        hf_dataset = hf_dataset.select(keep_episode)
+
+        # re-index episode idx
+        unique_eps = np.unique(hf_dataset["episode_idx"])
+        id_map = {old: new for new, old in enumerate(unique_eps)}
+        hf_dataset = hf_dataset.map(
+            lambda row: {"episode_idx": id_map[row["episode_idx"]]}
+        )
+
+        # extra episode
+        hf_dataset = hf_dataset.filter(
+            lambda row: row["episode_idx"] <= episodes
+        )
+
         shard_idx = 0
         while True:
             if not (dataset_path / f"data_shard_{shard_idx:05d}.parquet").is_file():
