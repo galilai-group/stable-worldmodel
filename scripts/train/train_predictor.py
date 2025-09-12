@@ -45,13 +45,11 @@ def get_data():
     data_module = spt.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
-    action = dataset[0]["actions"]
+    action = dataset[0]["action"]
 
-    action_dim = (
-        sum(a.size for a in action.values())
-        if isinstance(action, dict)
-        else action.size
-    )
+    print(action)
+
+    action_dim = action[0].shape[-1]
 
     action_dim //= num_steps
 
@@ -61,7 +59,7 @@ def get_data():
 def forward(self, batch, stage):
     """Forward pass for predictor training"""
 
-    actions = batch["actions"]
+    actions = batch["action"]
 
     if type(actions) is dict:
         actions = [a.flatten(2) for a in actions.values()]

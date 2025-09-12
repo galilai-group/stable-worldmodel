@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import json
 import datasets
 import gymnasium as gym
 import numpy as np
@@ -164,14 +165,21 @@ class World:
             max_steps: Maximum number of steps per episode.
         """
 
-        hf_dataset = None
+        # 1. don't wait until last episode before dump everything but do it in shards
+        # 2. save metadata (env name, policy type, seed, date, etc..) and episode lengths
+        # 3. shift actions by one timestep so you start with obs and action even for reset (you dont need action for last step)
+        # 4. add frameskip/actions chunk save option to reduce dataset size, i.e save every k frames and but block of actions
+
+
         dataset_path = Path(dataset_path)
         dataset_path.mkdir(parents=True, exist_ok=True)
-
+        
         if not hasattr(self, "episode_saved"):
             self.episode_saved = 0
 
         self.reset(seed, options)
+
+        # init record with post-reset data
         episode_idx = np.arange(self.num_envs)
         records = {
             key: [v for v in value]
@@ -182,19 +190,37 @@ class World:
         records["policy"] = [self.policy.type] * self.num_envs
 
         recorded_episodes = 0
+        env_stepcount = np.zeros(self.num_envs, dtype=int)
         self.terminateds = np.zeros(self.num_envs)
         self.truncateds = np.zeros(self.num_envs)
+        hf_dataset = None
+        episodes_len = {}
 
         while True:
+            # start new episode for done envs
             for i in range(self.num_envs):
                 if self.terminateds[i] or self.truncateds[i]:
                     states, infos = self.envs.envs[i].reset()
                     for k, v in infos.items():
                         self.infos[k][i] = v
+
+                    # log episode length and reset
+                    current_ep = int(episode_idx[i])
+                    ep_len = int(env_stepcount[i])
+                    episodes_len[current_ep] = ep_len
+                    env_stepcount[i] = 0
+
+                    # determine new episode idx
                     episode_idx[i] = episode_idx.max() + 1
                     recorded_episodes += 1
+
+            # TODO: should break as soon as episodes is reach!
+            # ie inside the loop and change init of episode_len metadata
             if recorded_episodes >= episodes:
                 break
+
+            # increase step counter by one for all envs
+            env_stepcount += 1
 
             self.step()
             for key in self.infos:
@@ -203,11 +229,17 @@ class World:
                 records[key].extend(list(self.infos[key]))
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
+        
+
+        # add the episode length
+        records["episode_len"] = [episodes_len[ep] for ep in records["episode_idx"]]
+
         # determine feature
         features = {
             "pixels": Image(),
             "episode_idx": Value("int32"),
             "step_idx": Value("int32"),
+            "episode_len": Value("int32"),
         }
         if "goal" in records:
             features["goal"] = Image()
