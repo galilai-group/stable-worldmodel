@@ -8,6 +8,8 @@ from transformers import AutoConfig, AutoModelForImageClassification
 
 from pathlib import Path
 
+import xenoworlds as xen
+
 def get_data():
     """Return data and action space dim for training predictor"""
 
@@ -21,8 +23,14 @@ def get_data():
         spt.data.transforms.ToImage(
             mean=mean,
             std=std,
-            source="observations.pixels",
-            target="observations.pixels",
+            source="pixels",
+            target="pixels",
+        ),
+        spt.data.transforms.ToImage(
+            mean=mean,
+            std=std,
+            source="goal",
+            target="goal",
         ),
     )
 
@@ -34,25 +42,21 @@ def get_data():
     #     minari_dataset, num_steps=num_steps, transform=transform
     # )
 
-    dataset = spt.data.HFDataset("parquet", data_files=str(Path('./dataset', "*.parquet")), split="train")
+    dataset = xen.data.StepsDataset("parquet", data_files=str(Path('./dataset', "*.parquet")), split="train",
+                                    num_steps=2, frameskip=1, transform=transform
+    )
 
-    train_set, val_set = spt.data.random_split(dataset, lengths=[0.5, 0.5])
+    train_set, val_set = spt.data.random_split(dataset, lengths=[0.9, 0.1])
 
     print(f"Train set size: {len(train_set)}, Val set size: {len(val_set)}")
 
-    train = DataLoader(train_set, batch_size=2, num_workers=1, drop_last=True)
-    val = DataLoader(val_set, batch_size=2, num_workers=1)
+    train = DataLoader(train_set, batch_size=128, num_workers=1, drop_last=True)
+    val = DataLoader(val_set, batch_size=128, num_workers=1)
     data_module = spt.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
     action = dataset[0]["action"]
-
-    print(action)
-
     action_dim = action[0].shape[-1]
-
-    action_dim //= num_steps
-
     return data_module, action_dim
 
 
@@ -61,19 +65,13 @@ def forward(self, batch, stage):
 
     actions = batch["action"]
 
-    if type(actions) is dict:
-        actions = [a.flatten(2) for a in actions.values()]
-        actions = torch.cat(actions, -1)
-    else:
-        actions.flatten(2)
+    # -- process observation
+    B, T, C, H, W = batch["pixels"].shape
+    obs = batch["pixels"].float()
+    obs = obs.flatten(0, 1)  # (B,T,C,H,W) -> (B*T,C,H,W)
 
     # -- process actions
     actions = actions.flatten(0, 1).float()  # (B,T,A) -> (B*T,A)
-
-    # -- process observation
-    B, T, C, H, W = batch["observations"]["pixels"].shape
-    obs = batch["observations"]["pixels"].float()
-    obs = obs.flatten(0, 1)  # (B,T,C,H,W) -> (B*T,C,H,W)
 
     # -- compute current state
     state = batch["embedding"] = self.backbone(obs)["logits"]
@@ -96,7 +94,7 @@ def forward(self, batch, stage):
 
 
 def get_world_model(action_dim):
-    """Return stable_ssl module with world model"""
+    """Return stable_spt module with world model"""
     config = AutoConfig.from_pretrained("microsoft/resnet-18")
     encoder = AutoModelForImageClassification.from_config(config)
     hidden_dim = encoder.classifier[1].in_features
@@ -111,9 +109,9 @@ def get_world_model(action_dim):
 
     # NOTE: can add a decoder here if needed
 
-    # -- world model as a stable_ssl module
-    world_model = ssl.Module(
-        backbone=ssl.backbone.EvalOnly(encoder),  # frozen encoder
+    # -- world model as a stable_spt module
+    world_model = spt.Module(
+        backbone=spt.backbone.EvalOnly(encoder),  # frozen encoder
         predictor=predictor,
         forward=forward,
     )
@@ -133,7 +131,7 @@ def run():
         logger=False,
         enable_checkpointing=False,
     )
-    manager = ssl.Manager(trainer=trainer, module=world_model, data=data)
+    manager = spt.Manager(trainer=trainer, module=world_model, data=data)
     manager()
 
 

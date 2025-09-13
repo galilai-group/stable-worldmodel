@@ -165,8 +165,6 @@ class World:
             max_steps: Maximum number of steps per episode.
         """
 
-        # 1. don't wait until last episode before dump everything but do it in shards
-        # 2. save metadata (env name, policy type, seed, date, etc..) and episode lengths
         # 3. shift actions by one timestep so you start with obs and action even for reset (you dont need action for last step)
         # 4. add frameskip/actions chunk save option to reduce dataset size, i.e save every k frames and but block of actions
 
@@ -211,6 +209,8 @@ class World:
                     episodes_len[next_ep_idx] = 0
                     recorded_episodes += 1
 
+                    # TODO: should add the reset env to the record
+
             if recorded_episodes >= episodes:
                 break
 
@@ -219,10 +219,31 @@ class World:
                 episodes_len[int(i)] += 1
 
             self.step()
+
             for key in self.infos:
                 if key[0] == "_":
                     continue
-                records[key].extend(list(self.infos[key]))
+                
+                # shift actions
+                if key == "action":
+                    n_action = len(self.infos[key])
+                    last_episode = records["episode_idx"][-n_action:]
+                    action_mask = (last_episode == episode_idx)[:, None]
+               
+                    # overwride last actions of continuing episodes
+                    records[key][-n_action:] = np.where(
+                        action_mask,
+                        self.infos[key],
+                        np.nan,
+                    )
+
+                    # add new dummy action
+                    action_shape = np.shape(self.infos[key][0])
+                    dummy_block = [np.full(action_shape, np.nan) for _ in range(self.num_envs)]
+                    records[key].extend(dummy_block)
+                else:
+                    records[key].extend(list(self.infos[key]))
+
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
         
@@ -245,7 +266,7 @@ class World:
                 state_feature = Value("string")
             elif records[k][0].ndim == 1:
                 state_feature = datasets.Sequence(
-                    feature=Value(dtype=records[k][0].dtype.name)
+                    feature=Value(dtype=records[k][0].dtype.name), length=len(records[k][0])
                 )
             elif 2 <= records[k][0].ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
