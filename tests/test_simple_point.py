@@ -3,12 +3,12 @@ def test_env():
 
     world = xenoworlds.World(
         "xenoworlds/SimplePointMaze-v0",
-        num_envs=20,
+        num_envs=5,
         image_shape=(224, 224),
         render_mode="rgb_array",
     )
     world.set_policy(xenoworlds.policy.RandomPolicy())
-    world.record_dataset("./dataset", episodes=100, seed=2347)
+    world.record_dataset("./dataset", episodes=10, seed=2347)
   
     world.policy.set_seed(42)
     world.record_video("./", seed=2347)
@@ -17,13 +17,13 @@ def test_env():
     # world_model = xenoworlds.wm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
     # solver = None
     # world.set_policy(xenoworlds.policy.WorldModelPolicy(world_model, solver))
-    world.set_policy(xenoworlds.policy.RandomPolicy())
-    world.policy.set_seed(42)
-    world.record_dataset("./dataset", episodes=1, seed=2347)
+    # world.set_policy(xenoworlds.policy.RandomPolicy())
+    # world.policy.set_seed(42)
+    # world.record_dataset("./dataset", episodes=1, seed=2347)
 
-    world.record_video_from_dataset(
-        "./", "./dataset", episode_idx=0, fps=30, num_proc=1
-    )
+    # world.record_video_from_dataset(
+    #     "./", "./dataset", episode_idx=0, fps=30, num_proc=1
+    # )
 
     # asdf
     # planner = CEMNevergrad(

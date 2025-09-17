@@ -104,14 +104,14 @@ def get_world_model(action_dim):
     predictor = torchvision.ops.MLP(
         hidden_dim + action_dim,
         [1024, 1024, hidden_dim],
-        norm_layer=torch.nn.BatchNorm1d,
+        # norm_layer=torch.nn.BatchNorm1d,
     )
 
     # NOTE: can add a decoder here if needed
 
     # -- world model as a stable_spt module
     world_model = spt.Module(
-        backbone=spt.backbone.EvalOnly(encoder),  # frozen encoder
+        backbone=encoder,  # frozen encoder
         predictor=predictor,
         forward=forward,
     )

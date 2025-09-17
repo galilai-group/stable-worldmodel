@@ -281,32 +281,46 @@ class World:
         print(features)
         hf_dataset = Dataset.from_dict(records, features=features)
 
-        # flush extra data
-        # incomplete episode
-        ep_col = np.array(hf_dataset["episode_idx"])
-        non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
-        keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
-        hf_dataset = hf_dataset.select(keep_episode)
-
-        # re-index episode idx
-        unique_eps = np.unique(hf_dataset["episode_idx"])
-        id_map = {old: new for new, old in enumerate(unique_eps)}
-        hf_dataset = hf_dataset.map(
-            lambda row: {"episode_idx": id_map[row["episode_idx"]]}
-        )
-
-        # extra episode
-        hf_dataset = hf_dataset.filter(
-            lambda row: row["episode_idx"] <= episodes
-        )
-
+        # determine shard index and num episode recorded so far
         shard_idx = 0
         while True:
             if not (dataset_path / f"data_shard_{shard_idx:05d}.parquet").is_file():
                 break
             shard_idx += 1
 
+        episode_counter = 0
+        if shard_idx > 0:
+            shard_dataset = load_dataset(
+            "parquet",
+            split="train",
+            data_files=str(dataset_path / f"data_shard_{shard_idx-1:05d}.parquet")
+            )
+            episode_counter = np.max(shard_dataset["episode_idx"]) + 1
+
+        # flush incomplete episode
+        ep_col = np.array(hf_dataset["episode_idx"])
+        non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
+        keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
+        hf_dataset = hf_dataset.select(keep_episode)
+
+        # re-index remaining episode starting from the last shard episode number
+        unique_eps = np.unique(hf_dataset["episode_idx"])
+        id_map = {old: new for new, old in enumerate(unique_eps, start=episode_counter)}
+        hf_dataset = hf_dataset.map(
+            lambda row: {"episode_idx": id_map[row["episode_idx"]]}
+        )
+
+        # flush all extra episode saved for the current shard
+        hf_dataset = hf_dataset.filter(
+            lambda row: (row["episode_idx"]-episode_counter) <= episodes
+        )
+
         hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
+        
+        # display info
+        final_num_episodes = np.unique(hf_dataset["episode_idx"])
+        episode_range = (final_num_episodes.min().item(), final_num_episodes.max().item())
+        print(f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}")
 
     def record_video_from_dataset(
         self, video_path, dataset_path, episode_idx, max_steps=500, fps=30, num_proc=4
