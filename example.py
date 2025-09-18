@@ -1,38 +1,31 @@
-import os
-os.environ["MUJOCO_GL"] = "egl"
-import xenoworlds
-
-
 if __name__ == "__main__":
-    # run with MUJOCO_GL=egl python example.py
+    import xenoworlds as swm
+    #import stable_worldmodel as swm
 
-    # gym.register_envs(gymnasium_robotics)
-    # envs = gym.envs.registry.keys()
-    # print(envs)
-    # asdf
-    wrappers = [
-        # lambda x: RecordVideo(x, video_folder="./videos"),
-        # lambda x: xenoworlds.wrappers.AddRenderObservation(x, render_only=False),
-        # lambda x: xenoworlds.wrappers.TransformObservation(x),
-    ]
-    world = xenoworlds.World(
-        "xenoworlds/PushT-v1", num_envs=4, wrappers=wrappers, max_episode_steps=100
+    # create world
+    world = swm.World(
+        "xenoworlds/SimplePointMaze-v0",
+        num_envs=7,
+        image_shape=(224, 224),
+        render_mode="rgb_array",
     )
 
-    world_model = xenoworlds.DummyWorldModel(
-        image_shape=(3, 224, 224), action_dim=world.single_action_space.shape[0]
-    )
-
-    # -- create a planning policy with a gradient descent solver
-    # solver = xenoworlds.solver.GDSolver(world_model, n_steps=100, action_space=world.action_space)
-    # policy = xenoworlds.policy.PlanningPolicy(world, solver)
-    # -- create a random policy
-    policy = xenoworlds.policy.RandomPolicy(world)
-
-    # -- run evaluation
-    evaluator = xenoworlds.evaluator.Evaluator(world, policy)
-    data = evaluator.run(episodes=5, video_episodes=5)
-    # data will be a dict with all the collected metrics
+    # collect data for pre-training
+    # world.set_policy(swm.policy.RandomPolicy())
+    # world.policy.set_seed(42)
+    # world.record_dataset("./dataset", episodes=10, seed=2347)
+    # world.record_video("./", seed=2347)
     
-    # visualize a rollout video (e.g. for debugging purposes)
-    xenoworlds.utils.save_rollout_videos(data["frames_list"])
+    # pre-train world model
+    action_dim = world.envs.single_action_space.shape[0]
+    world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)
+    solver = swm.solver.RandomSolver(...)
+    policy = swm.policy.WorldModelPolicy(world_model, solver, horizon=10, action_block=5, receding_horizon=5)
+    world.set_policy(swm.policy.WorldModelPolicy(world_model))
+
+    swm.pretraining("scripts/tdmpc.py", "dataset_name", "output_model_name") # + save ckpt etc
+
+    # evaluate world model
+    world.set_policy(swm.AutoPolicy("output_model_name"))
+    world.evaluate(episodes=10, seed=2347, options={...})
+

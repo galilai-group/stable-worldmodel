@@ -1,24 +1,12 @@
-class WorldModel(nn.Module):
+from typing import Protocol
 
-    # sanity check (shape, types)
-    # log prediction time etc..
+import torch
 
-    def __init__(self, wm):
-        super().__init__()
-        self.wm = wm
+class WorldModel(Protocol):
 
-
-    def encode(self):
-        embedding = ...
-        return embedding
-
-    def predict(self, obs, actions, timestep):
-        """predict next s_t+H embedding given s_t + action sequence
-        i.e rollout the dynamics model for H steps
-        """
-        predicted_embedding = ...
-        return predicted_embedding
+    def encode(self, obs: dict) -> dict:...
+    def predict(self, z_obs:dict, actions:torch.Tensor, timestep=None) -> dict:...
 
 def decode_rollout():
-    # if decoder
-    pass
+    # if decoder exists
+    raise NotImplementedError

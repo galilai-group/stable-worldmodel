@@ -1,5 +1,6 @@
 import numpy as np
 from collections import deque
+from xenoworlds.wm import WorldModel
 
 class BasePolicy:
     """Base class for agent policies"""
@@ -54,7 +55,15 @@ class WorldModelPolicy(BasePolicy):
         self.type = "world_model"
         self.solver = solver
         self.world_model = world_model
+
+        # TODO override the solver action dim with the frameskip etc
         
+
+        # world model sanity check
+        assert isinstance(self.world_model, WorldModel), "world_model must be an instance of WorldModel"
+        assert hasattr(self.world_model, "predict"), "world_model must have a predict method"
+        assert hasattr(self.world_model, "encode"), "world_model must have an encode method"
+
         # planning horizon
         self.horizon = horizon     
 
@@ -79,22 +88,16 @@ class WorldModelPolicy(BasePolicy):
     def action_dim(self):
         return np.prod(self.env.single_action_space.shape)
 
-    def plan(self, obs, goal):
-        # call the solver to get a plan
-        #return self.solver(obs, self.env.action_space, goal)
-        num_envs = self.env.num_envs
-        return np.random.uniform(
-            low=self.env.single_action_space.low,
-            high=self.env.single_action_space.high,
-            size=(num_envs, self.plan_len, self.action_dim)
-        ).astype(np.float32)
-
     def get_action(self, obs, goal=None, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
 
+        obs = self.world_model.encode(obs)
+        goal = self.world_model.encode(goal) # TODO: detach goal
+
         # need to replan if action buffer is empty
         if len(self.action_buffer) == 0:
-            plan = self.plan(obs, goal)
+            # TODO: add previous actions when replanning? (very important to have a good start)
+            plan = self.solver(obs, goal, self.env.action_space, self.world_model.predict)
             # keep only the receding horizon steps
             for action in range(self.receding_horizon):
                 self.action_buffer.append(plan[:, action])
