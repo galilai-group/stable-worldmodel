@@ -197,17 +197,18 @@ class World:
             # start new episode for done envs
             for i in range(self.num_envs):
                 if terminations_before[i] or truncations_before[i]:
-                    # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = seed + recorded_episodes + 1 if seed is not None else None
-                    states, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
-
-                    for k, v in infos.items():
-                        self.infos[k][i] = v
 
                     # determine new episode idx
                     next_ep_idx = episode_idx.max() + 1
                     episode_idx[i] = next_ep_idx
                     recorded_episodes += 1
+
+                    # re-reset env with seed and options (no supported by auto-reset)
+                    new_seed = seed + i + recorded_episodes if seed is not None else None
+                    states, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
+
+                    for k, v in infos.items():
+                        self.infos[k][i] = v
 
             if recorded_episodes >= episodes:
                 break

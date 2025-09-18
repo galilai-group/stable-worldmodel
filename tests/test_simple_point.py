@@ -3,7 +3,7 @@ def test_env():
 
     world = xenoworlds.World(
         "xenoworlds/SimplePointMaze-v0",
-        num_envs=5,
+        num_envs=7,
         image_shape=(224, 224),
         render_mode="rgb_array",
     )
