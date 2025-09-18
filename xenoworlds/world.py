@@ -164,59 +164,39 @@ class World:
             episodes: Number of episodes to record.
             max_steps: Maximum number of steps per episode.
         """
-
-        # 3. shift actions by one timestep so you start with obs and action even for reset (you dont need action for last step)
-        # 4. add frameskip/actions chunk save option to reduce dataset size, i.e save every k frames and but block of actions
-
-
+        
+        hf_dataset = None
+        recorded_episodes = 0
         dataset_path = Path(dataset_path)
         dataset_path.mkdir(parents=True, exist_ok=True)
-        
-        if not hasattr(self, "episode_saved"):
-            self.episode_saved = 0
+
+        self.terminateds = np.zeros(self.num_envs)
+        self.truncateds = np.zeros(self.num_envs)
+        episode_idx = np.arange(self.num_envs)
 
         self.reset(seed, options)
-
-        # init record with post-reset data
-        episode_idx = np.arange(self.num_envs)
 
         records = {
             key: [v for v in value]
             for key, value in self.infos.items()
             if key[0] != "_"
         }
+        
         records["episode_idx"] = list(episode_idx)
         records["policy"] = [self.policy.type] * self.num_envs
 
-        recorded_episodes = 0
-        self.terminateds = np.zeros(self.num_envs)
-        self.truncateds = np.zeros(self.num_envs)
-
-        hf_dataset = None
-        episodes_len = {i: 0 for i in episode_idx}
-
         while True:
-            # start new episode for done envs
+            
+            # handle new episode
             for i in range(self.num_envs):
                 if self.terminateds[i] or self.truncateds[i]:
-                    states, infos = self.envs.envs[i].reset()
-                    for k, v in infos.items():
-                        self.infos[k][i] = v
-
                     # determine new episode idx
                     next_ep_idx = episode_idx.max() + 1
                     episode_idx[i] = next_ep_idx
-                    episodes_len[next_ep_idx] = 0
                     recorded_episodes += 1
-
-                    # TODO: should add the reset env to the record
 
             if recorded_episodes >= episodes:
                 break
-
-            # increase step counter by one for all envs
-            for i in episode_idx:
-                episodes_len[int(i)] += 1
 
             self.step()
 
@@ -225,7 +205,7 @@ class World:
                     continue
                 
                 # shift actions
-                if key == "action":
+                if key == "action" and len(records['action']) > 0:
                     n_action = len(self.infos[key])
                     last_episode = records["episode_idx"][-n_action:]
                     action_mask = (last_episode == episode_idx)[:, None]
@@ -246,9 +226,11 @@ class World:
 
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
-        
+
+
         # add the episode length
-        records["episode_len"] = [episodes_len[int(ep)] for ep in records["episode_idx"]]
+        counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"])+1)
+        records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
 
         # determine feature
         features = {
@@ -257,6 +239,7 @@ class World:
             "step_idx": Value("int32"),
             "episode_len": Value("int32"),
         }
+
         if "goal" in records:
             features["goal"] = Image()
         for k in records:
@@ -276,9 +259,11 @@ class World:
             else:
                 state_feature = Value(records[k][0].dtype.name)
             features[k] = state_feature
-        # concat data
+
         features = Features(features)
         print(features)
+
+        # make dataset
         hf_dataset = Dataset.from_dict(records, features=features)
 
         # determine shard index and num episode recorded so far
@@ -322,6 +307,7 @@ class World:
         episode_range = (final_num_episodes.min().item(), final_num_episodes.max().item())
         print(f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}")
 
+
     def record_video_from_dataset(
         self, video_path, dataset_path, episode_idx, max_steps=500, fps=30, num_proc=4
     ):
@@ -361,6 +347,9 @@ class World:
             )
             episode = episode.sort("step_idx")
             episode_len = len(episode)
+
+            assert len(set(episode['episode_len'])) == 1, "'episode_len' contains different values for the same episode"
+            assert len(episode) == episode['episode_len'][0], f"Episode {i} has {len(episode)} steps, but 'episode_len' is {episode['episode_len'][0]}"
 
             for step_idx in range(min(episode_len, max_steps)):
 

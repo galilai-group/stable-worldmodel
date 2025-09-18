@@ -33,8 +33,8 @@ class EnsureInfoKeysWrapper(gym.Wrapper):
                 raise RuntimeError(f"Key {key} is not present in the env output")
         return obs, reward, terminated, truncated, info
 
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
         for key in self.required_keys:
             if key not in info:
                 raise RuntimeError(f"Key {key} is not present in the env output")
@@ -51,7 +51,7 @@ class EnsureInfoKeysWrapper(gym.Wrapper):
 #         super().__init__(env)
 #         self.required_keys = required_keys
 
-#     def reset(self, **kwargs):
+#     def reset(self, *args, **kwargs):
 #         obs, info = self.env.reset(**kwargs)
 #         self._ensure_keys(info)
 #         return obs, info
@@ -90,7 +90,7 @@ class EnsureImageShape(gym.Wrapper):
             )
         return obs, reward, terminated, truncated, info
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         obs, info = self.env.reset(**kwargs)
         if info[self.image_key].shape[:-1] != self.image_shape:
             raise RuntimeError(
@@ -105,7 +105,7 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
         self.check_reset = check_reset
         self.check_step = check_step
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         obs, info = self.env.reset(**kwargs)
         if self.check_reset and "goal" not in info:
             raise RuntimeError(
@@ -131,7 +131,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         self._step_counter = 0
         obs, info = self.env.reset(**kwargs)
         if type(obs) is not dict:
@@ -188,7 +188,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
 #     Assumes observations are dicts.
 #     """
 
-#     def reset(self, **kwargs):
+#     def reset(self, *args, **kwargs):
 #         obs, infos = self.env.reset(**kwargs)
 #         self._merge_info(obs, infos)
 #         return obs, infos
@@ -253,7 +253,7 @@ class AddPixelsWrapper(gym.Wrapper):
             pixels = np.array(pil_img)
         return pixels, t1 - t0
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         obs, info = self.env.reset(**kwargs)
         info["pixels"], info["render_time"] = self._get_pixels()
         return obs, info
@@ -290,7 +290,7 @@ class ResizeGoalWrapper(gym.Wrapper):
             pixels = np.array(pil_img)
         return pixels
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         obs, info = self.env.reset(**kwargs)
         info["goal"] = self._format(info["goal"])
         return obs, info
@@ -334,7 +334,7 @@ class ResizeGoalWrapper(gym.Wrapper):
 #             pixels_list.append(pixels)
 #         return pixels_list
 
-#     def reset(self, **kwargs):
+#     def reset(self, *args, **kwargs):
 #         obs, infos = self.env.reset(**kwargs)
 #         pixels_list = self._get_pixels()
 #         for info, pixels in zip(infos, pixels_list):
@@ -376,8 +376,8 @@ class MegaWrapper(gym.Wrapper):
         )
         self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
-    def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
+    def reset(self,*args,**kwargs):
+        return self.env.reset(*args, **kwargs)
 
     def step(self, action):
         return self.env.step(action)
@@ -403,7 +403,7 @@ class MegaWrapper(gym.Wrapper):
 #         # check that necessary keys are in the observation
 #         env = VecEnsureInfoKeysWrapper(env, required_keys)
 
-#     def reset(self, **kwargs):
+#     def reset(self, *args, **kwargs):
 #         return self.env.reset(**kwargs)
 
 #     def step(self, action):
