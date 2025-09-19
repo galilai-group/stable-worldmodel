@@ -13,7 +13,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModel
 from lightning.pytorch.callbacks import ModelCheckpoint
-from xenoworlds.predictor import CausalPredictor
+from stable_worldmodel.predictor import CausalPredictor
 
 
 class Config:
@@ -110,7 +110,7 @@ def get_data():
     # -- load dataset
     minari_dataset = minari.load_dataset(
         "dinowm/pusht_noise-v0", download=True
-    )  # xenoworlds/PushT-v1
+    )  # swm/PushT-v1
     dataset = ssl.data.MinariStepsDataset(
         minari_dataset, num_steps=num_steps, transform=transform
     )

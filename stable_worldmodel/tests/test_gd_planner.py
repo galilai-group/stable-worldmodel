@@ -191,19 +191,19 @@ def test_each_env(env):
     import gymnasium as gym
     import gymnasium_robotics
     import torch
-    import xenoworlds
-    from xenoworlds.planner import GD
+    import stable_worldmodel as swm
+    from stable_worldmodel.planner import GD
     from gymnasium.spaces import Discrete, MultiDiscrete
     import numpy as np
     import ogbench
 
     wrappers = [
         # lambda x: RecordVideo(x, video_folder="./videos"),
-        lambda x: xenoworlds.wrappers.AddRenderObservation(x, render_only=False),
-        lambda x: xenoworlds.wrappers.TransformObservation(x),
+        lambda x: swm.wrappers.AddRenderObservation(x, render_only=False),
+        lambda x: swm.wrappers.TransformObservation(x),
     ]
     # print(ogbench.make_env_and_datasets(env, env_only=True))
-    world = xenoworlds.World(env, num_envs=2, wrappers=wrappers, max_episode_steps=2)
+    world = swm.World(env, num_envs=2, wrappers=wrappers, max_episode_steps=2)
     if isinstance(world.envs.action_space, MultiDiscrete):
         print("The action space is discrete.")
         return
@@ -212,7 +212,7 @@ def test_each_env(env):
         return
 
     print(world.envs.action_space, type(world.envs.action_space))
-    world_model = xenoworlds.DummyWorldModel(
+    world_model = swm.DummyWorldModel(
         image_shape=(3, 224, 224), action_dim=world.single_action_space.shape[0]
     )
 
@@ -221,6 +221,6 @@ def test_each_env(env):
     # planner = CEMNevergrad(
     #     world_model, n_steps=100, action_space=world.action_space, planning_horizon=3
     # )
-    agent = xenoworlds.Agent(planner, world)
+    agent = swm.Agent(planner, world)
     # 'FetchPush-v1'
     agent.run(episodes=1)

@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForImageClassification
 from lightning.pytorch.callbacks import ModelCheckpoint
 from pathlib import Path
-import xenoworlds as swm
+import stable_worldmodel as swm
 
 def get_data(dataset_name):
     """Return data and action space dim for training predictor"""

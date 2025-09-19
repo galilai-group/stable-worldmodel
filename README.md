@@ -15,12 +15,12 @@
 This example demonstrates the key features of `stable-worldmodel`: dictionary-structured data, unified forward function, and rich monitoring through callbacks.
 
 ```python
-import xenoworlds as swm
+import stable_worldmodel as swm
 import torch
 
 # create world
 world = swm.World(
-    "xenoworlds/SimplePointMaze-v0",
+    "swm/SimplePointMaze-v0",
     num_envs=7,
     image_shape=(224, 224),
     render_mode="rgb_array",

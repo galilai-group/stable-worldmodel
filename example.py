@@ -1,11 +1,10 @@
 if __name__ == "__main__":
-    import xenoworlds as swm
+    import stable_worldmodel as swm
     import torch
-    #import stable_worldmodel as swm
-
+    
     # create world
     world = swm.World(
-        "xenoworlds/SimplePointMaze-v0",
+        "swm/SimplePointMaze-v0",
         num_envs=7,
         image_shape=(224, 224),
         render_mode="rgb_array",

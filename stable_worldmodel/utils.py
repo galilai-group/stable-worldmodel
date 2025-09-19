@@ -7,8 +7,8 @@ from loguru import logger as logging
 
 
 def get_cache_dir() -> str:
-    """Return the cache directory for xenoworlds"""
-    cache_dir = os.getenv("XENOWORLDS_HOME", os.path.expanduser("~/.xenoworlds"))
+    """Return the cache directory for stable_worldmodel"""
+    cache_dir = os.getenv("XENOWORLDS_HOME", os.path.expanduser("~/.stable_worldmodel"))
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 

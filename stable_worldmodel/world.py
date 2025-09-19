@@ -14,7 +14,7 @@ from loguru import logger as logging
 from torchvision import transforms
 from .wrappers import MegaWrapper
 
-import xenoworlds as swm
+import stable_worldmodel as swm
 
 class World:
 
@@ -279,7 +279,7 @@ class World:
         Parameters
         ----------
         dataset_name : str
-            Name of the dataset directory under the xenoworlds cache dir.
+            Name of the dataset directory under the stable_worldmodel cache dir.
         episodes : int, default=10
             Number of *complete* episodes to record (across all envs, total).
         seed : int, optional
@@ -483,7 +483,7 @@ class World:
             Directory to which MP4 files will be written; one file per requested episode
             named ``episode_{idx}.mp4``.
         dataset_name : str
-            Name of the dataset directory under the xenoworlds cache dir.
+            Name of the dataset directory under the stable_worldmodel cache dir.
         episode_idx : int or list[int]
             Episode index or indices to render from the dataset.
         max_steps : int, default=500

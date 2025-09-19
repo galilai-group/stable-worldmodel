@@ -26,7 +26,7 @@ def get_data(num_steps=2):
 
     # -- load dataset
     minari_dataset = minari.load_dataset(
-        "xenoworlds/ImagePositioning-v1", download=True
+        "swm/ImagePositioning-v1", download=True
     )
     dataset = ssl.data.MinariStepsDataset(
         minari_dataset, num_steps=num_steps, transform=transform

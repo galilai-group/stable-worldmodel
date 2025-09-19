@@ -340,7 +340,7 @@ class ImagePositioning(gym.Env):
 
 
 if __name__ == "__main__":
-    import xenoworlds
+    import stable_worldmodel as swm
     import gymnasium as gym
     import matplotlib.pyplot as plt
     import numpy as np
@@ -349,16 +349,16 @@ if __name__ == "__main__":
     # 1. Setup Environment
     # Create a CartPole environment with "rgb_array" render mode to get image data
     images = [
-        xenoworlds.utils.create_pil_image_from_url(
+        swm.utils.create_pil_image_from_url(
             "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK5OnlnP3_GHXI2y1LoIHbMROdN8_DYyLEGg&s"
         ).resize((64, 64)),
-        xenoworlds.utils.create_pil_image_from_url(
+        swm.utils.create_pil_image_from_url(
             "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjrFGrhOLwgYP0cdjTIBEWMpy9MHBcya4c5Q&s"
         ).resize((32, 32)),
     ]
 
     env = gym.make(
-        "xenoworlds/ImagePositioning",
+        "swm/ImagePositioning",
         render_mode="rgb_array",
         resolution=224,
         images=images,
@@ -366,7 +366,7 @@ if __name__ == "__main__":
         max_episode_steps=20,
     )  #
     env = gym.wrappers.AddRenderObservation(env, render_only=False)
-    xenoworlds.collect.random_action(env, num_episodes=1)
+    swm.collect.random_action(env, num_episodes=1)
     env = RecordVideo(
         env,
         video_folder="cartpole-agent",  # Folder to save videos

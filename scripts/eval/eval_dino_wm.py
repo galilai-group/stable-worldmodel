@@ -2,8 +2,7 @@ import torch
 from loguru import logger as logging
 from transformers import AutoConfig, AutoModel
 import torchvision.transforms.v2 as transforms
-import xenoworlds
-
+import stable_worldmodel as swm
 
 class Config:
     """Configuration for PUSHT Eval"""
@@ -54,7 +53,7 @@ def get_world_model(action_dim, proprio_dim, device="cpu"):
 
     # config = AutoConfig.from_pretrained("facebook/dinov2-small")
     # encoder = AutoModel.from_config(config)
-    encoder = xenoworlds.wm.DinoV2Encoder(
+    encoder = swm.wm.DinoV2Encoder(
         "dinov2_vits14", feature_key="x_norm_patchtokens"
     )
 
@@ -70,7 +69,7 @@ def get_world_model(action_dim, proprio_dim, device="cpu"):
     encoder.eval()
 
     # -- create predictor
-    predictor = xenoworlds.wm.CausalPredictor(
+    predictor = swm.wm.CausalPredictor(
         num_patches=num_patches,
         num_frames=Config.num_hist,
         dim=emb_dim + Config.proprio_emb_dim + Config.action_emb_dim,
@@ -86,21 +85,21 @@ def get_world_model(action_dim, proprio_dim, device="cpu"):
     logging.info(f"Predictor: {predictor}")
 
     # -- create action encoder
-    action_encoder = xenoworlds.wm.Embedder(
+    action_encoder = swm.wm.Embedder(
         in_chans=action_dim * Config.frameskip, emb_dim=Config.action_emb_dim
     )
 
     logging.info(f"Action dim: {action_dim}, action emb dim: {Config.action_emb_dim}")
 
     # -- create proprioceptive encoder
-    proprio_encoder = xenoworlds.wm.Embedder(
+    proprio_encoder = swm.wm.Embedder(
         in_chans=proprio_dim, emb_dim=Config.proprio_emb_dim
     )
     logging.info(
         f"Proprio dim: {proprio_dim}, proprio emb dim: {Config.proprio_emb_dim}"
     )
 
-    decoder = xenoworlds.wm.VQVAE(
+    decoder = swm.wm.VQVAE(
         channel=384,
         n_embed=2048,
         n_res_block=4,
@@ -116,7 +115,7 @@ def get_world_model(action_dim, proprio_dim, device="cpu"):
     load_ckpt(decoder, "dino_wm_ckpt/pusht/checkpoints/decoder.pth")
 
     # -- world model as a stable_ssl module
-    world_model = xenoworlds.wm.DINOWM(
+    world_model = swm.wm.DINOWM(
         encoder=encoder,
         predictor=predictor,
         action_encoder=action_encoder,
@@ -165,32 +164,32 @@ def run():
         return np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
 
     wrappers = [
-        # lambda x: xenoworlds.BackgroundDeform(
+        # lambda x: swm.BackgroundDeform(
         #     x,
         #     image="https://cs.brown.edu/media/filer_public/ba/c4/bac4b1d3-99b3-4b07-b755-8664f7ca7e85/img-20240706-wa0029.jpg",
         #     noise_fn=noise_fn,
         # ),
-        # lambda x: xenoworlds.ColorDeform(
+        # lambda x: swm.ColorDeform(
         #     x,
         #     target=["agent", "goal", "block"],
         #     every_k_steps=-1,
         # ),
-        lambda x: xenoworlds.wrappers.RecordVideo(x, video_folder="./videos"),
-        lambda x: xenoworlds.wrappers.AddRenderObservation(x, render_only=False),
-        lambda x: xenoworlds.wrappers.TransformObservation(
+        lambda x: swm.wrappers.RecordVideo(x, video_folder="./videos"),
+        lambda x: swm.wrappers.AddRenderObservation(x, render_only=False),
+        lambda x: swm.wrappers.TransformObservation(
             x, transform=default_transform()
         ),
     ]
 
     goal_wrappers = [
-        lambda x: xenoworlds.wrappers.AddRenderObservation(x, render_only=False),
-        lambda x: xenoworlds.wrappers.TransformObservation(
+        lambda x: swm.wrappers.AddRenderObservation(x, render_only=False),
+        lambda x: swm.wrappers.TransformObservation(
             x, transform=default_transform()
         ),
     ]
 
-    world = xenoworlds.World(
-        "xenoworlds/PushT-v1",
+    world = swm.World(
+        "swm/PushT-v1",
         num_envs=1,
         wrappers=wrappers,
         max_episode_steps=25,
@@ -208,24 +207,24 @@ def run():
     print(f"World model: {world_model}")
 
     # -- create a random policy
-    # policy = xenoworlds.policy.RandomPolicy(world)
-    # planning_solver = xenoworlds.solver.GDSolver(
+    # policy = swm.policy.RandomPolicy(world)
+    # planning_solver = swm.solver.GDSolver(
     #     world_model,
     #     n_steps=1000,
     #     action_space=world.action_space,
     #     horizon=Config.horizon,
     #     action_noise=0,
     # )
-    # policy = xenoworlds.policy.PlanningPolicy(world, planning_solver)
+    # policy = swm.policy.PlanningPolicy(world, planning_solver)
 
-    # random_solver = xenoworlds.solver.RandomSolver(
+    # random_solver = swm.solver.RandomSolver(
     #     world_model,
     #     horizon=Config.horizon,
     # )
 
-    # policy = xenoworlds.policy.PlanningPolicy(world, random_solver)
+    # policy = swm.policy.PlanningPolicy(world, random_solver)
 
-    cem_solver = xenoworlds.solver.CEMSolver(
+    cem_solver = swm.solver.CEMSolver(
         world_model,
         horizon=Config.horizon,
         num_samples=300,
@@ -236,20 +235,20 @@ def run():
         device=device,
     )
 
-    cem_solver = xenoworlds.solver.MPCWrapper(
+    cem_solver = swm.solver.MPCWrapper(
         cem_solver,
         n_mpc_actions=1,  # Config.frameskip
     )
 
-    policy = xenoworlds.policy.PlanningPolicy(world, cem_solver)
+    policy = swm.policy.PlanningPolicy(world, cem_solver)
 
     # -- run evaluation
-    evaluator = xenoworlds.evaluator.Evaluator(world, policy, device=device)
+    evaluator = swm.evaluator.Evaluator(world, policy, device=device)
     data = evaluator.run(episodes=1)
 
     # data will be a dict with all the collected metrics
     # # visualize a rollout video (e.g. for debugging purposes)
-    # xenoworlds.utils.save_rollout_videos(data["frames_list"])
+    # swm.utils.save_rollout_videos(data["frames_list"])
 
 
 if __name__ == "__main__":
