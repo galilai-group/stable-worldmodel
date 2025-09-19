@@ -1,11 +1,10 @@
 import minari
-import torch
-from tqdm.rich import tqdm
-
-import stable_pretraining as spt
 import numpy as np
+import stable_pretraining as spt
+import torch
 
 from torch.utils.data import default_collate
+from tqdm.rich import tqdm
 
 class StepsDataset(spt.data.HFDataset):
 
@@ -98,47 +97,4 @@ class StepsDataset(spt.data.HFDataset):
 
         steps["action"] = actions
 
-        # # align actions and observations (skip first action)
-        # if len(actions) > 1:
-        #     actions = actions[1:]
-
-        # group actions between frameskip
-        # if self.frameskip > 1:
-        #    # drop last chunk of action (useless to keep)
-        #    actions = actions[:-(self.frameskip-1)]
-        #    actions = actions.reshape(self.num_steps-1, -1)
-        #    assert len(actions) == self.num_steps-1, f"Actions length {len(actions)} should be {self.num_steps-1}"
-        
         return steps
-
-
-# def cache_minari_with_pixels(name, env):
-#     dataset = minari.load_dataset(name)
-#     N = len(dataset)
-#     for i, episode_data in enumerate(dataset.iterate_episodes()):
-#         env.reset()
-#         observations = episode_data.observations
-#         actions = episode_data.actions
-#         rewards = episode_data.rewards
-#         terminations = episode_data.terminations
-#         truncations = episode_data.truncations
-#         infos = episode_data.infos
-#         pixels = []
-#         assert "observation" in observations
-#         for action, observation in zip(actions, observations["observation"]):
-#             set_state(env, observation)
-#             env.step(action)
-#             pixels.append(env.render())
-
-
-if __name__ == "__main__":
-    import gymnasium as gym
-    import gymnasium_robotics
-    import xenoworlds
-    from gymnasium.wrappers import RecordVideo
-
-    env = gym.make("AntMaze_Large-v1", render_mode="rgb_array")
-    env = RecordVideo(
-        env, video_folder="test_videos_data_caching", episode_trigger=lambda x: True
-    )
-    data = xenoworlds.data.cache_minari_with_pixels("D4RL/antmaze/large-play-v1", env)
