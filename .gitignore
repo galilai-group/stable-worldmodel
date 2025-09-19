@@ -208,6 +208,7 @@ logs/
 .vscode/
 *.sh
 
+outputs/
 multirun/
 checkpoints/
 dino_wm_ckpt/

@@ -8,11 +8,13 @@ class RandomSolver(BaseSolver):
     def __init__(
         self,
         horizon: int,
-        frameskip: int,
+        action_dim: int,
+        frameskip: int = 1,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.horizon = horizon
+        self.action_dim = action_dim
         self.frameskip = frameskip
 
     def solve(
@@ -20,7 +22,7 @@ class RandomSolver(BaseSolver):
     ) -> torch.Tensor:
         """Solve the planning optimization problem using gradient descent."""
 
-        action_dim = self.world_model.action_dim
+        action_dim = self.action_dim
         n_envs = action_space.shape[0]
         actions = init_action
 
@@ -37,10 +39,10 @@ class RandomSolver(BaseSolver):
             action_sequence = np.stack(
                 [action_space.sample() for _ in range(total_sequence)], axis=1
             )
-            action_sequence = torch.from_numpy(action_sequence)
-            new_action = action_sequence.view(
-                        -1, remaining, self.frameskip, action_dim
-                    )
+            new_action = torch.from_numpy(action_sequence)
+            # new_action = action_sequence.view(
+            #             -1, remaining, self.frameskip, action_dim
+            #         )
     
             actions = torch.cat([actions, new_action], dim=1)
 

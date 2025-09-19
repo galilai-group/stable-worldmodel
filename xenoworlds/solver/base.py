@@ -1,6 +1,5 @@
 import torch
 
-
 class BaseSolver(torch.nn.Module):
     """Base class for planning solvers"""
 

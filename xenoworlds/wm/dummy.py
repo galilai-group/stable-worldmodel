@@ -1,9 +1,7 @@
 import torch
 import numpy as np
 
-from .worldmodel import WorldModel
-
-class DummyWorldModel(WorldModel):
+class DummyWorldModel(torch.nn.Module):
 
     def __init__(self, image_shape, action_dim):
         super().__init__()
@@ -11,13 +9,18 @@ class DummyWorldModel(WorldModel):
         self.predictor = torch.nn.Linear(10 + action_dim, 10)
 
     def encode(self, obs):
-        z_obs = self.encoder(obs.flatten(1))
-        return z_obs
 
-    def predict(self, z_obs, actions, timestep=None):
+        if type(obs['pixels']) is np.ndarray:
+            obs['pixels'] = torch.from_numpy(obs['pixels']).float()
+        obs['embedding'] = self.encoder(obs['pixels'].flatten(1))
+        return obs
+
+    def predict(self, obs, actions, timestep=None):
         """predict next s_t+H embedding given s_t + action sequence
         i.e rollout the dynamics model for H steps
         """
+
+        z_obs = obs['embedding']
 
         if torch.is_tensor(actions):
             return self.predictor(torch.cat([z_obs, actions], 1))

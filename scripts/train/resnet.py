@@ -1,3 +1,4 @@
+import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
@@ -5,12 +6,11 @@ import torchvision
 
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForImageClassification
-
+from lightning.pytorch.callbacks import ModelCheckpoint
 from pathlib import Path
+import xenoworlds as swm
 
-import xenoworlds as xen
-
-def get_data():
+def get_data(dataset_name):
     """Return data and action space dim for training predictor"""
 
     # -- number of rollout steps to include in the dataset
@@ -35,14 +35,8 @@ def get_data():
     )
 
     # -- load dataset
-    #minari_dataset = minari.load_dataset("dinowm/pusht_noise-v0", download=True)
-    #print(minari_dataset[0])
-
-    # dataset = spt.data.MinariStepsDataset(
-    #     minari_dataset, num_steps=num_steps, transform=transform
-    # )
-
-    dataset = xen.data.StepsDataset("parquet", data_files=str(Path('./dataset', "*.parquet")), split="train",
+    data_dir = swm.utils.get_cache_dir()
+    dataset = swm.data.StepsDataset("parquet", data_files=str(Path(data_dir, dataset_name, "*.parquet")), split="train",
                                     num_steps=2, frameskip=1, transform=transform
     )
 
@@ -118,22 +112,32 @@ def get_world_model(action_dim):
 
     return world_model
 
-
-def run():
+@hydra.main(version_base=None, config_path="./", config_name="config")
+def run(cfg):
     """Run training of predictor"""
-    data, action_dim = get_data()
+    data, action_dim = get_data(cfg.dataset_name)
     world_model = get_world_model(action_dim)
+
+    cache_dir = swm.utils.get_cache_dir()
+    checkpoint_callback = ModelCheckpoint(dirpath=cache_dir,filename=f'{cfg.output_model_name}_weights', save_last=True)
 
     trainer = pl.Trainer(
         max_epochs=1,
+        callbacks=[checkpoint_callback],
         num_sanity_val_steps=1,
         precision="16-mixed",
         logger=False,
-        enable_checkpointing=False,
+        enable_checkpointing=True,
     )
-    manager = spt.Manager(trainer=trainer, module=world_model, data=data)
+
+    manager = spt.Manager(trainer=trainer, module=world_model, data=data)#, ckpt_path=f"{cfg.output_model_name}_ckpt")
     manager()
 
+    if hasattr(cfg, "dump_object") and cfg.dump_object:
+        # -- save the world model object
+        output_path = Path(cache_dir, f"{cfg.output_model_name}_object.ckpt")
+        torch.save(world_model.to('cpu'), output_path)
+        print(f"Saved world model object to {output_path}")
 
 if __name__ == "__main__":
     run()

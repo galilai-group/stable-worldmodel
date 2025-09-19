@@ -1,0 +1,4 @@
+#output_dir: ./outputs
+
+dataset_name: simple-pointmaze
+output_model_name: world_model

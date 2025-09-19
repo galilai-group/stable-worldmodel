@@ -6,11 +6,13 @@ import datasets
 import gymnasium as gym
 import numpy as np
 import torch
+
 from datasets import Dataset, Features, Image, Value, concatenate_datasets, load_dataset
 from loguru import logger as logging
 from torchvision import transforms
 from .wrappers import MegaWrapper
 
+import xenoworlds as swm
 
 class World:
     def __init__(
@@ -156,14 +158,17 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def record_dataset(self, dataset_path, episodes=10, seed=None, options=None):
+    def record_dataset(self, dataset_name, episodes=10, seed=None, options=None):
         """
         Records a dataset with the current policy running in the first environment of a Gymnasium VecEnv.
         Args:
-            dataset_path: Output path for the dataset files.
+            dataset_name: Name of the dataset to save.
             episodes: Number of episodes to record.
             max_steps: Maximum number of steps per episode.
         """
+
+        dataset_path = Path(swm.utils.get_cache_dir(), dataset_name)
+        dataset_path.mkdir(parents=True, exist_ok=True) 
 
         hf_dataset = None
         recorded_episodes = 0
@@ -309,7 +314,7 @@ class World:
 
         # flush all extra episode saved for the current shard
         hf_dataset = hf_dataset.filter(
-            lambda row: (row["episode_idx"]-episode_counter) <= episodes
+            lambda row: (row["episode_idx"]-episode_counter) < episodes
         )
 
         hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
@@ -319,162 +324,8 @@ class World:
         episode_range = (final_num_episodes.min().item(), final_num_episodes.max().item())
         print(f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}")
 
-
-    # def record_dataset(self, dataset_path, episodes=10, seed=None, options=None):
-    #     """
-    #     Records a dataset with the current policy running in the first environment of a Gymnasium VecEnv.
-    #     Args:
-    #         dataset_path: Output path for the dataset files.
-    #         episodes: Number of episodes to record.
-    #         max_steps: Maximum number of steps per episode.
-    #     """
-        
-    #     hf_dataset = None
-    #     recorded_episodes = 0
-    #     dataset_path = Path(dataset_path)
-    #     dataset_path.mkdir(parents=True, exist_ok=True)
-
-    #     self.terminateds = np.zeros(self.num_envs)
-    #     self.truncateds = np.zeros(self.num_envs)
-    #     episode_idx = np.arange(self.num_envs)
-
-    #     self.reset(seed, options)
-
-
-    #     records = {
-    #         key: [v for v in value]
-    #         for key, value in self.infos.items()
-    #         if key[0] != "_"
-    #     }
-        
-    #     records["episode_idx"] = list(episode_idx)
-    #     records["policy"] = [self.policy.type] * self.num_envs
-
-    #     while True:
-            
-    #         # handle new episode
-    #         for i in range(self.num_envs):
-    #             if self.terminateds[i] or self.truncateds[i]:
-    #                 # determine new episode idx
-    #                 next_ep_idx = episode_idx.max() + 1
-    #                 episode_idx[i] = next_ep_idx
-    #                 recorded_episodes += 1
-
-    #         if recorded_episodes >= episodes:
-    #             break
-
-    #         self.step()
-
-    #         for key in self.infos:
-    #             if key[0] == "_":
-    #                 continue
-                
-    #             # shift actions
-    #             if key == "action" and len(records['action']) > 0:
-    #                 n_action = len(self.infos[key])
-    #                 last_episode = records["episode_idx"][-n_action:]
-    #                 action_mask = (last_episode == episode_idx)[:, None]
-               
-    #                 # overwride last actions of continuing episodes
-    #                 records[key][-n_action:] = np.where(
-    #                     action_mask,
-    #                     self.infos[key],
-    #                     np.nan,
-    #                 )
-
-    #                 # add new dummy action
-    #                 action_shape = np.shape(self.infos[key][0])
-    #                 dummy_block = [np.full(action_shape, np.nan) for _ in range(self.num_envs)]
-    #                 records[key].extend(dummy_block)
-    #             else:
-    #                 records[key].extend(list(self.infos[key]))
-
-    #         records["episode_idx"].extend(list(episode_idx))
-    #         records["policy"].extend([self.policy.type] * self.num_envs)
-
-
-    #     # add the episode length
-    #     counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"])+1)
-    #     records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
-
-    #     # determine feature
-    #     features = {
-    #         "pixels": Image(),
-    #         "episode_idx": Value("int32"),
-    #         "step_idx": Value("int32"),
-    #         "episode_len": Value("int32"),
-    #     }
-
-    #     if "goal" in records:
-    #         features["goal"] = Image()
-    #     for k in records:
-    #         if k in features:
-    #             continue
-    #         if type(records[k][0]) is str:
-    #             state_feature = Value("string")
-    #         elif records[k][0].ndim == 1:
-    #             state_feature = datasets.Sequence(
-    #                 feature=Value(dtype=records[k][0].dtype.name), length=len(records[k][0])
-    #             )
-    #         elif 2 <= records[k][0].ndim <= 6:
-    #             feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
-    #             state_feature = feature_cls(
-    #                 shape=records[k][0].shape, dtype=records[k][0].dtype
-    #             )
-    #         else:
-    #             state_feature = Value(records[k][0].dtype.name)
-    #         features[k] = state_feature
-
-    #     features = Features(features)
-    #     print(features)
-
-    #     # make dataset
-    #     hf_dataset = Dataset.from_dict(records, features=features)
-
-    #     # determine shard index and num episode recorded so far
-    #     shard_idx = 0
-    #     while True:
-    #         if not (dataset_path / f"data_shard_{shard_idx:05d}.parquet").is_file():
-    #             break
-    #         shard_idx += 1
-
-    #     episode_counter = 0
-    #     if shard_idx > 0:
-    #         shard_dataset = load_dataset(
-    #         "parquet",
-    #         split="train",
-    #         data_files=str(dataset_path / f"data_shard_{shard_idx-1:05d}.parquet")
-    #         )
-    #         episode_counter = np.max(shard_dataset["episode_idx"]) + 1
-
-    #     # flush incomplete episode
-    #     ep_col = np.array(hf_dataset["episode_idx"])
-    #     non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
-    #     keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
-    #     hf_dataset = hf_dataset.select(keep_episode)
-
-    #     # re-index remaining episode starting from the last shard episode number
-    #     unique_eps = np.unique(hf_dataset["episode_idx"])
-    #     id_map = {old: new for new, old in enumerate(unique_eps, start=episode_counter)}
-    #     hf_dataset = hf_dataset.map(
-    #         lambda row: {"episode_idx": id_map[row["episode_idx"]]}
-    #     )
-
-    #     # flush all extra episode saved for the current shard
-    #     hf_dataset = hf_dataset.filter(
-    #         lambda row: (row["episode_idx"]-episode_counter) <= episodes
-    #     )
-
-    #     hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
-        
-    #     # display info
-    #     final_num_episodes = np.unique(hf_dataset["episode_idx"])
-    #     episode_range = (final_num_episodes.min().item(), final_num_episodes.max().item())
-    #     print(f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}")
-
-
     def record_video_from_dataset(
-        self, video_path, dataset_path, episode_idx, max_steps=500, fps=30, num_proc=4
+        self, video_path, dataset_name, episode_idx, max_steps=500, fps=30, num_proc=4
     ):
         """
         Records a video of the current policy running in the first environment of a Gymnasium VecEnv.
@@ -487,7 +338,8 @@ class World:
         """
         import imageio
 
-        # TODO add goal support?
+        dataset_path = Path(swm.utils.get_cache_dir(), dataset_name)
+        assert dataset_path.is_dir(), f"Dataset {dataset_name} not found in cache dir {swm.utils.get_cache_dir()}"
 
         if isinstance(episode_idx, int):
             episode_idx = [episode_idx]
@@ -528,3 +380,79 @@ class World:
                 o.append_data(frame)
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
+
+    def evaluate(self, episodes=10, eval_keys=None, seed=None, options=None):
+
+        """
+        Evaluates the current policy on the environment.
+        Args:
+            episodes: Number of episodes to evaluate.
+        """
+
+        metrics = {
+            'success_rate': 0,
+            'episode_successes': np.zeros(episodes),
+            'seeds': np.empty(episodes, dtype=int),
+        }
+
+        if eval_keys:
+            for key in eval_keys:
+                metrics[key] = np.zeros(episodes)
+
+        self.terminateds = np.zeros(self.num_envs)
+        self.truncateds = np.zeros(self.num_envs)
+        
+        episode_idx = np.arange(self.num_envs)
+        self.reset(seed, options)
+        
+        eval_ep_count = 0
+        eval_done = False
+
+        while True:
+
+            # take before step to handle the auto-reset
+            truncations_before = self.truncateds.copy()
+            terminations_before = self.terminateds.copy()
+
+            # take step
+            self.step()
+
+            # start new episode for done envs
+            for i in range(self.num_envs):
+                if terminations_before[i] or truncations_before[i]:
+
+                    # record eval info
+                    ep_idx = episode_idx[i]-1
+                    metrics['episode_successes'][ep_idx] = terminations_before[i]
+                    metrics['seeds'][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
+
+                    if eval_keys:
+                        for key in eval_keys:
+                            assert key in self.infos, f"key {key} not found in infos"
+                            metrics[key][ep_idx] = self.infos[key][i]
+
+                    # break if enough episodes evaluated
+                    if eval_ep_count >= episodes:
+                        eval_done = True
+                        break
+
+                    # determine new episode idx
+                    next_ep_idx = episode_idx.max() + 1
+                    episode_idx[i] = next_ep_idx
+                    eval_ep_count += 1
+
+                    # re-reset env with seed and options (no supported by auto-reset)
+                    new_seed = seed + i + eval_ep_count if seed is not None else None
+                    _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
+
+                    for k, v in infos.items():
+                        self.infos[k][i] = v
+
+            if eval_done:
+                break
+        
+        # compute success rate
+        metrics['success_rate'] = float(np.sum(metrics['episode_successes'])) / episodes * 100.0
+
+        return metrics
+

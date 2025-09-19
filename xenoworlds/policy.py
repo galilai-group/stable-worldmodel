@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
-from xenoworlds.wm import WorldModel
+from typing import Protocol,runtime_checkable
+import torch
 
 class BasePolicy:
     """Base class for agent policies"""
@@ -41,6 +42,11 @@ class ExpertPolicy(BasePolicy):
         # Implement expert policy logic here
         pass
 
+@runtime_checkable
+class WorldModel(Protocol):
+    def encode(self, obs: dict) -> dict:...
+    def predict(self, z_obs:dict, actions:torch.Tensor, timestep=None) -> dict:...
+
 class WorldModelPolicy(BasePolicy):
     def __init__(self,
                 world_model,
@@ -60,10 +66,8 @@ class WorldModelPolicy(BasePolicy):
         
 
         # world model sanity check
-        assert isinstance(self.world_model, WorldModel), "world_model must be an instance of WorldModel"
-        assert hasattr(self.world_model, "predict"), "world_model must have a predict method"
-        assert hasattr(self.world_model, "encode"), "world_model must have an encode method"
-
+        assert isinstance(self.world_model, WorldModel), "world_model must have encode and predict method!"
+        
         # planning horizon
         self.horizon = horizon     
 
@@ -88,11 +92,17 @@ class WorldModelPolicy(BasePolicy):
     def action_dim(self):
         return np.prod(self.env.single_action_space.shape)
 
-    def get_action(self, obs, goal=None, **kwargs):
+    def get_action(self, infos, **kwargs):
+        
         assert hasattr(self, "env"), "Environment not set for the policy"
+        assert 'goal' in infos, "'goal' must be provided in infos"
+        
+        # create infos dict based on goal attributes
+        goal_infos = {k[5:]:v for k,v in infos.items() if k.startswith('goal_')}
+        goal_infos['pixels'] = infos['goal']  # TODO: unify obs and goal keys
 
-        obs = self.world_model.encode(obs)
-        goal = self.world_model.encode(goal) # TODO: detach goal
+        obs = self.world_model.encode(infos)
+        goal = self.world_model.encode(goal_infos) # TODO: detach goal
 
         # need to replan if action buffer is empty
         if len(self.action_buffer) == 0:
@@ -103,6 +113,9 @@ class WorldModelPolicy(BasePolicy):
                 self.action_buffer.append(plan[:, action])
 
         action = self.action_buffer.popleft()
-
         # TODO: reshape action shape into its original shape if needed
-        return action # (num_envs, action_dim)
+        return action.numpy() # (num_envs, action_dim)
+
+def AutoPolicy(torchscript_name, **kwargs):
+    return  # TODO load the torchscript policy
+      
