@@ -17,6 +17,12 @@ dependencies = [
     "hydra-core",
     "loguru",
     "tabulate",
+    "gymnasium[all]",
+    "minari",
+    "stable-pretraining",
+    "nevergrad",
+    "einops",
+    "datasets",
 ]
 
 dynamic = ["version"]
