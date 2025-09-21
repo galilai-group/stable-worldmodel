@@ -45,7 +45,7 @@ Contribute to the Docs <https://github.com/randall-lab/stable-worldmodel/tree/ma
 
 <h3 class="center-title">A Library for Evaluating World Models 🌎</h3>
 
-**Minari is a Python API that hosts a collection of popular Offline Reinforcement Learning datasets.** The environments from which these datasets are generated follow the [Gymnasium API](https://gymnasium.farama.org/). The datasets are publicly available in a [Farama GCP bucket](https://console.cloud.google.com/storage/browser/minari-remote) and can be downloaded through the Minari CLI. Minari also provides dataset handling features such as episode sampling, filtering trajectories, as well as dataset generation utilities.
+**stable-worldmodel (s-wm) is a Python library for world model evaluation across wide range of environment and variations.** The library is composed of a set of [Gymnasium](https://gymnasium.farama.org/) environment. s-wm not only provide an evaluation benchmark but also the api to add new environment and some utilities based on [stable-pretraining](https://github.com/randall-lab/stable-pretraining) to easily iterate and train new world model.
 
 <p style="text-align: center;">
 “Learn what the rest of the world is like. The variety is worthwhile.” ― Richard P. Feynman

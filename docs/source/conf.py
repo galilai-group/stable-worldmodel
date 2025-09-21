@@ -121,9 +121,6 @@ html_theme_options = {
         "color-inline-code-background": "#f8f8f8",
         "color-brand-visited": "#2757dd"
     },
-
-
-    "announcement": "alpha-pre-release version - API may change",
     "footer_icons": [
         {
             "name": "Discord",
