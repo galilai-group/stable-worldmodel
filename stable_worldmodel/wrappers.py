@@ -6,19 +6,20 @@ import numpy as np
 import torch
 import torchvision.transforms.v2 as transforms
 from gymnasium.vector import VectorWrapper
+from gymnasium.spaces.utils import is_space_dtype_shape_equiv
+from gymnasium.vector.utils import (
+    batch_differing_spaces,
+    batch_space,
+    create_empty_array,
+)
+
 from gymnasium.wrappers import (
-    AddRenderObservation,
-    NumpyToTorch,
-    RecordVideo,
-    ResizeObservation,
-    TimeLimit,
     TransformObservation,
 )
 
 
 class EnsureInfoKeysWrapper(gym.Wrapper):
-    """
-    Gymnasium wrapper to ensure certain keys are present in the info dict.
+    """Gymnasium wrapper to ensure certain keys are present in the info dict.
     If a key is missing, it is added with a default value.
     """
 
@@ -40,9 +41,9 @@ class EnsureInfoKeysWrapper(gym.Wrapper):
                 raise RuntimeError(f"Key {key} is not present in the env output")
         return obs, info
 
+
 class EnsureImageShape(gym.Wrapper):
-    """
-    Gymnasium wrapper to ensure certain keys are present in the info dict.
+    """Gymnasium wrapper to ensure certain keys are present in the info dict.
     If a key is missing, it is added with a default value.
     """
 
@@ -92,8 +93,7 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
 
 
 class EverythingToInfoWrapper(gym.Wrapper):
-    """
-    Gymnasium wrapper to ensure the observation is included in the info dict
+    """Gymnasium wrapper to ensure the observation is included in the info dict
     under a specified key after reset and step.
     """
 
@@ -152,8 +152,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
 
 
 class AddPixelsWrapper(gym.Wrapper):
-    """
-    Gymnasium wrapper that adds a 'pixels' key to the info dict,
+    """Gymnasium wrapper that adds a 'pixels' key to the info dict,
     containing a rendered and resized image of the environment.
     Optionally applies a torchvision transform to the image.
     Optionally applies another user-supplied wrapper to the environment.
@@ -235,6 +234,7 @@ class ResizeGoalWrapper(gym.Wrapper):
         info["goal"] = self._format(info["goal"])
         return obs, reward, terminated, truncated, info
 
+
 class MegaWrapper(gym.Wrapper):
     def __init__(
         self,
@@ -262,11 +262,73 @@ class MegaWrapper(gym.Wrapper):
         )
         self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
-    def reset(self,*args,**kwargs):
+    def reset(self, *args, **kwargs):
         return self.env.reset(*args, **kwargs)
 
     def step(self, action):
         return self.env.step(action)
+
+
+class VariationWrapper(VectorWrapper):
+    def __init__(
+        self,
+        env,
+        variation_mode: str | gym.Space = "same",
+    ):
+        super().__init__(env)
+
+        #     self.single_variation_space = self.envs[0].variation_space
+        #     self.action_space = batch_space(self.single_action_space, self.num_envs)
+        # else:
+        #     self.single_variation_space = None
+
+        base_env = env.envs[0].unwrapped
+
+        if not hasattr(base_env, "variation_space"):
+            self.single_variation_space = None
+            self.variation_space = None
+            return
+
+        if variation_mode == "same":
+            self.single_variation_space = base_env.variation_space
+            self.variation_space = batch_space(
+                self.single_variation_space, self.num_envs
+            )
+
+        elif variation_mode == "different":
+            self.single_variation_space = base_env.variation_space
+            self.variation_space = batch_differing_spaces(
+                [sub_env.unwrapped.variation_space for sub_env in env.envs]
+            )
+
+        else:
+            raise ValueError(
+                f"Invalid `variation_mode`, expected: 'same' or 'different' or tuple of single and batch variation space, actual got {variation_mode}"
+            )
+
+        # check sub-environment obs and action spaces
+        for sub_env in env.envs:
+            if variation_mode == "same":
+                assert (
+                    sub_env.unwrapped.variation_space == self.single_variation_space
+                ), (
+                    f"VariationWrapper(..., variation_mode='same') however the sub-environments variation spaces are not equivalent. single_variation_space={self.single_variation_space}, sub-environment variation_space={env.variation_space}. If this is intentional, use `variation_mode='different'` instead."
+                )
+            else:
+                assert is_space_dtype_shape_equiv(
+                    sub_env.unwrapped.variation_space, self.single_variation_space
+                ), (
+                    f"VariationWrapper(..., variation_mode='different' or custom space) however the sub-environments variation spaces do not share a common shape and dtype, single_variation_space={self.single_variation_space}, sub-environment variation_space={env.variation_space}"
+                )
+
+        # TODO handle auto-reset
+        self._variations = create_empty_array(
+            self.single_variation_space, n=self.num_envs, fn=np.zeros
+        )
+
+    @property
+    def envs(self):
+        return getattr(self.env, "envs", None)
 
 
 class TransformObservation(gym.ObservationWrapper):

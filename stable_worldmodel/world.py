@@ -1,25 +1,21 @@
 from typing import Callable
 
-import os
 from pathlib import Path
 
-import json
 import datasets
 import gymnasium as gym
 import numpy as np
 import torch
 
-from datasets import Dataset, Features, Image, Value, concatenate_datasets, load_dataset
+from datasets import Dataset, Features, Image, Value, load_dataset
 from loguru import logger as logging
-from torchvision import transforms
-from .wrappers import MegaWrapper
+from .wrappers import MegaWrapper, VariationWrapper
 
 import stable_worldmodel as swm
 
-class World:
 
-    """
-    A high-level environment manager for vectorized gym environments with support for
+class World:
+    """A high-level environment manager for vectorized gym environments with support for
     goal-conditioned tasks, video recording, dataset generation, and evaluation.
 
     The `World` class wraps multiple parallel environments using Gymnasium’s vectorized API and
@@ -48,7 +44,7 @@ class World:
     **kwargs : dict
         Additional keyword arguments passed to `gym.make_vec`.
 
-    Attributes
+    Attributes:
     ----------
     envs : gym.vector.VectorEnv
         Vectorized environments wrapped with `MegaWrapper`.
@@ -74,7 +70,7 @@ class World:
     single_observation_space : gym.Space
         Observation space for a single environment.
 
-    Methods
+    Methods:
     -------
     close(**kwargs)
         Closes all managed environments.
@@ -99,7 +95,7 @@ class World:
     evaluate(episodes=10, eval_keys=None, seed=None, options=None)
         Evaluates the policy across multiple episodes and computes metrics.
 
-    Notes
+    Notes:
     -----
     - Supports parallelized rollout collection with episode tracking.
     - Integrates tightly with HuggingFace Datasets for storage and replay.
@@ -119,7 +115,6 @@ class World:
         max_episode_steps: int = 100,
         **kwargs,
     ):
-        
         self.envs = gym.make_vec(
             env_name,
             num_envs=num_envs,
@@ -133,18 +128,22 @@ class World:
             **kwargs,
         )
 
-        self.goal_envs = gym.make_vec(
-            env_name,
-            num_envs=num_envs,
-            vectorization_mode="sync",
-            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform)],
-            max_episode_steps=max_episode_steps,
-            **kwargs,
-        )
+        self.envs = VariationWrapper(self.envs)
 
-        logging.info("WORLD INITIALIZED")
-        logging.info(f"ACTION SPACE: {self.envs.action_space}")
-        logging.info(f"OBSERVATION SPACE: {self.envs.observation_space}")
+        logging.info(f"🌍🌍🌍 World {env_name} initialized 🌍🌍🌍")
+
+        logging.info("🕹️ 🕹️ 🕹️ Action space 🕹️ 🕹️ 🕹️")
+        logging.info(f"{self.envs.action_space}")
+
+        logging.info("👁️ 👁️ 👁️ Observation space 👁️ 👁️ 👁️")
+        logging.info(f"{self.envs.observation_space}")
+
+        if self.envs.variation_space is not None:
+            logging.info("⚗️ ⚗️ ⚗️ Variation space ⚗️ ⚗️ ⚗️")
+            logging.info(f"{self.envs.variation_space}")
+        else:
+            logging.warning("No variation space provided!")
+
         self.seed = seed
 
         rng = torch.Generator()
@@ -179,8 +178,8 @@ class World:
 
         Initializes episode bookkeeping, resets all environments, and caches
         initial infos (including current goals if provided by the wrapper).
-    
-        Returns
+
+        Returns:
         -------
         World
             The iterator (``self``).
@@ -218,8 +217,7 @@ class World:
         self.policy.set_env(self.envs)
 
     def record_video(self, video_path, max_steps=500, fps=30, seed=None, options=None):
-        """
-        Record rollout videos for each environment under the current policy.
+        """Record rollout videos for each environment under the current policy.
 
         Parameters
         ----------
@@ -234,7 +232,7 @@ class World:
         options : dict, optional
             Env reset options.
 
-        Notes
+        Notes:
         -----
         - If ``infos`` contains ``"goal"``, the goal image is vertically stacked
           beneath the observation pixels in the output frames.
@@ -273,8 +271,7 @@ class World:
         print(f"Video saved to {video_path}")
 
     def record_dataset(self, dataset_name, episodes=10, seed=None, options=None):
-        """
-        Collect episodes with the current policy and save them as a HuggingFace Dataset (Parquet shards).
+        """Collect episodes with the current policy and save them as a HuggingFace Dataset (Parquet shards).
 
         Parameters
         ----------
@@ -287,7 +284,7 @@ class World:
             derive unique seeds from this value.
         options : dict, optional
             Env reset options.
-        
+
         Side Effects
         ------------
         - Creates ``{cache_dir}/{dataset_name}/data_shard_{NNNNN}.parquet`` files.
@@ -307,15 +304,14 @@ class World:
             - ``action`` : array-like feature shaped like the env action space
             - Per-step scalar/vector fields exposed by the wrapper in ``infos``
 
-        Notes
+        Notes:
         -----
         - The function handles action shifting to ensure alignment with continuing episodes.
         - Sharding logic ensures a new shard index is chosen if prior shards exist.
         - Only the first ``episodes`` fully completed episodes are persisted for the new shard.
         """
-
         dataset_path = Path(swm.utils.get_cache_dir(), dataset_name)
-        dataset_path.mkdir(parents=True, exist_ok=True) 
+        dataset_path.mkdir(parents=True, exist_ok=True)
 
         hf_dataset = None
         recorded_episodes = 0
@@ -333,12 +329,11 @@ class World:
             for key, value in self.infos.items()
             if key[0] != "_"
         }
-        
+
         records["episode_idx"] = list(episode_idx)
         records["policy"] = [self.policy.type] * self.num_envs
-        
-        while True:
 
+        while True:
             # take before step to handle the auto-reset
             truncations_before = self.truncateds.copy()
             terminations_before = self.terminateds.copy()
@@ -349,15 +344,18 @@ class World:
             # start new episode for done envs
             for i in range(self.num_envs):
                 if terminations_before[i] or truncations_before[i]:
-
                     # determine new episode idx
                     next_ep_idx = episode_idx.max() + 1
                     episode_idx[i] = next_ep_idx
                     recorded_episodes += 1
 
                     # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = seed + i + recorded_episodes if seed is not None else None
-                    states, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
+                    new_seed = (
+                        seed + i + recorded_episodes if seed is not None else None
+                    )
+                    states, infos = self.envs.envs[i].reset(
+                        seed=new_seed, options=options
+                    )
 
                     for k, v in infos.items():
                         self.infos[k][i] = v
@@ -368,14 +366,14 @@ class World:
             for key in self.infos:
                 if key[0] == "_":
                     continue
-                
+
                 # shift actions
                 if key == "action":
                     n_action = len(self.infos[key])
                     last_episode = records["episode_idx"][-n_action:]
                     action_mask = (last_episode == episode_idx)[:, None]
-               
-                    # overwride last actions of continuing episodes
+
+                    # override last actions of continuing episodes
                     records[key][-n_action:] = np.where(
                         action_mask,
                         self.infos[key],
@@ -384,16 +382,20 @@ class World:
 
                     # add new dummy action
                     action_shape = np.shape(self.infos[key][0])
-                    dummy_block = [np.full(action_shape, np.nan) for _ in range(self.num_envs)]
+                    dummy_block = [
+                        np.full(action_shape, np.nan) for _ in range(self.num_envs)
+                    ]
                     records[key].extend(dummy_block)
                 else:
                     records[key].extend(list(self.infos[key]))
 
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
-        
+
         # add the episode length
-        counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"])+1)
+        counts = np.bincount(
+            np.array(records["episode_idx"]), minlength=max(records["episode_idx"]) + 1
+        )
         records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
 
         # determine feature
@@ -413,7 +415,8 @@ class World:
                 state_feature = Value("string")
             elif records[k][0].ndim == 1:
                 state_feature = datasets.Sequence(
-                    feature=Value(dtype=records[k][0].dtype.name), length=len(records[k][0])
+                    feature=Value(dtype=records[k][0].dtype.name),
+                    length=len(records[k][0]),
                 )
             elif 2 <= records[k][0].ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
@@ -440,15 +443,19 @@ class World:
         episode_counter = 0
         if shard_idx > 0:
             shard_dataset = load_dataset(
-            "parquet",
-            split="train",
-            data_files=str(dataset_path / f"data_shard_{shard_idx-1:05d}.parquet")
+                "parquet",
+                split="train",
+                data_files=str(
+                    dataset_path / f"data_shard_{shard_idx - 1:05d}.parquet"
+                ),
             )
             episode_counter = np.max(shard_dataset["episode_idx"]) + 1
 
         # flush incomplete episode
         ep_col = np.array(hf_dataset["episode_idx"])
-        non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
+        non_complete_episodes = np.array(
+            episode_idx[~(self.terminateds | self.truncateds)]
+        )
         keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
         hf_dataset = hf_dataset.select(keep_episode)
 
@@ -461,21 +468,25 @@ class World:
 
         # flush all extra episode saved for the current shard
         hf_dataset = hf_dataset.filter(
-            lambda row: (row["episode_idx"]-episode_counter) < episodes
+            lambda row: (row["episode_idx"] - episode_counter) < episodes
         )
 
         hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
-        
+
         # display info
         final_num_episodes = np.unique(hf_dataset["episode_idx"])
-        episode_range = (final_num_episodes.min().item(), final_num_episodes.max().item())
-        print(f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}")
+        episode_range = (
+            final_num_episodes.min().item(),
+            final_num_episodes.max().item(),
+        )
+        print(
+            f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}"
+        )
 
     def record_video_from_dataset(
         self, video_path, dataset_name, episode_idx, max_steps=500, fps=30, num_proc=4
     ):
-        """
-        Replay stored dataset episodes and export them as MP4 videos.
+        """Replay stored dataset episodes and export them as MP4 videos.
 
         Parameters
         ----------
@@ -496,7 +507,9 @@ class World:
         import imageio
 
         dataset_path = Path(swm.utils.get_cache_dir(), dataset_name)
-        assert dataset_path.is_dir(), f"Dataset {dataset_name} not found in cache dir {swm.utils.get_cache_dir()}"
+        assert dataset_path.is_dir(), (
+            f"Dataset {dataset_name} not found in cache dir {swm.utils.get_cache_dir()}"
+        )
 
         if isinstance(episode_idx, int):
             episode_idx = [episode_idx]
@@ -522,11 +535,14 @@ class World:
             episode = episode.sort("step_idx")
             episode_len = len(episode)
 
-            assert len(set(episode['episode_len'])) == 1, "'episode_len' contains different values for the same episode"
-            assert len(episode) == episode['episode_len'][0], f"Episode {i} has {len(episode)} steps, but 'episode_len' is {episode['episode_len'][0]}"
+            assert len(set(episode["episode_len"])) == 1, (
+                "'episode_len' contains different values for the same episode"
+            )
+            assert len(episode) == episode["episode_len"][0], (
+                f"Episode {i} has {len(episode)} steps, but 'episode_len' is {episode['episode_len'][0]}"
+            )
 
             for step_idx in range(min(episode_len, max_steps)):
-
                 frame = episode[step_idx]["pixels"]
                 frame = np.array(frame.convert("RGB"), dtype=np.uint8)
 
@@ -539,8 +555,7 @@ class World:
         print(f"Video saved to {video_path}")
 
     def evaluate(self, episodes=10, eval_keys=None, seed=None, options=None):
-        """
-        Evaluate the current policy across multiple episodes and compute metrics.
+        """Evaluate the current policy across multiple episodes and compute metrics.
 
         Parameters
         ----------
@@ -554,7 +569,7 @@ class World:
         options : dict, optional
             Env reset options.
 
-        Returns
+        Returns:
         -------
         dict
             Metrics dictionary with the following entries:
@@ -566,15 +581,14 @@ class World:
                 The per-episode seeds used for evaluation.
             - Additional arrays for each key in ``eval_keys``, each of shape (episodes,).
 
-        Notes
+        Notes:
         -----
         Success is counted using the ``terminated`` signal observed prior to an env's auto-reset.
         """
-
         metrics = {
-            'success_rate': 0,
-            'episode_successes': np.zeros(episodes),
-            'seeds': np.empty(episodes, dtype=int),
+            "success_rate": 0,
+            "episode_successes": np.zeros(episodes),
+            "seeds": np.empty(episodes, dtype=int),
         }
 
         if eval_keys:
@@ -583,15 +597,14 @@ class World:
 
         self.terminateds = np.zeros(self.num_envs)
         self.truncateds = np.zeros(self.num_envs)
-        
+
         episode_idx = np.arange(self.num_envs)
         self.reset(seed, options)
-        
+
         eval_ep_count = 0
         eval_done = False
 
         while True:
-
             # take before step to handle the auto-reset
             truncations_before = self.truncateds.copy()
             terminations_before = self.terminateds.copy()
@@ -602,11 +615,12 @@ class World:
             # start new episode for done envs
             for i in range(self.num_envs):
                 if terminations_before[i] or truncations_before[i]:
-
                     # record eval info
-                    ep_idx = episode_idx[i]-1
-                    metrics['episode_successes'][ep_idx] = terminations_before[i]
-                    metrics['seeds'][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
+                    ep_idx = episode_idx[i] - 1
+                    metrics["episode_successes"][ep_idx] = terminations_before[i]
+                    metrics["seeds"][ep_idx] = self.envs.envs[
+                        i
+                    ].unwrapped.np_random_seed
 
                     if eval_keys:
                         for key in eval_keys:
@@ -632,9 +646,10 @@ class World:
 
             if eval_done:
                 break
-        
+
         # compute success rate
-        metrics['success_rate'] = float(np.sum(metrics['episode_successes'])) / episodes * 100.0
+        metrics["success_rate"] = (
+            float(np.sum(metrics["episode_successes"])) / episodes * 100.0
+        )
 
         return metrics
-

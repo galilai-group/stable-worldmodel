@@ -42,6 +42,10 @@ class SimplePointMazeEnv(gym.Env):
             dtype=np.float32,
             shape=(2,),
         )
+
+        # TODO
+        # self.variation_space = spaces.Discrete(1000)  # Dummy space for compatibility
+
         self.state = self.start_pos.copy()
         self.walls = self._generate_walls()
         self._fig = None
