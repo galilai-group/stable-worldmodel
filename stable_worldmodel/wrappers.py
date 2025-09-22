@@ -121,6 +121,8 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = self.env.action_space.sample()
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
+        # assert "variations" not in info
+        # info["variations"] = getattr(self.env.unwrapped, "variation_values", {})
 
         if type(info["action"]) is dict:
             raise NotImplementedError
@@ -148,8 +150,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = action
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
+        # assert "variations" not in info
+        # info["variations"] = getattr(self.env.unwrapped, "variation_values", {})
         return obs, reward, terminated, truncated, info
-
 
 class AddPixelsWrapper(gym.Wrapper):
     """Gymnasium wrapper that adds a 'pixels' key to the info dict,
