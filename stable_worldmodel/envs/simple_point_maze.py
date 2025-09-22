@@ -29,6 +29,8 @@ class SimplePointMazeEnv(gym.Env):
         self.start_pos = np.array([0.5, 0.5], dtype=np.float32)
         self.goal_pos = np.array([4.5, 4.5], dtype=np.float32)
         self.goal_radius = 0.2
+        self.speed = 1.0
+
         # Use Dict space for easy extension (e.g., adding "pixels" later)
         self.observation_space = spaces.Box(
             low=np.array([0.0, 0.0], dtype=np.float32),
@@ -43,8 +45,96 @@ class SimplePointMazeEnv(gym.Env):
             shape=(2,),
         )
 
-        # TODO
-        # self.variation_space = spaces.Discrete(1000)  # Dummy space for compatibility
+
+
+        #### variation space
+
+        self.variation_space = spaces.Dict(
+            {
+
+                "agent": spaces.Dict(
+                    {
+                        "color": spaces.Box(
+                            low=0,
+                            high=255,
+                            shape=(3,),
+                            dtype=np.uint8,
+                        ),
+                
+                        "radius": spaces.Box(
+                            low=0.05,
+                            high=0.5,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+
+                        "position": spaces.Box(
+                            low=np.array([0.0, 0.0], dtype=np.float32),
+                            high=np.array([self.width, self.height], dtype=np.float32),
+                            shape=(2,),
+                            dtype=np.float32,
+                        ),
+
+                    }
+                ),
+
+                "goal": spaces.Dict(
+                    {
+                        "color": spaces.Box(
+                            low=0,
+                            high=255,
+                            shape=(3,),
+                            dtype=np.uint8,
+                        ),
+
+                        "radius": spaces.Box(
+                            low=0.05,
+                            high=0.5,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+
+                        "position": spaces.Box(
+                            low=np.array([0.0, 0.0], dtype=np.float32),
+                            high=np.array([self.width, self.height], dtype=np.float32),
+                            shape=(2,),
+                            dtype=np.float32,
+                        ),
+                    }
+                ),
+
+                "physics": spaces.Dict(
+                    {
+                        "speed": spaces.Box(
+                            low=0.05,
+                            high=0.5,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+
+                    }
+                ),
+
+                "env": spaces.Dict(
+                    {
+                        "n_walls": spaces.Discrete(10),  # 0 to 9 walls
+                        "wall_min_size": spaces.Box(
+                            low=0.1,
+                            high=1.0,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                        "wall_max_size": spaces.Box(
+                            low=1.0,
+                            high=2.0,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                    }
+                ),
+
+            }
+        )
 
         self.state = self.start_pos.copy()
         self.walls = self._generate_walls()
@@ -113,7 +203,7 @@ class SimplePointMazeEnv(gym.Env):
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
-        next_state = self.state + action
+        next_state = self.state + self.speed * action
         # Check for wall collisions
         if self._collides(next_state):
             next_state = self.state  # Stay in place if collision
