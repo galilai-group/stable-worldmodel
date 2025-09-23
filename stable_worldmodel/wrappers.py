@@ -17,6 +17,7 @@ from gymnasium.wrappers import (
     TransformObservation,
 )
 
+from stable_worldmodel.utils import flatten_dict
 
 class EnsureInfoKeysWrapper(gym.Wrapper):
     """Gymnasium wrapper to ensure certain keys are present in the info dict.
@@ -121,8 +122,11 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = self.env.action_space.sample()
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
-        # assert "variations" not in info
-        # info["variations"] = getattr(self.env.unwrapped, "variation_values", {})
+
+        variations_dict = getattr(self.env.unwrapped, "variation_values", {})
+        for key, value in flatten_dict(variations_dict, parent_key='variations').items():
+            assert key not in info, f"Key {key} already present in info dict"
+            info[key] = value
 
         if type(info["action"]) is dict:
             raise NotImplementedError
@@ -150,8 +154,12 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = action
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
-        # assert "variations" not in info
-        # info["variations"] = getattr(self.env.unwrapped, "variation_values", {})
+
+        variations_dict = getattr(self.env.unwrapped, "variation_values", {})
+        for key, value in flatten_dict(variations_dict, parent_key='variations').items():
+            assert key not in info, f"Key {key} already present in info dict"
+            info[key] = value
+
         return obs, reward, terminated, truncated, info
 
 class AddPixelsWrapper(gym.Wrapper):

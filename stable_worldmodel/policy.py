@@ -22,10 +22,11 @@ class BasePolicy:
 
 
 class RandomPolicy(BasePolicy):
-    def __init__(self, **kwargs):
+    def __init__(self, seed=None, **kwargs):
         super().__init__(**kwargs)
         self.type = "random"
-    
+        self.seed = seed
+
     def get_action(self, obs, **kwargs):
         return self.env.action_space.sample()
 

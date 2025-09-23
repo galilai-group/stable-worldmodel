@@ -215,6 +215,9 @@ class World:
         """Attach a policy to the world and provide it the env context."""
         self.policy = policy
         self.policy.set_env(self.envs)
+        
+        if hasattr(self.policy, "seed") and self.policy.seed is not None:
+            self.policy.set_seed(self.policy.seed)
 
     def record_video(self, video_path, max_steps=500, fps=30, seed=None, options=None):
         """Record rollout videos for each environment under the current policy.

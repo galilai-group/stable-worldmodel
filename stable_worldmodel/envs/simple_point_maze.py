@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
+from stable_worldmodel.utils import patch_sampling
 
 class SimplePointMazeEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"]}
@@ -24,12 +25,13 @@ class SimplePointMazeEnv(gym.Env):
         self.render_mode = render_mode
 
         # Use Dict space for easy extension (e.g., adding "pixels" later)
-        self.observation_space = spaces.Box(
+        self.observation_space = patch_sampling(spaces.Box(
             low=np.array([0.0, 0.0], dtype=np.float32),
             high=np.array([self.width, self.height], dtype=np.float32),
             shape=(2,),
             dtype=np.float32,
-        )
+        ), lambda pos: not self._collides(pos))
+
         self.action_space = spaces.Box(
             low=np.array([-0.2, -0.2], dtype=np.float32),
             high=np.array([0.2, 0.2], dtype=np.float32),
@@ -48,12 +50,12 @@ class SimplePointMazeEnv(gym.Env):
                         "radius": spaces.Box(
                             low=0.05, high=0.5, shape=(), dtype=np.float32
                         ),
-                        "start_position": spaces.Box(
+                        "start_position": patch_sampling(spaces.Box(
                             low=np.array([0.0, 0.0], dtype=np.float32),
                             high=np.array([self.width, self.height], dtype=np.float32),
                             shape=(2,),
                             dtype=np.float32,
-                        ),
+                        ),  lambda pos: not self._collides(pos)),
                     }
                 ),
                 "goal": spaces.Dict(
@@ -64,12 +66,12 @@ class SimplePointMazeEnv(gym.Env):
                         "radius": spaces.Box(
                             low=0.05, high=0.5, shape=(), dtype=np.float32
                         ),
-                        "position": spaces.Box(
+                        "position": patch_sampling(spaces.Box(
                             low=np.array([0.0, 0.0], dtype=np.float32),
                             high=np.array([self.width, self.height], dtype=np.float32),
                             shape=(2,),
                             dtype=np.float32,
-                        ),
+                        ), lambda pos: not self._collides(pos)),
                     }
                 ),
                 "physics": spaces.Dict(
@@ -96,6 +98,7 @@ class SimplePointMazeEnv(gym.Env):
             }
         )
 
+        # check if box support default values to avoid duplicate dict
         self.variation_values = {
             "agent": {
                 "color": np.array([255, 0, 0], dtype=np.uint8),
