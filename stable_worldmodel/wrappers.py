@@ -62,7 +62,7 @@ class EnsureImageShape(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(**kwargs)
+        obs, info = self.env.reset(*args,**kwargs)
         if info[self.image_key].shape[:-1] != self.image_shape:
             raise RuntimeError(
                 f"Image shape {info[self.image_key].shape} should be {self.image_shape}"
@@ -77,7 +77,7 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
         self.check_step = check_step
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(**kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
         if self.check_reset and "goal" not in info:
             raise RuntimeError(
                 "The info dict returned by reset() must contain the key 'goal'."
@@ -103,7 +103,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
 
     def reset(self, *args, **kwargs):
         self._step_counter = 0
-        obs, info = self.env.reset(**kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
         if type(obs) is not dict:
             _obs = {"observation": obs}
         else:
@@ -115,9 +115,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         assert "reward" not in info
         info["reward"] = np.nan
         assert "terminated" not in info
-        info["terminated"] = np.nan
+        info["terminated"] = False
         assert "truncated" not in info
-        info["truncated"] = np.nan
+        info["truncated"] = False
         assert "action" not in info
         info["action"] = self.env.action_space.sample()
         assert "step_idx" not in info
@@ -132,6 +132,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
             raise NotImplementedError
         else:
             info["action"] *= np.nan
+
         return obs, info
 
     def step(self, action):
@@ -199,7 +200,7 @@ class AddPixelsWrapper(gym.Wrapper):
         return pixels, t1 - t0
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(**kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
         info["pixels"], info["render_time"] = self._get_pixels()
         return obs, info
 
@@ -236,7 +237,7 @@ class ResizeGoalWrapper(gym.Wrapper):
         return pixels
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(**kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
         info["goal"] = self._format(info["goal"])
         return obs, info
 

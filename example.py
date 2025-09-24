@@ -15,7 +15,7 @@ if __name__ == "__main__":
     world.policy.set_seed(42)
     world.record_dataset("simple-pointmaze", episodes=10, seed=2347)
     world.record_video("./", seed=2347)
-
+    
     # pre-train world model
     swm.pretraining(
         "scripts/train/dummy.py",

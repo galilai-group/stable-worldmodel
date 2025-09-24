@@ -2,7 +2,7 @@ import os
 
 from gymnasium.envs.registration import register
 
-from . import data, policy, solver, wrappers, wm, utils
+from . import data, policy, solver, wrappers, wm, utils, spaces
 from .utils import pretraining
 from .world import World
 from .env_trans import BackgroundDeform, ColorDeform, ShapeDeform

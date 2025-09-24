@@ -57,9 +57,9 @@ class BaseDeform(gym.Wrapper):
             self.every_k_steps > 0 and self._step % self.every_k_steps == 0
         ) or should_init_deform
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         self._step = 0
-        reset_res = self.env.reset(**kwargs)
+        reset_res = self.env.reset(*args, **kwargs)
         if self.apply_on_reset or self.should_update:
             print(f"{self._step}")
             self.deform()

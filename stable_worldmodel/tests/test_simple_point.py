@@ -9,7 +9,7 @@ def test_env():
     )
     world.set_policy(swm.policy.RandomPolicy())
     world.policy.set_seed(42)
-    world.record_dataset("./dataset", episodes=10, seed=2347)
+    world.record_dataset("debug", episodes=10, seed=2347)
   
     world.policy.set_seed(42)
     world.record_video("./", seed=2347)
@@ -23,7 +23,7 @@ def test_env():
     # world.record_dataset("./dataset", episodes=1, seed=2347)
 
     world.record_video_from_dataset(
-        "./", "./dataset", episode_idx=[0,1,5], fps=30, num_proc=1
+        "./", "debug", episode_idx=[0,1,2,3,4,5], fps=30, num_proc=1
     )
 
     # asdf

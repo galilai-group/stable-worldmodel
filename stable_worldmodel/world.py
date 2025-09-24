@@ -146,10 +146,6 @@ class World:
 
         self.seed = seed
 
-        rng = torch.Generator()
-        rng.manual_seed(seed)
-        self.goal_seed = torch.randint(0, 2**32 - 1, (1,), generator=rng).item()
-
     @property
     def num_envs(self):
         return self.envs.num_envs
@@ -173,35 +169,9 @@ class World:
     def close(self, **kwargs):
         return self.envs.close(**kwargs)
 
-    def __iter__(self):
-        """Prepare the world to iterate over steps (Python iterator protocol).
-
-        Initializes episode bookkeeping, resets all environments, and caches
-        initial infos (including current goals if provided by the wrapper).
-
-        Returns:
-        -------
-        World
-            The iterator (``self``).
-        """
-        self.terminations = np.array([False] * self.num_envs)
-        self.truncations = np.array([False] * self.num_envs)
-        self.rewards = None
-        logging.info(f"Resetting the ({self.num_envs}) world(s)!")
-        self.states, self.infos = self.envs.reset(seed=self.seed)
-        self.cur_goals = self.infos["goal"]
-        self.cur_goal_images = self.infos["goal_image"]
-        return self
-
-    def __next__(self):
-        """Return the current states and infos until all episodes terminate or truncate."""
-        if not all(self.terminations) and not all(self.truncations):
-            return self.states, self.infos
-        else:
-            raise StopIteration
-
     def step(self):
         """Advance all environments by one step using the current policy."""
+        # note: reset happens before because of auto-reset, should fix that
         actions = self.policy.get_action(self.infos)
         (self.states, self.rewards, self.terminateds, self.truncateds, self.infos) = (
             self.envs.step(actions)
@@ -325,7 +295,8 @@ class World:
         self.truncateds = np.zeros(self.num_envs)
         episode_idx = np.arange(self.num_envs)
 
-        self.reset(seed, options)
+        self.reset(seed, options) # <- incr global seed by num_envs
+        root_seed = seed + self.num_envs if seed is not None else None
 
         records = {
             key: [v for v in value]
@@ -347,18 +318,18 @@ class World:
             # start new episode for done envs
             for i in range(self.num_envs):
                 if terminations_before[i] or truncations_before[i]:
+
+                    # re-reset env with seed and options (no supported by auto-reset)
+                    new_seed = (
+                        root_seed + recorded_episodes if seed is not None else None
+                    )
+
                     # determine new episode idx
                     next_ep_idx = episode_idx.max() + 1
                     episode_idx[i] = next_ep_idx
                     recorded_episodes += 1
 
-                    # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = (
-                        seed + i + recorded_episodes if seed is not None else None
-                    )
-                    states, infos = self.envs.envs[i].reset(
-                        seed=new_seed, options=options
-                    )
+                    states, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 
                     for k, v in infos.items():
                         self.infos[k][i] = v
@@ -385,8 +356,9 @@ class World:
 
                     # add new dummy action
                     action_shape = np.shape(self.infos[key][0])
+                    action_dtype = self.single_action_space.dtype
                     dummy_block = [
-                        np.full(action_shape, np.nan) for _ in range(self.num_envs)
+                        np.full(action_shape, np.nan, dtype=action_dtype) for _ in range(self.num_envs)
                     ]
                     records[key].extend(dummy_block)
                 else:
@@ -424,14 +396,13 @@ class World:
             elif 2 <= records[k][0].ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
                 state_feature = feature_cls(
-                    shape=records[k][0].shape, dtype=records[k][0].dtype
+                    shape=records[k][0].shape, dtype=records[k][0].dtype.name
                 )
             else:
                 state_feature = Value(records[k][0].dtype.name)
             features[k] = state_feature
 
         features = Features(features)
-        print(features)
 
         # make dataset
         hf_dataset = Dataset.from_dict(records, features=features)
@@ -602,7 +573,8 @@ class World:
         self.truncateds = np.zeros(self.num_envs)
 
         episode_idx = np.arange(self.num_envs)
-        self.reset(seed, options)
+        self.reset(seed, options) # <- incr global seed by num_envs
+        root_seed = seed + self.num_envs if seed is not None else None
 
         eval_ep_count = 0
         eval_done = False
@@ -621,9 +593,7 @@ class World:
                     # record eval info
                     ep_idx = episode_idx[i] - 1
                     metrics["episode_successes"][ep_idx] = terminations_before[i]
-                    metrics["seeds"][ep_idx] = self.envs.envs[
-                        i
-                    ].unwrapped.np_random_seed
+                    metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
 
                     if eval_keys:
                         for key in eval_keys:
@@ -641,7 +611,10 @@ class World:
                     eval_ep_count += 1
 
                     # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = seed + i + eval_ep_count if seed is not None else None
+                    new_seed = (
+                        root_seed + eval_ep_count if seed is not None else None
+                    )
+
                     _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 
                     for k, v in infos.items():
@@ -655,4 +628,28 @@ class World:
             float(np.sum(metrics["episode_successes"])) / episodes * 100.0
         )
 
+        assert eval_ep_count == episodes, (
+            f"eval_ep_count {eval_ep_count} != episodes {episodes}"
+        )
+
+        assert np.unique(metrics["seeds"]).shape[0] == episodes, (
+            "Some episode seeds are identical!"
+        )
+
         return metrics
+
+
+# seed:  2347
+# [[1.425851  1.2717669]
+#  [2.514     1.8045106]
+#  [2.5545564 3.3728309]
+#  [2.3957472 2.291733 ]
+#  [3.9623232 1.7835523]]
+
+
+# seed:  2347
+# [[2.921828   2.3971708 ]
+#  [2.238938   0.8921005 ]
+#  [2.4078233  0.40717635]
+#  [2.7672877  0.9567832 ]
+#  [1.8181777  2.5882847 ]]
