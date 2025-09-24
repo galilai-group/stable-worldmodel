@@ -3,8 +3,9 @@ import os
 import shlex
 import subprocess
 import sys
-import types
 import time
+import types
+from typing import Any, Iterable, MutableMapping
 
 from loguru import logger as logging
 
@@ -32,7 +33,8 @@ def pretraining(script_path: str, args: str) -> int:
     logging.info("🏁🏁🏁 Pretraining script finished 🏁🏁🏁")
     return
 
-def flatten_dict(d, parent_key='', sep='.'):
+
+def flatten_dict(d, parent_key="", sep="."):
     items = {}
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -42,38 +44,19 @@ def flatten_dict(d, parent_key='', sep='.'):
             items[new_key] = v
     return items
 
-def patch_sampling(space, condition_fn, *, max_tries=100000, warn_after_s=5.0):
-    """
-    Mutates `space` so that space.sample(...) repeatedly samples from the original
-    sampler until `condition_fn(...)` returns True.
 
-    condition_fn: callable taking (sample) or (sample, space) -> bool
-    max_tries:    hard guard to prevent infinite loops
-    warn_after_s: log a warning if rejection sampling takes long
-    """
-    if not callable(condition_fn):
-        raise TypeError("condition_fn must be callable")
+def get_in(mapping: dict, path: Iterable[str]) -> Any:
+    """Return mapping[path[0]][path[1]]... ; raises KeyError if missing."""
+    cur = mapping
+    for key in list(path):
+        cur = cur[key]
+    return cur
 
-    original_sample = space.sample  # bound method
 
-    # Detect whether predicate wants (sample) or (sample, space)
-    try:
-        wants_space = len(inspect.signature(condition_fn).parameters) >= 2
-    except (ValueError, TypeError):
-        wants_space = False
-
-    def patched(self, *args, **kwargs):
-        start = time.time()
-        for i in range(1, max_tries + 1):
-            value = original_sample(*args, **kwargs)
-            ok = condition_fn(value, self) if wants_space else condition_fn(value)
-            if ok:
-                return value
-            if warn_after_s is not None and (time.time() - start) > warn_after_s and i == 1:
-                logging.warning("patch_sampling: rejection sampling is taking a while...")
-        raise RuntimeError(
-            f"patch_sampling: predicate not satisfied after {max_tries} draws"
-        )
-
-    space.sample = types.MethodType(patched, space)
-    return space
+def set_in(mapping: MutableMapping, path: Iterable[str], value: Any) -> None:
+    """Set mapping[path[:-1]][last] = value, creating nested dicts as needed."""
+    *parents, last = list(path)
+    cur = mapping
+    for key in parents:
+        cur = cur.setdefault(key, {})
+    cur[last] = value
