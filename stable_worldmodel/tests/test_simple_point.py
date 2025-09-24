@@ -13,14 +13,14 @@ def test_env():
         "debug",
         episodes=10,
         seed=2547,
-        options=dict(variation=("walls.number", "walls.shape", "walls.position")),
+        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
     )
 
     world.policy.set_seed(42)
     world.record_video(
         "./",
         seed=2547,
-        options=dict(variation=("walls.number", "walls.shape", "walls.position")),
+        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
     )
 
     # asdf

@@ -13,9 +13,18 @@ if __name__ == "__main__":
     # collect data for pre-training
     world.set_policy(swm.policy.RandomPolicy())
     world.policy.set_seed(42)
-    world.record_dataset("simple-pointmaze", episodes=10, seed=2347)
-    world.record_video("./", seed=2347)
-    
+    world.record_dataset(
+        "simple-pointmaze",
+        episodes=10,
+        seed=2347,
+        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+    )
+    world.record_video(
+        "./",
+        seed=2347,
+        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+    )
+
     # pre-train world model
     swm.pretraining(
         "scripts/train/dummy.py",
@@ -27,7 +36,7 @@ if __name__ == "__main__":
     action_dim = world.envs.single_action_space.shape[0]
     cost_fn = torch.nn.functional.mse_loss
     world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)
-    #wm = swm.load_from_dill(path, preprocess_fn)
+    # wm = swm.load_from_dill(path, preprocess_fn)
     solver = swm.solver.RandomSolver(horizon=5, action_dim=action_dim, cost_fn=cost_fn)
     policy = swm.policy.WorldModelPolicy(
         world_model, solver, horizon=10, action_block=5, receding_horizon=5
