@@ -5,7 +5,6 @@ from gymnasium.envs.registration import register
 from . import data, policy, solver, wrappers, wm, utils, spaces
 from .utils import pretraining
 from .world import World
-from .env_trans import BackgroundDeform, ColorDeform, ShapeDeform
 
 register(
     id="swm/ImagePositioning-v1",

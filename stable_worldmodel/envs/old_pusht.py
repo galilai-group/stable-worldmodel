@@ -16,8 +16,6 @@ import collections
 from matplotlib import cm
 import torch
 
-import stable_worldmodel as swm
-
 # @markdown ### **Environment**
 # @markdown Defines a PyMunk-based Push-T environment `PushTEnv`.
 # @markdown
@@ -52,126 +50,126 @@ When False::
 """
 
 
-# def farthest_point_sampling(points: np.ndarray, n_points: int, init_idx: int):
-#     """
-#     Naive O(N^2)
-#     """
-#     assert n_points >= 1
-#     chosen_points = [points[init_idx]]
-#     for _ in range(n_points - 1):
-#         cpoints = np.array(chosen_points)
-#         all_dists = np.linalg.norm(points[:, None, :] - cpoints[None, :, :], axis=-1)
-#         min_dists = all_dists.min(axis=1)
-#         next_idx = np.argmax(min_dists)
-#         next_pt = points[next_idx]
-#         chosen_points.append(next_pt)
-#     result = np.array(chosen_points)
-#     return result
+def farthest_point_sampling(points: np.ndarray, n_points: int, init_idx: int):
+    """
+    Naive O(N^2)
+    """
+    assert n_points >= 1
+    chosen_points = [points[init_idx]]
+    for _ in range(n_points - 1):
+        cpoints = np.array(chosen_points)
+        all_dists = np.linalg.norm(points[:, None, :] - cpoints[None, :, :], axis=-1)
+        min_dists = all_dists.min(axis=1)
+        next_idx = np.argmax(min_dists)
+        next_pt = points[next_idx]
+        chosen_points.append(next_pt)
+    result = np.array(chosen_points)
+    return result
 
 
-# class PymunkKeypointManager:
-#     def __init__(
-#         self,
-#         local_keypoint_map: Dict[str, np.ndarray],
-#         color_map: Optional[Dict[str, np.ndarray]] = None,
-#     ):
-#         """
-#         local_keypoint_map:
-#             "<attribute_name>": (N,2) floats in object local coordinate
-#         """
-#         if color_map is None:
-#             cmap = cm.get_cmap("tab10")
-#             color_map = dict()
-#             for i, key in enumerate(local_keypoint_map.keys()):
-#                 color_map[key] = (np.array(cmap.colors[i]) * 255).astype(np.uint8)
+class PymunkKeypointManager:
+    def __init__(
+        self,
+        local_keypoint_map: Dict[str, np.ndarray],
+        color_map: Optional[Dict[str, np.ndarray]] = None,
+    ):
+        """
+        local_keypoint_map:
+            "<attribute_name>": (N,2) floats in object local coordinate
+        """
+        if color_map is None:
+            cmap = cm.get_cmap("tab10")
+            color_map = dict()
+            for i, key in enumerate(local_keypoint_map.keys()):
+                color_map[key] = (np.array(cmap.colors[i]) * 255).astype(np.uint8)
 
-#         self.local_keypoint_map = local_keypoint_map
-#         self.color_map = color_map
+        self.local_keypoint_map = local_keypoint_map
+        self.color_map = color_map
 
-#     @property
-#     def kwargs(self):
-#         return {
-#             "local_keypoint_map": self.local_keypoint_map,
-#             "color_map": self.color_map,
-#         }
+    @property
+    def kwargs(self):
+        return {
+            "local_keypoint_map": self.local_keypoint_map,
+            "color_map": self.color_map,
+        }
 
-#     @classmethod
-#     def create_from_pusht_env(cls, env, n_block_kps=9, n_agent_kps=3, seed=0, **kwargs):
-#         rng = np.random.default_rng(seed=seed)
-#         local_keypoint_map = dict()
-#         for name in ["block", "agent"]:
-#             self = env
-#             self.space = pymunk.Space()
-#             if name == "agent":
-#                 self.agent = obj = self.add_circle((256, 400), 15)
-#                 n_kps = n_agent_kps
-#             else:
-#                 self.block = obj = self.add_tee((256, 300), 0)
-#                 n_kps = n_block_kps
+    @classmethod
+    def create_from_pusht_env(cls, env, n_block_kps=9, n_agent_kps=3, seed=0, **kwargs):
+        rng = np.random.default_rng(seed=seed)
+        local_keypoint_map = dict()
+        for name in ["block", "agent"]:
+            self = env
+            self.space = pymunk.Space()
+            if name == "agent":
+                self.agent = obj = self.add_circle((256, 400), 15)
+                n_kps = n_agent_kps
+            else:
+                self.block = obj = self.add_tee((256, 300), 0)
+                n_kps = n_block_kps
 
-#             self.screen = pygame.Surface((512, 512))
-#             self.screen.fill(pygame.Color("white"))
-#             draw_options = DrawOptions(self.screen)
-#             self.space.debug_draw(draw_options)
-#             # pygame.display.flip()
-#             img = np.uint8(pygame.surfarray.array3d(self.screen).transpose(1, 0, 2))
-#             obj_mask = (img != np.array([255, 255, 255], dtype=np.uint8)).any(axis=-1)
+            self.screen = pygame.Surface((512, 512))
+            self.screen.fill(pygame.Color("white"))
+            draw_options = DrawOptions(self.screen)
+            self.space.debug_draw(draw_options)
+            # pygame.display.flip()
+            img = np.uint8(pygame.surfarray.array3d(self.screen).transpose(1, 0, 2))
+            obj_mask = (img != np.array([255, 255, 255], dtype=np.uint8)).any(axis=-1)
 
-#             tf_img_obj = cls.get_tf_img_obj(obj)
-#             xy_img = np.moveaxis(np.array(np.indices((512, 512))), 0, -1)[:, :, ::-1]
-#             local_coord_img = tf_img_obj.inverse(xy_img.reshape(-1, 2)).reshape(
-#                 xy_img.shape
-#             )
-#             obj_local_coords = local_coord_img[obj_mask]
+            tf_img_obj = cls.get_tf_img_obj(obj)
+            xy_img = np.moveaxis(np.array(np.indices((512, 512))), 0, -1)[:, :, ::-1]
+            local_coord_img = tf_img_obj.inverse(xy_img.reshape(-1, 2)).reshape(
+                xy_img.shape
+            )
+            obj_local_coords = local_coord_img[obj_mask]
 
-#             # furthest point sampling
-#             init_idx = rng.choice(len(obj_local_coords))
-#             obj_local_kps = farthest_point_sampling(obj_local_coords, n_kps, init_idx)
-#             small_shift = rng.uniform(0, 1, size=obj_local_kps.shape)
-#             obj_local_kps += small_shift
+            # furthest point sampling
+            init_idx = rng.choice(len(obj_local_coords))
+            obj_local_kps = farthest_point_sampling(obj_local_coords, n_kps, init_idx)
+            small_shift = rng.uniform(0, 1, size=obj_local_kps.shape)
+            obj_local_kps += small_shift
 
-#             local_keypoint_map[name] = obj_local_kps
+            local_keypoint_map[name] = obj_local_kps
 
-#         return cls(local_keypoint_map=local_keypoint_map, **kwargs)
+        return cls(local_keypoint_map=local_keypoint_map, **kwargs)
 
-#     @staticmethod
-#     def get_tf_img(pose: Sequence):
-#         pos = pose[:2]
-#         rot = pose[2]
-#         tf_img_obj = st.AffineTransform(translation=pos, rotation=rot)
-#         return tf_img_obj
+    @staticmethod
+    def get_tf_img(pose: Sequence):
+        pos = pose[:2]
+        rot = pose[2]
+        tf_img_obj = st.AffineTransform(translation=pos, rotation=rot)
+        return tf_img_obj
 
-#     @classmethod
-#     def get_tf_img_obj(cls, obj: pymunk.Body):
-#         pose = tuple(obj.position) + (obj.angle,)
-#         return cls.get_tf_img(pose)
+    @classmethod
+    def get_tf_img_obj(cls, obj: pymunk.Body):
+        pose = tuple(obj.position) + (obj.angle,)
+        return cls.get_tf_img(pose)
 
-#     def get_keypoints_global(
-#         self, pose_map: Dict[set, Union[Sequence, pymunk.Body]], is_obj=False
-#     ):
-#         kp_map = dict()
-#         for key, value in pose_map.items():
-#             if is_obj:
-#                 tf_img_obj = self.get_tf_img_obj(value)
-#             else:
-#                 tf_img_obj = self.get_tf_img(value)
-#             kp_local = self.local_keypoint_map[key]
-#             kp_global = tf_img_obj(kp_local)
-#             kp_map[key] = kp_global
-#         return kp_map
+    def get_keypoints_global(
+        self, pose_map: Dict[set, Union[Sequence, pymunk.Body]], is_obj=False
+    ):
+        kp_map = dict()
+        for key, value in pose_map.items():
+            if is_obj:
+                tf_img_obj = self.get_tf_img_obj(value)
+            else:
+                tf_img_obj = self.get_tf_img(value)
+            kp_local = self.local_keypoint_map[key]
+            kp_global = tf_img_obj(kp_local)
+            kp_map[key] = kp_global
+        return kp_map
 
-#     def draw_keypoints(self, img, kps_map, radius=1):
-#         scale = np.array(img.shape[:2]) / np.array([512, 512])
-#         for key, value in kps_map.items():
-#             color = self.color_map[key].tolist()
-#             coords = (value * scale).astype(np.int32)
-#             for coord in coords:
-#                 cv2.circle(img, coord, radius=radius, color=color, thickness=-1)
-#         return img
+    def draw_keypoints(self, img, kps_map, radius=1):
+        scale = np.array(img.shape[:2]) / np.array([512, 512])
+        for key, value in kps_map.items():
+            color = self.color_map[key].tolist()
+            coords = (value * scale).astype(np.int32)
+            for coord in coords:
+                cv2.circle(img, coord, radius=radius, color=color, thickness=-1)
+        return img
 
-#     def draw_keypoints_pose(self, img, pose_map, is_obj=False, **kwargs):
-#         kp_map = self.get_keypoints_global(pose_map, is_obj=is_obj)
-#         return self.draw_keypoints(img, kps_map=kp_map, **kwargs)
+    def draw_keypoints_pose(self, img, pose_map, is_obj=False, **kwargs):
+        kp_map = self.get_keypoints_global(pose_map, is_obj=is_obj)
+        return self.draw_keypoints(img, kps_map=kp_map, **kwargs)
 
 
 class DrawOptions(pymunk.SpaceDebugDrawOptions):
@@ -378,176 +376,81 @@ class PushT(gym.Env):
         damping=None,
         render_action=False,
         resolution=224,
+        reset_to_state=None,
+        relative=True,
+        action_scale=100,
+        with_velocity=True,
         with_target=True,
+        shape="T",  # shape can be "T" <- the original shape, "I", "L", "Z", "square" and "small_tee"
+        color="LightSlateGray",
         render_mode="rgb_array",
+        obs_mode="pixels",  # ["states", "pixels"]
     ):
+        self.shape = shape
+        self.color = color
         self._seed = None
         self.window_size = ws = 512  # The size of the PyGame window
         self.render_size = resolution
-
-        # physics
-        self.control_hz = self.metadata["render_fps"]
-        self.k_p, self.k_v = 100, 20
-        self.dt = 0.01
-
+        self.sim_hz = 100
+        # Local controller params.
+        self.k_p, self.k_v = 100, 20  # PD control.z
+        self.control_hz = self.metadata["video.frames_per_second"]
+        # legcay set_state for data compatibility
         self.legacy = legacy
-        self.shapes = ["L", "T", "Z", "o", "square", "I", "small_tee", "+"]
+        self.relative = relative  # relative action space
+        self.action_scale = action_scale
 
-        self.observation_space = spaces.Dict(
-            {
-                "proprio": spaces.Box(
-                    low=np.array([0, 0, 0, 0]),
-                    high=np.array([ws, ws, ws, ws]),
-                    dtype=np.float64,
-                ),
-                "state": spaces.Box(
-                    low=np.array([0, 0, 0, 0, 0, 0, 0]),
-                    high=np.array([ws, ws, ws, ws, np.pi * 2, ws, ws]),
-                    dtype=np.float64,
-                ),
-            }
-        )
+        # agent_pos, block_pos, block_angle
+        # self.observation_space = spaces.Box(
+        #     low=np.array([0, 0, 0, 0, 0], dtype=np.float64),
+        #     high=np.array([ws, ws, ws, ws, np.pi * 2], dtype=np.float64),
+        #     shape=(5,),
+        #     dtype=np.float64,
+        # )
+
+        velocity_low_var = 2 * [float("-inf")] if with_velocity else []
+        velocity_high_var = 2 * [float("inf")] if with_velocity else []
+
+        self.obs_mode = obs_mode
+        if self.obs_mode == "pixels":
+            # observation space is RGB pixels
+            self.observation_space = gym.spaces.Box(
+                low=0, high=255, shape=(resolution, resolution, 3), dtype=np.uint8
+            )
+        else:
+            self.observation_space = spaces.Box(
+                low=np.array([0, 0, 0, 0, 0]),
+                high=np.array([512, 512, 512, 512, np.pi * 2]),
+                dtype=np.float64,
+            )
+
+        # self.observation_space = spaces.Dict({
+        #     "proprio": spaces.Box(
+        #         low=0,
+        #         high=512,
+        #         shape=(2 if not with_velocity else 4,),
+        #         dtype=np.float64,
+        #     ),
+        #     "state": spaces.Box(
+        #         low=np.array([0, 0, 0, 0, 0]),
+        #         high=np.array([512, 512, 512, 512, np.pi * 2]),
+        #         dtype=np.float64,
+        #     ),
+        # })
 
         # positional goal for agent
-        self.action_space = spaces.Box(low=0, high=ws, shape=(2,), dtype=np.float32)
-
-        self.variation_space = swm.spaces.Dict(
-            {
-                "agent": swm.spaces.Dict(
-                    {
-                        # "shape": swm.spaces.Categorical(
-                        #     categories=["circle", "square", "triangle"],   SHOULD IMPLEMENT THIS
-                        #     init_value="circle",
-                        # ),
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array(
-                                pygame.Color("RoyalBlue")[:3], np.uint8
-                            ),
-                            shape=(3,),
-                            dtype=np.uint8,
-                        ),
-                        "scale": swm.spaces.Box(
-                            low=0.5,
-                            high=2,
-                            init_value=1,
-                            shape=(),
-                            dtype=np.float32,
-                        ),
-                        "shape": swm.spaces.Discrete(
-                            len(self.shapes), start=0, init_value=3
-                        ),
-                        "angle": swm.spaces.Box(
-                            low=-2 * np.pi,
-                            high=2 * np.pi,
-                            init_value=0.0,
-                            shape=(),
-                            dtype=np.float64,
-                        ),
-                        "start_position": swm.spaces.Box(
-                            low=50,
-                            high=450,
-                            init_value=np.array((256, 400), dtype=np.float64),
-                            shape=(2,),
-                            dtype=np.float64,
-                        ),
-                        "velocity": swm.spaces.Box(
-                            low=0,
-                            high=ws,
-                            init_value=np.array((0.0, 0.0), dtype=np.float64),
-                            shape=(2,),
-                            dtype=np.float64,
-                        ),
-                    }
-                ),
-                "block": swm.spaces.Dict(
-                    {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array(
-                                pygame.Color("LightSlateGray")[:3], np.uint8
-                            ),
-                            shape=(3,),
-                            dtype=np.uint8,
-                        ),
-                        "scale": swm.spaces.Box(
-                            low=20,
-                            high=60,
-                            init_value=40,
-                            shape=(),
-                            dtype=np.float32,
-                        ),
-                        "shape": swm.spaces.Discrete(
-                            len(self.shapes), start=0, init_value=1
-                        ),
-                        "angle": swm.spaces.Box(
-                            low=-2 * np.pi,
-                            high=2 * np.pi,
-                            init_value=0.0,
-                            shape=(),
-                            dtype=np.float64,
-                        ),
-                        "start_position": swm.spaces.Box(
-                            low=100,
-                            high=400,
-                            init_value=np.array((400, 100), dtype=np.float64),
-                            shape=(2,),
-                            dtype=np.float64,
-                        ),
-                    }
-                ),
-                "goal": swm.spaces.Dict(
-                    {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array(
-                                pygame.Color("LightGreen")[:3], np.uint8
-                            ),
-                            shape=(3,),
-                            dtype=np.uint8,
-                        ),
-                        "scale": swm.spaces.Box(
-                            low=20,
-                            high=60,
-                            init_value=40,
-                            shape=(),
-                            dtype=np.float32,
-                        ),
-                        "angle": swm.spaces.Box(
-                            low=-2 * np.pi,
-                            high=2 * np.pi,
-                            init_value=np.pi / 4,
-                            shape=(),
-                            dtype=np.float64,
-                        ),
-                        "position": swm.spaces.Box(
-                            low=50,
-                            high=450,
-                            init_value=np.array([256, 256], dtype=np.float64),
-                            shape=(2,),
-                            dtype=np.float64,
-                        ),
-                    }
-                ),
-                "background": swm.spaces.Dict(
-                    {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array([255, 255, 255], dtype=np.uint8),
-                            shape=(3,),
-                            dtype=np.uint8,
-                        ),
-                    }
-                ),
-            },
-            sampling_order=["background", "goal", "block", "agent"],
+        self.action_space = gym.spaces.Box(
+            low=np.array([-1, -1], dtype=np.float64),
+            high=np.array([1, 1], dtype=np.float64),
+            shape=(2,),
+            dtype=np.float64,
         )
-
-        # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
+        # self.action_space = spaces.Box(
+        #     low=np.array([0, 0], dtype=np.float64),
+        #     high=np.array([ws, ws], dtype=np.float64),
+        #     shape=(2,),
+        #     dtype=np.float64,
+        # )
 
         self.block_cog = block_cog
         self.damping = damping
@@ -566,111 +469,153 @@ class PushT(gym.Env):
         self.screen = None
 
         self.space = None
+        self.teleop = None
         self.render_buffer = None
         self.latest_action = None
 
+        self.with_velocity = with_velocity
         self.with_target = with_target
+        self.reset_to_state = reset_to_state
         self.coverage_arr = []
+
+    def sample_state(self):
+        # sample a state from the environment
+        rs = self.random_state
+
+        state = [
+            rs.randint(50, 450),  # agent x
+            rs.randint(50, 450),  # agent y
+            rs.randint(100, 400),  # block x
+            rs.randint(100, 400),  # block y
+            # rs.randn() * 2 * np.pi - np.pi,  # block angle
+            rs.uniform(0, 2 * np.pi),  # fix to sample properly in [0, 2pi]
+        ]
+
+        # state = [
+        #     rs.randint(50, 150),  # agent x
+        #     rs.randint(50, 150),  # agent y
+        #     rs.randint(50, 150),  # block x
+        #     rs.randint(50, 150),  # block y
+        #     # rs.randn() * 2 * np.pi - np.pi,  # block angle
+        #     rs.uniform(0, 2 * np.pi),  # fix to sample properly in [0, 2pi]
+        # ]
+
+        if self.with_velocity:
+            state += [0, 0]  # agent velocity x, agent velocity y
+
+        return np.array(state, dtype=np.float64)
 
     def reset(self, seed=None, options=None):
         self.seed(seed)
-
-        ### update variation space
-        options = options or {}
-
-        self.variation_space.reset()
-
-        ### update the variation space
-        if "variation" in options:
-            assert isinstance(options["variation"], Sequence), (
-                "variation option must be a Sequence containing variations names to sample"
-            )
-            # self.update_variation(options["variation"])
-            # ... sample variations
-
-            if len(options["variation"]) == 1 and options["variation"][0] == "all":
-                self.variation_space.sample()
-
-            else:
-                for var in options["variation"]:
-                    try:
-                        var_path = var.split(".")
-                        swm.utils.get_in(self.variation_space, var_path).sample()
-
-                    except (KeyError, TypeError):
-                        raise ValueError(
-                            f"Variation {var} not found in variation space"
-                        )
-
-        assert self.variation_space.check(), (
-            "Variation values must be within variation space!"
-        )
-
-        ### setup pymunk space
         self._setup()
-
         if self.block_cog is not None:
             self.block.center_of_gravity = self.block_cog
         if self.damping is not None:
             self.space.damping = self.damping
 
-        ### get the state
-        goal_state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"]
-                .sample(set_value=False)
-                .tolist(),
-                self.variation_space["block"]["start_position"]
-                .sample(set_value=False)
-                .tolist(),
-                [self.variation_space["block"]["angle"].sample(set_value=False)],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        # use legacy RandomState for compatibility
+        rs = self.random_state
 
-        ### generate goal
+        # first, force set the current scene to a goal state to obtain the goal observation
+        if self.with_velocity:
+            goal_state = np.array(
+                [
+                    rs.randint(50, 450),
+                    rs.randint(50, 450),
+                    rs.randint(100, 400),
+                    rs.randint(100, 400),
+                    rs.randn() * 2 * np.pi - np.pi,
+                    0,  # set random velocity to 0
+                    0,  # set random velocity to 0
+                ]
+            )
+        else:
+            goal_state = np.array(
+                [
+                    rs.randint(50, 450),
+                    rs.randint(50, 450),
+                    rs.randint(100, 400),
+                    rs.randint(100, 400),
+                    rs.randn() * 2 * np.pi - np.pi,
+                ]
+            )
         self._set_state(goal_state)
-        self._goal = self.render()
+        goal_state = self._get_obs()
+        goal_proprio = goal_state[:2]
+        if self.with_velocity:
+            goal_proprio = np.concatenate((proprio, goal_state[5:]))
+        goal_visual = self._render_frame("rgb_array")
 
-        # restore original pos
-        state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].value.tolist(),
-                self.variation_space["block"]["start_position"].value.tolist(),
-                [self.variation_space["block"]["angle"].value],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
-
+        # get initial state
+        state = self.reset_to_state
+        if state is None:
+            if self.with_velocity:
+                state = np.array(
+                    [
+                        rs.randint(50, 450),
+                        rs.randint(50, 450),
+                        rs.randint(100, 400),
+                        rs.randint(100, 400),
+                        rs.randn() * 2 * np.pi - np.pi,
+                        0,  # set random velocity to 0
+                        0,  # set random velocity to 0
+                    ]
+                )
+            else:
+                state = np.array(
+                    [
+                        rs.randint(50, 450),
+                        rs.randint(50, 450),
+                        rs.randint(100, 400),
+                        rs.randint(100, 400),
+                        rs.randn() * 2 * np.pi - np.pi,
+                    ]
+                )
         self._set_state(state)
-
-        #### OBS
 
         self.coverage_arr = []
         state = self._get_obs()
-        proprio = np.concatenate((state[:2], state[-2:]))
+        visual = self._render_frame("rgb_array")
+        proprio = state[:2]
 
-        observation = {"proprio": proprio, "state": state}
+        if self.with_velocity:
+            proprio = np.concatenate((proprio, state[5:]))
+
+        observation = visual if self.obs_mode == "pixels" else state
 
         info = self._get_info()
+        info["proprio"] = proprio
+        info["state"] = state
+        info["image"] = visual
+        info["goal_state"] = goal_state
+        info["goal_proprio"] = goal_proprio
+        info["goal_image"] = goal_visual
+        info["goal"] = goal_visual if self.obs_mode == "pixels" else goal_state
         info["max_coverage"] = 0
         info["final_coverage"] = 0
+
         return observation, info
 
     def step(self, action):
+        dt = 1.0 / self.sim_hz
         self.n_contact_points = 0
-        n_steps = int(1 / (self.dt * self.control_hz))
+        n_steps = self.sim_hz // self.control_hz
 
-        self.latest_action = action
-        for _ in range(n_steps):
-            # Step PD control.
-            acceleration = self.k_p * (action - self.agent.position) + self.k_v * (
-                Vec2d(0, 0) - self.agent.velocity
-            )
-            self.agent.velocity += acceleration * self.dt
+        if action is not None:
+            action = np.array(action) * self.action_scale
+            if self.relative:
+                action = self.agent.position + action
+            self.latest_action = action
+            for i in range(n_steps):
+                # Step PD control.
+                # self.agent.velocity = self.k_p * (act - self.agent.position)    # P control works too.
+                acceleration = self.k_p * (action - self.agent.position) + self.k_v * (
+                    Vec2d(0, 0) - self.agent.velocity
+                )
+                self.agent.velocity += acceleration * dt
 
-            # Step physics.
-            self.space.step(self.dt)
+                # Step physics.
+                self.space.step(dt)
 
         # compute reward
         goal_body = self._get_goal_pose_body(self.goal_pose)
@@ -681,31 +626,58 @@ class PushT(gym.Env):
         goal_area = goal_geom.area
         coverage = intersection_area / goal_area
         reward = np.clip(coverage / self.success_threshold, 0, 1)
-        done = False  # coverage > self.success_threshold
+        terminated = False  # coverage > self.success_threshold
+        truncated = False
 
         self.coverage_arr.append(coverage)
 
         state = self._get_obs()
+        proprio = state[:2]
+        if self.with_velocity:
+            proprio = np.concatenate((proprio, state[5:]))
+        visual = self._render_frame("rgb_array")
 
-        proprio = np.concatenate((state[:2], state[-2:]))
-        observation = {"proprio": proprio, "state": state}
+        observation = visual if self.obs_mode == "pixels" else state
+        # observation = (
+        #     einops.rearrange(observation, "H W C -> 1 C H W") / 255.0
+        # )  # VCHW, range [0, 1]
 
         info = self._get_info()
+        info["proprio"] = proprio
+        info["state"] = state
+        info["image"] = visual
         info["max_coverage"] = 0
         info["final_coverage"] = self.coverage_arr[-1]
-        truncated = False
-        return observation, reward, done, truncated, info
+
+        return observation, reward, terminated, truncated, info
 
     def render(self):
         return self._render_frame(self.render_mode)
+
+    def teleop_agent(self):
+        TeleopAgent = collections.namedtuple("TeleopAgent", ["act"])
+
+        def act(obs):
+            act = None
+            mouse_position = pymunk.pygame_util.from_pygame(
+                Vec2d(*pygame.mouse.get_pos()), self.screen
+            )
+            if self.teleop or (mouse_position - self.agent.position).length < 30:
+                self.teleop = True
+                act = mouse_position
+            return act
+
+        return TeleopAgent(act)
 
     def _get_obs(self):
         obs = (
             tuple(self.agent.position)
             + tuple(self.block.position)
             + (self.block.angle % (2 * np.pi),)
-            + tuple(self.agent.velocity)
         )
+
+        if self.with_velocity:
+            obs += tuple(self.agent.velocity)
 
         return np.array(obs, dtype=np.float64)
 
@@ -720,7 +692,7 @@ class PushT(gym.Env):
         return body
 
     def _get_info(self):
-        n_steps = int(1 / self.dt * self.control_hz)
+        n_steps = self.sim_hz // self.control_hz
         n_contact_points_per_step = int(np.ceil(self.n_contact_points / n_steps))
         info = {
             "pos_agent": np.array(self.agent.position),
@@ -728,35 +700,34 @@ class PushT(gym.Env):
             "block_pose": np.array(list(self.block.position) + [self.block.angle]),
             "goal_pose": self.goal_pose,
             "n_contacts": n_contact_points_per_step,
-            "goal": self._goal,
         }
         return info
 
-    # def set_background(self, image):
-    #     """image can be a file path, pathlib.Path, or a BytesIO"""
-    #     # Load to a Surface; no display needed
-    #     self._bg_raw = image
-    #     self._bg_cache = None  # invalidate cache when a new image is set
+    def set_background(self, image):
+        """image can be a file path, pathlib.Path, or a BytesIO"""
+        # Load to a Surface; no display needed
+        self._bg_raw = image
+        self._bg_cache = None  # invalidate cache when a new image is set
 
-    # def _get_background_for_canvas(self, canvas):
-    #     """Convert/scale the raw background to match the canvas only when needed."""
-    #     if getattr(self, "_bg_raw", None) is None:
-    #         return None
-    #     if (
-    #         getattr(self, "_bg_cache", None) is not None
-    #         and self._bg_cache.get_size() == canvas.get_size()
-    #     ):
-    #         return self._bg_cache
+    def _get_background_for_canvas(self, canvas):
+        """Convert/scale the raw background to match the canvas only when needed."""
+        if getattr(self, "_bg_raw", None) is None:
+            return None
+        if (
+            getattr(self, "_bg_cache", None) is not None
+            and self._bg_cache.get_size() == canvas.get_size()
+        ):
+            return self._bg_cache
 
-    #     base = (
-    #         self._bg_raw.convert_alpha()
-    #         if self._bg_raw.get_alpha()
-    #         else self._bg_raw.convert(canvas)
-    #     )
-    #     scaled = pygame.transform.smoothscale(base, canvas.get_size())
-    #     self._bg_cache = scaled.convert(canvas)
+        base = (
+            self._bg_raw.convert_alpha()
+            if self._bg_raw.get_alpha()
+            else self._bg_raw.convert(canvas)
+        )
+        scaled = pygame.transform.smoothscale(base, canvas.get_size())
+        self._bg_cache = scaled.convert(canvas)
 
-    #     return self._bg_cache
+        return self._bg_cache
 
     def _render_frame(self, mode):
         if self.window is None and mode == "human":
@@ -767,7 +738,12 @@ class PushT(gym.Env):
             self.clock = pygame.time.Clock()
 
         canvas = pygame.Surface((self.window_size, self.window_size))
-        canvas.fill(self.variation_space["background"]["color"].value)
+
+        bg = self._get_background_for_canvas(canvas)
+        if bg is not None:
+            canvas.blit(bg, (0, 0))
+        else:
+            canvas.fill((255, 255, 255))  # fallback to white
 
         self.screen = canvas
 
@@ -783,21 +759,7 @@ class PushT(gym.Env):
                 for v in shape.get_vertices()
             ]
             goal_points += [goal_points[0]]
-            pygame.draw.polygon(
-                canvas,
-                self.variation_space["goal"]["color"].value,
-                goal_points,
-            )
-
-        # change agent color
-        self._set_body_color(
-            self.agent, self.variation_space["agent"]["color"].value.tolist()
-        )
-
-        # change block color
-        self._set_body_color(
-            self.block, self.variation_space["block"]["color"].value.tolist()
-        )
+            pygame.draw.polygon(canvas, self.goal_color, goal_points)
 
         # Draw agent and block.
         self.space.debug_draw(draw_options)
@@ -828,11 +790,6 @@ class PushT(gym.Env):
                 )
         return img
 
-    def _set_body_color(self, body, color):
-        color = pygame.Color(*color) if not isinstance(color, pygame.Color) else color
-        for s in body.shapes:
-            s.color = color
-
     def close(self):
         if self.window is not None:
             pygame.display.quit()
@@ -844,9 +801,6 @@ class PushT(gym.Env):
         self._seed = seed
         self.np_random = np.random.default_rng(seed)
         self.random_state = np.random.RandomState(seed)
-        self.observation_space.seed(seed)
-        self.action_space.seed(seed)
-        self.variation_space.seed(seed)
 
     def _handle_collision(self, arbiter, space, data):
         self.n_contact_points += len(arbiter.contact_point_set.points)
@@ -857,7 +811,7 @@ class PushT(gym.Env):
         pos_agent = state[:2]
         pos_block = state[2:4]
         rot_block = state[4]
-        vel_block = tuple(state[-2:])
+        vel_block = tuple(state[-2:]) if self.with_velocity else (0, 0)
         self.agent.velocity = vel_block
         self.agent.position = pos_agent
         # setting angle rotates with respect to center of mass
@@ -873,7 +827,7 @@ class PushT(gym.Env):
             self.block.position = pos_block
 
         # Run physics to take effect
-        self.space.step(self.dt)
+        self.space.step(1.0 / self.sim_hz)
 
     def _set_state_local(self, state_local):
         agent_pos_local = state_local[:2]
@@ -898,10 +852,10 @@ class PushT(gym.Env):
         self.goal_pose = goal
 
     def _setup(self):
-        ## create the space with physics
         self.space = pymunk.Space()
-        self.space.gravity = 0, 0  # TODO add physics support
+        self.space.gravity = 0, 0
         self.space.damping = 0
+        self.teleop = False
         self.render_buffer = list()
 
         # Add walls.
@@ -914,43 +868,17 @@ class PushT(gym.Env):
 
         self.space.add(*walls)
 
-        #### agent ####
-
-        agent_params = dict(
-            position=self.variation_space["agent"]["start_position"].value.tolist(),
-            angle=self.variation_space["agent"]["angle"].value,
-            scale=self.variation_space["agent"]["scale"].value,
-            color=self.variation_space["agent"]["color"].value.tolist(),
-            shape=self.shapes[self.variation_space["agent"]["shape"].value],
-        )
-
-        self.agent = self.add_shape(**agent_params)
-
-        #### block ####
-
-        block_params = dict(
-            position=self.variation_space["block"]["start_position"].value.tolist(),
-            angle=self.variation_space["block"]["angle"].value,
-            scale=self.variation_space["block"]["scale"].value,
-            color=self.variation_space["block"]["color"].value.tolist(),
-            shape=self.shapes[self.variation_space["block"]["shape"].value],
-        )
-
-        self.block = self.add_shape(**block_params)
-
         # Add agent, block, and goal zone.
-        # self.agent = self.add_circle((256, 400), 15)
+        self.agent = self.add_circle((256, 400), 15)
         # self.block = self.add_tee((256, 300), 0)
-        # self.block = self.add_shape(
-        #     self.shape, (256, 300), 0, color=self.color, scale=40
-        # )
-
-        self.goal_pose = np.concatenate(
-            [
-                self.variation_space["goal"]["position"].value,
-                [self.variation_space["goal"]["angle"].value],
-            ]
+        self.block = self.add_shape(
+            self.shape, (256, 300), 0, color=self.color, scale=40
         )
+        if self.with_target:
+            self.goal_color = pygame.Color("LightGreen")
+        else:
+            self.goal_color = pygame.Color("White")
+        self.goal_pose = np.array([256, 256, np.pi / 4])  # x, y, theta (in radians)
 
         # Add collision handling
         self.space.on_collision(0, 0, post_solve=self._handle_collision)
@@ -966,14 +894,7 @@ class PushT(gym.Env):
         )  # https://htmlcolorcodes.com/color-names
         return shape
 
-    def add_circle(
-        self,
-        position,
-        angle=0,
-        scale=1,
-        color="RoyalBlue",
-    ):
-        radius = 15
+    def add_circle(self, position, radius, color="RoyalBlue", scale=1):
         body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         body.position = position
         body.friction = 1
@@ -982,9 +903,7 @@ class PushT(gym.Env):
         self.space.add(body, shape)
         return body
 
-    def add_box(
-        self, position, height, width, color="LightSlateGray", scale=1, angle=0
-    ):
+    def add_box(self, position, height, width, color="LightSlateGray", scale=1):
         mass = 1
         inertia = pymunk.moment_for_box(mass, (height * scale, width * scale))
         body = pymunk.Body(mass, inertia)
@@ -1261,7 +1180,6 @@ class PushT(gym.Env):
 
     def add_shape(self, shape, *args, **kwargs):
         # Dispatch method based on the 'shape' parameter
-
         if shape == "L":
             return self.add_L(*args, **kwargs)
         elif shape == "T":
@@ -1280,3 +1198,224 @@ class PushT(gym.Env):
             return self.add_plus(*args, **kwargs)
         else:
             raise ValueError(f"Unknown shape type: {shape}")
+
+
+class PymunkKeypointManager:  # TODO: do we need this?
+    def __init__(
+        self,
+        local_keypoint_map: Dict[str, np.ndarray],
+        color_map: Optional[Dict[str, np.ndarray]] = None,
+    ):
+        """
+        local_keypoint_map:
+            "<attribute_name>": (N,2) floats in object local coordinate
+        """
+        if color_map is None:
+            cmap = cm.get_cmap("tab10")
+            color_map = dict()
+            for i, key in enumerate(local_keypoint_map.keys()):
+                color_map[key] = (np.array(cmap.colors[i]) * 255).astype(np.uint8)
+
+        self.local_keypoint_map = local_keypoint_map
+        self.color_map = color_map
+
+    @property
+    def kwargs(self):
+        return {
+            "local_keypoint_map": self.local_keypoint_map,
+            "color_map": self.color_map,
+        }
+
+    @classmethod
+    def create_from_pusht_env(cls, env, n_block_kps=9, n_agent_kps=3, seed=0, **kwargs):
+        rng = np.random.default_rng(seed=seed)
+        local_keypoint_map = dict()
+        for name in ["block", "agent"]:
+            self = env
+            self.space = pymunk.Space()
+            if name == "agent":
+                self.agent = obj = self.add_circle((256, 400), 15)
+                n_kps = n_agent_kps
+            else:
+                self.block = obj = self.add_tee((256, 300), 0)
+                n_kps = n_block_kps
+
+            self.screen = pygame.Surface((512, 512))
+            self.screen.fill(pygame.Color("white"))
+            draw_options = DrawOptions(self.screen)
+            self.space.debug_draw(draw_options)
+            # pygame.display.flip()
+            img = np.uint8(pygame.surfarray.array3d(self.screen).transpose(1, 0, 2))
+            obj_mask = (img != np.array([255, 255, 255], dtype=np.uint8)).any(axis=-1)
+
+            tf_img_obj = cls.get_tf_img_obj(obj)
+            xy_img = np.moveaxis(np.array(np.indices((512, 512))), 0, -1)[:, :, ::-1]
+            local_coord_img = tf_img_obj.inverse(xy_img.reshape(-1, 2)).reshape(
+                xy_img.shape
+            )
+            obj_local_coords = local_coord_img[obj_mask]
+
+            # furthest point sampling
+            init_idx = rng.choice(len(obj_local_coords))
+            obj_local_kps = farthest_point_sampling(obj_local_coords, n_kps, init_idx)
+            small_shift = rng.uniform(0, 1, size=obj_local_kps.shape)
+            obj_local_kps += small_shift
+
+            local_keypoint_map[name] = obj_local_kps
+
+        return cls(local_keypoint_map=local_keypoint_map, **kwargs)
+
+    @staticmethod
+    def get_tf_img(pose: Sequence):
+        pos = pose[:2]
+        rot = pose[2]
+        tf_img_obj = st.AffineTransform(translation=pos, rotation=rot)
+        return tf_img_obj
+
+    @classmethod
+    def get_tf_img_obj(cls, obj: pymunk.Body):
+        pose = tuple(obj.position) + (obj.angle,)
+        return cls.get_tf_img(pose)
+
+    def get_keypoints_global(
+        self, pose_map: Dict[set, Union[Sequence, pymunk.Body]], is_obj=False
+    ):
+        kp_map = dict()
+        for key, value in pose_map.items():
+            if is_obj:
+                tf_img_obj = self.get_tf_img_obj(value)
+            else:
+                tf_img_obj = self.get_tf_img(value)
+            kp_local = self.local_keypoint_map[key]
+            kp_global = tf_img_obj(kp_local)
+            kp_map[key] = kp_global
+        return kp_map
+
+    def draw_keypoints(self, img, kps_map, radius=1):
+        scale = np.array(img.shape[:2]) / np.array([512, 512])
+        for key, value in kps_map.items():
+            color = self.color_map[key].tolist()
+            coords = (value * scale).astype(np.int32)
+            for coord in coords:
+                cv2.circle(img, coord, radius=radius, color=color, thickness=-1)
+        return img
+
+    def draw_keypoints_pose(self, img, pose_map, is_obj=False, **kwargs):
+        kp_map = self.get_keypoints_global(pose_map, is_obj=is_obj)
+        return self.draw_keypoints(img, kps_map=kp_map, **kwargs)
+
+
+class PushTKeypointsEnv(PushT):  # TODO: do we need this?
+    def __init__(
+        self,
+        legacy=False,
+        block_cog=None,
+        damping=None,
+        render_size=96,
+        keypoint_visible_rate=1.0,
+        agent_keypoints=False,
+        draw_keypoints=False,
+        reset_to_state=None,
+        render_action=False,
+        local_keypoint_map: Dict[str, np.ndarray] = None,
+        color_map: Optional[Dict[str, np.ndarray]] = None,
+    ):
+        super().__init__(
+            legacy=legacy,
+            block_cog=block_cog,
+            damping=damping,
+            render_size=render_size,
+            reset_to_state=reset_to_state,
+            render_action=render_action,
+        )
+        ws = self.window_size
+
+        if local_keypoint_map is None:
+            # create default keypoint definition
+            kp_kwargs = self.genenerate_keypoint_manager_params()
+            local_keypoint_map = kp_kwargs["local_keypoint_map"]
+            color_map = kp_kwargs["color_map"]
+
+        # create observation spaces
+        Dblockkps = np.prod(local_keypoint_map["block"].shape)
+        Dagentkps = np.prod(local_keypoint_map["agent"].shape)
+        Dagentpos = 2
+
+        Do = Dblockkps
+        if agent_keypoints:
+            # blockkp + agnet_pos
+            Do += Dagentkps
+        else:
+            # blockkp + agnet_kp
+            Do += Dagentpos
+        # obs + obs_mask
+        Dobs = Do * 2
+
+        low = np.zeros((Dobs,), dtype=np.float64)
+        high = np.full_like(low, ws)
+        # mask range 0-1
+        high[Do:] = 1.0
+
+        # (block_kps+agent_kps, xy+confidence)
+        self.observation_space = spaces.Box(
+            low=low, high=high, shape=low.shape, dtype=np.float64
+        )
+
+        self.keypoint_visible_rate = keypoint_visible_rate
+        self.agent_keypoints = agent_keypoints
+        self.draw_keypoints = draw_keypoints
+        self.kp_manager = PymunkKeypointManager(
+            local_keypoint_map=local_keypoint_map, color_map=color_map
+        )
+        self.draw_kp_map = None
+
+    @classmethod
+    def genenerate_keypoint_manager_params(cls):
+        env = PushT()
+        kp_manager = PymunkKeypointManager.create_from_pusht_env(env)
+        kp_kwargs = kp_manager.kwargs
+        return kp_kwargs
+
+    def _get_obs(self):
+        # get keypoints
+        obj_map = {"block": self.block}
+        if self.agent_keypoints:
+            obj_map["agent"] = self.agent
+
+        kp_map = self.kp_manager.get_keypoints_global(pose_map=obj_map, is_obj=True)
+        # python dict guerentee order of keys and values
+        kps = np.concatenate(list(kp_map.values()), axis=0)
+
+        # select keypoints to drop
+        n_kps = kps.shape[0]
+        visible_kps = self.np_random.random(size=(n_kps,)) < self.keypoint_visible_rate
+        kps_mask = np.repeat(visible_kps[:, None], 2, axis=1)
+
+        # save keypoints for rendering
+        vis_kps = kps.copy()
+        vis_kps[~visible_kps] = 0
+        draw_kp_map = {"block": vis_kps[: len(kp_map["block"])]}
+        if self.agent_keypoints:
+            draw_kp_map["agent"] = vis_kps[len(kp_map["block"]) :]
+        self.draw_kp_map = draw_kp_map
+
+        # construct obs
+        obs = kps.flatten()
+        obs_mask = kps_mask.flatten()
+        if not self.agent_keypoints:
+            # passing agent position when keypoints are not available
+            agent_pos = np.array(self.agent.position)
+            obs = np.concatenate([obs, agent_pos])
+            obs_mask = np.concatenate([obs_mask, np.ones((2,), dtype=bool)])
+
+        # obs, obs_mask
+        obs = np.concatenate([obs, obs_mask.astype(obs.dtype)], axis=0)
+        return obs
+
+    def _render_frame(self, mode):
+        img = super()._render_frame(mode)
+        if self.draw_keypoints:
+            self.kp_manager.draw_keypoints(
+                img, self.draw_kp_map, radius=int(img.shape[0] / 96)
+            )
+        return img

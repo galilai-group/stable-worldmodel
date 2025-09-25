@@ -1,3 +1,6 @@
+"""Integration tests for checkpointing functionality."""
+
+
 def test_env():
     import stable_worldmodel as swm
 

@@ -185,7 +185,7 @@ class World:
         """Attach a policy to the world and provide it the env context."""
         self.policy = policy
         self.policy.set_env(self.envs)
-        
+
         if hasattr(self.policy, "seed") and self.policy.seed is not None:
             self.policy.set_seed(self.policy.seed)
 
@@ -295,7 +295,7 @@ class World:
         self.truncateds = np.zeros(self.num_envs)
         episode_idx = np.arange(self.num_envs)
 
-        self.reset(seed, options) # <- incr global seed by num_envs
+        self.reset(seed, options)  # <- incr global seed by num_envs
         root_seed = seed + self.num_envs if seed is not None else None
 
         records = {
@@ -318,7 +318,6 @@ class World:
             # start new episode for done envs
             for i in range(self.num_envs):
                 if terminations_before[i] or truncations_before[i]:
-
                     # re-reset env with seed and options (no supported by auto-reset)
                     new_seed = (
                         root_seed + recorded_episodes if seed is not None else None
@@ -329,7 +328,9 @@ class World:
                     episode_idx[i] = next_ep_idx
                     recorded_episodes += 1
 
-                    states, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
+                    states, infos = self.envs.envs[i].reset(
+                        seed=new_seed, options=options
+                    )
 
                     for k, v in infos.items():
                         self.infos[k][i] = v
@@ -358,7 +359,8 @@ class World:
                     action_shape = np.shape(self.infos[key][0])
                     action_dtype = self.single_action_space.dtype
                     dummy_block = [
-                        np.full(action_shape, np.nan, dtype=action_dtype) for _ in range(self.num_envs)
+                        np.full(action_shape, np.nan, dtype=action_dtype)
+                        for _ in range(self.num_envs)
                     ]
                     records[key].extend(dummy_block)
                 else:
@@ -573,7 +575,7 @@ class World:
         self.truncateds = np.zeros(self.num_envs)
 
         episode_idx = np.arange(self.num_envs)
-        self.reset(seed, options) # <- incr global seed by num_envs
+        self.reset(seed, options)  # <- incr global seed by num_envs
         root_seed = seed + self.num_envs if seed is not None else None
 
         eval_ep_count = 0
@@ -593,7 +595,9 @@ class World:
                     # record eval info
                     ep_idx = episode_idx[i] - 1
                     metrics["episode_successes"][ep_idx] = terminations_before[i]
-                    metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
+                    metrics["seeds"][ep_idx] = self.envs.envs[
+                        i
+                    ].unwrapped.np_random_seed
 
                     if eval_keys:
                         for key in eval_keys:
@@ -611,9 +615,7 @@ class World:
                     eval_ep_count += 1
 
                     # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = (
-                        root_seed + eval_ep_count if seed is not None else None
-                    )
+                    new_seed = root_seed + eval_ep_count if seed is not None else None
 
                     _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 

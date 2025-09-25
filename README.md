@@ -28,7 +28,6 @@ world = swm.World(
 
 # collect data for pre-training
 world.set_policy(swm.policy.RandomPolicy())
-world.policy.set_seed(42)
 world.record_dataset("simple-pointmaze", episodes=10, seed=2347)
 world.record_video("./", seed=2347)
 

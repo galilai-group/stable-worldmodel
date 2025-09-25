@@ -193,9 +193,8 @@ class SimplePointMazeEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
         self.observation_space.seed(seed)
+        self.action_space.seed(seed)
 
-        if hasattr(self, "action_space"):
-            self.action_space.seed(seed)
         if hasattr(self, "variation_space"):
             self.variation_space.seed(seed)
 

@@ -1,7 +1,8 @@
 import numpy as np
 from collections import deque
-from typing import Protocol,runtime_checkable
+from typing import Protocol, runtime_checkable
 import torch
+
 
 class BasePolicy:
     """Base class for agent policies"""
@@ -9,7 +10,7 @@ class BasePolicy:
     # a policy takes in an environment and a planner
     def __init__(self, **kwargs):
         self.env = None
-        self.type= "base"
+        self.type = "base"
         for arg, value in kwargs.items():
             setattr(self, arg, value)
 
@@ -34,6 +35,7 @@ class RandomPolicy(BasePolicy):
         if self.env is not None:
             self.env.action_space.seed(seed)
 
+
 class ExpertPolicy(BasePolicy):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -43,20 +45,24 @@ class ExpertPolicy(BasePolicy):
         # Implement expert policy logic here
         pass
 
+
 @runtime_checkable
 class WorldModel(Protocol):
-    def encode(self, obs: dict) -> dict:...
-    def predict(self, z_obs:dict, actions:torch.Tensor, timestep=None) -> dict:...
+    def encode(self, obs: dict) -> dict: ...
+    def predict(self, z_obs: dict, actions: torch.Tensor, timestep=None) -> dict: ...
+
 
 class WorldModelPolicy(BasePolicy):
-    def __init__(self,
-                world_model,
-                solver,
-                horizon=5,
-                action_block=5,
-                history_len=3,
-                receding_horizon=10,
-                **kwargs):
+    def __init__(
+        self,
+        world_model,
+        solver,
+        horizon=5,
+        action_block=5,
+        history_len=3,
+        receding_horizon=10,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
         self.type = "world_model"
@@ -64,13 +70,14 @@ class WorldModelPolicy(BasePolicy):
         self.world_model = world_model
 
         # TODO override the solver action dim with the frameskip etc
-        
 
         # world model sanity check
-        assert isinstance(self.world_model, WorldModel), "world_model must have encode and predict method!"
-        
+        assert isinstance(self.world_model, WorldModel), (
+            "world_model must have encode and predict method!"
+        )
+
         # planning horizon
-        self.horizon = horizon     
+        self.horizon = horizon
 
         # number of actions to plan at once (frameskip)
         # e.g horizon=5,action_chunk=2 -> optimize 10 actions
@@ -88,35 +95,36 @@ class WorldModelPolicy(BasePolicy):
     @property
     def plan_len(self):
         return self.horizon * self.action_block
-    
+
     @property
     def action_dim(self):
         return np.prod(self.env.single_action_space.shape)
 
     def get_action(self, infos, **kwargs):
-        
         assert hasattr(self, "env"), "Environment not set for the policy"
-        assert 'goal' in infos, "'goal' must be provided in infos"
-        
+        assert "goal" in infos, "'goal' must be provided in infos"
+
         # create infos dict based on goal attributes
-        goal_infos = {k[5:]:v for k,v in infos.items() if k.startswith('goal_')}
-        goal_infos['pixels'] = infos['goal']  # TODO: unify obs and goal keys
+        goal_infos = {k[5:]: v for k, v in infos.items() if k.startswith("goal_")}
+        goal_infos["pixels"] = infos["goal"]  # TODO: unify obs and goal keys
 
         obs = self.world_model.encode(infos)
-        goal = self.world_model.encode(goal_infos) # TODO: detach goal
+        goal = self.world_model.encode(goal_infos)  # TODO: detach goal
 
         # need to replan if action buffer is empty
         if len(self.action_buffer) == 0:
             # TODO: add previous actions when replanning? (very important to have a good start)
-            plan = self.solver(obs, goal, self.env.action_space, self.world_model.predict)
+            plan = self.solver(
+                obs, goal, self.env.action_space, self.world_model.predict
+            )
             # keep only the receding horizon steps
             for action in range(self.receding_horizon):
                 self.action_buffer.append(plan[:, action])
 
         action = self.action_buffer.popleft()
         # TODO: reshape action shape into its original shape if needed
-        return action.numpy() # (num_envs, action_dim)
+        return action.numpy()  # (num_envs, action_dim)
+
 
 def AutoPolicy(torchscript_name, **kwargs):
     return  # TODO load the torchscript policy
-      
