@@ -419,14 +419,10 @@ class PushT(gym.Env):
                         #     categories=["circle", "square", "triangle"],   SHOULD IMPLEMENT THIS
                         #     init_value="circle",
                         # ),
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
+                        "color": swm.spaces.RGBBox(
                             init_value=np.array(
-                                pygame.Color("RoyalBlue")[:3], np.uint8
-                            ),
-                            shape=(3,),
-                            dtype=np.uint8,
+                                pygame.Color("RoyalBlue")[:3], dtype=np.uint8
+                            )
                         ),
                         "scale": swm.spaces.Box(
                             low=0.5,
@@ -463,14 +459,10 @@ class PushT(gym.Env):
                 ),
                 "block": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
+                        "color": swm.spaces.RGBBox(
                             init_value=np.array(
-                                pygame.Color("LightSlateGray")[:3], np.uint8
-                            ),
-                            shape=(3,),
-                            dtype=np.uint8,
+                                pygame.Color("LightSlateGray")[:3], dtype=np.uint8
+                            )
                         ),
                         "scale": swm.spaces.Box(
                             low=20,
@@ -500,14 +492,10 @@ class PushT(gym.Env):
                 ),
                 "goal": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
+                        "color": swm.spaces.RGBBox(
                             init_value=np.array(
-                                pygame.Color("LightGreen")[:3], np.uint8
-                            ),
-                            shape=(3,),
-                            dtype=np.uint8,
+                                pygame.Color("LightGreen")[:3], dtype=np.uint8
+                            )
                         ),
                         "scale": swm.spaces.Box(
                             low=20,
@@ -534,12 +522,10 @@ class PushT(gym.Env):
                 ),
                 "background": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array([255, 255, 255], dtype=np.uint8),
-                            shape=(3,),
-                            dtype=np.uint8,
+                        "color": swm.spaces.RGBBox(
+                            init_value=np.array(
+                                np.array([255, 255, 255], dtype=np.uint8)
+                            )
                         ),
                     }
                 ),

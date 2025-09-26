@@ -19,6 +19,7 @@ from gymnasium.wrappers import (
 
 from stable_worldmodel.utils import flatten_dict
 
+
 class EnsureInfoKeysWrapper(gym.Wrapper):
     """Gymnasium wrapper to ensure certain keys are present in the info dict.
     If a key is missing, it is added with a default value.
@@ -62,7 +63,7 @@ class EnsureImageShape(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args,**kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
         if info[self.image_key].shape[:-1] != self.image_shape:
             raise RuntimeError(
                 f"Image shape {info[self.image_key].shape} should be {self.image_shape}"
@@ -124,7 +125,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["step_idx"] = self._step_counter
 
         variations_dict = getattr(self.env.unwrapped, "variation_values", {})
-        for key, value in flatten_dict(variations_dict, parent_key='variations').items():
+        for key, value in flatten_dict(
+            variations_dict, parent_key="variations"
+        ).items():
             assert key not in info, f"Key {key} already present in info dict"
             info[key] = value
 
@@ -157,11 +160,14 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["step_idx"] = self._step_counter
 
         variations_dict = getattr(self.env.unwrapped, "variation_values", {})
-        for key, value in flatten_dict(variations_dict, parent_key='variations').items():
+        for key, value in flatten_dict(
+            variations_dict, parent_key="variations"
+        ).items():
             assert key not in info, f"Key {key} already present in info dict"
             info[key] = value
 
         return obs, reward, terminated, truncated, info
+
 
 class AddPixelsWrapper(gym.Wrapper):
     """Gymnasium wrapper that adds a 'pixels' key to the info dict,

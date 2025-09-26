@@ -1,9 +1,9 @@
 import torch
 from loguru import logger as logging
-from .base import BaseSolver
+from .solver import Solver
 
 
-class GDSolver(BaseSolver):
+class GDSolver(Solver):
     """Gradient Descent Solver"""
 
     def __init__(
@@ -53,13 +53,19 @@ class GDSolver(BaseSolver):
 
     def solve(self, info_dict, init_action=None) -> torch.Tensor:
         """Solve the planning optimization problem using gradient descent."""
+
+        outputs = {
+            "cost": [],
+            "trajectory": [],
+        }
+
         # init action sequence
         with torch.no_grad():
             self.init_action(..., init_action)  # TODO need to find solution for that
         optim = torch.optim.SGD([self.init], lr=1.0)
 
         # perform gradient descent
-        for step_i in range(self.n_steps):
+        for _ in range(self.n_steps):
             cost = self.model.get_cost(info_dict, self.init)
 
             assert type(cost) is torch.Tensor, (
@@ -73,13 +79,13 @@ class GDSolver(BaseSolver):
             optim.zero_grad(set_to_none=True)
             self.init.data += torch.randn_like(self.init) * self.action_noise
 
+            outputs["cost"].append(cost.item())
+            outputs["trajectory"].extend([self.init.detach().cpu().clone()])
+
         # TODO add logger here
         # TODO break solving if finished
 
-        if self.verbose:
-            logging.info(f"Final gradient solver loss: {cost.item()}")
-
         # get the actions to return
-        actions = self.init.detach().cpu()
+        outputs["actions"] = self.init.detach().cpu()
 
-        return actions
+        return outputs

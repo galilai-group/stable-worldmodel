@@ -1,12 +1,12 @@
 import torch
 import nevergrad as ng
 import numpy as np
-from .base import BaseSolver
+from .solver import Solver
 from einops import rearrange, repeat
 from torch.nn import functional as F
 
 
-class CEMSolver(BaseSolver):
+class CEMSolver(Solver):
     """Cross Entropy Method Solver
 
     adapted from https://github.com/gaoyuezhou/dino_wm/blob/main/planning/cem.py

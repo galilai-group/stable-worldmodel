@@ -13,40 +13,38 @@ if __name__ == "__main__":
     print("Available variations: ", world.single_variation_space.names())
 
     # collect data for pre-training
-    world.set_policy(swm.policy.RandomPolicy())
-    world.record_dataset(
-        "simple-pointmaze",
-        episodes=10,
-        seed=2347,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
-    )
-    world.record_video(
-        "./",
-        seed=2347,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
-    )
+    # world.set_policy(swm.policy.RandomPolicy())
+    # world.record_dataset(
+    #     "simple-pointmaze",
+    #     episodes=10,
+    #     seed=2347,
+    #     options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+    # )
+    # world.record_video(
+    #     "./",
+    #     seed=2347,
+    #     options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+    # )
 
     # pre-train world model
-    swm.pretraining(
-        "scripts/train/dummy.py",
-        "++dump_object=True dataset_name=simple-pointmaze output_model_name=dummy_test",
-    )
+    # swm.pretraining(
+    #     "scripts/train/dummy.py",
+    #     "++dump_object=True dataset_name=simple-pointmaze output_model_name=dummy_test",
+    # )
 
     # evaluate world model
     # world.set_policy(swm.policy.AutoPolicy("output_model_name"))
     action_dim = world.envs.single_action_space.shape[0]
     cost_fn = torch.nn.functional.mse_loss
 
-    solver = swm.solver.RandomSolver(horizon=5, action_dim=action_dim, cost_fn=cost_fn)
-
     spt_module = torch.load(
         swm.utils.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False
     )
-    world_model = spt_module.model
 
-    policy = swm.policy.WorldModelPolicy(
-        world_model, solver, horizon=10, action_block=5, receding_horizon=5
-    )
+    # world_model = spt_module.model
+    config = swm.policy.PlanConfig(horizon=10, receding_horizon=5)
+    solver = swm.solver.RandomSolver()
+    policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
     world.set_policy(policy)
     results = world.evaluate(episodes=2, seed=2347)  # , options={...})
 

@@ -3,6 +3,24 @@ from collections import deque
 from typing import Protocol, runtime_checkable
 import torch
 
+from dataclasses import dataclass
+from stable_worldmodel.solver import Solver
+
+
+@dataclass(frozen=True)
+class PlanConfig:
+    """Configuration for the planning process."""
+
+    horizon: int
+    receding_horizon: int
+    history_len: int = 1
+    action_block: int = 1  # frameskip
+    warm_start: bool = True  # use previous plan to warm start
+
+    @property
+    def plan_len(self):
+        return self.horizon * self.action_block
+
 
 class BasePolicy:
     """Base class for agent policies"""
@@ -55,73 +73,46 @@ class WorldModel(Protocol):
 class WorldModelPolicy(BasePolicy):
     def __init__(
         self,
-        world_model,
-        solver,
-        horizon=5,
-        action_block=5,
-        history_len=3,
-        receding_horizon=10,
+        solver: Solver,
+        config: PlanConfig,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
         self.type = "world_model"
+        self.cfg = config
         self.solver = solver
-        self.world_model = world_model
+        self.action_buffer = deque(maxlen=self.cfg.receding_horizon)
+        self._action_buffer = None
+        self._next_init = None
 
-        # TODO override the solver action dim with the frameskip etc
-
-        # world model sanity check
-        assert isinstance(self.world_model, WorldModel), (
-            "world_model must have encode and predict method!"
+    def set_env(self, env):
+        super().set_env(env)
+        n_envs = getattr(env, "num_envs", 1)
+        self.solver.configure(
+            action_space=env.action_space, n_envs=n_envs, config=self.cfg
         )
+        self._action_buffer = deque(maxlen=self.cfg.receding_horizon)
 
-        # planning horizon
-        self.horizon = horizon
-
-        # number of actions to plan at once (frameskip)
-        # e.g horizon=5,action_chunk=2 -> optimize 10 actions
-        self.action_block = action_block
-
-        # maximum history length for world model predictor
-        self.history_len = history_len
-
-        # receding horizon steps to take before re-planning (mpc)
-        # rem: 1 <= receding_horizon <= action_block * horizon
-        self.receding_horizon = receding_horizon
-
-        self.action_buffer = deque(maxlen=self.receding_horizon)
-
-    @property
-    def plan_len(self):
-        return self.horizon * self.action_block
-
-    @property
-    def action_dim(self):
-        return np.prod(self.env.single_action_space.shape)
-
-    def get_action(self, infos, **kwargs):
+    def get_action(self, info_dict, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
-        assert "goal" in infos, "'goal' must be provided in infos"
-
-        # create infos dict based on goal attributes
-        goal_infos = {k[5:]: v for k, v in infos.items() if k.startswith("goal_")}
-        goal_infos["pixels"] = infos["goal"]  # TODO: unify obs and goal keys
-
-        obs = self.world_model.encode(infos)
-        goal = self.world_model.encode(goal_infos)  # TODO: detach goal
+        assert "pixels" in info_dict, "'pixels' must be provided in info_dict"
+        assert "goal" in info_dict, "'goal' must be provided in info_dict"
 
         # need to replan if action buffer is empty
-        if len(self.action_buffer) == 0:
-            # TODO: add previous actions when replanning? (very important to have a good start)
-            plan = self.solver(
-                obs, goal, self.env.action_space, self.world_model.predict
-            )
-            # keep only the receding horizon steps
-            for action in range(self.receding_horizon):
-                self.action_buffer.append(plan[:, action])
+        if len(self._action_buffer) == 0:
+            outputs = self.solver(info_dict, init_action=self._next_init)
 
-        action = self.action_buffer.popleft()
+            actions = outputs["actions"]  # (num_envs, horizon, action_dim)
+            keep_horizon = self.cfg.receding_horizon
+
+            plan = actions[:, :keep_horizon]
+            rest = actions[:, keep_horizon:]
+
+            self._next_init = rest if self.cfg.warm_start else None
+            self._action_buffer.extend(plan.transpose(0, 1))
+
+        action = self._action_buffer.popleft()
         # TODO: reshape action shape into its original shape if needed
         return action.numpy()  # (num_envs, action_dim)
 

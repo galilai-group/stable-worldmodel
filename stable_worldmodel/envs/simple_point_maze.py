@@ -105,12 +105,8 @@ class SimplePointMazeEnv(gym.Env):
                 ),
                 "goal": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array([0, 255, 0], dtype=np.uint8),
-                            shape=(3,),
-                            dtype=np.uint8,
+                        "color": swm.spaces.RGBBox(
+                            init_value=np.array([0, 255, 0], dtype=np.uint8)
                         ),
                         "radius": swm.spaces.Box(
                             low=0.05,
@@ -134,12 +130,8 @@ class SimplePointMazeEnv(gym.Env):
                         "number": swm.spaces.Discrete(
                             max_walls - min_walls + 1, start=min_walls, init_value=5
                         ),
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            shape=(3,),
-                            init_value=np.array([0, 0, 0], dtype=np.uint8),
-                            dtype=np.uint8,
+                        "color": swm.spaces.RGBBox(
+                            init_value=np.array([0, 0, 0], dtype=np.uint8)
                         ),
                         "shape": swm.spaces.Box(
                             low=wall_size_low,
@@ -161,12 +153,8 @@ class SimplePointMazeEnv(gym.Env):
                 ),
                 "background": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array([255, 255, 255], dtype=np.uint8),
-                            shape=(3,),
-                            dtype=np.uint8,
+                        "color": swm.spaces.RGBBox(
+                            init_value=np.array([255, 255, 255], dtype=np.uint8)
                         ),
                     }
                 ),
