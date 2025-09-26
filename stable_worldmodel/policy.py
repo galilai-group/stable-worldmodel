@@ -1,8 +1,10 @@
 import numpy as np
 from collections import deque
 from typing import Protocol, runtime_checkable
+from pathlib import Path
 import torch
 import gymnasium as gym
+import stable_worldmodel as swm
 
 from dataclasses import dataclass
 from stable_worldmodel.solver import Solver
@@ -83,9 +85,13 @@ class WorldModelPolicy(BasePolicy):
         self.type = "world_model"
         self.cfg = config
         self.solver = solver
-        self.action_buffer = deque(maxlen=self.cfg.receding_horizon)
+        self.action_buffer = deque(maxlen=self.flatten_receding_horizon)
         self._action_buffer = None
         self._next_init = None
+
+    @property
+    def flatten_receding_horizon(self):
+        return self.cfg.receding_horizon * self.cfg.action_block
 
     def set_env(self, env):
         self.env = env
@@ -93,7 +99,7 @@ class WorldModelPolicy(BasePolicy):
         self.solver.configure(
             action_space=env.action_space, n_envs=n_envs, config=self.cfg
         )
-        self._action_buffer = deque(maxlen=self.cfg.receding_horizon)
+        self._action_buffer = deque(maxlen=self.flatten_receding_horizon)
 
         assert isinstance(self.solver, Solver), (
             "Solver must implement the Solver protocol"
@@ -110,19 +116,28 @@ class WorldModelPolicy(BasePolicy):
 
             actions = outputs["actions"]  # (num_envs, horizon, action_dim)
             keep_horizon = self.cfg.receding_horizon
-
             plan = actions[:, :keep_horizon]
             rest = actions[:, keep_horizon:]
-
             self._next_init = rest if self.cfg.warm_start else None
+
+            # frameskip back to timestep
+            plan = plan.reshape(self.env.num_envs, self.flatten_receding_horizon, -1)
+
             self._action_buffer.extend(plan.transpose(0, 1))
 
         action = self._action_buffer.popleft()
-
         action = action.reshape(*self.env.action_space.shape)
 
         return action.numpy()  # (num_envs, action_dim)
 
 
-def AutoPolicy(torchscript_name, **kwargs):
-    return  # TODO load the torchscript policy
+def AutoPolicy(model_name):
+    path = Path(swm.utils.get_cache_dir() + f"/{model_name}_object.ckpt")
+    assert path.exists(), (
+        f"World model named {model_name} not found. Should launch pretraining first."
+    )
+    spt_module = torch.load(path, weights_only=False)
+    assert hasattr(spt_module, "model"), (
+        "Loaded world model should have a model attribute"
+    )
+    return spt_module.model

@@ -68,6 +68,7 @@ class DummyWorldModel(torch.nn.Module):
             preds = self.predictor(torch.cat([preds, actions[:, t]], 1))
 
         # -- compute cost as distance to goal
-        cost = torch.nn.functional.mse_loss(preds, goal, reduction="none").mean(1).sum()
+        # REM: SHOULD BE A COST PER ENV
+        cost = torch.nn.functional.mse_loss(preds, goal, reduction="none").mean(1)
 
         return cost

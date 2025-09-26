@@ -25,11 +25,11 @@ class RandomSolver:
 
     @property
     def action_dim(self) -> int:
-        return self._action_dim
+        return self._action_dim * self._config.action_block
 
     @property
-    def plan_len(self) -> int:
-        return self._config.plan_len
+    def horizon(self) -> int:
+        return self._config.horizon
 
     def __call__(self, *args, **kwargs) -> torch.Tensor:
         return self.solve(*args, **kwargs)
@@ -44,7 +44,7 @@ class RandomSolver:
             actions = torch.zeros((self.n_envs, 0, self.action_dim))
 
         # fill remaining actions with random sample
-        remaining = self._config.horizon - actions.shape[1]
+        remaining = self.horizon - actions.shape[1]
 
         if remaining > 0:
             total_sequence = remaining * self._config.action_block
@@ -52,7 +52,9 @@ class RandomSolver:
                 [self._action_space.sample() for _ in range(total_sequence)], axis=1
             )
 
-            new_action = torch.from_numpy(action_sequence)
+            new_action = torch.from_numpy(action_sequence).view(
+                self.n_envs, remaining, self.action_dim
+            )
             actions = torch.cat([actions, new_action], dim=1)
 
         outputs["actions"] = actions

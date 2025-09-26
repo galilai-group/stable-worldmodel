@@ -38,30 +38,28 @@ class GDSolver(torch.nn.Module):
 
     @property
     def action_dim(self) -> int:
-        return self._action_dim
+        return self._action_dim * self._config.action_block
 
     @property
-    def plan_len(self) -> int:
-        return self._config.plan_len
+    def horizon(self) -> int:
+        return self._config.horizon
 
     def __call__(self, *args, **kwargs) -> torch.Tensor:
         return self.solve(*args, **kwargs)
 
-    def init_action(self, initial_action=None):
+    def init_action(self, actions=None):
         """Initialize the action tensor for the solver.
 
         set self.init - initial action sequences (n_envs, horizon, action_dim)
         """
-        actions = initial_action
-
         if actions is None:
-            actions = torch.zeros((self._n_envs, 0, self._action_dim))
+            actions = torch.zeros((self._n_envs, 0, self.action_dim))
 
         # fill remaining action
-        remaining = self._config.horizon - actions.shape[1]
+        remaining = self.horizon - actions.shape[1]
 
         if remaining > 0:
-            new_actions = torch.zeros(self._n_envs, remaining, self._action_dim)
+            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
             actions = torch.cat([actions, new_actions], dim=1)
 
         actions = actions.to(self.device)
@@ -91,9 +89,12 @@ class GDSolver(torch.nn.Module):
             assert type(cost) is torch.Tensor, (
                 f"Got {type(cost)} cost, expect torch.Tensor"
             )
-            assert cost.ndim == 0, f"Cost should be a scalar, got shape {cost.shape}"
+            assert cost.ndim == 1 and len(cost) == self.n_envs, (
+                f"Cost should be of shape (n_envs,), got {cost.shape}"
+            )
             assert cost.requires_grad, "Cost must requires_grad for GD solver."
 
+            cost = cost.sum()  # independant cost for each env
             cost.backward()
             optim.step()
             optim.zero_grad(set_to_none=True)

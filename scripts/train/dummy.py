@@ -11,6 +11,10 @@ from transformers import AutoConfig, AutoModelForImageClassification
 from lightning.pytorch.callbacks import ModelCheckpoint
 from pathlib import Path
 
+##########
+# TODO: need to investigate slow down linked with action dim increase
+##########
+
 
 def get_data(dataset_name):
     """Return data and action space dim for training predictor."""
@@ -39,7 +43,7 @@ def get_data(dataset_name):
         data_files=str(Path(data_dir, dataset_name, "*.parquet")),
         split="train",
         num_steps=2,
-        frameskip=1,
+        frameskip=5,
         transform=transform,
     )
 
