@@ -10,22 +10,20 @@ if __name__ == "__main__":
         render_mode="rgb_array",
     )
 
+    print("Available variations: ", world.single_variation_space.names())
+
     # collect data for pre-training
     world.set_policy(swm.policy.RandomPolicy())
     world.record_dataset(
         "simple-pointmaze",
         episodes=10,
         seed=2347,
-        options=dict(
-            variation=("walls.number", "walls.shape", "walls.positions", "agent.color")
-        ),
+        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
     )
     world.record_video(
         "./",
         seed=2347,
-        options=dict(
-            variation=("walls.number", "walls.shape", "walls.positions", "agent.color")
-        ),
+        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
     )
 
     # pre-train world model

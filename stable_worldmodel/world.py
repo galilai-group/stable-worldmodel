@@ -159,6 +159,14 @@ class World:
         return self.envs.action_space
 
     @property
+    def variation_space(self):
+        return self.envs.variation_space
+
+    @property
+    def single_variation_space(self):
+        return self.envs.single_variation_space
+
+    @property
     def single_action_space(self):
         return self.envs.single_action_space
 
