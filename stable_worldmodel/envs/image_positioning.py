@@ -31,22 +31,24 @@ class ImagePositioning(gym.Env):
 
         # Define what the agent can observe
         # Dict space gives us structured, human-readable observations
-        self.observation_space = gym.spaces.Dict({
-            "current_background": gym.spaces.Box(0, 0.9, shape=(2, 1), dtype=float),
-            "current_locations": gym.spaces.Box(
-                0, 0.9, shape=(len(images), 2), dtype=float
-            ),
-            "current_rotations": gym.spaces.Box(
-                0, 1, shape=(len(images), 1), dtype=float
-            ),
-            "target_background": gym.spaces.Box(0, 1, shape=(2, 1), dtype=float),
-            "target_locations": gym.spaces.Box(
-                0, 0.9, shape=(len(images), 2), dtype=float
-            ),
-            "target_rotations": gym.spaces.Box(
-                0, 1, shape=(len(images), 1), dtype=float
-            ),
-        })
+        self.observation_space = gym.spaces.Dict(
+            {
+                "current_background": gym.spaces.Box(0, 0.9, shape=(2, 1), dtype=float),
+                "current_locations": gym.spaces.Box(
+                    0, 0.9, shape=(len(images), 2), dtype=float
+                ),
+                "current_rotations": gym.spaces.Box(
+                    0, 1, shape=(len(images), 1), dtype=float
+                ),
+                "target_background": gym.spaces.Box(0, 1, shape=(2, 1), dtype=float),
+                "target_locations": gym.spaces.Box(
+                    0, 0.9, shape=(len(images), 2), dtype=float
+                ),
+                "target_rotations": gym.spaces.Box(
+                    0, 1, shape=(len(images), 1), dtype=float
+                ),
+            }
+        )
 
         # Initialize positions - will be set randomly in reset()
         # Using -1,-1 as "uninitialized" state
@@ -70,15 +72,17 @@ class ImagePositioning(gym.Env):
         )
 
         # Define what actions are available (4 directions)
-        self.action_space = gym.spaces.Dict({
-            "delta_background": gym.spaces.Box(low=-0.1, high=0.1, shape=(2, 1)),
-            "delta_locations": gym.spaces.Box(
-                low=-0.1, high=0.1, shape=(len(images), 2)
-            ),
-            "delta_rotations": gym.spaces.Box(
-                low=-0.1, high=0.1, shape=(len(images), 1)
-            ),
-        })
+        self.action_space = gym.spaces.Dict(
+            {
+                "delta_background": gym.spaces.Box(low=-0.1, high=0.1, shape=(2, 1)),
+                "delta_locations": gym.spaces.Box(
+                    low=-0.1, high=0.1, shape=(len(images), 2)
+                ),
+                "delta_rotations": gym.spaces.Box(
+                    low=-0.1, high=0.1, shape=(len(images), 1)
+                ),
+            }
+        )
         self.images = [
             ImageOps.expand(img, border=5, fill=c).convert("RGBA")
             for img, c in zip(images, COLORS)

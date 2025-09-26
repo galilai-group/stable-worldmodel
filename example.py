@@ -16,12 +16,16 @@ if __name__ == "__main__":
         "simple-pointmaze",
         episodes=10,
         seed=2347,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+        options=dict(
+            variation=("walls.number", "walls.shape", "walls.positions", "agent.color")
+        ),
     )
     world.record_video(
         "./",
         seed=2347,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+        options=dict(
+            variation=("walls.number", "walls.shape", "walls.positions", "agent.color")
+        ),
     )
 
     # pre-train world model

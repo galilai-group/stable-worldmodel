@@ -32,7 +32,7 @@ class CEMSolver(BaseSolver):
         self.opt_steps = opt_steps
         self.topk = topk
 
-    def init_action_distrib(self, z_obs0, actions=None):
+    def init_action_distrib(self, actions=None):
         """Initialize the action distribution params (mu, sigma) given the initial condition.
         Args:
             actions (n_envs, T, action_dim): initial actions, T <= horizon
@@ -40,8 +40,14 @@ class CEMSolver(BaseSolver):
         """
 
         # ! should really note somewhere or make clear that action_dim is env_action_dim * frameskip
-        var = self.var_scale * torch.ones([self.num_envs, self.horizon, self.action_dim])
-        mean = torch.zeros([self.num_envs, 0, self.action_dim]) if actions is None else actions
+        var = self.var_scale * torch.ones(
+            [self.num_envs, self.horizon, self.action_dim]
+        )
+        mean = (
+            torch.zeros([self.num_envs, 0, self.action_dim])
+            if actions is None
+            else actions
+        )
 
         # -- fill remaining actions with random sample
         remaining = self.horizon - mean.shape[1]
@@ -53,11 +59,9 @@ class CEMSolver(BaseSolver):
 
         return mean, var
 
-
-    def solve(self, z_obs0, z_goal, action_space, predict_fn=None, init_action=None):
-
+    def solve(self, info_dict, init_action=None):
         # -- initialize the action distribution
-        mean, var = self.init_action_distrib(z_obs0, init_action)
+        mean, var = self.init_action_distrib(init_action)
         mean = mean.to(self.device)
         var = var.to(self.device)
 
@@ -66,22 +70,25 @@ class CEMSolver(BaseSolver):
         # -- optimization loop
         for step in range(self.opt_steps):
             losses = []
-            for traj in range(n_envs):
-                # duplicate the current observation for num_samples
-                cur_trans_obs_0 = {
-                    key: repeat(
-                        arr[traj].unsqueeze(0), "1 ... -> n ...", n=self.num_samples
-                    )
-                    for key, arr in z_obs0.items()
-                }
 
-                # duplicate the current goal embedding for num_samples
-                cur_z_obs_g = {
-                    key: repeat(
-                        arr[traj].unsqueeze(0), "1 ... -> n ...", n=self.num_samples
-                    )
-                    for key, arr in z_goal.items()
-                }
+            for traj in range(n_envs):
+                env_info = {}
+
+                # # duplicate the current observation for num_samples
+                # cur_trans_obs_0 = {
+                #     key: repeat(
+                #         arr[traj].unsqueeze(0), "1 ... -> n ...", n=self.num_samples
+                #     )
+                #     for key, arr in z_obs0.items()
+                # }
+
+                # # duplicate the current goal embedding for num_samples
+                # cur_z_obs_g = {
+                #     key: repeat(
+                #         arr[traj].unsqueeze(0), "1 ... -> n ...", n=self.num_samples
+                #     )
+                #     for key, arr in z_goal.items()
+                # }
 
                 # sample action sequences candidation from normal distrib
                 candidates = torch.randn(
@@ -94,17 +101,20 @@ class CEMSolver(BaseSolver):
                 # make the first action seq being mean
                 candidates[0] = mean[traj]
 
-                # simulate the action sequences
-                with torch.no_grad():
-                    z_preds = predict_fn(z_obs0, candidates)
+                # evaluate the candidates
+                cost = self.model.get_cost(info_dict, candidates)
 
-                # compute the loss
-                loss = self.cost_fn(z_preds, z_goal)
+                assert type(cost) is torch.Tensor, (
+                    f"Expected cost to be a torch.Tensor, got {type(cost)}"
+                )
+                assert cost.ndim == 0, (
+                    f"Expected scalar tensor for cost, got shape {cost.shape}"
+                )
 
                 # -- get the elites
-                topk_idx = torch.argsort(loss)[: self.topk]
+                topk_idx = torch.argsort(cost)[: self.topk]
                 topk_candidates = candidates[topk_idx]
-                losses.append(loss[topk_idx[0]].item())
+                losses.append(cost[topk_idx[0]].item())
 
                 # -- update the mean and var
                 mean[traj] = topk_candidates.mean(dim=0)
@@ -177,4 +187,3 @@ class CEMSolver(BaseSolver):
 #             preds = self.world_model(states, actions.unbind(0))
 #             rewards = (preds - goals).square().mean(1)
 #             return rewards
-

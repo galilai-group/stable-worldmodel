@@ -76,6 +76,23 @@ class Box(spaces.Box):
         )
 
 
+class RGBBox(Box):
+    """A Box space for RGB images or data, enforcing a channel of size 3 and values between 0 and 255."""
+
+    def __init__(self, shape=(3,), *args, init_value=None, **kwargs):
+        assert any([dim == 3 for dim in shape]), "shape must have a channel of size 3"
+
+        super().__init__(
+            low=0,
+            high=255,
+            shape=shape,
+            dtype="uint8",
+            init_value=init_value,
+            *args,
+            **kwargs,
+        )
+
+
 class Dict(spaces.Dict):
     def __init__(
         self, *args, init_value=None, constrain_fn=None, sampling_order=None, **kwargs
@@ -133,6 +150,17 @@ class Dict(spaces.Dict):
 
     def check(self):
         return self.contains(self.value)
+
+    def names(self):
+        def _key_generator(d, parent_key=""):
+            for k, v in d.items():
+                new_key = f"{parent_key}.{k}" if parent_key else k
+                if isinstance(v, spaces.Dict):
+                    yield from _key_generator(v.spaces, new_key)
+                else:
+                    yield new_key
+
+        return list(_key_generator(self.spaces))
 
     def sample(self, *args, max_tries=1000, warn_after_s=5.0, set_value=True, **kwargs):
         start = time.time()

@@ -74,12 +74,8 @@ class SimplePointMazeEnv(gym.Env):
             {
                 "agent": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
-                            low=0,
-                            high=255,
-                            init_value=np.array([255, 0, 0], dtype=np.uint8),
-                            shape=(3,),
-                            dtype=np.uint8,
+                        "color": swm.spaces.RGBBox(
+                            init_value=np.array([255, 0, 0], dtype=np.uint8)
                         ),
                         "radius": swm.spaces.Box(
                             low=0.05,
