@@ -2,6 +2,7 @@ import numpy as np
 from collections import deque
 from typing import Protocol, runtime_checkable
 import torch
+import gymnasium as gym
 
 from dataclasses import dataclass
 from stable_worldmodel.solver import Solver
@@ -23,7 +24,7 @@ class PlanConfig:
 
 
 class BasePolicy:
-    """Base class for agent policies"""
+    """Base class for agent policies."""
 
     # a policy takes in an environment and a planner
     def __init__(self, **kwargs):
@@ -33,7 +34,7 @@ class BasePolicy:
             setattr(self, arg, value)
 
     def get_action(self, obs, **kwargs):
-        """Get action from the policy given the observation"""
+        """Get action from the policy given the observation."""
         raise NotImplementedError
 
     def set_env(self, env):
@@ -41,6 +42,8 @@ class BasePolicy:
 
 
 class RandomPolicy(BasePolicy):
+    """Random Policy."""
+
     def __init__(self, seed=None, **kwargs):
         super().__init__(**kwargs)
         self.type = "random"
@@ -55,6 +58,8 @@ class RandomPolicy(BasePolicy):
 
 
 class ExpertPolicy(BasePolicy):
+    """Expert Policy."""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.type = "expert"
@@ -64,13 +69,9 @@ class ExpertPolicy(BasePolicy):
         pass
 
 
-@runtime_checkable
-class WorldModel(Protocol):
-    def encode(self, obs: dict) -> dict: ...
-    def predict(self, z_obs: dict, actions: torch.Tensor, timestep=None) -> dict: ...
-
-
 class WorldModelPolicy(BasePolicy):
+    """World Model Policy using a planning solver."""
+
     def __init__(
         self,
         solver: Solver,
@@ -87,12 +88,16 @@ class WorldModelPolicy(BasePolicy):
         self._next_init = None
 
     def set_env(self, env):
-        super().set_env(env)
+        self.env = env
         n_envs = getattr(env, "num_envs", 1)
         self.solver.configure(
             action_space=env.action_space, n_envs=n_envs, config=self.cfg
         )
         self._action_buffer = deque(maxlen=self.cfg.receding_horizon)
+
+        assert isinstance(self.solver, Solver), (
+            "Solver must implement the Solver protocol"
+        )
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
@@ -113,7 +118,9 @@ class WorldModelPolicy(BasePolicy):
             self._action_buffer.extend(plan.transpose(0, 1))
 
         action = self._action_buffer.popleft()
-        # TODO: reshape action shape into its original shape if needed
+
+        action = action.reshape(*self.env.action_space.shape)
+
         return action.numpy()  # (num_envs, action_dim)
 
 

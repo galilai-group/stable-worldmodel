@@ -13,11 +13,7 @@ from pathlib import Path
 
 
 def get_data(dataset_name):
-    """Return data and action space dim for training predictor"""
-
-    # -- number of rollout steps to include in the dataset
-    num_steps = 5
-
+    """Return data and action space dim for training predictor."""
     # -- make transform operations
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
@@ -94,7 +90,6 @@ def forward(self, batch, stage):
 def get_world_model(action_dim):
     """Return stable_spt module with world model"""
     world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)
-
     # NOTE: can add a decoder here if needed
 
     # -- world model as a stable_spt module

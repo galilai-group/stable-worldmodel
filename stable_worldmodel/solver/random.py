@@ -1,9 +1,8 @@
 import numpy as np
 import torch
-from .solver import Solver
 
 
-class RandomSolver(Solver):
+class RandomSolver:
     """Random Solver."""
 
     def __init__(self):

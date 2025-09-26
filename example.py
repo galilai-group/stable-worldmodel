@@ -34,16 +34,15 @@ if __name__ == "__main__":
 
     # evaluate world model
     # world.set_policy(swm.policy.AutoPolicy("output_model_name"))
-    action_dim = world.envs.single_action_space.shape[0]
-    cost_fn = torch.nn.functional.mse_loss
 
     spt_module = torch.load(
         swm.utils.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False
     )
 
-    # world_model = spt_module.model
-    config = swm.policy.PlanConfig(horizon=10, receding_horizon=5)
-    solver = swm.solver.RandomSolver()
+    model = spt_module.model
+    config = swm.PlanConfig(horizon=10, receding_horizon=5)
+    # solver = swm.solver.RandomSolver()
+    solver = swm.solver.GDSolver(model, n_steps=10)
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
     world.set_policy(policy)
     results = world.evaluate(episodes=2, seed=2347)  # , options={...})

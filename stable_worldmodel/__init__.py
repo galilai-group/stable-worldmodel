@@ -3,6 +3,7 @@ import os
 from gymnasium.envs.registration import register
 
 from . import data, policy, solver, wrappers, wm, utils, spaces
+from .policy import PlanConfig
 from .utils import pretraining
 from .world import World
 
