@@ -14,7 +14,9 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
+from rich.console import Group
 from typing_extensions import Annotated
+from rich.rule import Rule
 
 import stable_worldmodel as swm
 
@@ -87,7 +89,7 @@ def _render_hierarchy(parent: Tree, d: Dict[str, Dict]):
     for k in sorted(d):
         is_non_leaf = bool(d[k])
         label = Text(k, style="bold cyan") if is_non_leaf else Text(k)
-        child = parent.add(label)
+        child = parent.add(label) if parent else Tree(label)
         if is_non_leaf:
             _render_hierarchy(child, d[k])
 
@@ -108,12 +110,18 @@ def _render(meta: Union[Dict[str, Any], List[Any], None], label: str):
     return tree
 
 
-def _variation_space(variation: Dict[str, Any]):
-    vroot = Tree(Text("Variation Space", style="bold yellow"))
+def _variation_space(variation: Dict[str, Any], title: str = "Variation Space"):
+    vroot = Tree(Text(title, style="bold yellow"))
+    void_title = title == ""
 
     # small facts table (aligned titles)
     if not variation.get("has_variation"):
-        vroot.add("This world has no variations 🙁")
+        text = "There are no variations 🙁"
+        if void_title:
+            vroot.label = text
+        else:
+            vroot.add(text)
+
     else:
         # hierarchical names
         names = variation.get("names") or []
@@ -144,25 +152,44 @@ def display_world_info(info: Dict[str, Any]) -> None:
 
 
 def display_dataset_info(info: Dict[str, Any]) -> None:
-    """Pretty-print dataset info as a Rich table."""
-    table = Table(
+    """Pretty-print dataset info as a Rich table with a dotted separator."""
+    top_table = Table(
         title=f"Dataset: [bold cyan]{info['name']}[/bold cyan]",
         box=box.SIMPLE_HEAVY,
         show_header=False,
         pad_edge=False,
     )
-    table.add_column("Key", style="bold yellow", no_wrap=True)
-    table.add_column("Value", style="white")
 
-    # Add rows in a logical order
-    table.add_row("Episodes", str(info["num_episodes"]))
-    table.add_row("Steps", str(info["num_steps"]))
-    table.add_row("Obs Shape", str(info["obs_shape"]))
-    table.add_row("Action Shape", str(info["action_shape"]))
-    table.add_row("Goal Shape", str(info["goal_shape"]))
-    table.add_row("Columns", ", ".join(info["columns"]))
+    top_table.add_column("Key", style="bold yellow", no_wrap=True)
+    top_table.add_column("Value", style="white")
+    top_table.add_row("Columns", ", ".join(info["columns"]))
 
-    console.print(Panel(table, border_style="cyan", padding=(1, 2)))
+    separator = Rule(characters="·", style="grey62")
+
+    bottom_table = Table(
+        box=box.SIMPLE_HEAVY,
+        show_header=False,
+        pad_edge=False,
+    )
+    bottom_table.add_column("Key", style="bold yellow", no_wrap=True)
+    bottom_table.add_column("Value", style="white")
+
+    bottom_table.add_row("Episodes", str(info["num_episodes"]))
+    bottom_table.add_row("Total Steps", str(info["num_steps"]))
+    bottom_table.add_row("Obs Shape", str(info["obs_shape"]))
+    bottom_table.add_row("Action Shape", str(info["action_shape"]))
+    bottom_table.add_row("Goal Shape", str(info["goal_shape"]))
+    bottom_table.add_row("Variation", _variation_space(info["variation"], title=""))
+
+    group = Group(top_table, separator, bottom_table)
+
+    console.print(
+        Panel(
+            group,
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
 
 
 ##############

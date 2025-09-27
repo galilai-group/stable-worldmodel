@@ -126,7 +126,7 @@ class StepsDataset(spt.data.HFDataset):
 
 
 #####################
-### Dataset Info ####
+### CLI Info ####
 #####################
 
 
@@ -210,6 +210,16 @@ def dataset_info(name):
         "obs_shape": dataset["pixels"][0].shape,
         "action_shape": dataset["action"][0].shape,
         "goal_shape": dataset["goal"][0].shape,
+        "variation": {
+            "has_variation": any(
+                col.startswith("variation.") for col in dataset.column_names
+            ),
+            "names": [
+                col.removeprefix("variation.")
+                for col in dataset.column_names
+                if col.startswith("variation.")
+            ],
+        },
     }
 
     return info

@@ -17,7 +17,7 @@ from gymnasium.wrappers import (
     TransformObservation,
 )
 
-from stable_worldmodel.utils import flatten_dict
+from stable_worldmodel.utils import flatten_dict, get_in
 
 
 class EnsureInfoKeysWrapper(gym.Wrapper):
@@ -101,6 +101,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
 
     def __init__(self, env):
         super().__init__(env)
+        self._variations_watch = []
 
     def reset(self, *args, **kwargs):
         self._step_counter = 0
@@ -124,12 +125,16 @@ class EverythingToInfoWrapper(gym.Wrapper):
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
 
-        variations_dict = getattr(self.env.unwrapped, "variation_values", {})
-        for key, value in flatten_dict(
-            variations_dict, parent_key="variations"
-        ).items():
-            assert key not in info, f"Key {key} already present in info dict"
-            info[key] = value
+        # add all variations to info if needed
+        options = kwargs.get("options")
+        if options is not None and "variation" in options:
+            self._variations_watch = options.get("variation")
+
+        for key in self._variations_watch:
+            var_key = f"variation.{key}"
+            assert var_key not in info
+            subvar_space = get_in(self.env.unwrapped.variation_space, key.split("."))
+            info[var_key] = subvar_space.value
 
         if type(info["action"]) is dict:
             raise NotImplementedError
@@ -159,12 +164,11 @@ class EverythingToInfoWrapper(gym.Wrapper):
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
 
-        variations_dict = getattr(self.env.unwrapped, "variation_values", {})
-        for key, value in flatten_dict(
-            variations_dict, parent_key="variations"
-        ).items():
-            assert key not in info, f"Key {key} already present in info dict"
-            info[key] = value
+        for key in self._variations_watch:
+            var_key = f"variation.{key}"
+            assert var_key not in info
+            subvar_space = get_in(self.env.unwrapped.variation_space, key.split("."))
+            info[var_key] = subvar_space.value
 
         return obs, reward, terminated, truncated, info
 
@@ -295,11 +299,6 @@ class VariationWrapper(VectorWrapper):
     ):
         super().__init__(env)
 
-        #     self.single_variation_space = self.envs[0].variation_space
-        #     self.action_space = batch_space(self.single_action_space, self.num_envs)
-        # else:
-        #     self.single_variation_space = None
-
         base_env = env.envs[0].unwrapped
 
         if not hasattr(base_env, "variation_space"):
@@ -338,11 +337,6 @@ class VariationWrapper(VectorWrapper):
                 ), (
                     f"VariationWrapper(..., variation_mode='different' or custom space) however the sub-environments variation spaces do not share a common shape and dtype, single_variation_space={self.single_variation_space}, sub-environment variation_space={env.variation_space}"
                 )
-
-        # TODO handle auto-reset
-        self._variations = create_empty_array(
-            self.single_variation_space, n=self.num_envs, fn=np.zeros
-        )
 
     @property
     def envs(self):
