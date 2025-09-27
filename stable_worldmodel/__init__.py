@@ -1,16 +1,25 @@
-import os
-
-from gymnasium.envs.registration import register
-
+from gymnasium.envs import registration
 from . import data, policy, solver, wrappers, wm, utils, spaces
 from .policy import PlanConfig
 from .utils import pretraining
 from .world import World
 
-register(
-    id="swm/ImagePositioning-v1",
-    entry_point="stable_worldmodel.envs.image_positioning:ImagePositioning",
-)
+WORLDS = set()
+
+
+def register(id, entry_point):
+    registration.register(id=id, entry_point=entry_point)
+
+    if id in WORLDS:
+        raise ValueError(f"World {id} already registered.")
+
+    WORLDS.add(id)
+
+
+# register(
+#     id="swm/ImagePositioning-v1",
+#     entry_point="stable_worldmodel.envs.image_positioning:ImagePositioning",
+# )
 
 register(
     id="swm/PushT-v1",

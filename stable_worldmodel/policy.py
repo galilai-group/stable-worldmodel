@@ -131,8 +131,9 @@ class WorldModelPolicy(BasePolicy):
         return action.numpy()  # (num_envs, action_dim)
 
 
-def AutoPolicy(model_name):
-    path = Path(swm.utils.get_cache_dir() + f"/{model_name}_object.ckpt")
+def AutoPolicy(model_name, cache_dir=None):
+    cache_dir = Path(cache_dir or swm.utils.get_cache_dir())
+    path = cache_dir / f"{model_name}_object.ckpt"
     assert path.exists(), (
         f"World model named {model_name} not found. Should launch pretraining first."
     )

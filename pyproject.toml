@@ -27,6 +27,10 @@ dependencies = [
 
 dynamic = ["version"]
 
+[project.scripts]
+stable-worldmodel = "stable_worldmodel.cli:app"
+swm = "stable_worldmodel.cli:app"
+
 [tool.setuptools]
 packages = ["stable_worldmodel"]
 

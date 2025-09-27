@@ -113,6 +113,7 @@ class World:
         image_transform: Callable = None,
         seed: int = 2349867,
         max_episode_steps: int = 100,
+        verbose: int = 1,
         **kwargs,
     ):
         self.envs = gym.make_vec(
@@ -130,19 +131,20 @@ class World:
 
         self.envs = VariationWrapper(self.envs)
 
-        logging.info(f"🌍🌍🌍 World {env_name} initialized 🌍🌍🌍")
+        if verbose > 0:
+            logging.info(f"🌍🌍🌍 World {env_name} initialized 🌍🌍🌍")
 
-        logging.info("🕹️ 🕹️ 🕹️ Action space 🕹️ 🕹️ 🕹️")
-        logging.info(f"{self.envs.action_space}")
+            logging.info("🕹️ 🕹️ 🕹️ Action space 🕹️ 🕹️ 🕹️")
+            logging.info(f"{self.envs.action_space}")
 
-        logging.info("👁️ 👁️ 👁️ Observation space 👁️ 👁️ 👁️")
-        logging.info(f"{self.envs.observation_space}")
+            logging.info("👁️ 👁️ 👁️ Observation space 👁️ 👁️ 👁️")
+            logging.info(f"{self.envs.observation_space}")
 
-        if self.envs.variation_space is not None:
-            logging.info("⚗️ ⚗️ ⚗️ Variation space ⚗️ ⚗️ ⚗️")
-            logging.info(f"{self.envs.variation_space}")
-        else:
-            logging.warning("No variation space provided!")
+            if self.envs.variation_space is not None:
+                logging.info("⚗️ ⚗️ ⚗️ Variation space ⚗️ ⚗️ ⚗️")
+                logging.info(f"{self.envs.variation_space}")
+            else:
+                logging.warning("No variation space provided!")
 
         self.seed = seed
 
@@ -251,7 +253,9 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def record_dataset(self, dataset_name, episodes=10, seed=None, options=None):
+    def record_dataset(
+        self, dataset_name, episodes=10, seed=None, cache_dir=None, options=None
+    ):
         """Collect episodes with the current policy and save them as a HuggingFace Dataset (Parquet shards).
 
         Parameters
@@ -291,7 +295,8 @@ class World:
         - Sharding logic ensures a new shard index is chosen if prior shards exist.
         - Only the first ``episodes`` fully completed episodes are persisted for the new shard.
         """
-        dataset_path = Path(swm.utils.get_cache_dir(), dataset_name)
+        cache_dir = cache_dir or swm.utils.get_cache_dir()
+        dataset_path = Path(cache_dir, dataset_name)
         dataset_path.mkdir(parents=True, exist_ok=True)
 
         hf_dataset = None
@@ -468,7 +473,14 @@ class World:
         )
 
     def record_video_from_dataset(
-        self, video_path, dataset_name, episode_idx, max_steps=500, fps=30, num_proc=4
+        self,
+        video_path,
+        dataset_name,
+        episode_idx,
+        max_steps=500,
+        fps=30,
+        num_proc=4,
+        cache_dir=None,
     ):
         """Replay stored dataset episodes and export them as MP4 videos.
 
@@ -490,7 +502,8 @@ class World:
         """
         import imageio
 
-        dataset_path = Path(swm.utils.get_cache_dir(), dataset_name)
+        cache_dir = cache_dir or swm.utils.get_cache_dir()
+        dataset_path = Path(cache_dir, dataset_name)
         assert dataset_path.is_dir(), (
             f"Dataset {dataset_name} not found in cache dir {swm.utils.get_cache_dir()}"
         )

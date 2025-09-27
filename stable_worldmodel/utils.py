@@ -10,13 +10,6 @@ from typing import Any, Iterable, MutableMapping
 from loguru import logger as logging
 
 
-def get_cache_dir() -> str:
-    """Return the cache directory for stable_worldmodel."""
-    cache_dir = os.getenv("XENOWORLDS_HOME", os.path.expanduser("~/.stable_worldmodel"))
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
 def pretraining(script_path: str, args: str) -> int:
     assert os.path.isfile(script_path), f"Script {script_path} does not exist."
     logging.info(
