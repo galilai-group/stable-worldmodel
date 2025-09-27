@@ -1,16 +1,9 @@
-"""Minari CLI commands."""
+"""stable-worldmodel CLI commands."""
 
-import os
-import shutil
-from collections import deque
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import typer
-from datasets import load_dataset_builder
-from gymnasium.envs.registration import EnvSpec
 from rich import print
-from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
@@ -18,19 +11,14 @@ from rich.console import Group
 from typing_extensions import Annotated
 from rich.rule import Rule
 
-import stable_worldmodel as swm
+from stable_worldmodel import data
 
 from .__about__ import __version__
 
-
-from typing import Any, Dict, List, Union
 import numpy as np
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
-from rich.tree import Tree
-from rich.text import Text
 
 console = Console()
 
@@ -230,14 +218,14 @@ def list_cmd(
     ],
 ):
     """List stable-worldmodel models/datasets/worlds stored in cache dir."""
-    cache_dir = swm.data.get_cache_dir()
+    cache_dir = data.get_cache_dir()
 
     if kind == "dataset":
-        cached_items = swm.data.list_datasets()
+        cached_items = data.list_datasets()
     elif kind == "model":
-        cached_items = swm.data.list_models()
+        cached_items = data.list_models()
     elif kind == "world":
-        cached_items = swm.data.list_worlds()
+        cached_items = data.list_worlds()
     else:
         print("[red]Invalid type: must be 'model', 'dataset' or 'world'[/red]")
         raise typer.Abort()
@@ -273,17 +261,17 @@ def show(
     ] = False,
 ):
     """Show information about cached datasets or worlds."""
-    cache_dir = swm.data.get_cache_dir()
+    cache_dir = data.get_cache_dir()
 
     if kind == "dataset":
-        cached_items = swm.data.list_datasets()
+        cached_items = data.list_datasets()
         items = names if not all else cached_items
-        info_fn = swm.data.dataset_info
+        info_fn = data.dataset_info
         display_fn = display_dataset_info
     elif kind == "world":
-        cached_items = swm.data.list_worlds()
+        cached_items = data.list_worlds()
         items = names if not all else cached_items
-        info_fn = swm.data.world_info
+        info_fn = data.world_info
         display_fn = display_world_info
     else:
         print("[red] Invalid type: must be 'world' or 'dataset' [/red]")
@@ -321,14 +309,14 @@ def delete(
     ],
 ):
     """Delete models or datasets from cached dir."""
-    cache_dir = swm.data.get_cache_dir()
+    cache_dir = data.get_cache_dir()
 
     if kind == "dataset":
-        cached_items = swm.data.list_datasets()
-        deleter = swm.data.delete_dataset
+        cached_items = data.list_datasets()
+        deleter = data.delete_dataset
     elif kind == "model":
-        cached_items = swm.data.list_models()
-        deleter = swm.data.delete_model
+        cached_items = data.list_models()
+        deleter = data.delete_model
     else:
         print("[red]Invalid type: must be 'model' or 'dataset'[/red]")
         raise typer.Abort()
