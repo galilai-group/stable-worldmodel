@@ -32,7 +32,7 @@ policy = swm.policy.WorldModelPolicy(
 world.set_policy(policy)
 
 spt_module = torch.load(
-    swm.utils.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False
+    swm.data.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False
 )
 world_model = spt_module.model
 results = world.evaluate(episodes=2, seed=2347)  # , options={...})

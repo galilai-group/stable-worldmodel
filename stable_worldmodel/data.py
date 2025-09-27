@@ -165,8 +165,54 @@ def list_datasets():
         return [e.name for e in entries if e.is_dir()]
 
 
+def list_models():
+    pattern = re.compile(
+        r"^(.*?)(?=_(?:weights(?:-[^.]*)?|object)\.ckpt$)", re.IGNORECASE
+    )
+
+    cache_dir = get_cache_dir()
+    models = set()
+
+    for fname in os.listdir(cache_dir):
+        m = pattern.match(fname)
+        if m:
+            models.add(m.group(1))
+
+    return sorted(models)
+
+
 def dataset_info(name):
-    pass
+    # check name exists
+    if name not in list_datasets():
+        raise ValueError(f"Dataset '{name}' not found. Available: {list_datasets()}")
+
+    dataset = load_dataset(
+        "parquet",
+        data_files=str(Path(get_cache_dir(), name, "*.parquet")),
+        split="train",
+    )
+
+    dataset.set_format("numpy")
+
+    assert_msg = lambda col: (f"Dataset must have '{col}' column")
+    assert "episode_idx" in dataset.column_names, assert_msg("episode_idx")
+    assert "step_idx" in dataset.column_names, assert_msg("step_idx")
+    assert "episode_len" in dataset.column_names, assert_msg("episode_len")
+    assert "pixels" in dataset.column_names, assert_msg("pixels")
+    assert "action" in dataset.column_names, assert_msg("action")
+    assert "goal" in dataset.column_names, assert_msg("goal")
+
+    info = {
+        "name": name,
+        "num_episodes": len(np.unique(dataset["episode_idx"])),
+        "num_steps": len(dataset),
+        "columns": dataset.column_names,
+        "obs_shape": dataset["pixels"][0].shape,
+        "action_shape": dataset["action"][0].shape,
+        "goal_shape": dataset["goal"][0].shape,
+    }
+
+    return info
 
 
 def list_worlds():
@@ -263,6 +309,8 @@ def delete_dataset(name):
         # delete dataset directory
         shutil.rmtree(dataset_path, ignore_errors=False)
 
+        print(f"🗑️ Dataset {dataset_path} deleted!")
+
     except Exception as e:
         print(f"[red]Error cleaning up dataset [cyan]{name}[/cyan]: {e}[/red]")
 
@@ -275,22 +323,9 @@ def delete_model(name):
         if pattern.match(fname):
             filepath = os.path.join(cache_dir, fname)
             try:
-                # os.remove(filepath)
-                print(f"Deleted: {filepath}")
+                os.remove(filepath)
+                print(f"🔮 Model {fname} deleted")
             except Exception as e:
                 print(
                     f"[red]Error occured while deleting model [cyan]{name}[/cyan]: {e}[/red]"
                 )
-
-
-if __name__ == "__main__":
-    print("World list: ", list_worlds())
-    print("Dataset list: ", list_datasets())
-
-    for w in list_worlds():
-        print(world_info(w))
-
-    delete_model("push_t_model")
-    delete_model("dummy_test")
-    delete_dataset("test")
-    delete_dataset("simple-pointmaze")

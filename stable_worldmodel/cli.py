@@ -1,25 +1,173 @@
 """Minari CLI commands."""
 
 import os
+import shutil
 from collections import deque
 from pathlib import Path
-import shutil
 from typing import Any, Dict, List, Optional
-from typing_extensions import Annotated
 
 import typer
+from datasets import load_dataset_builder
 from gymnasium.envs.registration import EnvSpec
 from rich import print
 from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
-
-from __about__ import __version__
+from typing_extensions import Annotated
 
 import stable_worldmodel as swm
 
-from datasets import load_dataset_builder
+from .__about__ import __version__
+
+
+from typing import Any, Dict, List, Union
+import numpy as np
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.tree import Tree
+from rich.text import Text
+
+console = Console()
+
+
+def _summarize(x: Any) -> str:
+    try:
+        a = np.asarray(x)
+    except:
+        return repr(x)
+    return (
+        f"shape={list(a.shape)}, min={a.min()}, max={a.max()}"
+        if a.size
+        else f"[] shape={list(a.shape)}"
+    )
+
+
+def _leaf(m: Any) -> bool:
+    return isinstance(m, dict) and "type" in m
+
+
+def _leaf_table(title: str, m: Dict[str, Any]) -> Table:
+    t = Table(
+        title=title,
+        title_style="bold yellow",
+        title_justify="left",
+        box=box.MINIMAL_DOUBLE_HEAD,
+        show_header=False,
+        pad_edge=False,
+    )
+    t.add_column("k", style="bold cyan", no_wrap=True)
+    t.add_column("v")
+    order = ["type", "shape", "dtype", "n", "low", "high"]
+    for k in order:
+        if k in m:
+            v = _summarize(m[k]) if k in ("low", "high") and m[k] is not None else m[k]
+            t.add_row(k, str(v))
+    for k, v in m.items():
+        if k not in order:
+            t.add_row(k, str(v))
+    return t
+
+
+def _build_hierarchy(flat_names, sep="."):
+    root: Dict[str, Dict] = {}
+    if not flat_names:
+        return root
+    for raw in flat_names:
+        parts = [p for p in str(raw).split(sep) if p]
+        cur = root
+        for p in parts:
+            cur = cur.setdefault(p, {})
+    return root
+
+
+def _render_hierarchy(parent: Tree, d: Dict[str, Dict]):
+    for k in sorted(d):
+        is_non_leaf = bool(d[k])
+        label = Text(k, style="bold cyan") if is_non_leaf else Text(k)
+        child = parent.add(label)
+        if is_non_leaf:
+            _render_hierarchy(child, d[k])
+
+
+def _render(meta: Union[Dict[str, Any], List[Any], None], label: str):
+    if meta is None:
+        return Text(f"{label}: <none>", style="italic")
+    if _leaf(meta):
+        return _leaf_table(label, meta)
+    tree = Tree(Text(label, style="bold yellow"))
+    if isinstance(meta, dict):
+        for k, v in meta.items():
+            tree.add(_leaf_table(k, v) if _leaf(v) else _render(v, k))
+    else:
+        for i, v in enumerate(meta):
+            title = f"#{i}"
+            tree.add(_leaf_table(title, v) if _leaf(v) else _render(v, title))
+    return tree
+
+
+def _variation_space(variation: Dict[str, Any]):
+    vroot = Tree(Text("Variation Space", style="bold yellow"))
+
+    # small facts table (aligned titles)
+    if not variation.get("has_variation"):
+        vroot.add("This world has no variations 🙁")
+    else:
+        # hierarchical names
+        names = variation.get("names") or []
+        if isinstance(names, (list, tuple)) and names:
+            tree_dict = _build_hierarchy(names, sep=".")
+            _render_hierarchy(vroot, tree_dict)
+        else:
+            vroot.add(Text("names: —", style="dim"))
+
+    return vroot
+
+
+def display_world_info(info: Dict[str, Any]) -> None:
+    root = Tree(Text(f"World: {info.get('name', '<unknown>')}", style="bold green"))
+    root.add(_render(info.get("observation_space"), "Extra Observation Space"))
+    root.add(_render(info.get("action_space"), "Action Space"))
+    root.add(_variation_space(info.get("variation", {})))
+
+    console.print(
+        Panel(
+            root,
+            title="[b]World Info[/b]",
+            border_style="green",
+            padding=(1, 2),
+            title_align="center",
+        )
+    )
+
+
+def display_dataset_info(info: Dict[str, Any]) -> None:
+    """Pretty-print dataset info as a Rich table."""
+    table = Table(
+        title=f"Dataset: [bold cyan]{info['name']}[/bold cyan]",
+        box=box.SIMPLE_HEAVY,
+        show_header=False,
+        pad_edge=False,
+    )
+    table.add_column("Key", style="bold yellow", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    # Add rows in a logical order
+    table.add_row("Episodes", str(info["num_episodes"]))
+    table.add_row("Steps", str(info["num_steps"]))
+    table.add_row("Obs Shape", str(info["obs_shape"]))
+    table.add_row("Action Shape", str(info["action_shape"]))
+    table.add_row("Goal Shape", str(info["goal_shape"]))
+    table.add_row("Columns", ", ".join(info["columns"]))
+
+    console.print(Panel(table, border_style="cyan", padding=(1, 2)))
+
+
+##############
+##   APP    ##
+##############
 
 
 app = typer.Typer()
@@ -30,132 +178,6 @@ def _version_callback(value: bool):
     if value:
         typer.echo(f"stable-worldmodel version: {__version__}")
         raise typer.Exit()
-
-
-class TableTree:
-    def __init__(
-        self,
-        name: Optional[str] = None,
-        total_episodes: int = 0,
-        total_steps: int = 0,
-        size: float = 0,
-        authors: Optional[set] = None,
-        count: int = 0,
-        sub_nodes: Optional[Dict] = None,
-        docs_url: Optional[str] = None,
-    ):
-        self.name = name
-        self.total_episodes = total_episodes
-        self.total_steps = total_steps
-        self.size = size
-        self.authors = authors if authors is not None else set()
-        self.count = count
-        self.sub_nodes = sub_nodes if sub_nodes is not None else {}
-        self.docs_url = docs_url
-
-    def update(self, other):
-        self.total_episodes += other.total_episodes
-        self.total_steps += other.total_steps
-        self.size += other.size
-        self.authors.update(other.authors)
-        self.count += other.count
-
-    def to_row(self) -> List[str]:
-        if len(self.authors) == 0:
-            authors = "Unknown"
-        else:
-            authors = ", ".join(self.authors)
-
-        name = self.name
-        assert name is not None
-        if len(self.sub_nodes) > 0:
-            name = f"[bold]{name}/...[/bold]\n [italic]Group with {self.count} datasets[/italic]"
-        if self.docs_url is not None:
-            name = f"[link={self.docs_url}]{name}[/link]"
-
-        return [
-            name,
-            TableTree.print_num(self.total_episodes),
-            TableTree.print_num(self.total_steps),
-            self.print_size(),
-            authors,
-        ]
-
-    def print_size(self) -> str:
-        if self.size < 1_000:
-            return f"{self.size:.1f} MB"
-        elif self.size < 1_000_000:
-            return f"{self.size / 1_000:.2f} GB"
-        else:
-            return f"{self.size / 1_000_000:.2f} TB"
-
-    @staticmethod
-    def print_num(num: float) -> str:
-        num_letters = ["", "K", "M", "B", "T"]
-        i = 0
-        while num >= 1_000 and i < len(num_letters):
-            num /= 1000
-            i += 1
-
-        return f"{num:.0f}{num_letters[i]}"
-
-
-def _show_dataset_table(datasets: Dict[str, Dict[str, Any]], table_title: str):
-    MAX_ROWS_PER_GROUP = 10
-
-    table_tree = TableTree()
-    for dataset_id in datasets.keys():
-        dataset_metadata = datasets[dataset_id]
-        dataset_node = TableTree(
-            name=dataset_id,
-            total_episodes=dataset_metadata["total_episodes"],
-            total_steps=dataset_metadata["total_steps"],
-            size=dataset_metadata["dataset_size"],
-            authors=dataset_metadata.get("author"),
-            count=1,
-            docs_url=dataset_metadata.get("docs_url"),
-        )
-
-        table_tree.update(dataset_node)
-        namespace, _, _ = parse_dataset_id(dataset_id)
-        current_root = table_tree
-        for ns in namespace_hierarchy(namespace):
-            if ns not in current_root.sub_nodes:
-                current_root.sub_nodes[ns] = TableTree(name=ns)
-            current_root = current_root.sub_nodes[ns]
-            current_root.update(dataset_node)
-        current_root.sub_nodes[dataset_id] = dataset_node
-
-    caption = (
-        f"Number of datasets: {table_tree.count}, total size: {table_tree.print_size()}"
-    )
-    table = Table(title=table_title, caption=caption)
-    table.add_column("Name", justify="left", style="cyan", no_wrap=True)
-    table.add_column("# Episodes", justify="right", style="green", no_wrap=True)
-    table.add_column("# Steps", justify="right", style="green", no_wrap=True)
-    table.add_column("Size", justify="left", style="green", no_wrap=True)
-    table.add_column("Author", justify="left", style="magenta", no_wrap=True)
-
-    queue = deque(table_tree.sub_nodes.values())
-    section_sentinel = object()
-    aggregate = False
-    while queue:
-        table_node = queue.popleft()
-        if table_node is section_sentinel:
-            table.add_section()
-            continue
-
-        if len(table_node.sub_nodes) == 0:
-            table.add_row(*table_node.to_row())
-        elif aggregate and len(table_node.sub_nodes) > MAX_ROWS_PER_GROUP:
-            table.add_row(*table_node.to_row())
-            table.add_section()
-        else:
-            queue.extend(table_node.sub_nodes.values())
-            queue.append(section_sentinel)
-        aggregate = aggregate or len(table_node.sub_nodes) > 1
-
-    print(table)
 
 
 @app.callback()
@@ -176,151 +198,133 @@ def common(
 
 @app.command("list")
 def list_cmd(
-    all: Annotated[
-        bool, typer.Option("--all", "-a", help="Show all dataset versions.")
-    ] = False,
-    prefix: Annotated[
-        Optional[str], typer.Option("--prefix", "-p", help="Filter datasets by prefix.")
-    ] = None,
+    kind: Annotated[
+        str, typer.Argument(help="Type to list: 'model', 'dataset' or 'world'")
+    ],
 ):
-    """List stable-worldmodel datasets stored in local directory."""
-    datasets = local.list_local_datasets(
-        latest_version=True, compatible_minari_version=not all, prefix=prefix
+    """List stable-worldmodel models/datasets/worlds stored in cache dir."""
+    cache_dir = swm.data.get_cache_dir()
+
+    if kind == "dataset":
+        cached_items = swm.data.list_datasets()
+    elif kind == "model":
+        cached_items = swm.data.list_models()
+    elif kind == "world":
+        cached_items = swm.data.list_worlds()
+    else:
+        print("[red]Invalid type: must be 'model', 'dataset' or 'world'[/red]")
+        raise typer.Abort()
+
+    if not cached_items:
+        print(f"[yellow]No cached {kind}s found in {cache_dir}[/yellow]")
+        return
+
+    table = Table(
+        title=f"Cached {kind}s in [dim]{cache_dir}[/dim]",
+        header_style="bold cyan",
+        box=box.SIMPLE,
     )
+    table.add_column("Name", style="green", no_wrap=True)
 
-    dataset_dir = swm.utils.get_cache_dir()
-    table_title = f"Local saved datasets('{dataset_dir}')"
+    for item in sorted(cached_items):
+        table.add_row(item)
 
-    _show_dataset_table(datasets, table_title)
-
-
-@app.command()
-def show(dataset_id: Annotated[str, typer.Argument()]):
-    """Describe a local or remote dataset, and its environment."""
-    local_datasets = local.list_local_datasets(prefix=dataset_id)
-    if dataset_id in local_datasets:
-        dst_metadata = local_datasets[dataset_id]
-    else:
-        remote_path = None
-        if "://" in dataset_id:
-            remote_type, remote_path = dataset_id.split("://", maxsplit=1)
-            remote_path, dataset_id = remote_path.split("/", maxsplit=1)
-            remote_path = f"{remote_type}://{remote_path}"
-        remote_datasets = hosting.list_remote_datasets(
-            remote_path=remote_path, prefix=dataset_id
-        )
-
-        if dataset_id in remote_datasets:
-            dst_metadata = remote_datasets[dataset_id]
-        else:
-            local_dataset_path = get_dataset_path()
-            print(
-                Text(
-                    f"""The dataset `{dataset_id}` can't be found locally """
-                    f"""(at `{local_dataset_path}`) or remotely.""",
-                    style="red",
-                )
-            )
-            raise typer.Abort()
-
-    description = dst_metadata.get("description")
-    docs_url = dst_metadata.get("docs_url")
-
-    if docs_url is not None:
-        dataset_id_text = f"[{dataset_id}]({docs_url})"
-    else:
-        dataset_id_text = dataset_id
-
-    dataset_spec_table = Table(show_header=False, highlight=True)
-    dataset_spec_table.add_column(style="bold")
-    dataset_spec_table.add_column(style="not bold")
-
-    for key, value in get_dataset_spec_dict(dst_metadata).items():
-        md = Markdown(
-            str(value), inline_code_lexer="python", inline_code_theme="monokai"
-        )
-        dataset_spec_table.add_row(key, md)
-
-    print(Markdown(f"""# {dataset_id_text}"""))
-
-    if description is not None:
-        print(Markdown(f"""\n## Description\n {description} """))
-
-    print(Markdown("## Dataset Specs"))
-    print(dataset_spec_table)
-
-    for env_type in ["env_spec", "eval_env_spec"]:
-        env_spec_json = dst_metadata.get(env_type)
-
-        if env_spec_json is not None:
-            assert isinstance(env_spec_json, str)
-            env_spec_json = (  # for gymnasium 1.0.0 compatibility
-                env_spec_json.replace('"order_enforce": true,', "")
-                .replace('"apply_api_compatibility": false,', "")
-                .replace('"autoreset": false, ', "")
-            )
-            env_spec = EnvSpec.from_json(env_spec_json)
-            env_spec_table = Table(show_header=False, highlight=True)
-            env_spec_table.add_column(style="bold")
-            env_spec_table.add_column(style="not bold")
-
-            for key, value in get_env_spec_dict(env_spec).items():
-                md = Markdown(
-                    value, inline_code_lexer="python", inline_code_theme="monokai"
-                )
-                env_spec_table.add_row(key, md)
-
-            if env_type == "env_spec":
-                print(Markdown("## Environment Specs"))
-            else:
-                print(Markdown("## Evaluation Environment Specs"))
-
-            print(env_spec_table)
+    print(table)
 
 
 @app.command()
-def delete(datasets: Annotated[List[str], typer.Argument()]):
-    """Delete datasets from local database."""
-    # check that the given local datasets exist
-    local_dsts = local.list_local_datasets()
-    non_matching_local = [dst for dst in datasets if dst not in local_dsts]
+def show(
+    kind: Annotated[str, typer.Argument(help="Type to show: 'dataset' or 'world'")],
+    names: Annotated[
+        Optional[List[str]], typer.Argument(help="Names of worlds or datasets to show")
+    ] = None,
+    all: Annotated[
+        bool,
+        typer.Option(
+            "--all", "-a", help="Show all cached datasets/worlds", is_flag=True
+        ),
+    ] = False,
+):
+    """Show information about cached datasets or worlds."""
+    cache_dir = swm.data.get_cache_dir()
+
+    if kind == "dataset":
+        cached_items = swm.data.list_datasets()
+        items = names if not all else cached_items
+        info_fn = swm.data.dataset_info
+        display_fn = display_dataset_info
+    elif kind == "world":
+        cached_items = swm.data.list_worlds()
+        items = names if not all else cached_items
+        info_fn = swm.data.world_info
+        display_fn = display_world_info
+    else:
+        print("[red] Invalid type: must be 'world' or 'dataset' [/red]")
+        raise typer.Abort()
+
+    provided_names = list(names or [])
+    if not all and not provided_names:
+        print(
+            "[red]Nothing to show. Use --all or provide one or more NAMES.[/red]",
+        )
+        raise typer.Abort()
+
+    non_matching_local = [item for item in items if item not in cached_items]
+
     if len(non_matching_local) > 0:
-        local_dataset_path = get_dataset_path()
         tree = Tree(
-            f"The following datasets can't be found locally at `{local_dataset_path}`",
+            f"The following {kind}s can't be found locally at `{cache_dir}`",
             style="red",
         )
-        for dst in non_matching_local:
-            tree.add(dst, style="magenta")
+
+        for item in non_matching_local:
+            tree.add(item, style="magenta")
         print(tree)
         raise typer.Abort()
 
-    # prompt to delete datasets
-    datasets_to_delete = {
-        local_name: local_dsts[local_name]
-        for local_name in local_dsts.keys()
-        if local_name in datasets
-    }
+    for item in items:
+        display_fn(info_fn(item))
 
-    _show_dataset_table(datasets_to_delete, "Delete local Minari datasets")
-    typer.confirm("Are you sure you want to delete these local datasets?", abort=True)
 
-    cache_dir = swm.utils.get_cache_dir()
-    for dst in datasets:
-        try:
-            dataset_path = Path(cache_dir, dst)
-            # remove cache files
-            builder = load_dataset_builder(
-                "parquet", data_files=str(Path(dataset_path, "*.parquet"))
-            )
-            builder.cleanup_cache_files()
+@app.command()
+def delete(
+    kind: Annotated[str, typer.Argument(help="Type to delete: 'model' or 'dataset'")],
+    names: Annotated[
+        List[str], typer.Argument(help="Names of models or datasets to delete")
+    ],
+):
+    """Delete models or datasets from cached dir."""
+    cache_dir = swm.data.get_cache_dir()
 
-            # delete dataset directory
-            shutil.rmtree(dataset_path, ignore_errors=True)
-            print(f"Deleted dataset {dst}!")
+    if kind == "dataset":
+        cached_items = swm.data.list_datasets()
+        deleter = swm.data.delete_dataset
+    elif kind == "model":
+        cached_items = swm.data.list_models()
+        deleter = swm.data.delete_model
+    else:
+        print("[red]Invalid type: must be 'model' or 'dataset'[/red]")
+        raise typer.Abort()
 
-        except Exception as e:
-            print(f"[red]Error cleaning up dataset [cyan]{dst}[/cyan]: {e}[/red]")
+    non_matching_local = [item for item in names if item not in cached_items]
+
+    if len(non_matching_local) > 0:
+        tree = Tree(
+            f"The following {kind}s can't be found locally at `{cache_dir}`",
+            style="red",
+        )
+
+        for item in non_matching_local:
+            tree.add(item, style="magenta")
+        print(tree)
+        raise typer.Abort()
+
+    # _show_dataset_table(datasets_to_delete, "Delete local Minari datasets")
+    typer.confirm(f"Are you sure you want to delete these cached {kind}s?", abort=True)
+
+    for item in names:
+        print(f"Deleting {kind} '{item}'...")
+        deleter(item)
 
 
 if __name__ == "__main__":

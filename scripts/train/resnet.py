@@ -10,6 +10,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from pathlib import Path
 import stable_worldmodel as swm
 
+
 def get_data(dataset_name):
     """Return data and action space dim for training predictor"""
 
@@ -35,9 +36,14 @@ def get_data(dataset_name):
     )
 
     # -- load dataset
-    data_dir = swm.utils.get_cache_dir()
-    dataset = swm.data.StepsDataset("parquet", data_files=str(Path(data_dir, dataset_name, "*.parquet")), split="train",
-                                    num_steps=2, frameskip=1, transform=transform
+    data_dir = swm.data.get_cache_dir()
+    dataset = swm.data.StepsDataset(
+        "parquet",
+        data_files=str(Path(data_dir, dataset_name, "*.parquet")),
+        split="train",
+        num_steps=2,
+        frameskip=1,
+        transform=transform,
     )
 
     train_set, val_set = spt.data.random_split(dataset, lengths=[0.9, 0.1])
@@ -112,14 +118,17 @@ def get_world_model(action_dim):
 
     return world_model
 
+
 @hydra.main(version_base=None, config_path="./", config_name="config")
 def run(cfg):
     """Run training of predictor"""
     data, action_dim = get_data(cfg.dataset_name)
     world_model = get_world_model(action_dim)
 
-    cache_dir = swm.utils.get_cache_dir()
-    checkpoint_callback = ModelCheckpoint(dirpath=cache_dir,filename=f'{cfg.output_model_name}_weights', save_last=True)
+    cache_dir = swm.data.get_cache_dir()
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights", save_last=True
+    )
 
     trainer = pl.Trainer(
         max_epochs=1,
@@ -130,14 +139,17 @@ def run(cfg):
         enable_checkpointing=True,
     )
 
-    manager = spt.Manager(trainer=trainer, module=world_model, data=data)#, ckpt_path=f"{cfg.output_model_name}_ckpt")
+    manager = spt.Manager(
+        trainer=trainer, module=world_model, data=data
+    )  # , ckpt_path=f"{cfg.output_model_name}_ckpt")
     manager()
 
     if hasattr(cfg, "dump_object") and cfg.dump_object:
         # -- save the world model object
         output_path = Path(cache_dir, f"{cfg.output_model_name}_object.ckpt")
-        torch.save(world_model.to('cpu'), output_path)
+        torch.save(world_model.to("cpu"), output_path)
         print(f"Saved world model object to {output_path}")
+
 
 if __name__ == "__main__":
     run()

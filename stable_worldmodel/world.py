@@ -295,7 +295,7 @@ class World:
         - Sharding logic ensures a new shard index is chosen if prior shards exist.
         - Only the first ``episodes`` fully completed episodes are persisted for the new shard.
         """
-        cache_dir = cache_dir or swm.utils.get_cache_dir()
+        cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
         dataset_path.mkdir(parents=True, exist_ok=True)
 
@@ -502,10 +502,10 @@ class World:
         """
         import imageio
 
-        cache_dir = cache_dir or swm.utils.get_cache_dir()
+        cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
         assert dataset_path.is_dir(), (
-            f"Dataset {dataset_name} not found in cache dir {swm.utils.get_cache_dir()}"
+            f"Dataset {dataset_name} not found in cache dir {swm.data.get_cache_dir()}"
         )
 
         if isinstance(episode_idx, int):
@@ -596,7 +596,7 @@ class World:
         self.truncateds = np.zeros(self.num_envs)
 
         episode_idx = np.arange(self.num_envs)
-        self.reset(seed, options)  # <- incr global seed by num_envs
+        self.reset(seed, options)
         root_seed = seed + self.num_envs if seed is not None else None
 
         eval_ep_count = 0
@@ -660,19 +660,3 @@ class World:
         )
 
         return metrics
-
-
-# seed:  2347
-# [[1.425851  1.2717669]
-#  [2.514     1.8045106]
-#  [2.5545564 3.3728309]
-#  [2.3957472 2.291733 ]
-#  [3.9623232 1.7835523]]
-
-
-# seed:  2347
-# [[2.921828   2.3971708 ]
-#  [2.238938   0.8921005 ]
-#  [2.4078233  0.40717635]
-#  [2.7672877  0.9567832 ]
-#  [1.8181777  2.5882847 ]]
