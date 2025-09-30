@@ -128,7 +128,11 @@ class EverythingToInfoWrapper(gym.Wrapper):
         # add all variations to info if needed
         options = kwargs.get("options")
         if options is not None and "variation" in options:
-            self._variations_watch = options.get("variation")
+            var_opt = options["variation"]
+            if len(var_opt) == 1 and var_opt[0] == "all":
+                self._variations_watch = self.env.unwrapped.variation_space.names()
+            else:
+                self._variations_watch = var_opt
 
         for key in self._variations_watch:
             var_key = f"variation.{key}"

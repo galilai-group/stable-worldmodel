@@ -1,366 +1,17 @@
-# env import
+from typing import Sequence
+
+import cv2
 import gymnasium as gym
-import einops
-from gymnasium import spaces
-from pymunk.space_debug_draw_options import SpaceDebugColor
-from pymunk.vec2d import Vec2d
-from typing import Tuple, Sequence, Dict, Union, Optional
+import numpy as np
 import pygame
 import pymunk
-import numpy as np
-import shapely.geometry as sg
-import cv2
-import skimage.transform as st
 import pymunk.pygame_util
-import collections
-from matplotlib import cm
-import torch
+from gymnasium import spaces
+from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
 
-# @markdown ### **Environment**
-# @markdown Defines a PyMunk-based Push-T environment `PushTEnv`.
-# @markdown
-# @markdown **Goal**: push the gray T-block into the green area.
-# @markdown
-# @markdown Adapted from [Implicit Behavior Cloning](https://implicitbc.github.io/)
-
-
-positive_y_is_up: bool = False
-"""Make increasing values of y point upwards.
-
-When True::
-
-    y
-    ^
-    |      . (3, 3)
-    |
-    |   . (2, 2)
-    |
-    +------ > x
-
-When False::
-
-    +------ > x
-    |
-    |   . (2, 2)
-    |
-    |      . (3, 3)
-    v
-    y
-
-"""
-
-
-# def farthest_point_sampling(points: np.ndarray, n_points: int, init_idx: int):
-#     """
-#     Naive O(N^2)
-#     """
-#     assert n_points >= 1
-#     chosen_points = [points[init_idx]]
-#     for _ in range(n_points - 1):
-#         cpoints = np.array(chosen_points)
-#         all_dists = np.linalg.norm(points[:, None, :] - cpoints[None, :, :], axis=-1)
-#         min_dists = all_dists.min(axis=1)
-#         next_idx = np.argmax(min_dists)
-#         next_pt = points[next_idx]
-#         chosen_points.append(next_pt)
-#     result = np.array(chosen_points)
-#     return result
-
-
-# class PymunkKeypointManager:
-#     def __init__(
-#         self,
-#         local_keypoint_map: Dict[str, np.ndarray],
-#         color_map: Optional[Dict[str, np.ndarray]] = None,
-#     ):
-#         """
-#         local_keypoint_map:
-#             "<attribute_name>": (N,2) floats in object local coordinate
-#         """
-#         if color_map is None:
-#             cmap = cm.get_cmap("tab10")
-#             color_map = dict()
-#             for i, key in enumerate(local_keypoint_map.keys()):
-#                 color_map[key] = (np.array(cmap.colors[i]) * 255).astype(np.uint8)
-
-#         self.local_keypoint_map = local_keypoint_map
-#         self.color_map = color_map
-
-#     @property
-#     def kwargs(self):
-#         return {
-#             "local_keypoint_map": self.local_keypoint_map,
-#             "color_map": self.color_map,
-#         }
-
-#     @classmethod
-#     def create_from_pusht_env(cls, env, n_block_kps=9, n_agent_kps=3, seed=0, **kwargs):
-#         rng = np.random.default_rng(seed=seed)
-#         local_keypoint_map = dict()
-#         for name in ["block", "agent"]:
-#             self = env
-#             self.space = pymunk.Space()
-#             if name == "agent":
-#                 self.agent = obj = self.add_circle((256, 400), 15)
-#                 n_kps = n_agent_kps
-#             else:
-#                 self.block = obj = self.add_tee((256, 300), 0)
-#                 n_kps = n_block_kps
-
-#             self.screen = pygame.Surface((512, 512))
-#             self.screen.fill(pygame.Color("white"))
-#             draw_options = DrawOptions(self.screen)
-#             self.space.debug_draw(draw_options)
-#             # pygame.display.flip()
-#             img = np.uint8(pygame.surfarray.array3d(self.screen).transpose(1, 0, 2))
-#             obj_mask = (img != np.array([255, 255, 255], dtype=np.uint8)).any(axis=-1)
-
-#             tf_img_obj = cls.get_tf_img_obj(obj)
-#             xy_img = np.moveaxis(np.array(np.indices((512, 512))), 0, -1)[:, :, ::-1]
-#             local_coord_img = tf_img_obj.inverse(xy_img.reshape(-1, 2)).reshape(
-#                 xy_img.shape
-#             )
-#             obj_local_coords = local_coord_img[obj_mask]
-
-#             # furthest point sampling
-#             init_idx = rng.choice(len(obj_local_coords))
-#             obj_local_kps = farthest_point_sampling(obj_local_coords, n_kps, init_idx)
-#             small_shift = rng.uniform(0, 1, size=obj_local_kps.shape)
-#             obj_local_kps += small_shift
-
-#             local_keypoint_map[name] = obj_local_kps
-
-#         return cls(local_keypoint_map=local_keypoint_map, **kwargs)
-
-#     @staticmethod
-#     def get_tf_img(pose: Sequence):
-#         pos = pose[:2]
-#         rot = pose[2]
-#         tf_img_obj = st.AffineTransform(translation=pos, rotation=rot)
-#         return tf_img_obj
-
-#     @classmethod
-#     def get_tf_img_obj(cls, obj: pymunk.Body):
-#         pose = tuple(obj.position) + (obj.angle,)
-#         return cls.get_tf_img(pose)
-
-#     def get_keypoints_global(
-#         self, pose_map: Dict[set, Union[Sequence, pymunk.Body]], is_obj=False
-#     ):
-#         kp_map = dict()
-#         for key, value in pose_map.items():
-#             if is_obj:
-#                 tf_img_obj = self.get_tf_img_obj(value)
-#             else:
-#                 tf_img_obj = self.get_tf_img(value)
-#             kp_local = self.local_keypoint_map[key]
-#             kp_global = tf_img_obj(kp_local)
-#             kp_map[key] = kp_global
-#         return kp_map
-
-#     def draw_keypoints(self, img, kps_map, radius=1):
-#         scale = np.array(img.shape[:2]) / np.array([512, 512])
-#         for key, value in kps_map.items():
-#             color = self.color_map[key].tolist()
-#             coords = (value * scale).astype(np.int32)
-#             for coord in coords:
-#                 cv2.circle(img, coord, radius=radius, color=color, thickness=-1)
-#         return img
-
-#     def draw_keypoints_pose(self, img, pose_map, is_obj=False, **kwargs):
-#         kp_map = self.get_keypoints_global(pose_map, is_obj=is_obj)
-#         return self.draw_keypoints(img, kps_map=kp_map, **kwargs)
-
-
-class DrawOptions(pymunk.SpaceDebugDrawOptions):
-    def __init__(self, surface: pygame.Surface) -> None:
-        """Draw a pymunk.Space on a pygame.Surface object.
-
-        Typical usage::
-
-        >>> import pymunk
-        >>> surface = pygame.Surface((10, 10))
-        >>> space = pymunk.Space()
-        >>> options = pymunk.pygame_util.DrawOptions(surface)
-        >>> space.debug_draw(options)
-
-        You can control the color of a shape by setting shape.color to the color
-        you want it drawn in::
-
-        >>> c = pymunk.Circle(None, 10)
-        >>> c.color = pygame.Color("pink")
-
-        See pygame_util.demo.py for a full example
-
-        Since pygame uses a coordinate system where y points down (in contrast
-        to many other cases), you either have to make the physics simulation
-        with Pymunk also behave in that way, or flip everything when you draw.
-
-        The easiest is probably to just make the simulation behave the same
-        way as Pygame does. In that way all coordinates used are in the same
-        orientation and easy to reason about::
-
-        >>> space = pymunk.Space()
-        >>> space.gravity = (0, -1000)
-        >>> body = pymunk.Body()
-        >>> body.position = (0, 0)  # will be positioned in the top left corner
-        >>> space.debug_draw(options)
-
-        To flip the drawing its possible to set the module property
-        :py:data:`positive_y_is_up` to True. Then the pygame drawing will flip
-        the simulation upside down before drawing::
-
-        >>> positive_y_is_up = True
-        >>> body = pymunk.Body()
-        >>> body.position = (0, 0)
-        >>> # Body will be position in bottom left corner
-
-        :Parameters:
-                surface : pygame.Surface
-                    Surface that the objects will be drawn on
-        """
-        self.surface = surface
-        super(DrawOptions, self).__init__()
-
-    def draw_circle(
-        self,
-        pos: Vec2d,
-        angle: float,
-        radius: float,
-        outline_color: SpaceDebugColor,
-        fill_color: SpaceDebugColor,
-    ) -> None:
-        p = to_pygame(pos, self.surface)
-
-        pygame.draw.circle(self.surface, fill_color.as_int(), p, round(radius), 0)
-        pygame.draw.circle(
-            self.surface, light_color(fill_color).as_int(), p, round(radius - 4), 0
-        )
-
-        circle_edge = pos + Vec2d(radius, 0).rotated(angle)
-        p2 = to_pygame(circle_edge, self.surface)
-        line_r = 2 if radius > 20 else 1
-        # pygame.draw.lines(self.surface, outline_color.as_int(), False, [p, p2], line_r)
-
-    def draw_segment(self, a: Vec2d, b: Vec2d, color: SpaceDebugColor) -> None:
-        p1 = to_pygame(a, self.surface)
-        p2 = to_pygame(b, self.surface)
-
-        pygame.draw.aalines(self.surface, color.as_int(), False, [p1, p2])
-
-    def draw_fat_segment(
-        self,
-        a: Tuple[float, float],
-        b: Tuple[float, float],
-        radius: float,
-        outline_color: SpaceDebugColor,
-        fill_color: SpaceDebugColor,
-    ) -> None:
-        p1 = to_pygame(a, self.surface)
-        p2 = to_pygame(b, self.surface)
-
-        r = round(max(1, radius * 2))
-        pygame.draw.lines(self.surface, fill_color.as_int(), False, [p1, p2], r)
-        if r > 2:
-            orthog = [abs(p2[1] - p1[1]), abs(p2[0] - p1[0])]
-            if orthog[0] == 0 and orthog[1] == 0:
-                return
-            scale = radius / (orthog[0] * orthog[0] + orthog[1] * orthog[1]) ** 0.5
-            orthog[0] = round(orthog[0] * scale)
-            orthog[1] = round(orthog[1] * scale)
-            points = [
-                (p1[0] - orthog[0], p1[1] - orthog[1]),
-                (p1[0] + orthog[0], p1[1] + orthog[1]),
-                (p2[0] + orthog[0], p2[1] + orthog[1]),
-                (p2[0] - orthog[0], p2[1] - orthog[1]),
-            ]
-            pygame.draw.polygon(self.surface, fill_color.as_int(), points)
-            pygame.draw.circle(
-                self.surface,
-                fill_color.as_int(),
-                (round(p1[0]), round(p1[1])),
-                round(radius),
-            )
-            pygame.draw.circle(
-                self.surface,
-                fill_color.as_int(),
-                (round(p2[0]), round(p2[1])),
-                round(radius),
-            )
-
-    def draw_polygon(
-        self,
-        verts: Sequence[Tuple[float, float]],
-        radius: float,
-        outline_color: SpaceDebugColor,
-        fill_color: SpaceDebugColor,
-    ) -> None:
-        ps = [to_pygame(v, self.surface) for v in verts]
-        ps += [ps[0]]
-
-        radius = 2
-        pygame.draw.polygon(self.surface, light_color(fill_color).as_int(), ps)
-
-        if radius > 0:
-            for i in range(len(verts)):
-                a = verts[i]
-                b = verts[(i + 1) % len(verts)]
-                self.draw_fat_segment(a, b, radius, fill_color, fill_color)
-
-    def draw_dot(
-        self, size: float, pos: Tuple[float, float], color: SpaceDebugColor
-    ) -> None:
-        p = to_pygame(pos, self.surface)
-        pygame.draw.circle(self.surface, color.as_int(), p, round(size), 0)
-
-
-def get_mouse_pos(surface: pygame.Surface) -> Tuple[int, int]:
-    """Get position of the mouse pointer in pymunk coordinates."""
-    p = pygame.mouse.get_pos()
-    return from_pygame(p, surface)
-
-
-def to_pygame(p: Tuple[float, float], surface: pygame.Surface) -> Tuple[int, int]:
-    """Convenience method to convert pymunk coordinates to pygame surface
-    local coordinates.
-
-    Note that in case positive_y_is_up is False, this function won't actually do
-    anything except converting the point to integers.
-    """
-    if positive_y_is_up:
-        return round(p[0]), surface.get_height() - round(p[1])
-    else:
-        return round(p[0]), round(p[1])
-
-
-def from_pygame(p: Tuple[float, float], surface: pygame.Surface) -> Tuple[int, int]:
-    """Convenience method to convert pygame surface local coordinates to
-    pymunk coordinates
-    """
-    return to_pygame(p, surface)
-
-
-def light_color(color: SpaceDebugColor):
-    color = np.minimum(
-        1.2 * np.float32([color.r, color.g, color.b, color.a]), np.float32([255])
-    )
-    color = SpaceDebugColor(r=color[0], g=color[1], b=color[2], a=color[3])
-    return color
-
-
-def pymunk_to_shapely(body, shapes):
-    geoms = list()
-    for shape in shapes:
-        if isinstance(shape, pymunk.shapes.Poly):
-            verts = [body.local_to_world(v) for v in shape.get_vertices()]
-            verts += [verts[0]]
-            geoms.append(sg.Polygon(verts))
-        else:
-            raise RuntimeError(f"Unsupported shape type {type(shape)}")
-    geom = sg.MultiPolygon(geoms)
-    return geom
+from .utils import DrawOptions, pymunk_to_shapely
 
 
 class PushT(gym.Env):
@@ -373,7 +24,6 @@ class PushT(gym.Env):
 
     def __init__(
         self,
-        legacy=False,
         block_cog=None,
         damping=None,
         render_action=False,
@@ -390,7 +40,6 @@ class PushT(gym.Env):
         self.k_p, self.k_v = 100, 20
         self.dt = 0.01
 
-        self.legacy = legacy
         self.shapes = ["L", "T", "Z", "o", "square", "I", "small_tee", "+"]
 
         self.observation_space = spaces.Dict(
@@ -564,31 +213,25 @@ class PushT(gym.Env):
         ### update variation space
         options = options or {}
 
+        if hasattr(self, "variation_space"):
+            self.variation_space.seed(seed)
+
+        options = options or {}
+
         self.variation_space.reset()
 
-        ### update the variation space
         if "variation" in options:
             assert isinstance(options["variation"], Sequence), (
                 "variation option must be a Sequence containing variations names to sample"
             )
-            # self.update_variation(options["variation"])
-            # ... sample variations
 
             if len(options["variation"]) == 1 and options["variation"][0] == "all":
                 self.variation_space.sample()
 
             else:
-                for var in options["variation"]:
-                    try:
-                        var_path = var.split(".")
-                        swm.utils.get_in(self.variation_space, var_path).sample()
+                self.variation_space.update(set(options["variation"]))
 
-                    except (KeyError, TypeError):
-                        raise ValueError(
-                            f"Variation {var} not found in variation space"
-                        )
-
-        assert self.variation_space.check(), (
+        assert self.variation_space.check(debug=True), (
             "Variation values must be within variation space!"
         )
 
@@ -846,39 +489,11 @@ class PushT(gym.Env):
         vel_block = tuple(state[-2:])
         self.agent.velocity = vel_block
         self.agent.position = pos_agent
-        # setting angle rotates with respect to center of mass
-        # therefore will modify the geometric position
-        # if not the same as CoM
-        # therefore should be modified first.
-        if self.legacy:
-            # for compatibility with legacy data
-            self.block.position = pos_block
-            self.block.angle = rot_block
-        else:
-            self.block.angle = rot_block
-            self.block.position = pos_block
+        self.block.angle = rot_block
+        self.block.position = pos_block
 
         # Run physics to take effect
         self.space.step(self.dt)
-
-    def _set_state_local(self, state_local):
-        agent_pos_local = state_local[:2]
-        block_pose_local = state_local[2:]
-        tf_img_obj = st.AffineTransform(
-            translation=self.goal_pose[:2], rotation=self.goal_pose[2]
-        )
-        tf_obj_new = st.AffineTransform(
-            translation=block_pose_local[:2], rotation=block_pose_local[2]
-        )
-        tf_img_new = st.AffineTransform(matrix=tf_img_obj.params @ tf_obj_new.params)
-        agent_pos_new = tf_img_new(agent_pos_local)
-        new_state = np.array(
-            list(agent_pos_new[0])
-            + list(tf_img_new.translation)
-            + [tf_img_new.rotation]
-        )
-        self._set_state(new_state)
-        return new_state
 
     def set_task_goal(self, goal):
         self.goal_pose = goal

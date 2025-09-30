@@ -7,10 +7,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
 
 import stable_worldmodel as swm
-from loguru import logger as logging
-
-from functools import reduce
-from operator import getitem
 
 
 class SimplePointMazeEnv(gym.Env):
@@ -190,24 +186,14 @@ class SimplePointMazeEnv(gym.Env):
             assert isinstance(options["variation"], Sequence), (
                 "variation option must be a Sequence containing variations names to sample"
             )
-            # self.update_variation(options["variation"])
-            # ... sample variations
 
             if len(options["variation"]) == 1 and options["variation"][0] == "all":
                 self.variation_space.sample()
 
             else:
-                for var in options["variation"]:
-                    try:
-                        var_path = var.split(".")
-                        swm.utils.get_in(self.variation_space, var_path).sample()
+                self.variation_space.update(set(options["variation"]))
 
-                    except (KeyError, TypeError):
-                        raise ValueError(
-                            f"Variation {var} not found in variation space"
-                        )
-
-        assert self.variation_space.check(), (
+        assert self.variation_space.check(debug=True), (
             "Variation values must be within variation space!"
         )
 

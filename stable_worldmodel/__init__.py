@@ -30,3 +30,8 @@ register(
     id="swm/SimplePointMaze-v0",
     entry_point="stable_worldmodel.envs.simple_point_maze:SimplePointMazeEnv",
 )
+
+register(
+    id="swm/TwoRoom-v0",
+    entry_point="stable_worldmodel.envs.two_room:TwoRoomEnv",
+)
