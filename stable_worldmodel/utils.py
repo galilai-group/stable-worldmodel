@@ -1,3 +1,5 @@
+"""Utility functions for stable_worldmodel."""
+
 import inspect
 import os
 import shlex
@@ -39,17 +41,24 @@ def flatten_dict(d, parent_key="", sep="."):
 
 
 def get_in(mapping: dict, path: Iterable[str]) -> Any:
-    """Return mapping[path[0]][path[1]]... ; raises KeyError if missing."""
+    """Retrieve a value from a nested dictionary using a sequence of keys.
+
+    Args:
+        mapping (dict): A nested dictionary.
+        path (Iterable[str]): An iterable of keys representing the path to the desired value in mapping.
+
+    Returns:
+        Any: The value located at the specified path in the nested dictionary.
+
+    Raises:
+        KeyError: If any key in the path does not exist in the mapping dict.
+
+    Examples:
+        >>> variations = {"a": {"b": {"c": 42}}}
+        >>> get_in(variations, ["a", "b", "c"])
+        42
+    """
     cur = mapping
     for key in list(path):
         cur = cur[key]
     return cur
-
-
-def set_in(mapping: MutableMapping, path: Iterable[str], value: Any) -> None:
-    """Set mapping[path[:-1]][last] = value, creating nested dicts as needed."""
-    *parents, last = list(path)
-    cur = mapping
-    for key in parents:
-        cur = cur.setdefault(key, {})
-    cur[last] = value

@@ -37,49 +37,7 @@ packages = ["stable_worldmodel"]
 [tool.setuptools.dynamic]
 version = {attr = "stable_worldmodel.__about__.__version__"}
 
-[project.optional-dependencies]
-# Advanced vision models and transforms
-vision = [
-    "timm",
-    "transformers",
-    "pillow>=11.3.0",
-]
-
-# Experiment tracking
-tracking = [
-    "wandb",
-]
-
-# Cluster/SLURM execution support
-cluster = [
-    "hydra-submitit-launcher",
-    "submitit",
-]
-
-# Visualization and reporting tools
-visualization = [
-    "matplotlib",
-    "prettytable",
-]
-
-# Extra dataset support
-datasets = [
-    "datasets",  # HuggingFace datasets
-    "pyarrow>=15.0.0",  # Required for datasets compatibility
-    "minari[hdf5]>=0.5.3",  # Reinforcement learning datasets
-]
-
-# Additional utilities
-extras = [
-    "scikit-learn>=1.7.0",  # sklearn model checkpointing
-    "requests-cache[all]",  # Caching for API requests
-    "richuru",  # Enhanced logging formatting
-]
-
-# All optional dependencies
-all = [
-    "stable-worldmodel[vision,tracking,cluster,visualization,datasets,extras]",
-]
+[dependency-groups]
 
 # Development tools
 dev = [
@@ -102,6 +60,9 @@ doc = [
     "myst-parser",
 ]
 
+
+[tool.pytest.ini_options]
+pythonpath = "stable_worldmodel"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "D"]
