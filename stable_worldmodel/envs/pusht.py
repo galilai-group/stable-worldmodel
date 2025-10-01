@@ -10,6 +10,7 @@ from gymnasium import spaces
 from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
+from stable_worldmodel.envs.utils import light_color, to_pygame
 
 from .utils import DrawOptions, pymunk_to_shapely
 
@@ -40,7 +41,7 @@ class PushT(gym.Env):
         self.k_p, self.k_v = 100, 20
         self.dt = 0.01
 
-        self.shapes = ["L", "T", "Z", "o", "square", "I", "small_tee", "+"]
+        self.shapes = ["o", "L", "T", "Z", "square", "I", "small_tee", "+"]
 
         self.observation_space = spaces.Dict(
             {
@@ -74,9 +75,9 @@ class PushT(gym.Env):
                             )
                         ),
                         "scale": swm.spaces.Box(
-                            low=0.5,
-                            high=2,
-                            init_value=1,
+                            low=20,
+                            high=60,
+                            init_value=40,
                             shape=(),
                             dtype=np.float32,
                         ),
@@ -121,7 +122,7 @@ class PushT(gym.Env):
                             dtype=np.float32,
                         ),
                         "shape": swm.spaces.Discrete(
-                            len(self.shapes), start=0, init_value=1
+                            len(self.shapes) - 1, start=1, init_value=2
                         ),
                         "angle": swm.spaces.Box(
                             low=-2 * np.pi,
@@ -258,6 +259,7 @@ class PushT(gym.Env):
         )
 
         ### generate goal
+        self.goal_state = goal_state
         self._set_state(goal_state)
         self._goal = self.render()
 
@@ -274,16 +276,12 @@ class PushT(gym.Env):
         self._set_state(state)
 
         #### OBS
-
-        self.coverage_arr = []
         state = self._get_obs()
         proprio = np.concatenate((state[:2], state[-2:]))
 
         observation = {"proprio": proprio, "state": state}
-
         info = self._get_info()
-        info["max_coverage"] = 0
-        info["final_coverage"] = 0
+
         return observation, info
 
     def step(self, action):
@@ -301,29 +299,29 @@ class PushT(gym.Env):
             # Step physics.
             self.space.step(self.dt)
 
-        # compute reward
-        goal_body = self._get_goal_pose_body(self.goal_pose)
-        goal_geom = pymunk_to_shapely(goal_body, self.block.shapes)
-        block_geom = pymunk_to_shapely(self.block, self.block.shapes)
-
-        intersection_area = goal_geom.intersection(block_geom).area
-        goal_area = goal_geom.area
-        coverage = intersection_area / goal_area
-        reward = np.clip(coverage / self.success_threshold, 0, 1)
-        done = False  # coverage > self.success_threshold
-
-        self.coverage_arr.append(coverage)
-
+        # make the observation
         state = self._get_obs()
-
         proprio = np.concatenate((state[:2], state[-2:]))
         observation = {"proprio": proprio, "state": state}
 
+        # collect info
         info = self._get_info()
-        info["max_coverage"] = 0
-        info["final_coverage"] = self.coverage_arr[-1]
+
+        # compute reward and termination
+        terminated, distance = self.eval_state(self.goal_state, state)
+        reward = -distance  # the closer the better
+
         truncated = False
-        return observation, reward, done, truncated, info
+        return observation, reward, terminated, truncated, info
+
+    def eval_state(self, goal_state, cur_state):
+        # success if position difference is < 20, and angle difference < np.pi/9
+        pos_diff = np.linalg.norm(goal_state[:4] - cur_state[:4])
+        angle_diff = np.abs(goal_state[4] - cur_state[4])
+        angle_diff = np.minimum(angle_diff, 2 * np.pi - angle_diff)
+        success = pos_diff < 20 and angle_diff < np.pi / 9
+        state_dist = np.linalg.norm(goal_state - cur_state)
+        return success, state_dist
 
     def render(self):
         return self._render_frame(self.render_mode)
@@ -361,32 +359,6 @@ class PushT(gym.Env):
         }
         return info
 
-    # def set_background(self, image):
-    #     """image can be a file path, pathlib.Path, or a BytesIO"""
-    #     # Load to a Surface; no display needed
-    #     self._bg_raw = image
-    #     self._bg_cache = None  # invalidate cache when a new image is set
-
-    # def _get_background_for_canvas(self, canvas):
-    #     """Convert/scale the raw background to match the canvas only when needed."""
-    #     if getattr(self, "_bg_raw", None) is None:
-    #         return None
-    #     if (
-    #         getattr(self, "_bg_cache", None) is not None
-    #         and self._bg_cache.get_size() == canvas.get_size()
-    #     ):
-    #         return self._bg_cache
-
-    #     base = (
-    #         self._bg_raw.convert_alpha()
-    #         if self._bg_raw.get_alpha()
-    #         else self._bg_raw.convert(canvas)
-    #     )
-    #     scaled = pygame.transform.smoothscale(base, canvas.get_size())
-    #     self._bg_cache = scaled.convert(canvas)
-
-    #     return self._bg_cache
-
     def _render_frame(self, mode):
         if self.window is None and mode == "human":
             pygame.init()
@@ -405,18 +377,30 @@ class PushT(gym.Env):
         # Draw goal pose.
         goal_body = self._get_goal_pose_body(self.goal_pose)
         for shape in self.block.shapes:
-            goal_points = [
-                pymunk.pygame_util.to_pygame(
-                    goal_body.local_to_world(v), draw_options.surface
+            if isinstance(shape, pymunk.Circle):
+                center_pg = pymunk.pygame_util.to_pygame(
+                    goal_body.local_to_world(shape.offset), draw_options.surface
                 )
-                for v in shape.get_vertices()
-            ]
-            goal_points += [goal_points[0]]
-            pygame.draw.polygon(
-                canvas,
-                self.variation_space["goal"]["color"].value,
-                goal_points,
-            )
+                pygame.draw.circle(
+                    canvas,
+                    self.variation_space["goal"]["color"].value,
+                    (int(center_pg[0]), int(center_pg[1])),
+                    int(shape.radius),
+                )
+
+            else:
+                goal_points = [
+                    pymunk.pygame_util.to_pygame(
+                        goal_body.local_to_world(v), draw_options.surface
+                    )
+                    for v in shape.get_vertices()
+                ]
+                goal_points += [goal_points[0]]
+                pygame.draw.polygon(
+                    canvas,
+                    self.variation_space["goal"]["color"].value,
+                    goal_points,
+                )
 
         # change agent color
         self._set_body_color(
@@ -495,9 +479,6 @@ class PushT(gym.Env):
         # Run physics to take effect
         self.space.step(self.dt)
 
-    def set_task_goal(self, goal):
-        self.goal_pose = goal
-
     def _setup(self):
         ## create the space with physics
         self.space = pymunk.Space()
@@ -539,13 +520,6 @@ class PushT(gym.Env):
 
         self.block = self.add_shape(**block_params)
 
-        # Add agent, block, and goal zone.
-        # self.agent = self.add_circle((256, 400), 15)
-        # self.block = self.add_tee((256, 300), 0)
-        # self.block = self.add_shape(
-        #     self.shape, (256, 300), 0, color=self.color, scale=40
-        # )
-
         self.goal_pose = np.concatenate(
             [
                 self.variation_space["goal"]["position"].value,
@@ -574,11 +548,11 @@ class PushT(gym.Env):
         scale=1,
         color="RoyalBlue",
     ):
-        radius = 15
+        base_radius = 0.375
         body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         body.position = position
         body.friction = 1
-        shape = pymunk.Circle(body, radius * scale)
+        shape = pymunk.Circle(body, base_radius * scale)
         shape.color = pygame.Color(color)
         self.space.add(body, shape)
         return body
