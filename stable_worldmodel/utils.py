@@ -30,6 +30,27 @@ def pretraining(script_path: str, args: str) -> int:
 
 
 def flatten_dict(d, parent_key="", sep="."):
+    """Flatten a nested dictionary into a single-level dictionary with concatenated keys.
+
+    The naming convention for the new keys is similar to Hydra's, using a `.` separator to denote levels of nesting.
+    Attention is needed when flattening dictionaries with overlapping keys, as this may lead to information loss.
+
+    Args:
+        d (dict): The nested dictionary to flatten.
+        parent_key (str, optional): The base key to use for the flattened keys.
+        sep (str, optional): The separator to use between levels of nesting. Defaults to '.'.
+
+    Returns:
+        dict: A flattened version of the input dictionary.
+
+    Examples:
+        >>> info = {"a": {"b": {"c": 42, "d": 43}}, "e": 44}
+        >>> flatten_dict(info)
+        {'a.b.c': 42, 'a.b.d': 43, 'e': 44}
+
+        >>> flatten_dict({"a": {"b": 2}, "a.b": 3})
+        {'a.b': 3}
+    """
     items = {}
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
