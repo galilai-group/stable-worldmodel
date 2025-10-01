@@ -35,3 +35,8 @@ register(
     id="swm/TwoRoom-v0",
     entry_point="stable_worldmodel.envs.two_room:TwoRoomEnv",
 )
+
+register(
+    id="swm/VoidRun-v0",
+    entry_point="stable_worldmodel.envs.voidrun:VoidRunEnv",
+)
