@@ -1,5 +1,3 @@
-# stable-worldmodel
-
 <p align="center">
   <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="600"/>
 </p>
