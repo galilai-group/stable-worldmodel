@@ -1,7 +1,7 @@
 # stable-worldmodel
 
 <p align="center">
-  <img src="assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="600"/>
+  <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="600"/>
 </p>
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
