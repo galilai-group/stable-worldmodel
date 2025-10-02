@@ -69,7 +69,7 @@ def test_pretraining_with_empty_args(monkeypatch):
 
     cmd = mock_run.call_args[0][0]
     assert "fake_script.py" in cmd
-    assert len(cmd) == 2  # Only [python, script_path]
+    assert len(cmd) == 2
 
 
 ########################
