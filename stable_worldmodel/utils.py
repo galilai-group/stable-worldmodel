@@ -1,17 +1,34 @@
-import inspect
+"""Utility functions for stable_worldmodel."""
+
 import os
 import shlex
 import subprocess
 import sys
-import time
-import types
-from typing import Any, Iterable, MutableMapping
+from typing import Any, Iterable
 
 from loguru import logger as logging
 
 
-def pretraining(script_path: str, args: str) -> int:
-    assert os.path.isfile(script_path), f"Script {script_path} does not exist."
+def pretraining(script_path: str, args: str = "") -> int:
+    """Run a pretraining script as a subprocess with optional command-line arguments.
+
+    This function checks if the specified script exists, constructs a command to run it with the provided arguments,
+    and executes the command in a subprocess.
+
+    Args:
+        script_path (str): The path to the pretraining script to be executed.
+        args (str, optional): A string of command-line arguments to pass to the script. Defaults to an empty string.
+
+    Returns:
+        int: The return code of the subprocess. A return code of 0 indicates success.
+
+    Raises:
+        ValueError: If the specified script does not exist.
+        SystemExit: If the subprocess exits with a non-zero return code.
+    """
+    if not os.path.isfile(script_path):
+        raise ValueError(f"Script {script_path} does not exist.")
+
     logging.info(
         f"🏃🏃🏃 Running pretraining script: {script_path} with args: {args} 🏃🏃🏃"
     )
@@ -28,6 +45,27 @@ def pretraining(script_path: str, args: str) -> int:
 
 
 def flatten_dict(d, parent_key="", sep="."):
+    """Flatten a nested dictionary into a single-level dictionary with concatenated keys.
+
+    The naming convention for the new keys is similar to Hydra's, using a `.` separator to denote levels of nesting.
+    Attention is needed when flattening dictionaries with overlapping keys, as this may lead to information loss.
+
+    Args:
+        d (dict): The nested dictionary to flatten.
+        parent_key (str, optional): The base key to use for the flattened keys.
+        sep (str, optional): The separator to use between levels of nesting. Defaults to '.'.
+
+    Returns:
+        dict: A flattened version of the input dictionary.
+
+    Examples:
+        >>> info = {"a": {"b": {"c": 42, "d": 43}}, "e": 44}
+        >>> flatten_dict(info)
+        {'a.b.c': 42, 'a.b.d': 43, 'e': 44}
+
+        >>> flatten_dict({"a": {"b": 2}, "a.b": 3})
+        {'a.b': 3}
+    """
     items = {}
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -39,17 +77,24 @@ def flatten_dict(d, parent_key="", sep="."):
 
 
 def get_in(mapping: dict, path: Iterable[str]) -> Any:
-    """Return mapping[path[0]][path[1]]... ; raises KeyError if missing."""
+    """Retrieve a value from a nested dictionary using a sequence of keys.
+
+    Args:
+        mapping (dict): A nested dictionary.
+        path (Iterable[str]): An iterable of keys representing the path to the desired value in mapping.
+
+    Returns:
+        Any: The value located at the specified path in the nested dictionary.
+
+    Raises:
+        KeyError: If any key in the path does not exist in the mapping dict.
+
+    Examples:
+        >>> variations = {"a": {"b": {"c": 42}}}
+        >>> get_in(variations, ["a", "b", "c"])
+        42
+    """
     cur = mapping
     for key in list(path):
         cur = cur[key]
     return cur
-
-
-def set_in(mapping: MutableMapping, path: Iterable[str], value: Any) -> None:
-    """Set mapping[path[:-1]][last] = value, creating nested dicts as needed."""
-    *parents, last = list(path)
-    cur = mapping
-    for key in parents:
-        cur = cur.setdefault(key, {})
-    cur[last] = value

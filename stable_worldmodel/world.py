@@ -5,7 +5,6 @@ from pathlib import Path
 import datasets
 import gymnasium as gym
 import numpy as np
-import torch
 
 from datasets import Dataset, Features, Image, Value, load_dataset
 from loguru import logger as logging

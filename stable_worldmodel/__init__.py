@@ -1,8 +1,17 @@
 from gymnasium.envs import registration
-from . import data, policy, solver, wrappers, wm, utils, spaces
-from .policy import PlanConfig
-from .utils import pretraining
-from .world import World
+from stable_worldmodel.policy import PlanConfig
+from stable_worldmodel.world import World
+from stable_worldmodel.utils import pretraining
+
+from stable_worldmodel import (
+    solver,
+    envs,
+    data,
+    policy,
+    spaces,
+    wrappers,
+    utils,
+)
 
 WORLDS = set()
 
@@ -35,3 +44,21 @@ register(
     id="swm/TwoRoom-v0",
     entry_point="stable_worldmodel.envs.two_room:TwoRoomEnv",
 )
+
+register(
+    id="swm/VoidRun-v0",
+    entry_point="stable_worldmodel.envs.voidrun:VoidRunEnv",
+)
+
+__all__ = [
+    "World",
+    "PlanConfig",
+    "pretraining",
+    "spaces",
+    "utils",
+    "data",
+    "policy",
+    "solver",
+    "wrappers",
+    "wm",
+]

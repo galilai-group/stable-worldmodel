@@ -1,9 +1,9 @@
 import torch
-import nevergrad as ng
 import numpy as np
 from .solver import Costable
-from einops import rearrange, repeat
-from torch.nn import functional as F
+
+from loguru import logger as logging
+from gymnasium.spaces import Box
 
 
 class CEMSolver:
@@ -34,6 +34,13 @@ class CEMSolver:
         self._config = config
         self._action_dim = int(np.prod(action_space.shape[1:]))
         self._configured = True
+
+        # warning if action space is discrete
+        if not isinstance(action_space, Box):
+            logging.warning(
+                f"Action space is discrete, got {type(action_space)}. "
+                "GDSolver may not work as expected."
+            )
 
     @property
     def n_envs(self) -> int:

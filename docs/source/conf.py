@@ -31,16 +31,18 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.doctest",
     "sphinx.ext.githubpages",
-    #"sphinx_gallery.gen_gallery",
+    # "sphinx_gallery.gen_gallery",
     "sphinxcontrib.bibtex",
+    "sphinx.ext.todo",
     "myst_parser",
 ]
 
+todo_include_todos = True
 autosummary_generate = True
 autodoc_default_options = {
-"members": True,
-"undoc-members": False,
-"show-inheritance": True,
+    "members": True,
+    "undoc-members": False,
+    "show-inheritance": True,
 }
 
 napoleon_google_docstring = True
@@ -113,13 +115,12 @@ html_theme_options = {
     "source_branch": "main",
     "source_directory": "docs/",
     "top_of_page_buttons": ["edit"],
-
     # TODO change for dark them as well
     "light_css_variables": {
         "color-brand-primary": "#202123",
         "color-brand-content": "#296cde",
         "color-inline-code-background": "#f8f8f8",
-        "color-brand-visited": "#2757dd"
+        "color-brand-visited": "#2757dd",
     },
     "footer_icons": [
         {
@@ -135,5 +136,4 @@ html_theme_options = {
             "class": "fa-brands fa-solid fa-github",
         },
     ],
-    
 }

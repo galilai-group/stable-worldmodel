@@ -45,7 +45,7 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoPolicy("dummy_test")
+    model = swm.policy.AutoCost("dummy_test")  # auto-cost is confusing
     config = swm.PlanConfig(horizon=10, receding_horizon=5, action_block=5)
     solver = swm.solver.GDSolver(model, n_steps=10)
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
