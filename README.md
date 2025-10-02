@@ -10,14 +10,11 @@ A stable library for world model research and evaluation, providing unified inte
 
 ## Features
 
-- � **Control Factors of Variation**: Manage and track environmental factors with extended Gymnasium spaces
-- 🔬 **Complete Solver Support**: Multiple planning algorithms (CEM, Gradient Descent, MPPI, Random)
+- 🧑‍🔬 **Controlled Factors of Variation**: Manage and track environmental factors with extended Gymnasium spaces
+- 🎯 **Complete Solver Support**: Multiple planning algorithms (CEM, Gradient Descent, MPPI, Random)
 - ✅ **High Test Coverage**: Comprehensive test suite ensuring reliability and correctness
 
 ## Installation
-
-### Requirements
-- Python 3.10+
 
 ### Quick Start
 
