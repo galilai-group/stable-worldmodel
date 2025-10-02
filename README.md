@@ -25,8 +25,8 @@ pip install uv
 
 2. **Clone and install the package**:
 ```bash
-git clone https://github.com/rbalestr-lab/xenoworlds.git
-cd xenoworlds
+git clone https://github.com/rbalestr-lab/stable-worldmodel.git
+cd stable-worldmodel
 uv pip install -e .
 ```
 
