@@ -1,6 +1,75 @@
 import pytest
+import subprocess
+from unittest.mock import MagicMock
+from stable_worldmodel.utils import get_in, flatten_dict, pretraining
 
-from stable_worldmodel.utils import get_in, flatten_dict
+#######################
+## pretraining tests ##
+#######################
+
+
+def test_raises_when_script_not_exists(monkeypatch):
+    monkeypatch.setattr("os.path.isfile", lambda p: False)
+
+    with pytest.raises(ValueError, match=r"does not exist"):
+        pretraining("non_existent_script.py")
+
+
+def test_pretraining_success(monkeypatch):
+    monkeypatch.setattr("os.path.isfile", lambda p: True)
+    mock_run = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    pretraining("fake_script.py", "--epochs 10")
+
+    assert mock_run.called
+
+
+def test_pretraining_exits_on_failure(monkeypatch):
+    monkeypatch.setattr("os.path.isfile", lambda p: True)
+    mock_run = MagicMock(side_effect=subprocess.CalledProcessError(1, "cmd"))
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    with pytest.raises(SystemExit, match="1"):
+        pretraining("fake_script.py", "--epochs 10")
+
+
+def test_pretraining_parses_single_arg(monkeypatch):
+    monkeypatch.setattr("os.path.isfile", lambda p: True)
+    mock_run = MagicMock()
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    pretraining("fake_script.py", "batch-size=32")
+
+    cmd = mock_run.call_args[0][0]
+    assert "fake_script.py" in cmd
+    assert "batch-size=32" in cmd
+    assert mock_run.call_args[1]["check"] is True
+
+
+def test_pretraining_parses_multiple_args(monkeypatch):
+    monkeypatch.setattr("os.path.isfile", lambda p: True)
+    mock_run = MagicMock()
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    pretraining("fake_script.py", "batch-size=32 ++dump_object=True")
+
+    cmd = mock_run.call_args[0][0]
+    assert "fake_script.py" in cmd
+    assert "batch-size=32" in cmd
+    assert "++dump_object=True" in cmd
+
+
+def test_pretraining_with_empty_args(monkeypatch):
+    monkeypatch.setattr("os.path.isfile", lambda p: True)
+    mock_run = MagicMock()
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    pretraining("fake_script.py")
+
+    cmd = mock_run.call_args[0][0]
+    assert "fake_script.py" in cmd
+    assert len(cmd) == 2  # Only [python, script_path]
 
 
 ########################

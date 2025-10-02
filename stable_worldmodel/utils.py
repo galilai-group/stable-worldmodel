@@ -1,19 +1,34 @@
 """Utility functions for stable_worldmodel."""
 
-import inspect
 import os
 import shlex
 import subprocess
 import sys
-import time
-import types
-from typing import Any, Iterable, MutableMapping
+from typing import Any, Iterable
 
 from loguru import logger as logging
 
 
-def pretraining(script_path: str, args: str) -> int:
-    assert os.path.isfile(script_path), f"Script {script_path} does not exist."
+def pretraining(script_path: str, args: str = "") -> int:
+    """Run a pretraining script as a subprocess with optional command-line arguments.
+
+    This function checks if the specified script exists, constructs a command to run it with the provided arguments,
+    and executes the command in a subprocess.
+
+    Args:
+        script_path (str): The path to the pretraining script to be executed.
+        args (str, optional): A string of command-line arguments to pass to the script. Defaults to an empty string.
+
+    Returns:
+        int: The return code of the subprocess. A return code of 0 indicates success.
+
+    Raises:
+        ValueError: If the specified script does not exist.
+        SystemExit: If the subprocess exits with a non-zero return code.
+    """
+    if not os.path.isfile(script_path):
+        raise ValueError(f"Script {script_path} does not exist.")
+
     logging.info(
         f"🏃🏃🏃 Running pretraining script: {script_path} with args: {args} 🏃🏃🏃"
     )
