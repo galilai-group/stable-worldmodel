@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
-  <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="600"/>
+  <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="500px"/>
 </p>
 
 A stable library for world model research and evaluation, providing unified interfaces for data collection, model training, and policy evaluation.
