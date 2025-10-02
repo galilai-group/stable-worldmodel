@@ -1,10 +1,10 @@
-<p align="center">
-  <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="600"/>
-</p>
-
 [![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+<p align="center">
+  <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="600"/>
+</p>
 
 A stable library for world model research and evaluation, providing unified interfaces for data collection, model training, and policy evaluation.
 
