@@ -64,6 +64,14 @@ def forward(self, batch, stage):
     """Forward pass for predictor training"""
 
     actions = batch["action"]
+    print(
+        actions.shape,
+        batch["pixels"].shape,
+        batch["episode_idx"],
+        batch["step_idx"],
+        list(batch.keys()),
+    )
+    asdf
 
     # -- process actions
     actions = actions.flatten(0, 1).float()  # (B,T,A) -> (B*T,A)
