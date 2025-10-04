@@ -31,7 +31,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
-          enable-cache: true
+          enable-cache: false # Disable cache since we don't have uv.lock
 
       # Install Python & Packages
       - name: Setup Python 3.10
@@ -54,7 +54,6 @@ jobs:
             --cov-report=html \
             --junitxml=pytest.xml \
             --cov-report=term | tee pytest-coverage.txt
-        continue-on-error: false
 
       # Post Coverage Comment on PR
       - name: Pytest coverage comment
