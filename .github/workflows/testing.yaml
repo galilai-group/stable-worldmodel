@@ -1,0 +1,76 @@
+name: Testing
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - "main"
+  push:
+    branches:
+      - "main"
+  create:
+    branches:
+      - "main"
+    tags:
+      - "**"
+
+jobs:
+  Test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # Required to post coverage comment on PRs
+    strategy:
+      fail-fast: false
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      # Checkout repository
+      - name: Checking Out Repository
+        uses: actions/checkout@v4
+
+      # Install UV
+      - name: Install UV
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      # Install Python & Packages
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Display Python version
+        run: python --version
+
+      - name: Install stable-worldmodel package with dev dependencies
+        run: |
+          uv pip install -e .[dev] --system
+
+      # Run Tests
+      - name: Run Tests with Coverage
+        run: |
+          pytest stable_worldmodel/ \
+            --verbose \
+            --cov=stable_worldmodel \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            --junitxml=pytest.xml | tee pytest-coverage.txt
+
+      # Post Coverage Comment on PR
+      - name: Pytest coverage comment
+        if: github.event_name == 'pull_request'
+        uses: MishaKav/pytest-coverage-comment@main
+        with:
+          pytest-coverage-path: ./pytest-coverage.txt
+          junitxml-path: ./pytest.xml
+
+      # Upload Coverage Report as Artifact
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
