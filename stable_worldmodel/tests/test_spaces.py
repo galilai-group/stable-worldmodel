@@ -1026,7 +1026,8 @@ def test_dict_space_one_level_sampling_order_default():
 
     # sampling_order property returns set of dotted paths
     order = space.sampling_order
-    assert order == {"x", "y", "z"}
+    assert set(order) == {"x", "y", "z"}
+    assert order == ["x", "y", "z"]  # Insertion order
 
 
 def test_dict_space_one_level_sampling_order_explicit():
@@ -1790,6 +1791,20 @@ def test_dict_space_sampling_order_invalid_key(monkeypatch):
     monkeypatch.setattr(space, "_sampling_order", ["x", "invalid_key"])
 
     assert ["x"] == list(space._get_sampling_order())
+
+
+def test_dict_space_correct_sampling_order_property():
+    """Test that update respects sampling order."""
+    space = spaces.Dict(
+        {
+            "a": spaces.Discrete(10, init_value=1),
+            "b": spaces.Discrete(10, init_value=2),
+            "c": spaces.Discrete(10, init_value=3),
+        },
+        sampling_order=["c", "b", "a"],
+    )
+
+    assert space.sampling_order == list(space.sampling_order)
 
 
 # Edge cases
