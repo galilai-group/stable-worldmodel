@@ -8,12 +8,12 @@ from typing import Any, TypedDict
 import gymnasium as gym
 import numpy as np
 import stable_pretraining as spt
+import torch
 from datasets import load_dataset
 from rich import print
 from torch.utils.data import default_collate
 
 import stable_worldmodel as swm
-import torch
 
 
 class StepsDataset(spt.data.HFDataset):
@@ -96,32 +96,28 @@ class StepsDataset(spt.data.HFDataset):
         start = offset
         stop = start + self.num_steps * self.frameskip
 
-        # indices with frameskip applied
-        idx_slice = episode_indices[start : stop : self.frameskip]
-
         # actions indices, covering the whole window (every frame in between)
-        action_slice = episode_indices[start:stop]
+        idx_slice = episode_indices[start:stop]
 
+        # pre select and transform data
         raw_info = [self.transform(self.dataset[i]) for i in idx_slice]
-        raw_actions = self.dataset["action"][action_slice]
+        raw_steps = default_collate(raw_info)
 
-        # TODO NEED TO TRANSFORM ACTIONS AS WELL
-        # raw_actions = self.transform({"action": self.dataset["action"][action_slice]})
+        steps = {}
+        for k, v in raw_steps.items():
+            if k == "action":
+                steps[k] = v
+                continue
+            steps[k] = v[:: self.frameskip]
 
         # reshape actions after transform!
-        raw_actions = raw_actions.reshape(self.num_steps, -1)
-
-        # plug the correct actions back to the info
-        for i in range(len(raw_info)):
-            raw_info[i]["action"] = raw_actions[i]
-
-        steps = default_collate(raw_info)
+        steps["action"] = steps["action"].reshape(self.num_steps, -1)
 
         return steps
 
 
 #####################
-### CLI Info ####
+###   CLI Info   ####
 #####################
 
 
