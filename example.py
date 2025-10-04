@@ -14,22 +14,22 @@ if __name__ == "__main__":
 
     print("Available variations: ", world.single_variation_space.names())
 
-    #######################
-    ##  Data Collection  ##
-    #######################
+    # #######################
+    # ##  Data Collection  ##
+    # #######################
 
-    world.set_policy(swm.policy.RandomPolicy())
-    world.record_dataset(
-        "simple-pointmaze",
-        episodes=10,
-        seed=2347,
-        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
-    )
-    world.record_video(
-        "./",
-        seed=2347,
-        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
-    )
+    # world.set_policy(swm.policy.RandomPolicy())
+    # world.record_dataset(
+    #     "simple-pointmaze",
+    #     episodes=10,
+    #     seed=2347,
+    #     options={"variation": ("walls.number", "walls.shape", "walls.positions")},
+    # )
+    # world.record_video(
+    #     "./",
+    #     seed=2347,
+    #     options={"variation": ("walls.number", "walls.shape", "walls.positions")},
+    # )
 
     ################
     ##  Pretrain  ##

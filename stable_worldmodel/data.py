@@ -13,6 +13,7 @@ from rich import print
 from torch.utils.data import default_collate
 
 import stable_worldmodel as swm
+import torch
 
 
 class StepsDataset(spt.data.HFDataset):
@@ -31,19 +32,40 @@ class StepsDataset(spt.data.HFDataset):
         self.num_steps = num_steps
         self.frameskip = frameskip
 
-        assert "episode_idx" in self.dataset.column_names, "Dataset must have 'episode_idx' column"
-        assert "step_idx" in self.dataset.column_names, "Dataset must have 'step_idx' column"
+        assert (
+            "episode_idx" in self.dataset.column_names
+        ), "Dataset must have 'episode_idx' column"
+        assert (
+            "step_idx" in self.dataset.column_names
+        ), "Dataset must have 'step_idx' column"
 
         self.episodes = np.unique(self.dataset["episode_idx"])
         self.slices = {e: self.num_slice(e) for e in self.episodes}
         self.cum_slices = np.cumsum([0] + [self.slices[e] for e in self.episodes])
-
         self.torch_exclude_column = torch_exclude_column
 
         # TODO: add assert for basic column name
 
-        cols = [c for c in self.dataset.column_names if c not in self.torch_exclude_column]
-        self.dataset = self.dataset.with_format("torch", columns=cols, output_all_columns=True)
+        cols = [
+            c for c in self.dataset.column_names if c not in self.torch_exclude_column
+        ]
+        self.dataset = self.dataset.with_format(
+            "torch", columns=cols, output_all_columns=True
+        )
+
+        # find which episode this idx belongs to
+        self.ep_idx = (
+            np.searchsorted(
+                self.cum_slices, torch.arange(len(self.dataset)), side="right"
+            )
+            - 1
+        )
+
+        # get dataset indices for this slice
+        self.ep_mask = {
+            ep: np.flatnonzero(self.dataset["episode_idx"] == ep)
+            for ep in self.dataset["episode_idx"].unique()
+        }
 
     def num_slice(self, episode_idx):
         """Return number of possible slices for a given episode index"""
@@ -51,9 +73,9 @@ class StepsDataset(spt.data.HFDataset):
         episode_len = self.dataset["episode_len"][idx]
         num_slices = 1 + (episode_len - self.num_steps * self.frameskip)
 
-        assert num_slices > 0, (
-            f"Episode {episode_idx} is too short for {self.num_steps} steps with {self.frameskip} frameskip (len={episode_len})"
-        )
+        assert (
+            num_slices > 0
+        ), f"Episode {episode_idx} is too short for {self.num_steps} steps with {self.frameskip} frameskip (len={episode_len})"
 
         return num_slices
 
@@ -74,20 +96,22 @@ class StepsDataset(spt.data.HFDataset):
 
     def __getitem__(self, idx):
         # find which episode this idx belongs to
-        ep_idx = np.searchsorted(self.cum_slices, idx, side="right") - 1
+        ep_idx = self.ep_idx[idx]
         episode = self.episodes[ep_idx]
 
         # find local slice within episode
         local_idx = idx - self.cum_slices[ep_idx]
 
         # get dataset indices for this slice
-        ep_mask = np.nonzero(self.dataset["episode_idx"] == episode).squeeze().tolist()
+        ep_mask = self.ep_mask[episode]
 
         # starting step index inside this episode
         start_step = local_idx
 
         # slice steps with frameskip
-        slice_idx = [ep_mask[start_step + i] for i in range(self.num_steps * self.frameskip)]
+        slice_idx = [
+            ep_mask[start_step + i] for i in range(self.num_steps * self.frameskip)
+        ]
 
         # transform the data
         raw = [self.transform(self.dataset[i]) for i in slice_idx]
@@ -149,7 +173,9 @@ def list_datasets():
 
 
 def list_models():
-    pattern = re.compile(r"^(.*?)(?=_(?:weights(?:-[^.]*)?|object)\.ckpt$)", re.IGNORECASE)
+    pattern = re.compile(
+        r"^(.*?)(?=_(?:weights(?:-[^.]*)?|object)\.ckpt$)", re.IGNORECASE
+    )
 
     cache_dir = get_cache_dir()
     models = set()
@@ -194,8 +220,14 @@ def dataset_info(name):
         "action_shape": dataset["action"][0].shape,
         "goal_shape": dataset["goal"][0].shape,
         "variation": {
-            "has_variation": any(col.startswith("variation.") for col in dataset.column_names),
-            "names": [col.removeprefix("variation.") for col in dataset.column_names if col.startswith("variation.")],
+            "has_variation": any(
+                col.startswith("variation.") for col in dataset.column_names
+            ),
+            "names": [
+                col.removeprefix("variation.")
+                for col in dataset.column_names
+                if col.startswith("variation.")
+            ],
         },
     }
 
@@ -237,7 +269,9 @@ def world_info(
     render_mode: str = "rgb_array",
 ) -> WorldInfo:
     if name not in swm.WORLDS:
-        raise ValueError(f"World '{name}' not found. Available: {', '.join(list_worlds())}")
+        raise ValueError(
+            f"World '{name}' not found. Available: {', '.join(list_worlds())}"
+        )
     world = None
 
     try:
@@ -286,7 +320,9 @@ def delete_dataset(name):
             raise ValueError(f"Dataset {name} does not exist at {dataset_path}")
 
         # remove cache files
-        dataset = load_dataset("parquet", data_files=str(Path(dataset_path, "*.parquet")))
+        dataset = load_dataset(
+            "parquet", data_files=str(Path(dataset_path, "*.parquet"))
+        )
         dataset.cleanup_cache_files()
 
         # delete dataset directory
@@ -309,4 +345,6 @@ def delete_model(name):
                 os.remove(filepath)
                 print(f"🔮 Model {fname} deleted")
             except Exception as e:
-                print(f"[red]Error occurred while deleting model [cyan]{name}[/cyan]: {e}[/red]")
+                print(
+                    f"[red]Error occurred while deleting model [cyan]{name}[/cyan]: {e}[/red]"
+                )
