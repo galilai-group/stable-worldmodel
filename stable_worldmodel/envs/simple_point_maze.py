@@ -5,9 +5,17 @@ import matplotlib.pyplot as plt
 
 # from gymnasium import spaces
 import numpy as np
+from loguru import logger as logging
 from matplotlib.patches import Circle, Rectangle
 
 import stable_worldmodel as swm
+
+
+DEFAULT_VARIATIONS = {
+    "walls.number",
+    "walls.shape",
+    "walls.positions",
+}
 
 
 class SimplePointMazeEnv(gym.Env):
@@ -157,16 +165,14 @@ class SimplePointMazeEnv(gym.Env):
 
         self.variation_space.reset()
 
-        if "variation" in options:
-            assert isinstance(options["variation"], Sequence), (
-                "variation option must be a Sequence containing variations names to sample"
-            )
+        if "variation" not in options:
+            options["variation"] = DEFAULT_VARIATIONS
+            logging.warning(f"No variation provided, defaulting to {options['variation']}")
 
-            if len(options["variation"]) == 1 and options["variation"][0] == "all":
-                self.variation_space.sample()
+        elif not isinstance(options["variation"], Sequence):
+            raise ValueError("variation option must be a Sequence containing variations names to sample")
 
-            else:
-                self.variation_space.update(set(options["variation"]))
+        self.variation_space.update(options["variation"])
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
@@ -329,3 +335,9 @@ class SimplePointMazeEnv(gym.Env):
             plt.close(self._fig)
             self._fig = None
             self._ax = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

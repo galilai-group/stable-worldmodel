@@ -12,6 +12,9 @@ from gymnasium import spaces
 import stable_worldmodel as swm
 
 
+DEFAULT_VARIATIONS = ("board.prob_gravel", "agent.position", "goal.position")
+
+
 @dataclass(frozen=True)
 class Action:
     LEFT: int = 0
@@ -139,15 +142,12 @@ class VoidRunEnv(gym.Env):
 
         self.variation_space.reset()
 
-        if "variation" in options:
-            assert isinstance(options["variation"], Sequence), (
-                "variation option must be a Sequence containing variations names to sample"
-            )
+        if "variation" not in options:
+            options["variation"] = DEFAULT_VARIATIONS
+        elif not isinstance(options["variation"], Sequence):
+            raise ValueError("variation option must be a Sequence containing variations names to sample")
 
-            if len(options["variation"]) == 1 and options["variation"][0] == "all":
-                self.variation_space.sample()
-            else:
-                self.variation_space.update(set(options["variation"]))
+        self.variation_space.update(options["variation"])
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 

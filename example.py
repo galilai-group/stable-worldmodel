@@ -19,12 +19,12 @@ if __name__ == "__main__":
     # #######################
 
     world.set_policy(swm.policy.RandomPolicy())
-    # world.record_dataset(
-    #     "simple-pointmaze",
-    #     episodes=10,
-    #     seed=2347,
-    #     options={"variation": ("walls.number", "walls.shape", "walls.positions")},
-    # )
+    world.record_dataset(
+        "simple-pointmaze",
+        episodes=10,
+        seed=2347,
+        options=None,
+    )
     # world.record_video(
     #     "./",
     #     seed=2347,

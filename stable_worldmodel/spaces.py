@@ -783,7 +783,7 @@ class Dict(spaces.Dict):
             set: Set of strings representing dotted paths (e.g., 'parent.child.key')
                 for all variables including nested Dict spaces.
         """
-        return set(self._get_sampling_order())
+        return list(self._get_sampling_order())
 
     def reset(self):
         """Reset all contained spaces to their initial values.
@@ -920,13 +920,19 @@ class Dict(spaces.Dict):
             ValueError: If a specified key is not found in the Dict space.
             AssertionError: If the updated values violate the space constraints.
         """
-        order = self.sampling_order
-        for v in filter(keys.__contains__, order):
-            try:
-                var_path = v.split(".")
-                swm.utils.get_in(self, var_path).sample()
 
-            except (KeyError, TypeError):
-                raise ValueError(f"Key {v} not found in Dict space")
+        keys = set(keys)
+        order = self.sampling_order
+
+        if len(keys) == 1 and "all" in keys:
+            self.sample()
+        else:
+            for v in filter(keys.__contains__, order):
+                try:
+                    var_path = v.split(".")
+                    swm.utils.get_in(self, var_path).sample()
+
+                except (KeyError, TypeError):
+                    raise ValueError(f"Key {v} not found in Dict space")
 
         assert self.check(debug=True), "Values must be within space!"

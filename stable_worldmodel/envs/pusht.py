@@ -14,6 +14,9 @@ import stable_worldmodel as swm
 from .utils import DrawOptions
 
 
+DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
+
+
 class PushT(gym.Env):
     metadata = {
         "render_modes": ["human", "rgb_array"],
@@ -204,16 +207,13 @@ class PushT(gym.Env):
 
         self.variation_space.reset()
 
-        if "variation" in options:
-            assert isinstance(options["variation"], Sequence), (
-                "variation option must be a Sequence containing variations names to sample"
-            )
+        if "variation" not in options:
+            options["variation"] = DEFAULT_VARIATIONS
 
-            if len(options["variation"]) == 1 and options["variation"][0] == "all":
-                self.variation_space.sample()
+        elif not isinstance(options["variation"], Sequence):
+            raise ValueError("variation option must be a Sequence containing variations names to sample")
 
-            else:
-                self.variation_space.update(set(options["variation"]))
+        self.variation_space.update(options["variation"])
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
