@@ -201,6 +201,8 @@ cython_debug/
 .cursorindexingignore
 
 
+node_modules/
+
 # custom
 logs/
 .vscode/

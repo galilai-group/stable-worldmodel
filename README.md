@@ -1,6 +1,8 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Testing](https://github.com/rbalestr-lab/stable-worldmodel/actions/workflows/testing.yaml/badge.svg)](https://github.com/rbalestr-lab/stable-worldmodel/actions/workflows/testing.yaml)
+![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 <p align="center">
   <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="500px"/>

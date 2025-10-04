@@ -38,8 +38,7 @@ packages = ["stable_worldmodel"]
 [tool.setuptools.dynamic]
 version = {attr = "stable_worldmodel.__about__.__version__"}
 
-[dependency-groups]
-
+[project.optional-dependencies]
 # Development tools
 dev = [
     "pytest",
