@@ -1,18 +1,18 @@
-from xml.parsers.expat import model
 import hydra
 import lightning as pl
 import minari
-from omegaconf import OmegaConf
 import stable_ssl as ssl
 import torch
 from einops import rearrange, repeat
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
+from omegaconf import OmegaConf
 from stable_ssl.data import transforms
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModel
-from lightning.pytorch.callbacks import ModelCheckpoint
+
 from stable_worldmodel.predictor import CausalPredictor
 
 
@@ -64,9 +64,7 @@ class Embedder(torch.nn.Module):
         self.in_chans = in_chans
         self.emb_dim = emb_dim
 
-        self.patch_embed = torch.nn.Conv1d(
-            in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size
-        )
+        self.patch_embed = torch.nn.Conv1d(in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size)
 
     def forward(self, x):
         x = x.float()
@@ -108,12 +106,8 @@ def get_data():
     )
 
     # -- load dataset
-    minari_dataset = minari.load_dataset(
-        "dinowm/pusht_noise-v0", download=True
-    )  # swm/PushT-v1
-    dataset = ssl.data.MinariStepsDataset(
-        minari_dataset, num_steps=num_steps, transform=transform
-    )
+    minari_dataset = minari.load_dataset("dinowm/pusht_noise-v0", download=True)  # swm/PushT-v1
+    dataset = ssl.data.MinariStepsDataset(minari_dataset, num_steps=num_steps, transform=transform)
     train_set, val_set = ssl.data.random_split(dataset, lengths=[0.9, 0.1])
     train = DataLoader(
         train_set,
@@ -121,18 +115,12 @@ def get_data():
         num_workers=Config.num_workers,
         drop_last=True,
     )
-    val = DataLoader(
-        val_set, batch_size=Config.batch_size, num_workers=Config.num_workers
-    )
+    val = DataLoader(val_set, batch_size=Config.batch_size, num_workers=Config.num_workers)
     data_module = ssl.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
     action = dataset[0]["actions"]
-    action_dim = (
-        sum(a.size for a in action.values())
-        if isinstance(action, dict)
-        else action.size
-    )
+    action_dim = sum(a.size for a in action.values()) if isinstance(action, dict) else action.size
 
     action_dim //= num_steps
     proprio_dim = dataset[0]["observations"]["proprio"].shape[-1]
@@ -165,7 +153,7 @@ def forward(self, batch, stage):
 
         # -- merge state, action, proprio
         n_patches = state.shape[2]
-        # share action/proprio embedding accros patches for each time step
+        # share action/proprio embedding across patches for each time step
         proprio_repeat = repeat(proprio.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
         actions_repeat = repeat(actions.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
         # z (B, T, P, dim+A_emb+P_emb)
@@ -266,9 +254,7 @@ def get_world_model(action_dim, proprio_dim):
 
     # -- create proprioceptive encoder
     proprio_encoder = Embedder(in_chans=proprio_dim, emb_dim=Config.proprio_emb_dim)
-    logging.info(
-        f"Proprio dim: {proprio_dim}, proprio emb dim: {Config.proprio_emb_dim}"
-    )
+    logging.info(f"Proprio dim: {proprio_dim}, proprio emb dim: {Config.proprio_emb_dim}")
 
     # NOTE: can add a decoder here if needed
 

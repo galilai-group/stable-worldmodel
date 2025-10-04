@@ -4,7 +4,8 @@ import os
 import shlex
 import subprocess
 import sys
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from loguru import logger as logging
 
@@ -29,9 +30,7 @@ def pretraining(script_path: str, args: str = "") -> int:
     if not os.path.isfile(script_path):
         raise ValueError(f"Script {script_path} does not exist.")
 
-    logging.info(
-        f"🏃🏃🏃 Running pretraining script: {script_path} with args: {args} 🏃🏃🏃"
-    )
+    logging.info(f"🏃🏃🏃 Running pretraining script: {script_path} with args: {args} 🏃🏃🏃")
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     cmd = [sys.executable, script_path] + shlex.split(args)

@@ -1,14 +1,15 @@
-import torch
-from torch import nn
-from einops import rearrange, repeat
-from torchvision import transforms
-from torch.nn import functional as F
-
 import sys
 
+import torch
+from einops import rearrange, repeat
+from torch import nn
+from torch.nn import functional as F
+from torchvision import transforms
+
+
 sys.path.append("..")
-from einops import rearrange
 from torch import distributed as dist
+
 
 torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
 
@@ -62,9 +63,7 @@ class DINOWM(torch.nn.Module):
         decoder_scale = 16  # from vqvae
         num_side_patches = image_size // decoder_scale
         self.encoder_image_size = num_side_patches * encoder.patch_size
-        self.encoder_transform = transforms.Compose([
-            transforms.Resize(self.encoder_image_size)
-        ])
+        self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
 
     def forward(self, obs, actions):
         z = self.encode(obs, actions)
@@ -82,7 +81,7 @@ class DINOWM(torch.nn.Module):
         # -- merge state, action, proprio
         n_patches = z_pixels.shape[2]
 
-        # share action/proprio embedding accros patches for each time step
+        # share action/proprio embedding across patches for each time step
         propr_tiled = repeat(z_proprio.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
         act_tiled = repeat(z_act.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
 
@@ -183,7 +182,7 @@ class DINOWM(torch.nn.Module):
     #     # z_tgt = z[:, Config.num_pred :, :, :]
 
     #     # keep only the part corresponding to the visual features
-    #     # TODO chekc if need to remove proprio as well
+    #     # TODO check if need to remove proprio as well
     #     z_pred_visual = z_preds[..., : -action_emb_dim - proprio_emb_dim]
 
     #     return z_pred_visual
@@ -328,9 +327,7 @@ class Embedder(torch.nn.Module):
         self.in_chans = in_chans
         self.emb_dim = emb_dim
 
-        self.patch_embed = torch.nn.Conv1d(
-            in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size
-        )
+        self.patch_embed = torch.nn.Conv1d(in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size)
 
     def forward(self, x):
         x = x.float()
@@ -356,20 +353,14 @@ class CausalPredictor(nn.Module):
         emb_dropout=0.0,
     ):
         super().__init__()
-        assert pool in {"cls", "mean"}, (
-            "pool type must be either cls (cls token) or mean (mean pooling)"
-        )
+        assert pool in {"cls", "mean"}, "pool type must be either cls (cls token) or mean (mean pooling)"
 
         self.num_patches = num_patches
         self.num_frames = num_frames
 
-        self.pos_embedding = nn.Parameter(
-            torch.randn(1, num_frames * (num_patches), dim)
-        )  # dim for the pos encodings
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_frames * (num_patches), dim))  # dim for the pos encodings
         self.dropout = nn.Dropout(emb_dropout)
-        self.transformer = Transformer(
-            dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames
-        )
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames)
         self.pool = pool
 
     def forward(self, x):  # x: (b, window_size * H/patch_size * W/patch_size, 384)
@@ -397,9 +388,7 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(
-        self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1
-    ):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1):
         super().__init__()
         inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
@@ -409,11 +398,7 @@ class Attention(nn.Module):
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-        self.to_out = (
-            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
-            if project_out
-            else nn.Identity()
-        )
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
         # self.register_buffer(
         #     "temp_mask", self.generate_mask_matrix(num_patches, num_frames)
@@ -426,7 +411,7 @@ class Attention(nn.Module):
         x = self.norm(x)
 
         qkv = self.to_qkv(x).chunk(3, dim=-1)
-        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), qkv)
+        q, k, v = (rearrange(t, "b n (h d) -> b h n d", h=self.heads) for t in qkv)
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
         dots = dots.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
@@ -466,17 +451,19 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(
-                nn.ModuleList([
-                    Attention(
-                        dim,
-                        heads=heads,
-                        dim_head=dim_head,
-                        dropout=dropout,
-                        num_patches=num_patches,
-                        num_frames=num_frames,
-                    ),
-                    FeedForward(dim, mlp_dim, dropout=dropout),
-                ])
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            heads=heads,
+                            dim_head=dim_head,
+                            dropout=dropout,
+                            num_patches=num_patches,
+                            num_frames=num_frames,
+                        ),
+                        FeedForward(dim, mlp_dim, dropout=dropout),
+                    ]
+                )
             )
 
     def forward(self, x):
@@ -524,11 +511,7 @@ class Quantize(nn.Module):
 
     def forward(self, input):
         flatten = input.reshape(-1, self.dim)
-        dist = (
-            flatten.pow(2).sum(1, keepdim=True)
-            - 2 * flatten @ self.embed
-            + self.embed.pow(2).sum(0, keepdim=True)
-        )
+        dist = flatten.pow(2).sum(1, keepdim=True) - 2 * flatten @ self.embed + self.embed.pow(2).sum(0, keepdim=True)
         _, embed_ind = (-dist).max(1)
         embed_onehot = F.one_hot(embed_ind, self.n_embed).type(flatten.dtype)
         embed_ind = embed_ind.view(*input.shape[:-1])
@@ -541,14 +524,10 @@ class Quantize(nn.Module):
             all_reduce(embed_onehot_sum)
             all_reduce(embed_sum)
 
-            self.cluster_size.data.mul_(self.decay).add_(
-                embed_onehot_sum, alpha=1 - self.decay
-            )
+            self.cluster_size.data.mul_(self.decay).add_(embed_onehot_sum, alpha=1 - self.decay)
             self.embed_avg.data.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
             n = self.cluster_size.sum()
-            cluster_size = (
-                (self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
-            )
+            cluster_size = (self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
             self.embed.data.copy_(embed_normalized)
 
@@ -611,9 +590,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(
-        self, in_channel, out_channel, channel, n_res_block, n_res_channel, stride
-    ):
+    def __init__(self, in_channel, out_channel, channel, n_res_block, n_res_channel, stride):
         super().__init__()
 
         blocks = [nn.Conv2d(in_channel, channel, 3, padding=1)]
@@ -624,16 +601,16 @@ class Decoder(nn.Module):
         blocks.append(nn.ReLU(inplace=True))
 
         if stride == 4:
-            blocks.extend([
-                nn.ConvTranspose2d(channel, channel // 2, 4, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.ConvTranspose2d(channel // 2, out_channel, 4, stride=2, padding=1),
-            ])
+            blocks.extend(
+                [
+                    nn.ConvTranspose2d(channel, channel // 2, 4, stride=2, padding=1),
+                    nn.ReLU(inplace=True),
+                    nn.ConvTranspose2d(channel // 2, out_channel, 4, stride=2, padding=1),
+                ]
+            )
 
         elif stride == 2:
-            blocks.append(
-                nn.ConvTranspose2d(channel, out_channel, 4, stride=2, padding=1)
-            )
+            blocks.append(nn.ConvTranspose2d(channel, out_channel, 4, stride=2, padding=1))
 
         self.blocks = nn.Sequential(*blocks)
 
@@ -662,9 +639,7 @@ class VQVAE(nn.Module):
             for param in self.quantize_b.parameters():
                 param.requires_grad = False
 
-        self.upsample_b = Decoder(
-            emb_dim, emb_dim, channel, n_res_block, n_res_channel, stride=4
-        )
+        self.upsample_b = Decoder(emb_dim, emb_dim, channel, n_res_block, n_res_channel, stride=4)
         self.dec = Decoder(
             emb_dim,
             in_channel,
@@ -681,9 +656,7 @@ class VQVAE(nn.Module):
         """
         num_patches = input.shape[2]
         num_side_patches = int(num_patches**0.5)
-        input = rearrange(
-            input, "b t (h w) e -> (b t) h w e", h=num_side_patches, w=num_side_patches
-        )
+        input = rearrange(input, "b t (h w) e -> (b t) h w e", h=num_side_patches, w=num_side_patches)
 
         if self.quantize:
             quant_b, diff_b, id_b = self.quantize_b(input)

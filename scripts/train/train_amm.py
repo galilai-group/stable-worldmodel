@@ -3,7 +3,6 @@ import minari
 import stable_ssl as ssl
 import torch
 import torchvision
-
 from stable_ssl.data import transforms
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForImageClassification
@@ -25,12 +24,8 @@ def get_data(num_steps=2):
     )
 
     # -- load dataset
-    minari_dataset = minari.load_dataset(
-        "swm/ImagePositioning-v1", download=True
-    )
-    dataset = ssl.data.MinariStepsDataset(
-        minari_dataset, num_steps=num_steps, transform=transform
-    )
+    minari_dataset = minari.load_dataset("swm/ImagePositioning-v1", download=True)
+    dataset = ssl.data.MinariStepsDataset(minari_dataset, num_steps=num_steps, transform=transform)
     train_set, val_set = ssl.data.random_split(dataset, lengths=[0.5, 0.5])
     train = DataLoader(train_set, batch_size=2, num_workers=20, drop_last=True)
     val = DataLoader(val_set, batch_size=2, num_workers=10)
@@ -38,11 +33,7 @@ def get_data(num_steps=2):
 
     # -- determine action space dimension
     action = dataset[0]["actions"]
-    action_dim = (
-        sum(a.size for a in action.values())
-        if isinstance(action, dict)
-        else action.size
-    )
+    action_dim = sum(a.size for a in action.values()) if isinstance(action, dict) else action.size
     action_dim //= num_steps
 
     return data_module, action_dim

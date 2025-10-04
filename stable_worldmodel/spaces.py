@@ -215,9 +215,7 @@ class Discrete(spaces.Discrete):
             bool: True if the current value is valid, False otherwise.
         """
         if not self.constrain_fn(self.value):
-            logging.warning(
-                f"Discrete: value {self.value} does not satisfy constrain_fn"
-            )
+            logging.warning(f"Discrete: value {self.value} does not satisfy constrain_fn")
             return False
         return super().contains(self.value)
 
@@ -252,12 +250,8 @@ class Discrete(spaces.Discrete):
                     self._value = sample
                 return sample
             if warn_after_s is not None and (time.time() - start) > warn_after_s:
-                logging.warning(
-                    "rejection sampling: rejection sampling is taking a while..."
-                )
-        raise RuntimeError(
-            f"rejection sampling: predicate not satisfied after {max_tries} draws"
-        )
+                logging.warning("rejection sampling: rejection sampling is taking a while...")
+        raise RuntimeError(f"rejection sampling: predicate not satisfied after {max_tries} draws")
 
 
 class MultiDiscrete(spaces.MultiDiscrete):
@@ -348,9 +342,7 @@ class MultiDiscrete(spaces.MultiDiscrete):
             bool: True if the current values are valid, False otherwise.
         """
         if not self.constrain_fn(self.value):
-            logging.warning(
-                f"MultiDiscrete: value {self.value} does not satisfy constrain_fn"
-            )
+            logging.warning(f"MultiDiscrete: value {self.value} does not satisfy constrain_fn")
             return False
         return super().contains(self.value)
 
@@ -386,12 +378,8 @@ class MultiDiscrete(spaces.MultiDiscrete):
                     self._value = sample
                 return sample
             if warn_after_s is not None and (time.time() - start) > warn_after_s:
-                logging.warning(
-                    "rejection sampling: rejection sampling is taking a while..."
-                )
-        raise RuntimeError(
-            f"rejection sampling: predicate not satisfied after {max_tries} draws"
-        )
+                logging.warning("rejection sampling: rejection sampling is taking a while...")
+        raise RuntimeError(f"rejection sampling: predicate not satisfied after {max_tries} draws")
 
 
 class Box(spaces.Box):
@@ -521,17 +509,9 @@ class Box(spaces.Box):
                 if set_value:
                     self._value = sample
                 return sample
-            if (
-                warn_after_s is not None
-                and (time.time() - start) > warn_after_s
-                and i == 1
-            ):
-                logging.warning(
-                    "rejection sampling: rejection sampling is taking a while..."
-                )
-        raise RuntimeError(
-            f"rejection sampling: predicate not satisfied after {max_tries} draws"
-        )
+            if warn_after_s is not None and (time.time() - start) > warn_after_s:
+                logging.warning("rejection sampling: rejection sampling is taking a while...")
+        raise RuntimeError(f"rejection sampling: predicate not satisfied after {max_tries} draws")
 
 
 class RGBBox(Box):
@@ -575,7 +555,7 @@ class RGBBox(Box):
     """
 
     def __init__(self, shape=(3,), *args, init_value=None, **kwargs):
-        if not any([dim == 3 for dim in shape]):
+        if not any(dim == 3 for dim in shape):
             raise ValueError("shape must have a channel of size 3")
 
         super().__init__(
@@ -679,9 +659,7 @@ class Dict(spaces.Dict):
                     )
     """
 
-    def __init__(
-        self, *args, init_value=None, constrain_fn=None, sampling_order=None, **kwargs
-    ):
+    def __init__(self, *args, init_value=None, constrain_fn=None, sampling_order=None, **kwargs):
         """Initialize a Dict space with state tracking and sampling order.
 
         Args:
@@ -760,9 +738,7 @@ class Dict(spaces.Dict):
             if hasattr(v, "value"):
                 val[k] = v.value
             else:
-                raise ValueError(
-                    f"Space {k} of type {type(v)} does not have value property"
-                )
+                raise ValueError(f"Space {k} of type {type(v)} does not have value property")
         return val
 
     def _get_sampling_order(self, parts=None):

@@ -1,6 +1,7 @@
-import torch
-import gymnasium as gym
 from typing import Protocol, runtime_checkable
+
+import gymnasium as gym
+import torch
 
 
 class Costable(Protocol):

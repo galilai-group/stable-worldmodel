@@ -1,5 +1,7 @@
-import pytest
 import os
+
+import pytest
+
 
 os.environ["MUJOCO_GL"] = "egl"
 
@@ -187,15 +189,11 @@ os.environ["MUJOCO_GL"] = "egl"
     ],
 )
 def test_each_env(env):
+    import numpy as np
+    from gymnasium.spaces import MultiDiscrete
 
-    import gymnasium as gym
-    import gymnasium_robotics
-    import torch
     import stable_worldmodel as swm
     from stable_worldmodel.planner import GD
-    from gymnasium.spaces import Discrete, MultiDiscrete
-    import numpy as np
-    import ogbench
 
     wrappers = [
         # lambda x: RecordVideo(x, video_folder="./videos"),
@@ -212,9 +210,7 @@ def test_each_env(env):
         return
 
     print(world.envs.action_space, type(world.envs.action_space))
-    world_model = swm.DummyWorldModel(
-        image_shape=(3, 224, 224), action_dim=world.single_action_space.shape[0]
-    )
+    world_model = swm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=world.single_action_space.shape[0])
 
     # print(sorted(envs))
     planner = GD(world_model, n_steps=5, action_space=world.action_space)

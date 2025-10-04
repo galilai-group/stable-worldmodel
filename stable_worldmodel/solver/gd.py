@@ -1,9 +1,9 @@
-import torch
 import numpy as np
-from loguru import logger as logging
-from .solver import Costable
-
+import torch
 from gymnasium.spaces import Box
+from loguru import logger as logging
+
+from .solver import Costable
 
 
 class GDSolver(torch.nn.Module):
@@ -36,10 +36,7 @@ class GDSolver(torch.nn.Module):
 
         # warning if action space is discrete
         if not isinstance(action_space, Box):
-            logging.warning(
-                f"Action space is discrete, got {type(action_space)}. "
-                "GDSolver may not work as expected."
-            )
+            logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
 
     @property
     def n_envs(self) -> int:
@@ -95,15 +92,11 @@ class GDSolver(torch.nn.Module):
         for _ in range(self.n_steps):
             cost = self.model.get_cost(info_dict, self.init)
 
-            assert type(cost) is torch.Tensor, (
-                f"Got {type(cost)} cost, expect torch.Tensor"
-            )
-            assert cost.ndim == 1 and len(cost) == self.n_envs, (
-                f"Cost should be of shape (n_envs,), got {cost.shape}"
-            )
+            assert type(cost) is torch.Tensor, f"Got {type(cost)} cost, expect torch.Tensor"
+            assert cost.ndim == 1 and len(cost) == self.n_envs, f"Cost should be of shape (n_envs,), got {cost.shape}"
             assert cost.requires_grad, "Cost must requires_grad for GD solver."
 
-            cost = cost.sum()  # independant cost for each env
+            cost = cost.sum()  # independent cost for each env
             cost.backward()
             optim.step()
             optim.zero_grad(set_to_none=True)

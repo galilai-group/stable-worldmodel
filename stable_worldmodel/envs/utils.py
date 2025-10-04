@@ -1,12 +1,11 @@
+from collections.abc import Sequence
+
 import numpy as np
 import pygame
 import pymunk
-
-from pymunk.vec2d import Vec2d
-from pymunk.space_debug_draw_options import SpaceDebugColor
 import shapely.geometry as sg
-
-from typing import Sequence, Tuple
+from pymunk.space_debug_draw_options import SpaceDebugColor
+from pymunk.vec2d import Vec2d
 
 
 positive_y_is_up: bool = False
@@ -60,7 +59,7 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
                     Surface that the objects will be drawn on
         """
         self.surface = surface
-        super(DrawOptions, self).__init__()
+        super().__init__()
 
     def draw_circle(
         self,
@@ -73,14 +72,7 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
         p = to_pygame(pos, self.surface)
 
         pygame.draw.circle(self.surface, fill_color.as_int(), p, round(radius), 0)
-        pygame.draw.circle(
-            self.surface, light_color(fill_color).as_int(), p, round(radius - 4), 0
-        )
-
-        circle_edge = pos + Vec2d(radius, 0).rotated(angle)
-        p2 = to_pygame(circle_edge, self.surface)
-        line_r = 2 if radius > 20 else 1
-        # pygame.draw.lines(self.surface, outline_color.as_int(), False, [p, p2], line_r)
+        pygame.draw.circle(self.surface, light_color(fill_color).as_int(), p, round(radius - 4), 0)
 
     def draw_segment(self, a: Vec2d, b: Vec2d, color: SpaceDebugColor) -> None:
         p1 = to_pygame(a, self.surface)
@@ -90,8 +82,8 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
 
     def draw_fat_segment(
         self,
-        a: Tuple[float, float],
-        b: Tuple[float, float],
+        a: tuple[float, float],
+        b: tuple[float, float],
         radius: float,
         outline_color: SpaceDebugColor,
         fill_color: SpaceDebugColor,
@@ -130,7 +122,7 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
 
     def draw_polygon(
         self,
-        verts: Sequence[Tuple[float, float]],
+        verts: Sequence[tuple[float, float]],
         radius: float,
         outline_color: SpaceDebugColor,
         fill_color: SpaceDebugColor,
@@ -147,20 +139,18 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
                 b = verts[(i + 1) % len(verts)]
                 self.draw_fat_segment(a, b, radius, fill_color, fill_color)
 
-    def draw_dot(
-        self, size: float, pos: Tuple[float, float], color: SpaceDebugColor
-    ) -> None:
+    def draw_dot(self, size: float, pos: tuple[float, float], color: SpaceDebugColor) -> None:
         p = to_pygame(pos, self.surface)
         pygame.draw.circle(self.surface, color.as_int(), p, round(size), 0)
 
 
-def get_mouse_pos(surface: pygame.Surface) -> Tuple[int, int]:
+def get_mouse_pos(surface: pygame.Surface) -> tuple[int, int]:
     """Get position of the mouse pointer in pymunk coordinates."""
     p = pygame.mouse.get_pos()
     return from_pygame(p, surface)
 
 
-def to_pygame(p: Tuple[float, float], surface: pygame.Surface) -> Tuple[int, int]:
+def to_pygame(p: tuple[float, float], surface: pygame.Surface) -> tuple[int, int]:
     """Convenience method to convert pymunk coordinates to pygame surface
     local coordinates.
 
@@ -173,7 +163,7 @@ def to_pygame(p: Tuple[float, float], surface: pygame.Surface) -> Tuple[int, int
         return round(p[0]), round(p[1])
 
 
-def from_pygame(p: Tuple[float, float], surface: pygame.Surface) -> Tuple[int, int]:
+def from_pygame(p: tuple[float, float], surface: pygame.Surface) -> tuple[int, int]:
     """Convenience method to convert pygame surface local coordinates to
     pymunk coordinates
     """
@@ -181,15 +171,13 @@ def from_pygame(p: Tuple[float, float], surface: pygame.Surface) -> Tuple[int, i
 
 
 def light_color(color: SpaceDebugColor):
-    color = np.minimum(
-        1.2 * np.float32([color.r, color.g, color.b, color.a]), np.float32([255])
-    )
+    color = np.minimum(1.2 * np.float32([color.r, color.g, color.b, color.a]), np.float32([255]))
     color = SpaceDebugColor(r=color[0], g=color[1], b=color[2], a=color[3])
     return color
 
 
 def pymunk_to_shapely(body, shapes):
-    geoms = list()
+    geoms = []
     for shape in shapes:
         if isinstance(shape, pymunk.shapes.Poly):
             verts = [body.local_to_world(v) for v in shape.get_vertices()]

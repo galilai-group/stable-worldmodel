@@ -15,7 +15,7 @@ def test_env():
     world.record_video(
         "./",
         seed=2547,
-        options=dict(),
+        options=None,
     )
 
 

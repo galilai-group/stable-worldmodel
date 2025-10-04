@@ -1,7 +1,10 @@
-import pytest
-from unittest.mock import patch, MagicMock
-from stable_worldmodel import spaces
+from unittest.mock import MagicMock, patch
+
 import numpy as np
+import pytest
+
+from stable_worldmodel import spaces
+
 
 ##########################
 ## Discrete Space tests ##
@@ -268,9 +271,7 @@ def test_multidiscrete_space_sample_sets_value():
 
 def test_multidiscrete_space_constraint_function_fails():
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.MultiDiscrete(
-        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
-    )
+    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
     assert not space.check()
     assert not space.contains(np.array([0, 0, 0]))
     assert not space.contains(np.array([2, 3, 4]))
@@ -278,9 +279,7 @@ def test_multidiscrete_space_constraint_function_fails():
 
 def test_multidiscrete_space_constraint_function_fail_sample():
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.MultiDiscrete(
-        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
-    )
+    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
 
     with pytest.raises(RuntimeError):
         space.sample(max_tries=3)
@@ -288,9 +287,7 @@ def test_multidiscrete_space_constraint_function_fail_sample():
 
 def test_multidiscrete_space_constraint_function_warn_sample():
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.MultiDiscrete(
-        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
-    )
+    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
 
     with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
         with pytest.raises(RuntimeError):
@@ -300,9 +297,7 @@ def test_multidiscrete_space_constraint_function_warn_sample():
 
 def test_multidiscrete_space_constraint_function_pass():
     constraint_fn = MagicMock(return_value=True)
-    space = spaces.MultiDiscrete(
-        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
-    )
+    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
     assert space.check()
     assert space.contains(np.array([0, 0, 0]))
     assert space.contains(np.array([2, 3, 4]))
@@ -325,9 +320,7 @@ def test_multidiscrete_space_constraint_real_logic():
 def test_multidiscrete_space_constraint_rejection_succeeds():
     """Test that rejection sampling eventually succeeds."""
     # Only accept arrays where first element >= 2
-    space = spaces.MultiDiscrete(
-        [5, 5, 5], init_value=np.array([2, 1, 1]), constrain_fn=lambda x: x[0] >= 2
-    )
+    space = spaces.MultiDiscrete([5, 5, 5], init_value=np.array([2, 1, 1]), constrain_fn=lambda x: x[0] >= 2)
     for _ in range(10):
         sample = space.sample()
         assert sample[0] >= 2
@@ -335,9 +328,7 @@ def test_multidiscrete_space_constraint_rejection_succeeds():
 
 def test_multidiscrete_space_sample_without_setting_value_constraint():
     """Test set_value=False with constraint function."""
-    space = spaces.MultiDiscrete(
-        [10, 10], init_value=np.array([2, 4]), constrain_fn=lambda x: np.sum(x) % 2 == 0
-    )
+    space = spaces.MultiDiscrete([10, 10], init_value=np.array([2, 4]), constrain_fn=lambda x: np.sum(x) % 2 == 0)
     original_value = space.value.copy()
     sample = space.sample(set_value=False)
     assert np.array_equal(space.value, original_value)
@@ -346,9 +337,7 @@ def test_multidiscrete_space_sample_without_setting_value_constraint():
 
 def test_multidiscrete_space_check_warning_on_constraint_fail():
     """Test that check() logs warning when constraint fails."""
-    space = spaces.MultiDiscrete(
-        [5, 5], init_value=np.array([2, 2]), constrain_fn=lambda x: False
-    )
+    space = spaces.MultiDiscrete([5, 5], init_value=np.array([2, 2]), constrain_fn=lambda x: False)
     with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
         result = space.check()
         assert not result
@@ -357,9 +346,7 @@ def test_multidiscrete_space_check_warning_on_constraint_fail():
 
 def test_multidiscrete_space_init_value_violates_constraint():
     """Test behavior when init_value doesn't satisfy constraint."""
-    space = spaces.MultiDiscrete(
-        [10, 10], init_value=np.array([1, 2]), constrain_fn=lambda x: np.sum(x) % 2 == 0
-    )
+    space = spaces.MultiDiscrete([10, 10], init_value=np.array([1, 2]), constrain_fn=lambda x: np.sum(x) % 2 == 0)
     assert not space.contains(space.value)
     assert not space.check()
 
@@ -433,9 +420,7 @@ def test_box_space_vanilla_reset():
 
 def test_box_space_properties():
     init_val = np.array([0.5, 0.7], dtype=np.float32)
-    space = spaces.Box(
-        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
-    )
+    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
     assert np.array_equal(space.init_value, init_val)
     assert np.array_equal(space.value, init_val)
     assert space.contains(init_val)
@@ -443,26 +428,20 @@ def test_box_space_properties():
 
 def test_box_space_check():
     init_val = np.array([0.5, 0.7], dtype=np.float32)
-    space = spaces.Box(
-        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
-    )
+    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
     assert space.check()
 
 
 def test_box_space_outbound():
     init_val = np.array([1.5, 0.7], dtype=np.float32)
-    space = spaces.Box(
-        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
-    )
+    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
     assert not space.contains(space.value)
     assert not space.check()
 
 
 def test_box_space_reset():
     init_val = np.array([0.5, 0.7], dtype=np.float32)
-    space = spaces.Box(
-        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
-    )
+    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
     space.sample()
     assert not np.array_equal(space.value, space.init_value)
     space.reset()
@@ -471,9 +450,7 @@ def test_box_space_reset():
 
 def test_box_space_sample_sets_value():
     init_val = np.array([0.5, 0.5], dtype=np.float32)
-    space = spaces.Box(
-        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
-    )
+    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
     sample1 = space.sample()
     assert np.array_equal(space.value, sample1)
     space.reset()
@@ -636,9 +613,7 @@ def test_box_space_init_value_violates_constraint():
 def test_box_space_multiple_samples():
     """Test that value updates correctly across multiple samples."""
     init_val = np.array([0.0, 0.0], dtype=np.float32)
-    space = spaces.Box(
-        low=-1.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
-    )
+    space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
     values = [space.sample() for _ in range(5)]
     assert np.array_equal(space.value, values[-1])
 
@@ -870,9 +845,7 @@ def test_rgbbox_space_constraint_function():
     def not_too_dark(img):
         return np.mean(img) > 100
 
-    space = spaces.RGBBox(
-        shape=(4, 4, 3), init_value=init_img, constrain_fn=not_too_dark
-    )
+    space = spaces.RGBBox(shape=(4, 4, 3), init_value=init_img, constrain_fn=not_too_dark)
 
     assert space.check()
     assert space.contains(init_img)
@@ -962,9 +935,7 @@ def test_rgbbox_space_constraint_fail_sample():
 
     # Impossible constraint
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.RGBBox(
-        shape=(3, 3, 3), init_value=init_img, constrain_fn=constraint_fn
-    )
+    space = spaces.RGBBox(shape=(3, 3, 3), init_value=init_img, constrain_fn=constraint_fn)
 
     with pytest.raises(RuntimeError):
         space.sample(max_tries=3)
@@ -1387,9 +1358,7 @@ def test_dict_space_two_level_contains():
 
     assert space.contains({"player": {"x": 5, "y": 5}, "score": 0})
     assert space.contains({"player": {"x": 0, "y": 9}, "score": 99})
-    assert not space.contains(
-        {"player": {"x": 10, "y": 5}, "score": 0}
-    )  # x out of bounds
+    assert not space.contains({"player": {"x": 10, "y": 5}, "score": 0})  # x out of bounds
     assert not space.contains({"player": {"x": 5}, "score": 0})  # missing nested key
 
 
@@ -1714,9 +1683,7 @@ def test_dict_space_mixed_nested():
         {
             "config": spaces.Dict(
                 {
-                    "resolution": spaces.MultiDiscrete(
-                        [1920, 1080], init_value=np.array([800, 600])
-                    ),
+                    "resolution": spaces.MultiDiscrete([1920, 1080], init_value=np.array([800, 600])),
                     "settings": spaces.Dict(
                         {
                             "volume": spaces.Box(
@@ -1759,9 +1726,7 @@ def test_dict_space_update_single_key():
     space.update({"x"})
 
     # x should have changed, y should not
-    assert (
-        space["x"].value != original_x or original_x == space["x"].value
-    )  # Might sample same value
+    assert space["x"].value != original_x or original_x == space["x"].value  # Might sample same value
     assert space["y"].value == original_y  # Should not change
 
 
@@ -1904,8 +1869,7 @@ def test_dict_space_constraint_with_nested_access():
             ),
         },
         # Constraint: player must not be at same position as target
-        constrain_fn=lambda d: d["player"]["x"] != d["target"]["x"]
-        or d["player"]["y"] != d["target"]["y"],
+        constrain_fn=lambda d: d["player"]["x"] != d["target"]["x"] or d["player"]["y"] != d["target"]["y"],
     )
 
     assert space.contains({"player": {"x": 2, "y": 3}, "target": {"x": 7, "y": 8}})

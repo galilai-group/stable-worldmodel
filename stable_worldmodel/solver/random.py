@@ -315,13 +315,9 @@ class RandomSolver:
 
         if remaining > 0:
             total_sequence = remaining * self._config.action_block
-            action_sequence = np.stack(
-                [self._action_space.sample() for _ in range(total_sequence)], axis=1
-            )
+            action_sequence = np.stack([self._action_space.sample() for _ in range(total_sequence)], axis=1)
 
-            new_action = torch.from_numpy(action_sequence).view(
-                self.n_envs, remaining, self.action_dim
-            )
+            new_action = torch.from_numpy(action_sequence).view(self.n_envs, remaining, self.action_dim)
             actions = torch.cat([actions, new_action], dim=1)
 
         outputs["actions"] = actions

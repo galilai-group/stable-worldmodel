@@ -1,4 +1,4 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import cv2
 import gymnasium as gym
@@ -10,9 +10,8 @@ from gymnasium import spaces
 from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
-from stable_worldmodel.envs.utils import light_color, to_pygame
 
-from .utils import DrawOptions, pymunk_to_shapely
+from .utils import DrawOptions
 
 
 class PushT(gym.Env):
@@ -69,11 +68,7 @@ class PushT(gym.Env):
                         #     categories=["circle", "square", "triangle"],   SHOULD IMPLEMENT THIS
                         #     init_value="circle",
                         # ),
-                        "color": swm.spaces.RGBBox(
-                            init_value=np.array(
-                                pygame.Color("RoyalBlue")[:3], dtype=np.uint8
-                            )
-                        ),
+                        "color": swm.spaces.RGBBox(init_value=np.array(pygame.Color("RoyalBlue")[:3], dtype=np.uint8)),
                         "scale": swm.spaces.Box(
                             low=20,
                             high=60,
@@ -81,9 +76,7 @@ class PushT(gym.Env):
                             shape=(),
                             dtype=np.float32,
                         ),
-                        "shape": swm.spaces.Discrete(
-                            len(self.shapes), start=0, init_value=3
-                        ),
+                        "shape": swm.spaces.Discrete(len(self.shapes), start=0, init_value=3),
                         "angle": swm.spaces.Box(
                             low=-2 * np.pi,
                             high=2 * np.pi,
@@ -110,9 +103,7 @@ class PushT(gym.Env):
                 "block": swm.spaces.Dict(
                     {
                         "color": swm.spaces.RGBBox(
-                            init_value=np.array(
-                                pygame.Color("LightSlateGray")[:3], dtype=np.uint8
-                            )
+                            init_value=np.array(pygame.Color("LightSlateGray")[:3], dtype=np.uint8)
                         ),
                         "scale": swm.spaces.Box(
                             low=20,
@@ -121,9 +112,7 @@ class PushT(gym.Env):
                             shape=(),
                             dtype=np.float32,
                         ),
-                        "shape": swm.spaces.Discrete(
-                            len(self.shapes) - 1, start=1, init_value=2
-                        ),
+                        "shape": swm.spaces.Discrete(len(self.shapes) - 1, start=1, init_value=2),
                         "angle": swm.spaces.Box(
                             low=-2 * np.pi,
                             high=2 * np.pi,
@@ -143,9 +132,7 @@ class PushT(gym.Env):
                 "goal": swm.spaces.Dict(
                     {
                         "color": swm.spaces.RGBBox(
-                            init_value=np.array(
-                                pygame.Color("LightGreen")[:3], dtype=np.uint8
-                            )
+                            init_value=np.array(pygame.Color("LightGreen")[:3], dtype=np.uint8)
                         ),
                         "scale": swm.spaces.Box(
                             low=20,
@@ -172,11 +159,7 @@ class PushT(gym.Env):
                 ),
                 "background": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.RGBBox(
-                            init_value=np.array(
-                                np.array([255, 255, 255], dtype=np.uint8)
-                            )
-                        ),
+                        "color": swm.spaces.RGBBox(init_value=np.array(np.array([255, 255, 255], dtype=np.uint8))),
                     }
                 ),
             },
@@ -232,9 +215,7 @@ class PushT(gym.Env):
             else:
                 self.variation_space.update(set(options["variation"]))
 
-        assert self.variation_space.check(debug=True), (
-            "Variation values must be within variation space!"
-        )
+        assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
         ### setup pymunk space
         self._setup()
@@ -247,12 +228,8 @@ class PushT(gym.Env):
         ### get the state
         goal_state = np.concatenate(
             [
-                self.variation_space["agent"]["start_position"]
-                .sample(set_value=False)
-                .tolist(),
-                self.variation_space["block"]["start_position"]
-                .sample(set_value=False)
-                .tolist(),
+                self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
+                self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
                 [self.variation_space["block"]["angle"].sample(set_value=False)],
                 self.variation_space["agent"]["velocity"].value.tolist(),
             ]
@@ -291,9 +268,7 @@ class PushT(gym.Env):
         self.latest_action = action
         for _ in range(n_steps):
             # Step PD control.
-            acceleration = self.k_p * (action - self.agent.position) + self.k_v * (
-                Vec2d(0, 0) - self.agent.velocity
-            )
+            acceleration = self.k_p * (action - self.agent.position) + self.k_v * (Vec2d(0, 0) - self.agent.velocity)
             self.agent.velocity += acceleration * self.dt
 
             # Step physics.
@@ -378,9 +353,7 @@ class PushT(gym.Env):
         goal_body = self._get_goal_pose_body(self.goal_pose)
         for shape in self.block.shapes:
             if isinstance(shape, pymunk.Circle):
-                center_pg = pymunk.pygame_util.to_pygame(
-                    goal_body.local_to_world(shape.offset), draw_options.surface
-                )
+                center_pg = pymunk.pygame_util.to_pygame(goal_body.local_to_world(shape.offset), draw_options.surface)
                 pygame.draw.circle(
                     canvas,
                     self.variation_space["goal"]["color"].value,
@@ -390,9 +363,7 @@ class PushT(gym.Env):
 
             else:
                 goal_points = [
-                    pymunk.pygame_util.to_pygame(
-                        goal_body.local_to_world(v), draw_options.surface
-                    )
+                    pymunk.pygame_util.to_pygame(goal_body.local_to_world(v), draw_options.surface)
                     for v in shape.get_vertices()
                 ]
                 goal_points += [goal_points[0]]
@@ -403,14 +374,10 @@ class PushT(gym.Env):
                 )
 
         # change agent color
-        self._set_body_color(
-            self.agent, self.variation_space["agent"]["color"].value.tolist()
-        )
+        self._set_body_color(self.agent, self.variation_space["agent"]["color"].value.tolist())
 
         # change block color
-        self._set_body_color(
-            self.block, self.variation_space["block"]["color"].value.tolist()
-        )
+        self._set_body_color(self.block, self.variation_space["block"]["color"].value.tolist())
 
         # Draw agent and block.
         self.space.debug_draw(draw_options)
@@ -484,7 +451,7 @@ class PushT(gym.Env):
         self.space = pymunk.Space()
         self.space.gravity = 0, 0  # TODO add physics support
         self.space.damping = 0
-        self.render_buffer = list()
+        self.render_buffer = []
 
         # Add walls.
         walls = [
@@ -498,25 +465,25 @@ class PushT(gym.Env):
 
         #### agent ####
 
-        agent_params = dict(
-            position=self.variation_space["agent"]["start_position"].value.tolist(),
-            angle=self.variation_space["agent"]["angle"].value,
-            scale=self.variation_space["agent"]["scale"].value,
-            color=self.variation_space["agent"]["color"].value.tolist(),
-            shape=self.shapes[self.variation_space["agent"]["shape"].value],
-        )
+        agent_params = {
+            "position": self.variation_space["agent"]["start_position"].value.tolist(),
+            "angle": self.variation_space["agent"]["angle"].value,
+            "scale": self.variation_space["agent"]["scale"].value,
+            "color": self.variation_space["agent"]["color"].value.tolist(),
+            "shape": self.shapes[self.variation_space["agent"]["shape"].value],
+        }
 
         self.agent = self.add_shape(**agent_params)
 
         #### block ####
 
-        block_params = dict(
-            position=self.variation_space["block"]["start_position"].value.tolist(),
-            angle=self.variation_space["block"]["angle"].value,
-            scale=self.variation_space["block"]["scale"].value,
-            color=self.variation_space["block"]["color"].value.tolist(),
-            shape=self.shapes[self.variation_space["block"]["shape"].value],
-        )
+        block_params = {
+            "position": self.variation_space["block"]["start_position"].value.tolist(),
+            "angle": self.variation_space["block"]["angle"].value,
+            "scale": self.variation_space["block"]["scale"].value,
+            "color": self.variation_space["block"]["color"].value.tolist(),
+            "shape": self.shapes[self.variation_space["block"]["shape"].value],
+        }
 
         self.block = self.add_shape(**block_params)
 
@@ -536,9 +503,7 @@ class PushT(gym.Env):
 
     def _add_segment(self, a, b, radius):
         shape = pymunk.Segment(self.space.static_body, a, b, radius)
-        shape.color = pygame.Color(
-            "LightGray"
-        )  # https://htmlcolorcodes.com/color-names
+        shape.color = pygame.Color("LightGray")  # https://htmlcolorcodes.com/color-names
         return shape
 
     def add_circle(
@@ -557,9 +522,7 @@ class PushT(gym.Env):
         self.space.add(body, shape)
         return body
 
-    def add_box(
-        self, position, height, width, color="LightSlateGray", scale=1, angle=0
-    ):
+    def add_box(self, position, height, width, color="LightSlateGray", scale=1, angle=0):
         mass = 1
         inertia = pymunk.moment_for_box(mass, (height * scale, width * scale))
         body = pymunk.Body(mass, inertia)
@@ -601,9 +564,7 @@ class PushT(gym.Env):
         shape2.color = pygame.Color(color)
         shape1.filter = pymunk.ShapeFilter(mask=mask)
         shape2.filter = pymunk.ShapeFilter(mask=mask)
-        body.center_of_gravity = (
-            shape1.center_of_gravity + shape2.center_of_gravity
-        ) / 2
+        body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
         body.friction = 1
@@ -640,9 +601,7 @@ class PushT(gym.Env):
         shape2.color = pygame.Color(color)
         shape1.filter = pymunk.ShapeFilter(mask=mask)
         shape2.filter = pymunk.ShapeFilter(mask=mask)
-        body.center_of_gravity = (
-            shape1.center_of_gravity + shape2.center_of_gravity
-        ) / 2
+        body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
         body.friction = 1
@@ -689,11 +648,7 @@ class PushT(gym.Env):
         shape1.filter = pymunk.ShapeFilter(mask=mask)
         shape2.filter = pymunk.ShapeFilter(mask=mask)
         shape3.filter = pymunk.ShapeFilter(mask=mask)
-        body.center_of_gravity = (
-            shape1.center_of_gravity
-            + shape2.center_of_gravity
-            + shape3.center_of_gravity
-        ) / 3
+        body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity + shape3.center_of_gravity) / 3
         body.position = position
         body.angle = angle
         body.friction = 1
@@ -731,9 +686,7 @@ class PushT(gym.Env):
         shape2.color = pygame.Color(color)
         shape1.filter = pymunk.ShapeFilter(mask=mask)
         shape2.filter = pymunk.ShapeFilter(mask=mask)
-        body.center_of_gravity = (
-            shape1.center_of_gravity + shape2.center_of_gravity
-        ) / 2
+        body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
         body.friction = 1
@@ -771,9 +724,7 @@ class PushT(gym.Env):
         shape2.color = pygame.Color(color)
         shape1.filter = pymunk.ShapeFilter(mask=mask)
         shape2.filter = pymunk.ShapeFilter(mask=mask)
-        body.center_of_gravity = (
-            shape1.center_of_gravity + shape2.center_of_gravity
-        ) / 2
+        body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
         body.friction = 1

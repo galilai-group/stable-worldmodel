@@ -1,16 +1,15 @@
-from typing import Callable
-
+from collections.abc import Callable
 from pathlib import Path
 
 import datasets
 import gymnasium as gym
 import numpy as np
-
 from datasets import Dataset, Features, Image, Value, load_dataset
 from loguru import logger as logging
-from .wrappers import MegaWrapper, VariationWrapper
 
 import stable_worldmodel as swm
+
+from .wrappers import MegaWrapper, VariationWrapper
 
 
 class World:
@@ -107,9 +106,9 @@ class World:
         env_name: str,
         num_envs: int,
         image_shape: tuple,
-        goal_shape: tuple = None,
-        goal_transform: Callable = None,
-        image_transform: Callable = None,
+        goal_shape: tuple | None = None,
+        goal_transform: Callable | None = None,
+        image_transform: Callable | None = None,
         seed: int = 2349867,
         max_episode_steps: int = 100,
         verbose: int = 1,
@@ -119,11 +118,7 @@ class World:
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=[
-                lambda x: MegaWrapper(
-                    x, image_shape, image_transform, goal_shape, goal_transform
-                )
-            ],
+            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform, goal_shape, goal_transform)],
             max_episode_steps=max_episode_steps,
             **kwargs,
         )
@@ -182,9 +177,7 @@ class World:
         """Advance all environments by one step using the current policy."""
         # note: reset happens before because of auto-reset, should fix that
         actions = self.policy.get_action(self.infos)
-        (self.states, self.rewards, self.terminateds, self.truncateds, self.infos) = (
-            self.envs.step(actions)
-        )
+        (self.states, self.rewards, self.terminateds, self.truncateds, self.infos) = self.envs.step(actions)
 
     def reset(self, seed=None, options=None):
         """Reset all environments."""
@@ -252,9 +245,7 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def record_dataset(
-        self, dataset_name, episodes=10, seed=None, cache_dir=None, options=None
-    ):
+    def record_dataset(self, dataset_name, episodes=10, seed=None, cache_dir=None, options=None):
         """Collect episodes with the current policy and save them as a HuggingFace Dataset (Parquet shards).
 
         Parameters
@@ -310,11 +301,7 @@ class World:
         self.reset(seed, options)  # <- incr global seed by num_envs
         root_seed = seed + self.num_envs if seed is not None else None
 
-        records = {
-            key: [v for v in value]
-            for key, value in self.infos.items()
-            if key[0] != "_"
-        }
+        records = {key: list(value) for key, value in self.infos.items() if key[0] != "_"}
 
         records["episode_idx"] = list(episode_idx)
         records["policy"] = [self.policy.type] * self.num_envs
@@ -331,18 +318,14 @@ class World:
             for i in range(self.num_envs):
                 if terminations_before[i] or truncations_before[i]:
                     # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = (
-                        root_seed + recorded_episodes if seed is not None else None
-                    )
+                    new_seed = root_seed + recorded_episodes if seed is not None else None
 
                     # determine new episode idx
                     next_ep_idx = episode_idx.max() + 1
                     episode_idx[i] = next_ep_idx
                     recorded_episodes += 1
 
-                    states, infos = self.envs.envs[i].reset(
-                        seed=new_seed, options=options
-                    )
+                    states, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 
                     for k, v in infos.items():
                         self.infos[k][i] = v
@@ -370,10 +353,7 @@ class World:
                     # add new dummy action
                     action_shape = np.shape(self.infos[key][0])
                     action_dtype = self.single_action_space.dtype
-                    dummy_block = [
-                        np.full(action_shape, np.nan, dtype=action_dtype)
-                        for _ in range(self.num_envs)
-                    ]
+                    dummy_block = [np.full(action_shape, np.nan, dtype=action_dtype) for _ in range(self.num_envs)]
                     records[key].extend(dummy_block)
                 else:
                     records[key].extend(list(self.infos[key]))
@@ -382,9 +362,7 @@ class World:
             records["policy"].extend([self.policy.type] * self.num_envs)
 
         # add the episode length
-        counts = np.bincount(
-            np.array(records["episode_idx"]), minlength=max(records["episode_idx"]) + 1
-        )
+        counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"]) + 1)
         records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
 
         # determine feature
@@ -409,9 +387,7 @@ class World:
                 )
             elif 2 <= records[k][0].ndim <= 6:
                 feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
-                state_feature = feature_cls(
-                    shape=records[k][0].shape, dtype=records[k][0].dtype.name
-                )
+                state_feature = feature_cls(shape=records[k][0].shape, dtype=records[k][0].dtype.name)
             else:
                 state_feature = Value(records[k][0].dtype.name)
             features[k] = state_feature
@@ -433,31 +409,23 @@ class World:
             shard_dataset = load_dataset(
                 "parquet",
                 split="train",
-                data_files=str(
-                    dataset_path / f"data_shard_{shard_idx - 1:05d}.parquet"
-                ),
+                data_files=str(dataset_path / f"data_shard_{shard_idx - 1:05d}.parquet"),
             )
             episode_counter = np.max(shard_dataset["episode_idx"]) + 1
 
         # flush incomplete episode
         ep_col = np.array(hf_dataset["episode_idx"])
-        non_complete_episodes = np.array(
-            episode_idx[~(self.terminateds | self.truncateds)]
-        )
+        non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
         keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
         hf_dataset = hf_dataset.select(keep_episode)
 
         # re-index remaining episode starting from the last shard episode number
         unique_eps = np.unique(hf_dataset["episode_idx"])
         id_map = {old: new for new, old in enumerate(unique_eps, start=episode_counter)}
-        hf_dataset = hf_dataset.map(
-            lambda row: {"episode_idx": id_map[row["episode_idx"]]}
-        )
+        hf_dataset = hf_dataset.map(lambda row: {"episode_idx": id_map[row["episode_idx"]]})
 
         # flush all extra episode saved for the current shard
-        hf_dataset = hf_dataset.filter(
-            lambda row: (row["episode_idx"] - episode_counter) < episodes
-        )
+        hf_dataset = hf_dataset.filter(lambda row: (row["episode_idx"] - episode_counter) < episodes)
 
         hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
 
@@ -503,9 +471,7 @@ class World:
 
         cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
-        assert dataset_path.is_dir(), (
-            f"Dataset {dataset_name} not found in cache dir {swm.data.get_cache_dir()}"
-        )
+        assert dataset_path.is_dir(), f"Dataset {dataset_name} not found in cache dir {swm.data.get_cache_dir()}"
 
         if isinstance(episode_idx, int):
             episode_idx = [episode_idx]
@@ -520,14 +486,10 @@ class World:
             for i in episode_idx
         ]
 
-        dataset = load_dataset(
-            "parquet", data_files=str(Path(dataset_path, "*.parquet")), split="train"
-        )
+        dataset = load_dataset("parquet", data_files=str(Path(dataset_path, "*.parquet")), split="train")
 
         for i, o in zip(episode_idx, out):
-            episode = dataset.filter(
-                lambda ex: ex["episode_idx"] == i, num_proc=num_proc
-            )
+            episode = dataset.filter(lambda ex: ex["episode_idx"] == i, num_proc=num_proc)
             episode = episode.sort("step_idx")
             episode_len = len(episode)
 
@@ -615,9 +577,7 @@ class World:
                     # record eval info
                     ep_idx = episode_idx[i] - 1
                     metrics["episode_successes"][ep_idx] = terminations_before[i]
-                    metrics["seeds"][ep_idx] = self.envs.envs[
-                        i
-                    ].unwrapped.np_random_seed
+                    metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
 
                     if eval_keys:
                         for key in eval_keys:
@@ -646,16 +606,10 @@ class World:
                 break
 
         # compute success rate
-        metrics["success_rate"] = (
-            float(np.sum(metrics["episode_successes"])) / episodes * 100.0
-        )
+        metrics["success_rate"] = float(np.sum(metrics["episode_successes"])) / episodes * 100.0
 
-        assert eval_ep_count == episodes, (
-            f"eval_ep_count {eval_ep_count} != episodes {episodes}"
-        )
+        assert eval_ep_count == episodes, f"eval_ep_count {eval_ep_count} != episodes {episodes}"
 
-        assert np.unique(metrics["seeds"]).shape[0] == episodes, (
-            "Some episode seeds are identical!"
-        )
+        assert np.unique(metrics["seeds"]).shape[0] == episodes, "Some episode seeds are identical!"
 
         return metrics

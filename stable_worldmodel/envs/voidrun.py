@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-import math
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -28,7 +27,7 @@ class VoidRunEnv(gym.Env):
 
     def __init__(
         self,
-        seed: Optional[int] = None,
+        seed: int | None = None,
         render_mode: str = "human",
     ) -> None:
         super().__init__()
@@ -47,9 +46,7 @@ class VoidRunEnv(gym.Env):
 
         self.observation_space = spaces.Dict(
             {
-                "board": spaces.Box(
-                    low=0, high=3, shape=(self.max_size, self.max_size), dtype=np.int8
-                ),
+                "board": spaces.Box(low=0, high=3, shape=(self.max_size, self.max_size), dtype=np.int8),
                 "perception": spaces.MultiDiscrete([self.max_size, self.max_size]),
             }
         )
@@ -91,9 +88,7 @@ class VoidRunEnv(gym.Env):
                 ),
                 "board": swm.spaces.Dict(
                     {
-                        "size": swm.spaces.Discrete(
-                            self.max_size - 10, start=10, init_value=20
-                        ),
+                        "size": swm.spaces.Discrete(self.max_size - 10, start=10, init_value=20),
                         "prob_gravel": swm.spaces.Box(
                             low=np.array(0.0, dtype=np.float32),
                             high=np.array(1.0, dtype=np.float32),
@@ -130,9 +125,7 @@ class VoidRunEnv(gym.Env):
 
     # -------------------- Core API ----------
 
-    def reset(
-        self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None
-    ):
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         if seed is not None:
             self._rng = np.random.default_rng(seed)
 
@@ -156,9 +149,7 @@ class VoidRunEnv(gym.Env):
             else:
                 self.variation_space.update(set(options["variation"]))
 
-        assert self.variation_space.check(debug=True), (
-            "Variation values must be within variation space!"
-        )
+        assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
         self._reset_state()
 
@@ -226,7 +217,7 @@ class VoidRunEnv(gym.Env):
 
         return obs, reward, bool(terminated), bool(truncated), info
 
-    def render(self, mode: Optional[str] = None):
+    def render(self, mode: str | None = None):
         mode = mode or self.render_mode or "human"
         size = self.variation_space["board"]["size"].value
         if self._fig is None or self._ax is None:
@@ -281,15 +272,13 @@ class VoidRunEnv(gym.Env):
 
     def _reset_state(self) -> None:
         self.board = self.generate_board().astype(np.int8)
-        self.player_row, self.player_col = self.variation_space["agent"][
-            "position"
-        ].value
+        self.player_row, self.player_col = self.variation_space["agent"]["position"].value
         self.player_y = self.player_row + 0.5
         self.player_x = self.player_col + 0.5
         self.steps = 0
         self.generate_goal()
 
-    def _get_obs(self) -> Dict[str, Any]:
+    def _get_obs(self) -> dict[str, Any]:
         return {
             "board": self.board.copy(),
             "perception": np.array([self.player_row, self.player_col], dtype=np.int32),
@@ -306,15 +295,12 @@ class VoidRunEnv(gym.Env):
         board[:size, :size] = self._rng.choice([0, 1, 2], size=(size, size), p=probs)
         return board
 
-    def render_board(self, ax: Optional[plt.Axes] = None) -> None:
+    def render_board(self, ax: plt.Axes | None = None) -> None:
         void_color = self.variation_space["board"]["void_color"].value
         sand_color = self.variation_space["board"]["sand_color"].value
         gravel_color = self.variation_space["board"]["gravel_color"].value
         goal_color = self.variation_space["goal"]["color"].value
-        lut = (
-            np.array([void_color, sand_color, gravel_color, goal_color], dtype=float)
-            / 255.0
-        )
+        lut = np.array([void_color, sand_color, gravel_color, goal_color], dtype=float) / 255.0
 
         size = self.variation_space["board"]["size"].value
         board = self.board[:size, :size]
@@ -324,9 +310,7 @@ class VoidRunEnv(gym.Env):
         if ax is None:
             _, ax = plt.subplots(figsize=(board.shape[1] * 0.2, board.shape[0] * 0.2))
 
-        ax.imshow(
-            img, interpolation="nearest", origin="lower", extent=[0, size, 0, size]
-        )
+        ax.imshow(img, interpolation="nearest", origin="lower", extent=[0, size, 0, size])
         ax.set_xticks([])
         ax.set_yticks([])
 
@@ -360,11 +344,11 @@ class VoidRunEnv(gym.Env):
     def set_state(
         self,
         board: np.ndarray,
-        player_pos: Tuple[int, int],
+        player_pos: tuple[int, int],
         *,
         validate: bool = True,
         render: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if validate:
             size = self.variation_space["board"]["size"].value
             if board.shape != (size, size):

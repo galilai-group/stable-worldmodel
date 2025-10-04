@@ -1,9 +1,9 @@
-import torch
 import numpy as np
-from .solver import Costable
-
-from loguru import logger as logging
+import torch
 from gymnasium.spaces import Box
+from loguru import logger as logging
+
+from .solver import Costable
 
 
 class CEMSolver:
@@ -37,10 +37,7 @@ class CEMSolver:
 
         # warning if action space is discrete
         if not isinstance(action_space, Box):
-            logging.warning(
-                f"Action space is discrete, got {type(action_space)}. "
-                "GDSolver may not work as expected."
-            )
+            logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
 
     @property
     def n_envs(self) -> int:
@@ -65,11 +62,7 @@ class CEMSolver:
         """
         var = self.var_scale * torch.ones([self.n_envs, self.horizon, self.action_dim])
 
-        mean = (
-            torch.zeros([self.n_envs, 0, self.action_dim])
-            if actions is None
-            else actions
-        )
+        mean = torch.zeros([self.n_envs, 0, self.action_dim]) if actions is None else actions
 
         # -- fill remaining actions with random sample
         remaining = self.horizon - mean.shape[1]
@@ -115,9 +108,7 @@ class CEMSolver:
                     expanded_infos[k] = v_traj
 
                 # sample action sequences candidation from normal distrib
-                candidates = torch.randn(
-                    self.num_samples, self.horizon, self.action_dim, device=self.device
-                )
+                candidates = torch.randn(self.num_samples, self.horizon, self.action_dim, device=self.device)
 
                 # scale and shift
                 candidates = candidates * var[traj] + mean[traj]
@@ -128,9 +119,7 @@ class CEMSolver:
                 # evaluate the candidates
                 cost = self.model.get_cost(expanded_infos, candidates)
 
-                assert type(cost) is torch.Tensor, (
-                    f"Expected cost to be a torch.Tensor, got {type(cost)}"
-                )
+                assert type(cost) is torch.Tensor, f"Expected cost to be a torch.Tensor, got {type(cost)}"
                 assert cost.ndim == 1 and len(cost) == self.num_samples, (
                     f"Expected cost to be of shape num_samples ({self.num_samples},), got {cost.shape}"
                 )

@@ -23,12 +23,12 @@ if __name__ == "__main__":
         "simple-pointmaze",
         episodes=10,
         seed=2347,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
     )
     world.record_video(
         "./",
         seed=2347,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
     )
 
     ################

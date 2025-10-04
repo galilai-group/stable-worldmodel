@@ -16,14 +16,14 @@ def test_env():
         "debug",
         episodes=10,
         seed=2547,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
     )
 
     world.policy.set_seed(42)
     world.record_video(
         "./",
         seed=2547,
-        options=dict(variation=("walls.number", "walls.shape", "walls.positions")),
+        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
     )
 
     # asdf
@@ -34,9 +34,7 @@ def test_env():
     # world.policy.set_seed(42)
     # world.record_dataset("./dataset", episodes=1, seed=2347)
 
-    world.record_video_from_dataset(
-        "./", "debug", episode_idx=[0, 1, 2, 3, 4, 5], fps=30, num_proc=1
-    )
+    world.record_video_from_dataset("./", "debug", episode_idx=[0, 1, 2, 3, 4, 5], fps=30, num_proc=1)
 
     # asdf
     # planner = CEMNevergrad(

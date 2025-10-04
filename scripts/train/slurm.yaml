@@ -3,7 +3,7 @@ defaults:
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
   # - override hydra/launcher: submitit_slurm
-    
+
 hydra:
   output_subdir: null
   # mode: MULTIRUN

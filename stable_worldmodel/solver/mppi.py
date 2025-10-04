@@ -1,5 +1,6 @@
-import torch
 import gymnasium as gym
+import torch
+
 from .solver import BasePlanner
 
 
@@ -62,16 +63,12 @@ class MPPI(BasePlanner):
         )
         if not t0:
             mean[:-1] = self._prev_mean[1:]
-        actions = torch.empty(
-            self.horizon, self.num_samples, self.action_dim, device=self.device
-        )
+        actions = torch.empty(self.horizon, self.num_samples, self.action_dim, device=self.device)
 
         # Iterate MPPI
         for _ in range(self.iterations):
             # Sample actions
-            r = torch.randn(
-                self.horizon, self.num_samples, self.action_dim, device=std.device
-            )
+            r = torch.randn(self.horizon, self.num_samples, self.action_dim, device=std.device)
             actions_sample = mean.unsqueeze(1) + std.unsqueeze(1) * r
             actions_sample = actions_sample.clamp(-1, 1)
             actions = actions_sample
@@ -85,14 +82,9 @@ class MPPI(BasePlanner):
             max_value = elite_value.max(0).values
             score = torch.exp(self.temperature * (elite_value - max_value))
             score = score / score.sum(0)
-            mean = (score.unsqueeze(0) * elite_actions).sum(dim=1) / (
-                score.sum(0) + 1e-9
-            )
+            mean = (score.unsqueeze(0) * elite_actions).sum(dim=1) / (score.sum(0) + 1e-9)
             std = (
-                (score.unsqueeze(0) * (elite_actions - mean.unsqueeze(1)) ** 2).sum(
-                    dim=1
-                )
-                / (score.sum(0) + 1e-9)
+                (score.unsqueeze(0) * (elite_actions - mean.unsqueeze(1)) ** 2).sum(dim=1) / (score.sum(0) + 1e-9)
             ).sqrt()
             std = std.clamp(self.min_std, self.max_std)
 
@@ -117,9 +109,7 @@ def gumbel_softmax_sample(p, temperature=1.0, dim=0):
     """Sample from the Gumbel-Softmax distribution."""
     logits = p.log()
     gumbels = (
-        -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format)
-        .exponential_()
-        .log()
+        -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
     )  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / temperature  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)

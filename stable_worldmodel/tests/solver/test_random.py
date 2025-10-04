@@ -1,13 +1,13 @@
 """Tests for RandomSolver class."""
 
-import numpy as np
-import pytest
-import torch
 from unittest.mock import MagicMock
+
+import numpy as np
+import torch
 from gymnasium import spaces as gym_spaces
 
-from stable_worldmodel.solver.random import RandomSolver
 from stable_worldmodel.policy import PlanConfig
+from stable_worldmodel.solver.random import RandomSolver
 
 
 ###########################

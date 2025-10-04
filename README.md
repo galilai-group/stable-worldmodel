@@ -19,11 +19,13 @@ A stable library for world model research and evaluation, providing unified inte
 ### Quick Start
 
 1. **Install uv** (fast Python package manager):
+
 ```bash
 pip install uv
 ```
 
 2. **Clone and install the package**:
+
 ```bash
 git clone https://github.com/rbalestr-lab/stable-worldmodel.git
 cd stable-worldmodel
@@ -33,6 +35,7 @@ uv pip install -e .
 ### Development Installation
 
 For development with testing and documentation tools:
+
 ```bash
 uv pip install -e . --group dev --group doc
 ```
@@ -96,6 +99,7 @@ stable_worldmodel/
 ## Testing
 
 Run tests with coverage:
+
 ```bash
 pytest --cov=stable_worldmodel --cov-report=term-missing
 ```
@@ -110,5 +114,10 @@ pytest --cov=stable_worldmodel --cov-report=term-missing
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
+## Citation
 
-
+@inproceedings{tbd,
+title = "TBD",
+author = "",
+booktitle = "",
+}

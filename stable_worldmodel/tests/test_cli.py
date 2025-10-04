@@ -1,24 +1,26 @@
 """Tests for CLI module."""
 
-import numpy as np
 from unittest.mock import patch
-from typer.testing import CliRunner
-from rich.tree import Tree
-from rich.text import Text
+
+import numpy as np
 from rich.table import Table
+from rich.text import Text
+from rich.tree import Tree
+from typer.testing import CliRunner
 
 from stable_worldmodel.cli import (
-    app,
-    _summarize,
+    _build_hierarchy,
     _leaf,
     _leaf_table,
-    _build_hierarchy,
-    _render_hierarchy,
     _render,
+    _render_hierarchy,
+    _summarize,
     _variation_space,
-    display_world_info,
+    app,
     display_dataset_info,
+    display_world_info,
 )
+
 
 runner = CliRunner()
 
@@ -586,9 +588,7 @@ def test_show_multiple_non_existent_worlds(mock_cache_dir, mock_list):
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = ["swm/World1-v0"]
 
-    result = runner.invoke(
-        app, ["show", "world", "swm/NonExistent1-v0", "swm/NonExistent2-v0"]
-    )
+    result = runner.invoke(app, ["show", "world", "swm/NonExistent1-v0", "swm/NonExistent2-v0"])
     assert result.exit_code == 1
     assert "can't be found" in result.stdout
 
@@ -628,9 +628,7 @@ def test_delete_multiple_datasets(mock_cache_dir, mock_list, mock_delete):
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = ["dataset1", "dataset2"]
 
-    result = runner.invoke(
-        app, ["delete", "dataset", "dataset1", "dataset2"], input="y\n"
-    )
+    result = runner.invoke(app, ["delete", "dataset", "dataset1", "dataset2"], input="y\n")
     assert result.exit_code == 0
     assert mock_delete.call_count == 2
 

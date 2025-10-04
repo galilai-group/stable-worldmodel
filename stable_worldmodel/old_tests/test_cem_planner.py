@@ -1,14 +1,10 @@
 def test_each_env():
-    import gymnasium as gym
-    import gymnasium_robotics
-    import torch
     import stable_worldmodel as swm
-    from stable_worldmodel.planner import GD, CEMNevergrad
+    from stable_worldmodel.planner import CEMNevergrad
 
     # run with MUJOCO_GL=egl python example.py
 
     # gym.register_envs(gymnasium_robotics)
-    envs = gym.envs.registry.keys()
 
     world_model = swm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=8)
 
@@ -19,9 +15,7 @@ def test_each_env():
         lambda x: swm.wrappers.TransformObservation(x),
     ]
     world = swm.World("AntMaze_Medium", num_envs=4, wrappers=wrappers)
-    planner = CEMNevergrad(
-        world_model, n_steps=100, action_space=world.action_space, planning_horizon=3
-    )
+    planner = CEMNevergrad(world_model, n_steps=100, action_space=world.action_space, planning_horizon=3)
     agent = swm.Agent(planner, world)
     # 'FetchPush-v1'
     agent.run(episodes=5)

@@ -1,5 +1,7 @@
-import stable_worldmodel as swm
 import torch
+
+import stable_worldmodel as swm
+
 
 # create world
 world = swm.World(
@@ -26,14 +28,10 @@ action_dim = world.envs.single_action_space.shape[0]
 cost_fn = torch.nn.functional.mse_loss
 world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)
 solver = swm.solver.RandomSolver(horizon=5, action_dim=action_dim, cost_fn=cost_fn)
-policy = swm.policy.WorldModelPolicy(
-    world_model, solver, horizon=10, action_block=5, receding_horizon=5
-)
+policy = swm.policy.WorldModelPolicy(world_model, solver, horizon=10, action_block=5, receding_horizon=5)
 world.set_policy(policy)
 
-spt_module = torch.load(
-    swm.data.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False
-)
+spt_module = torch.load(swm.data.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False)
 world_model = spt_module.model
 results = world.evaluate(episodes=2, seed=2347)  # , options={...})
 

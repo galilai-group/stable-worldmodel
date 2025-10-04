@@ -1,21 +1,19 @@
+from pathlib import Path
+
 import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
 import torchvision
-
+from lightning.pytorch.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForImageClassification
-from lightning.pytorch.callbacks import ModelCheckpoint
-from pathlib import Path
+
 import stable_worldmodel as swm
 
 
 def get_data(dataset_name):
     """Return data and action space dim for training predictor"""
-
-    # -- number of rollout steps to include in the dataset
-    num_steps = 5
 
     # -- make transform operations
     mean = [0.485, 0.456, 0.406]

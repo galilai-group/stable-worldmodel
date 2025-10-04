@@ -1,23 +1,16 @@
 import time
-from typing import Callable, Iterable, Optional, Tuple
+from collections.abc import Callable, Iterable
 
 import gymnasium as gym
 import numpy as np
-import torch
-import torchvision.transforms.v2 as transforms
-from gymnasium.vector import VectorWrapper
 from gymnasium.spaces.utils import is_space_dtype_shape_equiv
+from gymnasium.vector import VectorWrapper
 from gymnasium.vector.utils import (
     batch_differing_spaces,
     batch_space,
-    create_empty_array,
 )
 
-from gymnasium.wrappers import (
-    TransformObservation,
-)
-
-from stable_worldmodel.utils import flatten_dict, get_in
+from stable_worldmodel.utils import get_in
 
 
 class EnsureInfoKeysWrapper(gym.Wrapper):
@@ -57,17 +50,13 @@ class EnsureImageShape(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         if info[self.image_key].shape[:-1] != self.image_shape:
-            raise RuntimeError(
-                f"Image shape {info[self.image_key].shape} should be {self.image_shape}"
-            )
+            raise RuntimeError(f"Image shape {info[self.image_key].shape} should be {self.image_shape}")
         return obs, reward, terminated, truncated, info
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         if info[self.image_key].shape[:-1] != self.image_shape:
-            raise RuntimeError(
-                f"Image shape {info[self.image_key].shape} should be {self.image_shape}"
-            )
+            raise RuntimeError(f"Image shape {info[self.image_key].shape} should be {self.image_shape}")
         return obs, info
 
 
@@ -80,17 +69,13 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         if self.check_reset and "goal" not in info:
-            raise RuntimeError(
-                "The info dict returned by reset() must contain the key 'goal'."
-            )
+            raise RuntimeError("The info dict returned by reset() must contain the key 'goal'.")
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         if self.check_step and "goal" not in info:
-            raise RuntimeError(
-                "The info dict returned by step() must contain the key 'goal'."
-            )
+            raise RuntimeError("The info dict returned by step() must contain the key 'goal'.")
         return obs, reward, terminated, truncated, info
 
 
@@ -187,8 +172,8 @@ class AddPixelsWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        pixels_shape: Tuple[int, int] = (84, 84),
-        torchvision_transform: Optional[Callable] = None,
+        pixels_shape: tuple[int, int] = (84, 84),
+        torchvision_transform: Callable | None = None,
     ):
         super().__init__(env)
         self.pixels_shape = pixels_shape
@@ -228,8 +213,8 @@ class ResizeGoalWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        pixels_shape: Tuple[int, int] = (84, 84),
-        torchvision_transform: Optional[Callable] = None,
+        pixels_shape: tuple[int, int] = (84, 84),
+        torchvision_transform: Callable | None = None,
     ):
         super().__init__(env)
         self.pixels_shape = pixels_shape
@@ -265,11 +250,11 @@ class MegaWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        image_shape: Tuple[int, int] = (84, 84),
-        pixels_transform: Optional[Callable] = None,
-        goal_transform: Optional[Callable] = None,
-        required_keys: Optional[Iterable] = None,
-        separate_goal: Optional[Iterable] = True,
+        image_shape: tuple[int, int] = (84, 84),
+        pixels_transform: Callable | None = None,
+        goal_transform: Callable | None = None,
+        required_keys: Iterable | None = None,
+        separate_goal: Iterable | None = True,
     ):
         super().__init__(env)
         if required_keys is None:
@@ -283,9 +268,7 @@ class MegaWrapper(gym.Wrapper):
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
-        env = EnsureGoalInfoWrapper(
-            env, check_reset=separate_goal, check_step=separate_goal
-        )
+        env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
         self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
     def reset(self, *args, **kwargs):
@@ -312,15 +295,11 @@ class VariationWrapper(VectorWrapper):
 
         if variation_mode == "same":
             self.single_variation_space = base_env.variation_space
-            self.variation_space = batch_space(
-                self.single_variation_space, self.num_envs
-            )
+            self.variation_space = batch_space(self.single_variation_space, self.num_envs)
 
         elif variation_mode == "different":
             self.single_variation_space = base_env.variation_space
-            self.variation_space = batch_differing_spaces(
-                [sub_env.unwrapped.variation_space for sub_env in env.envs]
-            )
+            self.variation_space = batch_differing_spaces([sub_env.unwrapped.variation_space for sub_env in env.envs])
 
         else:
             raise ValueError(
@@ -330,68 +309,64 @@ class VariationWrapper(VectorWrapper):
         # check sub-environment obs and action spaces
         for sub_env in env.envs:
             if variation_mode == "same":
-                assert (
-                    sub_env.unwrapped.variation_space == self.single_variation_space
-                ), (
-                    f"VariationWrapper(..., variation_mode='same') however the sub-environments variation spaces are not equivalent. single_variation_space={self.single_variation_space}, sub-environment variation_space={env.variation_space}. If this is intentional, use `variation_mode='different'` instead."
-                )
+                if not is_space_dtype_shape_equiv(sub_env.unwrapped.observation_space, self.single_observation_space):
+                    raise ValueError(
+                        f"VariationWrapper(..., variation_mode='same') however the sub-environments observation spaces do not share a common shape and dtype, single_observation_space={self.single_observation_space}, sub-environment observation_space={sub_env.observation_space}"
+                    )
             else:
-                assert is_space_dtype_shape_equiv(
-                    sub_env.unwrapped.variation_space, self.single_variation_space
-                ), (
-                    f"VariationWrapper(..., variation_mode='different' or custom space) however the sub-environments variation spaces do not share a common shape and dtype, single_variation_space={self.single_variation_space}, sub-environment variation_space={env.variation_space}"
-                )
+                if not is_space_dtype_shape_equiv(sub_env.unwrapped.observation_space, self.single_observation_space):
+                    raise ValueError(
+                        f"VariationWrapper(..., variation_mode='different' or custom space) however the sub-environments observation spaces do not share a common shape and dtype, single_observation_space={self.single_observation_space}, sub-environment observation_space={sub_env.observation_space}"
+                    )
 
     @property
     def envs(self):
         return getattr(self.env, "envs", None)
 
 
-class TransformObservation(gym.ObservationWrapper):
-    def __init__(
-        self,
-        env,
-        transform=None,
-        image_shape=(3, 224, 224),
-        mean=None,
-        std=None,
-        source_key="pixels",
-        target_key="pixels",
-    ):
-        super(TransformObservation, self).__init__(env)
-        self.source_key = source_key
-        self.target_key = target_key
+# class TransformObservation(gym.ObservationWrapper):
+#     def __init__(
+#         self,
+#         env,
+#         transform=None,
+#         image_shape=(3, 224, 224),
+#         mean=None,
+#         std=None,
+#         source_key="pixels",
+#         target_key="pixels",
+#     ):
+#         super().__init__(env)
+#         self.source_key = source_key
+#         self.target_key = target_key
 
-        assert len(image_shape) == 3
-        if transform:
-            self.transform = transform
-        else:
-            if image_shape[0] == 3:
-                t = [transforms.RGB()]
-            elif image_shape[0] == 1:
-                t = [transforms.Grayscale()]
-            t.extend(
-                [
-                    transforms.Resize((224, 224)),  # Resize the image
-                    transforms.ToImage(),
-                    transforms.ToDtype(torch.float, scale=True),
-                ]
-            )
-            if mean is not None and std is not None:
-                t.append(transforms.Normalize(mean=mean, std=std))
-            t = transforms.Compose(t)
-            self.transform = t
-        # Update the observation space to include the new transformed observation
-        original_space = self.observation_space
-        transformed_space = gym.spaces.Box(
-            low=0, high=1, shape=image_shape, dtype=np.float32
-        )
-        original_space[self.source_key] = transformed_space
-        self.observation_space = original_space
+#         assert len(image_shape) == 3
+#         if transform:
+#             self.transform = transform
+#         else:
+#             if image_shape[0] == 3:
+#                 t = [transforms.RGB()]
+#             elif image_shape[0] == 1:
+#                 t = [transforms.Grayscale()]
+#             t.extend(
+#                 [
+#                     transforms.Resize((224, 224)),  # Resize the image
+#                     transforms.ToImage(),
+#                     transforms.ToDtype(torch.float, scale=True),
+#                 ]
+#             )
+#             if mean is not None and std is not None:
+#                 t.append(transforms.Normalize(mean=mean, std=std))
+#             t = transforms.Compose(t)
+#             self.transform = t
+#         # Update the observation space to include the new transformed observation
+#         original_space = self.observation_space
+#         transformed_space = gym.spaces.Box(low=0, high=1, shape=image_shape, dtype=np.float32)
+#         original_space[self.source_key] = transformed_space
+#         self.observation_space = original_space
 
-    def observation(self, observation):
-        pixels = torch.from_numpy(observation[self.source_key].copy())
-        pixels = pixels.permute(2, 0, 1)
-        pixels = self.transform(pixels)
-        observation[self.target_key] = pixels
-        return observation
+#     def observation(self, observation):
+#         pixels = torch.from_numpy(observation[self.source_key].copy())
+#         pixels = pixels.permute(2, 0, 1)
+#         pixels = self.transform(pixels)
+#         observation[self.target_key] = pixels
+#         return observation

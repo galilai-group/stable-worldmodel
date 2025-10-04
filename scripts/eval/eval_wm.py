@@ -1,5 +1,6 @@
 import stable_worldmodel as swm
 
+
 if __name__ == "__main__":
 
     def noise_fn():
@@ -37,9 +38,7 @@ if __name__ == "__main__":
         goal_wrappers=goal_wrappers,
     )
 
-    world_model = swm.wm.DummyWorldModel(
-        image_shape=(3, 224, 224), action_dim=world.single_action_space.shape[0]
-    )
+    world_model = swm.wm.DummyWorldModel(image_shape=(3, 224, 224), action_dim=world.single_action_space.shape[0])
 
     # -- create a gradient descent solver
     action_space = world.action_space

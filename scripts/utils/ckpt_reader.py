@@ -1,10 +1,16 @@
-import importlib, sys, types, torch
+import importlib
+import sys
+import types
+from collections import OrderedDict
+
+import torch
 from torch.serialization import (
-    get_unsafe_globals_in_checkpoint,
     add_safe_globals,
     clear_safe_globals,
+    get_unsafe_globals_in_checkpoint,
     safe_globals,
 )
+
 
 ckpt_path = "outputs/pusht/checkpoints/model_latest.pth"
 
@@ -31,8 +37,6 @@ def resolve_or_stub(fqname: str):
         if obj is not None:
             return obj
     if fqname.startswith("numpy."):
-        import numpy as np
-
         # e.g. numpy.core.multiarray.scalar
         try:
             modname, attr = fqname.rsplit(".", 1)
@@ -73,15 +77,9 @@ with safe_globals(objs):  # also add for this context
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
 
 # 3) Extract state_dict
-state_dict = (
-    ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
-)
+state_dict = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
 
 # 4) (Optional) strip common prefixes
-from collections import OrderedDict
-
-state_dict = OrderedDict(
-    (k.replace("model.", "").replace("module.", ""), v) for k, v in state_dict.items()
-)
+state_dict = OrderedDict((k.replace("model.", "").replace("module.", ""), v) for k, v in state_dict.items())
 
 print(f"Loaded {len(state_dict)} tensors. Example keys:", list(state_dict.keys())[:10])

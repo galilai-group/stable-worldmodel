@@ -1,8 +1,9 @@
 import torch
-from loguru import logger as logging
-from transformers import AutoConfig, AutoModel
 import torchvision.transforms.v2 as transforms
+from loguru import logger as logging
+
 import stable_worldmodel as swm
+
 
 class Config:
     """Configuration for PUSHT Eval"""
@@ -24,24 +25,28 @@ class Config:
     action_std = torch.tensor([0.2019, 0.2002])
     proprio_mean = torch.tensor([236.6155, 264.5674, -2.93032027, 2.54307914])
     proprio_std = torch.tensor([101.1202, 87.0112, 74.84556075, 74.14009094])
-    state_mean = torch.tensor([
-        236.6155,
-        264.5674,
-        255.1307,
-        266.3721,
-        1.9584,
-        -2.93032027,
-        2.54307914,
-    ])
-    state_std = torch.tensor([
-        101.1202,
-        87.0112,
-        52.7054,
-        57.4971,
-        1.7556,
-        74.84556075,
-        74.14009094,
-    ])
+    state_mean = torch.tensor(
+        [
+            236.6155,
+            264.5674,
+            255.1307,
+            266.3721,
+            1.9584,
+            -2.93032027,
+            2.54307914,
+        ]
+    )
+    state_std = torch.tensor(
+        [
+            101.1202,
+            87.0112,
+            52.7054,
+            57.4971,
+            1.7556,
+            74.84556075,
+            74.14009094,
+        ]
+    )
 
 
 def get_world_model(action_dim, proprio_dim, device="cpu"):
@@ -53,9 +58,7 @@ def get_world_model(action_dim, proprio_dim, device="cpu"):
 
     # config = AutoConfig.from_pretrained("facebook/dinov2-small")
     # encoder = AutoModel.from_config(config)
-    encoder = swm.wm.DinoV2Encoder(
-        "dinov2_vits14", feature_key="x_norm_patchtokens"
-    )
+    encoder = swm.wm.DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens")
 
     emb_dim = encoder.emb_dim  # 384 for vits14
     patch_size = 16  # 16 size for create 14 patches
@@ -85,19 +88,13 @@ def get_world_model(action_dim, proprio_dim, device="cpu"):
     logging.info(f"Predictor: {predictor}")
 
     # -- create action encoder
-    action_encoder = swm.wm.Embedder(
-        in_chans=action_dim * Config.frameskip, emb_dim=Config.action_emb_dim
-    )
+    action_encoder = swm.wm.Embedder(in_chans=action_dim * Config.frameskip, emb_dim=Config.action_emb_dim)
 
     logging.info(f"Action dim: {action_dim}, action emb dim: {Config.action_emb_dim}")
 
     # -- create proprioceptive encoder
-    proprio_encoder = swm.wm.Embedder(
-        in_chans=proprio_dim, emb_dim=Config.proprio_emb_dim
-    )
-    logging.info(
-        f"Proprio dim: {proprio_dim}, proprio emb dim: {Config.proprio_emb_dim}"
-    )
+    proprio_encoder = swm.wm.Embedder(in_chans=proprio_dim, emb_dim=Config.proprio_emb_dim)
+    logging.info(f"Proprio dim: {proprio_dim}, proprio emb dim: {Config.proprio_emb_dim}")
 
     decoder = swm.wm.VQVAE(
         channel=384,
@@ -149,14 +146,16 @@ def run():
     # std = [0.229, 0.224, 0.225]
 
     def default_transform(img_size=224):
-        return transforms.Compose([
-            transforms.ToImage(),
-            transforms.Lambda(lambda img: torch.tensor(img)),
-            transforms.Lambda(lambda img: img / 255.0),
-            transforms.Resize(img_size),
-            transforms.CenterCrop(img_size),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-        ])
+        return transforms.Compose(
+            [
+                transforms.ToImage(),
+                transforms.Lambda(lambda img: torch.tensor(img)),
+                transforms.Lambda(lambda img: img / 255.0),
+                transforms.Resize(img_size),
+                transforms.CenterCrop(img_size),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ]
+        )
 
     def noise_fn():
         import numpy as np
@@ -176,16 +175,12 @@ def run():
         # ),
         lambda x: swm.wrappers.RecordVideo(x, video_folder="./videos"),
         lambda x: swm.wrappers.AddRenderObservation(x, render_only=False),
-        lambda x: swm.wrappers.TransformObservation(
-            x, transform=default_transform()
-        ),
+        lambda x: swm.wrappers.TransformObservation(x, transform=default_transform()),
     ]
 
     goal_wrappers = [
         lambda x: swm.wrappers.AddRenderObservation(x, render_only=False),
-        lambda x: swm.wrappers.TransformObservation(
-            x, transform=default_transform()
-        ),
+        lambda x: swm.wrappers.TransformObservation(x, transform=default_transform()),
     ]
 
     world = swm.World(
@@ -224,27 +219,27 @@ def run():
 
     # policy = swm.policy.PlanningPolicy(world, random_solver)
 
-    cem_solver = swm.solver.CEMSolver(
-        world_model,
-        horizon=Config.horizon,
-        num_samples=300,
-        var_scale=1.0,
-        opt_steps=30,
-        action_dim=action_dim * Config.frameskip,
-        topk=30,
-        device=device,
-    )
+    # cem_solver = swm.solver.CEMSolver(
+    #     world_model,
+    #     horizon=Config.horizon,
+    #     num_samples=300,
+    #     var_scale=1.0,
+    #     opt_steps=30,
+    #     action_dim=action_dim * Config.frameskip,
+    #     topk=30,
+    #     device=device,
+    # )
 
-    cem_solver = swm.solver.MPCWrapper(
-        cem_solver,
-        n_mpc_actions=1,  # Config.frameskip
-    )
+    # cem_solver = swm.solver.MPCWrapper(
+    #     cem_solver,
+    #     n_mpc_actions=1,  # Config.frameskip
+    # )
 
-    policy = swm.policy.PlanningPolicy(world, cem_solver)
+    # policy = swm.policy.PlanningPolicy(world, cem_solver)
 
     # -- run evaluation
-    evaluator = swm.evaluator.Evaluator(world, policy, device=device)
-    data = evaluator.run(episodes=1)
+    # evaluator = swm.evaluator.Evaluator(world, policy, device=device)
+    # data = evaluator.run(episodes=1)
 
     # data will be a dict with all the collected metrics
     # # visualize a rollout video (e.g. for debugging purposes)

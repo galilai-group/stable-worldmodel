@@ -1,10 +1,9 @@
+"""Train a world model on the Dino dataset from Minari."""
+
 import lightning as pl
 import minari
 import stable_ssl as ssl
 import torch
-import torchvision
-
-
 from stable_ssl.data import transforms
 from torch.utils.data import DataLoader
 from transformers import (
@@ -16,7 +15,7 @@ from transformers import (
 
 
 class Config:
-    """Configuration for the training script"""
+    """Configuration for the training script."""
 
     # encoder
     encoder_lr: float = 1e-6
@@ -42,6 +41,8 @@ class Config:
 
 
 class ProprioEmbedding(torch.nn.Module):
+    """Embed proprioceptive and action information."""
+
     def __init__(
         self,
         num_frames=1,
@@ -56,9 +57,7 @@ class ProprioEmbedding(torch.nn.Module):
         self.in_chans = in_chans
         self.emb_dim = emb_dim
 
-        self.patch_embed = torch.nn.Conv1d(
-            in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size
-        )
+        self.patch_embed = torch.nn.Conv1d(in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size)
 
     def forward(self, x):
         x = x.permute(0, 2, 1)  # (B, T, B) -> (B, D, T)
@@ -97,11 +96,7 @@ def get_data():
 
     # -- determine action space dimension
     action = dataset[0]["actions"]
-    action_dim = (
-        sum(a.size for a in action.values())
-        if isinstance(action, dict)
-        else action.size
-    )
+    action_dim = sum(a.size for a in action.values()) if isinstance(action, dict) else action.size
     action_dim //= num_steps
 
     return data_module, action_dim

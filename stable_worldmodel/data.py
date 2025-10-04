@@ -1,24 +1,18 @@
-from pathlib import Path
-import numpy as np
-
-import stable_pretraining as spt
-import torch
 import os
-import gymnasium as gym
-
-from dataclasses import dataclass, asdict
+import re
+import shutil
 from functools import lru_cache
+from pathlib import Path
+from typing import Any, TypedDict
 
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
-
-from torch.utils.data import default_collate
+import gymnasium as gym
+import numpy as np
+import stable_pretraining as spt
 from datasets import load_dataset
+from rich import print
+from torch.utils.data import default_collate
 
 import stable_worldmodel as swm
-import shutil
-from rich import print
-
-import re
 
 
 class StepsDataset(spt.data.HFDataset):
@@ -37,12 +31,8 @@ class StepsDataset(spt.data.HFDataset):
         self.num_steps = num_steps
         self.frameskip = frameskip
 
-        assert "episode_idx" in self.dataset.column_names, (
-            "Dataset must have 'episode_idx' column"
-        )
-        assert "step_idx" in self.dataset.column_names, (
-            "Dataset must have 'step_idx' column"
-        )
+        assert "episode_idx" in self.dataset.column_names, "Dataset must have 'episode_idx' column"
+        assert "step_idx" in self.dataset.column_names, "Dataset must have 'step_idx' column"
 
         self.episodes = np.unique(self.dataset["episode_idx"])
         self.slices = {e: self.num_slice(e) for e in self.episodes}
@@ -52,12 +42,8 @@ class StepsDataset(spt.data.HFDataset):
 
         # TODO: add assert for basic column name
 
-        cols = [
-            c for c in self.dataset.column_names if c not in self.torch_exclude_column
-        ]
-        self.dataset = self.dataset.with_format(
-            "torch", columns=cols, output_all_columns=True
-        )
+        cols = [c for c in self.dataset.column_names if c not in self.torch_exclude_column]
+        self.dataset = self.dataset.with_format("torch", columns=cols, output_all_columns=True)
 
     def num_slice(self, episode_idx):
         """Return number of possible slices for a given episode index"""
@@ -95,17 +81,13 @@ class StepsDataset(spt.data.HFDataset):
         local_idx = idx - self.cum_slices[ep_idx]
 
         # get dataset indices for this slice
-        ep_mask = (
-            torch.nonzero(self.dataset["episode_idx"] == episode).squeeze().tolist()
-        )
+        ep_mask = np.nonzero(self.dataset["episode_idx"] == episode).squeeze().tolist()
 
         # starting step index inside this episode
         start_step = local_idx
 
         # slice steps with frameskip
-        slice_idx = [
-            ep_mask[start_step + i] for i in range(self.num_steps * self.frameskip)
-        ]
+        slice_idx = [ep_mask[start_step + i] for i in range(self.num_steps * self.frameskip)]
 
         # transform the data
         raw = [self.transform(self.dataset[i]) for i in slice_idx]
@@ -132,7 +114,7 @@ class StepsDataset(spt.data.HFDataset):
 
 
 class SpaceInfo(TypedDict, total=False):
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
     type: str
     dtype: str
     low: Any
@@ -142,8 +124,8 @@ class SpaceInfo(TypedDict, total=False):
 
 class VariationInfo(TypedDict):
     has_variation: bool
-    type: Optional[str]
-    names: Optional[List[str]]
+    type: str | None
+    names: list[str] | None
 
 
 class WorldInfo(TypedDict):
@@ -151,7 +133,7 @@ class WorldInfo(TypedDict):
     observation_space: SpaceInfo
     action_space: SpaceInfo
     variation: VariationInfo
-    config: Dict[str, Any]
+    config: dict[str, Any]
 
 
 def get_cache_dir() -> str:
@@ -167,9 +149,7 @@ def list_datasets():
 
 
 def list_models():
-    pattern = re.compile(
-        r"^(.*?)(?=_(?:weights(?:-[^.]*)?|object)\.ckpt$)", re.IGNORECASE
-    )
+    pattern = re.compile(r"^(.*?)(?=_(?:weights(?:-[^.]*)?|object)\.ckpt$)", re.IGNORECASE)
 
     cache_dir = get_cache_dir()
     models = set()
@@ -195,7 +175,9 @@ def dataset_info(name):
 
     dataset.set_format("numpy")
 
-    assert_msg = lambda col: (f"Dataset must have '{col}' column")
+    def assert_msg(col):
+        return f"Dataset must have '{col}' column"  # type: ignore
+
     assert "episode_idx" in dataset.column_names, assert_msg("episode_idx")
     assert "step_idx" in dataset.column_names, assert_msg("step_idx")
     assert "episode_len" in dataset.column_names, assert_msg("episode_len")
@@ -212,14 +194,8 @@ def dataset_info(name):
         "action_shape": dataset["action"][0].shape,
         "goal_shape": dataset["goal"][0].shape,
         "variation": {
-            "has_variation": any(
-                col.startswith("variation.") for col in dataset.column_names
-            ),
-            "names": [
-                col.removeprefix("variation.")
-                for col in dataset.column_names
-                if col.startswith("variation.")
-            ],
+            "has_variation": any(col.startswith("variation.") for col in dataset.column_names),
+            "names": [col.removeprefix("variation.") for col in dataset.column_names if col.startswith("variation.")],
         },
     }
 
@@ -227,10 +203,10 @@ def dataset_info(name):
 
 
 def list_worlds():
-    return sorted(list(swm.WORLDS))
+    return sorted(swm.WORLDS)
 
 
-def _space_meta(space) -> SpaceInfo | Dict[str, SpaceInfo] | List[SpaceInfo]:
+def _space_meta(space) -> SpaceInfo | dict[str, SpaceInfo] | list[SpaceInfo]:
     if isinstance(space, gym.spaces.Dict):
         return {k: _space_meta(v) for k, v in space.spaces.items()}
 
@@ -257,13 +233,11 @@ def _space_meta(space) -> SpaceInfo | Dict[str, SpaceInfo] | List[SpaceInfo]:
 def world_info(
     name: str,
     *,
-    image_shape: Tuple[int, int] = (224, 224),
+    image_shape: tuple[int, int] = (224, 224),
     render_mode: str = "rgb_array",
 ) -> WorldInfo:
     if name not in swm.WORLDS:
-        raise ValueError(
-            f"World '{name}' not found. Available: {', '.join(list_worlds())}"
-        )
+        raise ValueError(f"World '{name}' not found. Available: {', '.join(list_worlds())}")
     world = None
 
     try:
@@ -312,9 +286,7 @@ def delete_dataset(name):
             raise ValueError(f"Dataset {name} does not exist at {dataset_path}")
 
         # remove cache files
-        dataset = load_dataset(
-            "parquet", data_files=str(Path(dataset_path, "*.parquet"))
-        )
+        dataset = load_dataset("parquet", data_files=str(Path(dataset_path, "*.parquet")))
         dataset.cleanup_cache_files()
 
         # delete dataset directory
@@ -337,6 +309,4 @@ def delete_model(name):
                 os.remove(filepath)
                 print(f"🔮 Model {fname} deleted")
             except Exception as e:
-                print(
-                    f"[red]Error occured while deleting model [cyan]{name}[/cyan]: {e}[/red]"
-                )
+                print(f"[red]Error occurred while deleting model [cyan]{name}[/cyan]: {e}[/red]")

@@ -1,7 +1,10 @@
-import pytest
 import subprocess
 from unittest.mock import MagicMock
-from stable_worldmodel.utils import get_in, flatten_dict, pretraining
+
+import pytest
+
+from stable_worldmodel.utils import flatten_dict, get_in, pretraining
+
 
 #######################
 ## pretraining tests ##
@@ -113,9 +116,7 @@ def test_flatten_dict_mixed_types():
 
 
 def test_flatten_dict_same_flatten():
-    assert flatten_dict({"a": {"b": {"c": 3}}, "d": 4}) == flatten_dict(
-        {"a": {"b.c": 3}, "d": 4}
-    )
+    assert flatten_dict({"a": {"b": {"c": 3}}, "d": 4}) == flatten_dict({"a": {"b.c": 3}, "d": 4})
 
 
 #################

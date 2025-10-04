@@ -33,25 +33,22 @@ Typical usage examples:
         $ swm --version
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Annotated, Any
 
+import numpy as np
 import typer
-from rich import print
+from rich import box, print
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
-from rich.console import Group
-from typing_extensions import Annotated
-from rich.rule import Rule
 
 from stable_worldmodel import data
 
 from .__about__ import __version__
 
-import numpy as np
-from rich import box
-from rich.console import Console
-from rich.panel import Panel
 
 console = Console()
 
@@ -77,11 +74,7 @@ def _summarize(x: Any) -> str:
         a = np.asarray(x)
     except Exception:
         return repr(x)
-    return (
-        f"shape={list(a.shape)}, min={a.min()}, max={a.max()}"
-        if a.size
-        else f"[] shape={list(a.shape)}"
-    )
+    return f"shape={list(a.shape)}, min={a.min()}, max={a.max()}" if a.size else f"[] shape={list(a.shape)}"
 
 
 def _leaf(m: Any) -> bool:
@@ -99,7 +92,7 @@ def _leaf(m: Any) -> bool:
     return isinstance(m, dict) and "type" in m
 
 
-def _leaf_table(title: str, m: Dict[str, Any]) -> Table:
+def _leaf_table(title: str, m: dict[str, Any]) -> Table:
     """Create a Rich table displaying leaf node space properties.
 
     Generates a formatted table showing space attributes like type, shape, dtype,
@@ -156,7 +149,7 @@ def _build_hierarchy(flat_names, sep="."):
         >>> _build_hierarchy(names)
         {'agent': {'pos': {'x': {}, 'y': {}}}, 'goal': {'pos': {}}}
     """
-    root: Dict[str, Dict] = {}
+    root: dict[str, dict] = {}
     if not flat_names:
         return root
     for raw in flat_names:
@@ -167,7 +160,7 @@ def _build_hierarchy(flat_names, sep="."):
     return root
 
 
-def _render_hierarchy(parent: Tree, d: Dict[str, Dict]):
+def _render_hierarchy(parent: Tree, d: dict[str, dict]):
     """Recursively render a hierarchical dictionary as a Rich Tree.
 
     Traverses the nested dictionary and adds nodes to the Rich Tree, with
@@ -189,7 +182,7 @@ def _render_hierarchy(parent: Tree, d: Dict[str, Dict]):
             _render_hierarchy(child, d[k])
 
 
-def _render(meta: Union[Dict[str, Any], List[Any], None], label: str):
+def _render(meta: dict[str, Any] | list[Any] | None, label: str):
     """Render space metadata as a Rich Tree or Table.
 
     Creates an appropriate Rich display object (Tree or Table) for the given
@@ -222,7 +215,7 @@ def _render(meta: Union[Dict[str, Any], List[Any], None], label: str):
     return tree
 
 
-def _variation_space(variation: Dict[str, Any], title: str = "Variation Space"):
+def _variation_space(variation: dict[str, Any], title: str = "Variation Space"):
     """Create a Rich Tree displaying variation space information.
 
     Renders the variation space structure showing available environment variations
@@ -255,7 +248,7 @@ def _variation_space(variation: Dict[str, Any], title: str = "Variation Space"):
     else:
         # hierarchical names
         names = variation.get("names") or []
-        if isinstance(names, (list, tuple)) and names:
+        if isinstance(names, (list | tuple)) and names:
             tree_dict = _build_hierarchy(names, sep=".")
             _render_hierarchy(vroot, tree_dict)
         else:
@@ -264,7 +257,7 @@ def _variation_space(variation: Dict[str, Any], title: str = "Variation Space"):
     return vroot
 
 
-def display_world_info(info: Dict[str, Any]) -> None:
+def display_world_info(info: dict[str, Any]) -> None:
     """Display world environment information in a formatted panel.
 
     Prints a Rich panel showing the world's observation space, action space,
@@ -298,7 +291,7 @@ def display_world_info(info: Dict[str, Any]) -> None:
     )
 
 
-def display_dataset_info(info: Dict[str, Any]) -> None:
+def display_dataset_info(info: dict[str, Any]) -> None:
     """Display dataset information in a formatted panel with tables.
 
     Prints a Rich panel showing dataset metadata including columns, episode count,
@@ -387,7 +380,7 @@ def _version_callback(value: bool):
 @app.callback()
 def common(
     version: Annotated[
-        Optional[bool],
+        bool | None,
         typer.Option(
             "--version",
             "-v",
@@ -410,9 +403,7 @@ def common(
 
 @app.command("list")
 def list_cmd(
-    kind: Annotated[
-        str, typer.Argument(help="Type to list: 'model', 'dataset' or 'world'")
-    ],
+    kind: Annotated[str, typer.Argument(help="Type to list: 'model', 'dataset' or 'world'")],
 ):
     """List cached stable-worldmodel resources.
 
@@ -470,14 +461,10 @@ def list_cmd(
 @app.command()
 def show(
     kind: Annotated[str, typer.Argument(help="Type to show: 'dataset' or 'world'")],
-    names: Annotated[
-        Optional[List[str]], typer.Argument(help="Names of worlds or datasets to show")
-    ] = None,
+    names: Annotated[list[str] | None, typer.Argument(help="Names of worlds or datasets to show")] = None,
     all: Annotated[
         bool,
-        typer.Option(
-            "--all", "-a", help="Show all cached datasets/worlds", is_flag=True
-        ),
+        typer.Option("--all", "-a", help="Show all cached datasets/worlds", is_flag=True),
     ] = False,
 ):
     """Show detailed information about datasets or worlds.
@@ -559,9 +546,7 @@ def show(
 @app.command()
 def delete(
     kind: Annotated[str, typer.Argument(help="Type to delete: 'model' or 'dataset'")],
-    names: Annotated[
-        List[str], typer.Argument(help="Names of models or datasets to delete")
-    ],
+    names: Annotated[list[str], typer.Argument(help="Names of models or datasets to delete")],
 ):
     """Delete models or datasets from cache directory.
 

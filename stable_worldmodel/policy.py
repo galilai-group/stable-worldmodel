@@ -1,12 +1,10 @@
-import numpy as np
 from collections import deque
-from typing import Protocol, runtime_checkable
-from pathlib import Path
-import torch
-import gymnasium as gym
-import stable_worldmodel as swm
-
 from dataclasses import dataclass
+from pathlib import Path
+
+import torch
+
+import stable_worldmodel as swm
 from stable_worldmodel.solver import Solver
 
 
@@ -96,14 +94,10 @@ class WorldModelPolicy(BasePolicy):
     def set_env(self, env):
         self.env = env
         n_envs = getattr(env, "num_envs", 1)
-        self.solver.configure(
-            action_space=env.action_space, n_envs=n_envs, config=self.cfg
-        )
+        self.solver.configure(action_space=env.action_space, n_envs=n_envs, config=self.cfg)
         self._action_buffer = deque(maxlen=self.flatten_receding_horizon)
 
-        assert isinstance(self.solver, Solver), (
-            "Solver must implement the Solver protocol"
-        )
+        assert isinstance(self.solver, Solver), "Solver must implement the Solver protocol"
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
@@ -134,11 +128,7 @@ class WorldModelPolicy(BasePolicy):
 def AutoPolicy(model_name, cache_dir=None):
     cache_dir = Path(cache_dir or swm.data.get_cache_dir())
     path = cache_dir / f"{model_name}_object.ckpt"
-    assert path.exists(), (
-        f"World model named {model_name} not found. Should launch pretraining first."
-    )
+    assert path.exists(), f"World model named {model_name} not found. Should launch pretraining first."
     spt_module = torch.load(path, weights_only=False)
-    assert hasattr(spt_module, "model"), (
-        "Loaded world model should have a model attribute"
-    )
+    assert hasattr(spt_module, "model"), "Loaded world model should have a model attribute"
     return spt_module.model
