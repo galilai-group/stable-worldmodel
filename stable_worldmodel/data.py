@@ -34,6 +34,7 @@ class StepsDataset(spt.data.HFDataset):
 
         assert "episode_idx" in self.dataset.column_names, "Dataset must have 'episode_idx' column"
         assert "step_idx" in self.dataset.column_names, "Dataset must have 'step_idx' column"
+        assert "action" in self.dataset.column_names, "Dataset must have 'action' column"
 
         # Setup HF dataset
 
@@ -41,25 +42,36 @@ class StepsDataset(spt.data.HFDataset):
 
         # TODO: add assert for basic column name
 
+        # load the dataset with pytorch format
         cols = [c for c in self.dataset.column_names if c not in self.torch_exclude_column]
         self.dataset = self.dataset.with_format("torch", columns=cols, output_all_columns=True)
 
+        # get number of episodes
         ep_indices = self.dataset["episode_idx"]
         self.episodes = np.unique(ep_indices)
-        self.episode_slices = {e: self.get_episode_slice(e, ep_indices) for e in self.episodes}
-        self.cum_slices = np.cumsum([0] + [len(v) - self.num_steps for v in self.episode_slices.values()])
 
-        # find which episode this idx belongs to, make sure to remove num_steps!
+        # get dataset indices of each episode
+        self.episode_slices = {e: self.get_episode_slice(e, ep_indices) for e in self.episodes}
+
+        # start index for each episode
+        valid_samples_per_ep = [
+            max(0, len(ep_slice) - self.num_steps * self.frameskip + 1) for ep_slice in self.episode_slices.values()
+        ]
+        self.cum_slices = np.cumsum([0] + valid_samples_per_ep)
+
+        # map from sample to their episode
         self.idx_to_ep = np.searchsorted(self.cum_slices, torch.arange(len(self)), side="right") - 1
 
     def get_episode_slice(self, episode_idx, episode_indices):
         """Return number of possible slices for a given episode index"""
-        subsampled_indices = np.flatnonzero(episode_indices == episode_idx)[:: self.frameskip]
-        assert len(subsampled_indices) >= self.num_steps, (
-            f"Episode {episode_idx} is too short for {self.num_steps} steps with {self.frameskip} frameskip"
-        )
+        indices = np.flatnonzero(episode_indices == episode_idx)
 
-        return subsampled_indices
+        if len(indices) <= (self.num_steps * self.frameskip):
+            raise ValueError(
+                f"Episode {episode_idx} is too short ({len(indices)} steps) for {self.num_steps} steps with {self.frameskip} frameskip"
+            )
+
+        return indices
 
     def process_sample(self, sample):
         if self._trainer is not None:
@@ -77,19 +89,35 @@ class StepsDataset(spt.data.HFDataset):
         return int(self.cum_slices[-1])
 
     def __getitem__(self, idx):
-        # find which episode this idx belongs to
         ep = self.idx_to_ep[idx]
-        ep_slice = self.episode_slices[ep]
-        idx_slice = ep_slice[idx - self.cum_slices[ep] : idx - self.cum_slices[ep] + self.num_steps]
+        episode_indices = self.episode_slices[ep]  # indices for this episode
 
-        # transform the data
-        raw = [self.transform(self.dataset[i]) for i in idx_slice]
-        steps = default_collate(raw)
+        offset = idx - self.cum_slices[ep]  # position within the episode
+        start = offset
+        stop = start + self.num_steps * self.frameskip
+
+        # actions indices, covering the whole window (every frame in between)
+        idx_slice = episode_indices[start:stop]
+
+        # pre select and transform data
+        raw_info = [self.transform(self.dataset[i]) for i in idx_slice]
+        raw_steps = default_collate(raw_info)
+
+        steps = {}
+        for k, v in raw_steps.items():
+            if k == "action":
+                steps[k] = v
+                continue
+            steps[k] = v[:: self.frameskip]
+
+        # reshape actions after transform!
+        steps["action"] = steps["action"].reshape(self.num_steps, -1)
+
         return steps
 
 
 #####################
-### CLI Info ####
+###   CLI Info   ####
 #####################
 
 

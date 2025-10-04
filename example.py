@@ -18,7 +18,7 @@ if __name__ == "__main__":
     # ##  Data Collection  ##
     # #######################
 
-    # world.set_policy(swm.policy.RandomPolicy())
+    world.set_policy(swm.policy.RandomPolicy())
     # world.record_dataset(
     #     "simple-pointmaze",
     #     episodes=10,
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoPolicy("dummy_test")  # auto-cost is confusing
+    model = swm.policy.AutoPolicy("dummy_test")  # auto-policy name is confusing
     config = swm.PlanConfig(horizon=10, receding_horizon=5, action_block=5)
     solver = swm.solver.GDSolver(model, n_steps=10)
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)

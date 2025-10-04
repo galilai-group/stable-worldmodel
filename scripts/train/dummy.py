@@ -36,6 +36,8 @@ def get_data(dataset_name):
     )
 
     # -- load dataset
+    NUM_STEPS = 2
+    FRAME_SKIP = 5
     data_dir = swm.data.get_cache_dir()
     dataset = swm.data.StepsDataset(
         "parquet",
@@ -64,6 +66,7 @@ def forward(self, batch, stage):
     """Forward pass for predictor training"""
 
     actions = batch["action"]
+
     # -- process actions
     actions = actions.flatten(0, 1).float()  # (B,T,A) -> (B*T,A)
 
@@ -91,6 +94,7 @@ def forward(self, batch, stage):
 
 def get_world_model(action_dim):
     """Return stable_spt module with world model"""
+
     world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)
     # NOTE: can add a decoder here if needed
 

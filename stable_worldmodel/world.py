@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import gymnasium as gym
 import numpy as np
 from datasets import Dataset, Features, Image, Value, load_dataset
 from loguru import logger as logging
+from rich import print
 
 import stable_worldmodel as swm
 
@@ -136,7 +138,7 @@ class World:
 
             if self.envs.variation_space is not None:
                 logging.info("⚗️ ⚗️ ⚗️ Variation space ⚗️ ⚗️ ⚗️")
-                logging.info(f"{self.envs.variation_space}")
+                print(self.envs.variation_space)
             else:
                 logging.warning("No variation space provided!")
 
