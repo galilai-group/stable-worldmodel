@@ -213,9 +213,11 @@ multirun/
 checkpoints/
 dino_wm_ckpt/
 pusht_noise/
-stable-pretraining/
 wandb/
 videos/
 dataset/
 *.out
 *.mp4
+
+
+old_tests/
