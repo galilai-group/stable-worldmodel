@@ -24,6 +24,9 @@ dependencies = [
     "nevergrad",
     "einops",
     "datasets",
+    "pygame",
+    "pymunk",
+    "shapely"
 ]
 
 dynamic = ["version"]

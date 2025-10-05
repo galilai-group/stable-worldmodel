@@ -23,7 +23,6 @@ swm.pretraining(
 )
 
 # evaluate world model
-# world.set_policy(swm.policy.AutoPolicy("output_model_name"))
 action_dim = world.envs.single_action_space.shape[0]
 cost_fn = torch.nn.functional.mse_loss
 world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)

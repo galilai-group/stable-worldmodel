@@ -6,8 +6,8 @@ if __name__ == "__main__":
     ######################
 
     world = swm.World(
-        "swm/SimplePointMaze-v0",
-        num_envs=7,
+        "swm/PushT-v1",
+        num_envs=5,
         image_shape=(224, 224),
         render_mode="rgb_array",
     )
@@ -19,16 +19,11 @@ if __name__ == "__main__":
     # #######################
 
     world.set_policy(swm.policy.RandomPolicy())
-    world.record_dataset(
-        "simple-pointmaze",
-        episodes=10,
-        seed=2347,
-        options=None,
-    )
-    # world.record_video(
-    #     "./",
+    # world.record_dataset(
+    #     "example-pusht",
+    #     episodes=10,
     #     seed=2347,
-    #     options={"variation": ("walls.number", "walls.shape", "walls.positions")},
+    #     options=None,
     # )
 
     ################
@@ -36,20 +31,23 @@ if __name__ == "__main__":
     ################
 
     # pre-train world model
-    swm.pretraining(
-        "scripts/train/dummy.py",
-        "++dump_object=True dataset_name=simple-pointmaze output_model_name=dummy_test",
-    )
+    # swm.pretraining(
+    #     "scripts/train/dummy.py",
+    #     "++dump_object=True dataset_name=example-pusht output_model_name=dummy_pusht",
+    # )
 
     ################
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoPolicy("dummy_test")  # auto-policy name is confusing
-    config = swm.PlanConfig(horizon=10, receding_horizon=5, action_block=5)
-    solver = swm.solver.GDSolver(model, n_steps=10)
+    # NOTE: make sure to match action_block with the one used during training!
+
+    model = swm.policy.AutoCostModel("dummy_pusht")
+    config = swm.PlanConfig(horizon=25, receding_horizon=25, action_block=5)
+    solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30)
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
+
     world.set_policy(policy)
-    results = world.evaluate(episodes=2, seed=2347)  # , options={...})
+    results = world.evaluate(episodes=50, seed=2347)
 
     print(results)
