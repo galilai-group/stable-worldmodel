@@ -12,9 +12,7 @@ import stable_worldmodel as swm
 
 
 DEFAULT_VARIATIONS = {
-    "walls.number",
-    "walls.shape",
-    "walls.positions",
+    "agent.position",
 }
 
 
