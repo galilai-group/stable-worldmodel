@@ -580,6 +580,10 @@ class World:
                     metrics["episode_successes"][ep_idx] = terminations_before[i]
                     metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
 
+                    logging.error(
+                        "EXTRACTED SEED : ", metrics["seeds"][ep_idx], self.envs.envs[i].unwrapped.np_random_seed
+                    )
+
                     if eval_keys:
                         for key in eval_keys:
                             assert key in self.infos, f"key {key} not found in infos"
@@ -610,8 +614,6 @@ class World:
         metrics["success_rate"] = float(np.sum(metrics["episode_successes"])) / episodes * 100.0
 
         assert eval_ep_count == episodes, f"eval_ep_count {eval_ep_count} != episodes {episodes}"
-
-        print(metrics["seeds"])
 
         assert np.unique(metrics["seeds"]).shape[0] == episodes, "Some episode seeds are identical!"
 

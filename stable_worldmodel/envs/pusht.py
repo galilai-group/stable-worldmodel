@@ -195,10 +195,9 @@ class PushT(gym.Env):
         self.coverage_arr = []
 
     def reset(self, seed=None, options=None):
-        self.seed(seed)
-
-        ### update variation space
-        options = options or {}
+        super().reset(seed=seed, options=options)
+        self.observation_space.seed(seed)
+        self.action_space.seed(seed)
 
         if hasattr(self, "variation_space"):
             self.variation_space.seed(seed)
@@ -417,16 +416,6 @@ class PushT(gym.Env):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
-
-    def seed(self, seed=None):
-        if seed is None:
-            seed = np.random.randint(0, 25536)
-        self._seed = seed
-        self.np_random = np.random.default_rng(seed)
-        self.random_state = np.random.RandomState(seed)
-        self.observation_space.seed(seed)
-        self.action_space.seed(seed)
-        self.variation_space.seed(seed)
 
     def _handle_collision(self, arbiter, space, data):
         self.n_contact_points += len(arbiter.contact_point_set.points)
