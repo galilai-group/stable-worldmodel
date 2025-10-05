@@ -36,8 +36,6 @@ def get_data(dataset_name):
     )
 
     # -- load dataset
-    NUM_STEPS = 2
-    FRAME_SKIP = 5
     data_dir = swm.data.get_cache_dir()
     dataset = swm.data.StepsDataset(
         "parquet",
