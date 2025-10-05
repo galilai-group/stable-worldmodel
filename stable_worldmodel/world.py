@@ -1,4 +1,3 @@
-import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -611,6 +610,8 @@ class World:
         metrics["success_rate"] = float(np.sum(metrics["episode_successes"])) / episodes * 100.0
 
         assert eval_ep_count == episodes, f"eval_ep_count {eval_ep_count} != episodes {episodes}"
+
+        print(metrics["seeds"])
 
         assert np.unique(metrics["seeds"]).shape[0] == episodes, "Some episode seeds are identical!"
 

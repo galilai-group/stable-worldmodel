@@ -38,7 +38,9 @@ if __name__ == "__main__":
     # pre-train world model
     swm.pretraining(
         "scripts/train/dummy.py",
-        "++dump_object=True dataset_name=simple-pointmaze output_model_name=dummy_test",
+        dataset_name="simple-pointmaze",
+        output_model_name="dummy_test",
+        dump_object=True,
     )
 
     ################

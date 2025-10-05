@@ -30,10 +30,11 @@ if __name__ == "__main__":
     ##  Pretrain  ##
     ################
 
-    # pre-train world model
     # swm.pretraining(
     #     "scripts/train/dummy.py",
-    #     "++dump_object=True dataset_name=example-pusht output_model_name=dummy_pusht",
+    #     dataset_name="example-pusht",
+    #     output_model_name="dummy_pusht",
+    #     dump_object=True,
     # )
 
     ################

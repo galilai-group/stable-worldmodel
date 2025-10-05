@@ -329,13 +329,10 @@ class SimplePointMazeEnv(gym.Env):
             raise NotImplementedError(f"Render mode {mode} not supported.")
 
     def close(self):
-        if self._fig is not None:
-            plt.close(self._fig)
-            self._fig = None
-            self._ax = None
-
-    def __del__(self):
         try:
-            self.close()
+            if self._fig is not None:
+                plt.close(self._fig)
+                self._fig = None
+                self._ax = None
         except Exception:
             pass
