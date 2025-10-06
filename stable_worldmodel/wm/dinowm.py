@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch import distributed as dist
 from torch import nn
+from torchvision import transforms
 
 
 def transform(info_dict, device="cpu"):
@@ -29,7 +30,7 @@ def transform(info_dict, device="cpu"):
 
     # convert all numpy array to torch tensor
     for k in info_dict:
-        if isinstance(info_dict[k] | (np.ndarray, np.generic)):
+        if isinstance(info_dict[k], (np.ndarray | np.generic)):
             # to torch tensor and add temporal dimension if needed
             info_dict[k] = torch.from_numpy(info_dict[k])
 
@@ -62,11 +63,16 @@ class DINOWM(torch.nn.Module):
         self.num_pred = num_pred
         self.device = device
 
+        decoder_scale = 16  # from vqvae
+        num_side_patches = 224 // decoder_scale
+        self.encoder_image_size = num_side_patches * 14
+        self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
+
     def encode(
         self,
         info,
         pixels_key="pixels",
-        target="embedding",
+        target="embed",
         proprio_key=None,
         action_key=None,
     ):
@@ -78,22 +84,21 @@ class DINOWM(torch.nn.Module):
 
         B = pixels.shape[0]
         pixels = rearrange(pixels, "b t ... -> (b t) ...")
-        # pixels = self.encoder_transform(pixels)  # split into patches
+        pixels = self.encoder_transform(pixels)
         pixels_embed = self.backbone(pixels).last_hidden_state.detach()
-
-        # ? pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
+        pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
         pixels_embed = rearrange(pixels_embed, "(b t) p d -> b t p d", b=B)
 
         # == improve the embedding
         n_patches = pixels_embed.shape[2]
         embedding = pixels_embed
-        info[f"{pixels_key}_embed"] = pixels_embed
+        info[f"pixels_{target}"] = pixels_embed
 
         # == proprio embeddings
         if proprio_key is not None:
             proprio = info[proprio_key].float()
             proprio_embed = self.proprio_encoder(proprio)  # (B, T, P) -> (B, T, P_emb)
-            info[f"{proprio_key}_embed"] = proprio_embed
+            info[f"proprio_{target}"] = proprio_embed
 
             # copy proprio embedding across patches for each time step
             proprio_tiled = repeat(proprio_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
@@ -105,7 +110,7 @@ class DINOWM(torch.nn.Module):
         if action_key is not None:
             action = info[action_key].float()
             action_embed = self.action_encoder(action)  # (B, T, A) -> (B, T, A_emb)
-            info[f"{action_key}_embed"] = action_embed
+            info[f"action_{target}"] = action_embed
 
             # copy action embedding across patches for each time step
             action_tiled = repeat(action_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
@@ -124,6 +129,7 @@ class DINOWM(torch.nn.Module):
         Returns:
             preds: (B, T, P, d)
         """
+
         T = embedding.shape[1]
         embedding = rearrange(embedding, "b t p d -> b (t p) d")
         preds = self.predictor(embedding)
@@ -152,7 +158,7 @@ class DINOWM(torch.nn.Module):
         split_embed["pixels_embed"] = embedding[..., :pixel_dim]
 
         # == proprio embedding
-        if self.use_proprio and proprio_dim > 0:
+        if proprio_dim > 0:
             split_embed["proprio_embed"] = embedding[..., pixel_dim : pixel_dim + proprio_dim]
 
         if action_dim > 0:
@@ -184,7 +190,6 @@ class DINOWM(torch.nn.Module):
         """
 
         assert "pixels" in info, "pixels not in info_dict"
-
         n_obs = info["pixels"].shape[1]
 
         # == add action to info dict
@@ -195,7 +200,7 @@ class DINOWM(torch.nn.Module):
         info = self.encode(
             info,
             pixels_key="pixels",
-            target="embedding",
+            target="embed",
             proprio_key=proprio_key,
             action_key="action",
         )
@@ -205,7 +210,7 @@ class DINOWM(torch.nn.Module):
         n_steps = act_pred.shape[1]
 
         # == initial embedding
-        z = info["embedding"]
+        z = info["embed"]
 
         for t in range(n_steps):
             # predict the next state
@@ -241,10 +246,10 @@ class DINOWM(torch.nn.Module):
         assert "pixels" in info_dict, "pixels key must be in info_dict"
 
         # == get the goal embedding
-        proprio_key = "goal_pos" if "goal_pos" in info_dict else None
+        proprio_key = "goal_proprio" if "goal_proprio" in info_dict else None
         info_dict = self.encode(
             info_dict,
-            target="goal_embedding",
+            target="goal_embed",
             pixels_key="goal",
             proprio_key=proprio_key,
             action_key=None,
@@ -253,24 +258,23 @@ class DINOWM(torch.nn.Module):
         # == run world model
         info_dict = self.rollout(info_dict, action_candidates)
 
-        # == get the predicted embeddings
+        # == get the pixels cost
         pixels_preds = info_dict["predicted_pixels_embed"]  # (B, T, P, d)
-        proprio_preds = info_dict["predicted_proprio_embed"]
-
-        pixels_goal = info_dict["goal_embedding"]["pixels"]
-        proprio_goal = info_dict["goal_embedding"]["proprio"]
-
-        # cost for the LAST prediction
+        pixels_goal = info_dict["pixels_goal_embed"]
         pixels_cost = F.mse_loss(pixels_preds[:, -1:], pixels_goal, reduction="none").mean(
             dim=tuple(range(1, pixels_preds.ndim))
         )
 
-        proprio_cost = F.mse_loss(proprio_preds[:, -1:], proprio_goal, reduction="none").mean(
-            dim=tuple(range(1, proprio_preds.ndim))
-        )
+        cost = pixels_cost
 
-        # combine the costs
-        cost = pixels_cost + proprio_cost
+        if proprio_key is not None:
+            # == get the proprio cost
+            proprio_preds = info_dict["predicted_proprio_embed"]
+            proprio_goal = info_dict["proprio_goal_embed"]
+            proprio_cost = F.mse_loss(proprio_preds[:, -1:], proprio_goal, reduction="none").mean(
+                dim=tuple(range(1, proprio_preds.ndim))
+            )
+            cost = cost + proprio_cost
 
         return cost
 
