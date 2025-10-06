@@ -4,7 +4,6 @@ Solver
 .. toctree::
    :hidden:
    
-   solver/base
    solver/cem
    solver/gd
 

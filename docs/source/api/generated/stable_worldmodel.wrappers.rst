@@ -1,4 +1,4 @@
-stable\_worldmodel.wrappers
+﻿stable\_worldmodel.wrappers
 ===========================
 
 .. automodule:: stable_worldmodel.wrappers
@@ -15,5 +15,5 @@ stable\_worldmodel.wrappers
       EverythingToInfoWrapper
       MegaWrapper
       ResizeGoalWrapper
-      TransformObservation
+      VariationWrapper
    

@@ -1,40 +1,54 @@
-import torch
-
 import stable_worldmodel as swm
 
 
-# create world
+######################
+##  World Creation  ##
+######################
+
 world = swm.World(
-    "swm/SimplePointMaze-v0",
-    num_envs=7,
+    "swm/PushT-v1",
+    num_envs=5,
     image_shape=(224, 224),
     render_mode="rgb_array",
 )
 
-# collect data for pre-training
-world.set_policy(swm.policy.RandomPolicy())
-world.record_dataset("simple-pointmaze", episodes=10, seed=2347)
-world.record_video("./", seed=2347)
+print("Available variations: ", world.single_variation_space.names())
 
-# pre-train world model
-swm.pretraining(
-    "scripts/train/dummy.py",
-    "++dump_object=True dataset_name=simple-pointmaze output_model_name=dummy_test",
+# #######################
+# ##  Data Collection  ##
+# #######################
+
+world.set_policy(swm.policy.RandomPolicy())
+world.record_dataset(
+    "example-pusht",
+    episodes=10,
+    seed=2347,
+    options=None,
 )
 
-# evaluate world model
-action_dim = world.envs.single_action_space.shape[0]
-cost_fn = torch.nn.functional.mse_loss
-world_model = swm.wm.DummyWorldModel((224, 224, 3), action_dim)
-solver = swm.solver.RandomSolver(horizon=5, action_dim=action_dim, cost_fn=cost_fn)
-policy = swm.policy.WorldModelPolicy(world_model, solver, horizon=10, action_block=5, receding_horizon=5)
+################
+##  Pretrain  ##
+################
+
+swm.pretraining(
+    "scripts/train/dinowm.py",
+    dataset_name="example-pusht",
+    output_model_name="dummy_pusht",
+    dump_object=True,
+)
+
+################
+##  Evaluate  ##
+################
+
+# NOTE for user: make sure to match action_block with the one used during training!
+
+model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
+config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
+solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
+policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
+
 world.set_policy(policy)
-
-spt_module = torch.load(swm.data.get_cache_dir() + "/dummy_test_object.ckpt", weights_only=False)
-world_model = spt_module.model
-results = world.evaluate(episodes=2, seed=2347)  # , options={...})
-
-# what about eval on all type of env?
-# TODO: add leaderboard
+results = world.evaluate(episodes=5, seed=2347)
 
 print(results)

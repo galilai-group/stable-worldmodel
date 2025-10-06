@@ -1,4 +1,4 @@
-stable\_worldmodel.policy
+﻿stable\_worldmodel.policy
 =========================
 
 .. automodule:: stable_worldmodel.policy
@@ -8,7 +8,7 @@ stable\_worldmodel.policy
 
    .. autosummary::
    
-      AutoPolicy
+      AutoCostModel
    
    .. rubric:: Classes
 
@@ -16,7 +16,7 @@ stable\_worldmodel.policy
    
       BasePolicy
       ExpertPolicy
+      PlanConfig
       RandomPolicy
-      WorldModel
       WorldModelPolicy
    

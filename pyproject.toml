@@ -61,6 +61,7 @@ doc = [
     "sphinxcontrib-bibtex",
     "matplotlib",
     "memory_profiler",
+    "furo",
     "myst-parser",
 ]
 

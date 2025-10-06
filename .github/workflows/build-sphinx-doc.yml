@@ -1,0 +1,66 @@
+name: build_sphinx_docs
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[doc]"
+
+      - name: Remove all .rst files except index.rst
+        run: |
+          find docs/source -type f -name "*.rst" ! -name "index.rst" -exec rm -f {} \;
+
+      - name: Generate .rst files from package
+        run: |
+          sphinx-apidoc -o docs/source stable_worldmodel
+
+      - name: Build Sphinx HTML documentation
+        run: |
+          cd docs
+          sphinx-build -b html source build/html
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sphinx-html
+          path: docs/build/html
+
+      # Publish built docs to gh-pages branch
+      # =======================================
+      - name: Commit documentation changes
+        run: |
+          git clone https://${{ secrets.GH_TOKEN }}@github.com/rbalestr-lab/stable-worldmodel.git --branch gh-pages --single-branch gh-pages
+          cd gh-pages
+          git clean -fdx
+          cp -r ../docs/build/html/* .
+          touch .nojekyll
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Update documentation" -a || true
+        env:
+          GH_PAT: ${{ secrets.GH_TOKEN }}
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          branch: gh-pages
+          directory: gh-pages
+          github_token: ${{ secrets.GH_TOKEN }}

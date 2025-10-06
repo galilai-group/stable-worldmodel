@@ -19,23 +19,23 @@ if __name__ == "__main__":
     # #######################
 
     world.set_policy(swm.policy.RandomPolicy())
-    # world.record_dataset(
-    #     "example-pusht",
-    #     episodes=10,
-    #     seed=2347,
-    #     options=None,
-    # )
+    world.record_dataset(
+        "example-pusht",
+        episodes=10,
+        seed=2347,
+        options=None,
+    )
 
     ################
     ##  Pretrain  ##
     ################
 
-    # swm.pretraining(
-    #     "scripts/train/dinowm.py",
-    #     dataset_name="example-pusht",
-    #     output_model_name="dummy_pusht",
-    #     dump_object=True,
-    # )
+    swm.pretraining(
+        "scripts/train/dinowm.py",
+        dataset_name="example-pusht",
+        output_model_name="dummy_pusht",
+        dump_object=True,
+    )
 
     ################
     ##  Evaluate  ##
