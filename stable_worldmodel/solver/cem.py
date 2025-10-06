@@ -74,6 +74,7 @@ class CEMSolver:
 
         return mean, var
 
+    @torch.inference_mode()
     def solve(self, info_dict, init_action=None):
         outputs = {
             "costs": [],
@@ -91,6 +92,8 @@ class CEMSolver:
         # -- optimization loop
         for step in range(self.n_steps):
             costs = []
+
+            print(f"CEM Step {step + 1}/{self.n_steps}")
 
             # TODO: could flatten the batch dimension and process all samples together
             # rem: need many memory and split before computing top k

@@ -1,43 +1,17 @@
-import numpy as np
-import stable_pretraining as spt
+import sys
+
 import torch
-import torch.nn.functional as F
 from einops import rearrange, repeat
-from torch import distributed as dist
 from torch import nn
+from torch.nn import functional as F
 from torchvision import transforms
 
 
-def transform(info_dict, device="cpu"):
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
-    transform = spt.data.transforms.Compose(
-        spt.data.transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="pixels",
-            target="pixels",
-        ),
-        spt.data.transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="goal",
-            target="goal",
-        ),
-    )
+sys.path.append("..")
+from torch import distributed as dist
 
-    info_dict = transform(info_dict)
 
-    # convert all numpy array to torch tensor
-    for k in info_dict:
-        if isinstance(info_dict[k], (np.ndarray | np.generic)):
-            # to torch tensor and add temporal dimension if needed
-            info_dict[k] = torch.from_numpy(info_dict[k])
-
-        if torch.is_tensor(info_dict[k]):
-            info_dict[k] = info_dict[k].unsqueeze(1).to(device)
-
-    return info_dict
+torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
 
 
 class DINOWM(torch.nn.Module):
@@ -47,137 +21,216 @@ class DINOWM(torch.nn.Module):
         predictor,
         action_encoder,
         proprio_encoder,
-        decoder=None,
-        history_size=3,
-        num_pred=1,
+        image_size,
+        frameskip,
+        history_size,
+        action_dim,
+        action_emb_dim,
+        proprio_dim,
+        proprio_emb_dim,
         device="cpu",
+        # boring ...
+        decoder=None,
+        action_mean=0,
+        action_std=1,
+        proprio_mean=0,
+        proprio_std=1,
     ):
         super().__init__()
-
+        self.device = device
         self.backbone = encoder
         self.predictor = predictor
+        self.decoder = decoder
         self.action_encoder = action_encoder
         self.proprio_encoder = proprio_encoder
-        self.decoder = decoder
+
+        self.frameskip = frameskip
+
         self.history_size = history_size
-        self.num_pred = num_pred
-        self.device = device
+
+        self.proprio_dim = proprio_dim
+        self.original_action_dim = action_dim
+        self.action_dim = action_dim * frameskip  #
+
+        self.action_emb_dim = action_emb_dim
+        self.proprio_emb_dim = proprio_emb_dim
+
+        self.action_mean = action_mean
+        self.action_std = action_std
+        self.proprio_mean = proprio_mean
+        self.proprio_std = proprio_std
 
         decoder_scale = 16  # from vqvae
-        num_side_patches = 224 // decoder_scale
-        self.encoder_image_size = num_side_patches * 14
+        num_side_patches = image_size // decoder_scale
+        self.encoder_image_size = num_side_patches * encoder.patch_size
         self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
 
-    def encode(
-        self,
-        info,
-        pixels_key="pixels",
-        target="embed",
-        proprio_key=None,
-        action_key=None,
-    ):
-        assert target not in info, f"{target} key already in info_dict"
+    def forward(self, obs, actions):
+        z = self.encode(obs, actions)
+        z_pred = self.predict(z[:, -self.history_size :])  # (B, hist_size, P, D)
+        z_new = z_pred[:, -1:, :, :]  # (B, 1, P, D)
 
-        # == pixels embeddings
-        pixels = info[pixels_key].float()  # (B, T, 3, H, W)
+        z_obs, z_act = self.split_embeddings(z_new)
+
+    def encode(self, obs, actions):
+        z_obs = self.encode_obs(obs)
+        z_pixels = z_obs["pixels"]  # (B, T, P, D)
+        z_proprio = z_obs["proprio"]  # (B, T, P_emb)
+        z_act = self.encode_action(actions)  # (B, T, A_emb)
+
+        # -- merge state, action, proprio
+        n_patches = z_pixels.shape[2]
+
+        # share action/proprio embedding across patches for each time step
+        propr_tiled = repeat(z_proprio.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
+        act_tiled = repeat(z_act.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
+
+        # (B, T, P, dim+A_emb+P_emb)
+        z = torch.cat([z_pixels, propr_tiled, act_tiled], dim=3)
+
+        return z  # (B, T, P, d)
+
+    def encode_action(self, actions):
+        return self.action_encoder(actions)
+
+    def encode_proprio(self, proprio):
+        proprio = self.normalize_proprio(proprio.cpu()).to(self.device)
+        return self.proprio_encoder(proprio)
+
+    def encode_obs(self, obs):
+        """Preprocess observation from the environment obs dict
+        Args:
+            states: dict with all the observation modalities (img, proprio, etc)
+        Returns:
+            z: encoded latent states for observations
+        """
+
+        pixels = obs["pixels"].float()  # (B, T, 3, H, W)
         pixels = pixels.unsqueeze(1) if pixels.ndim == 4 else pixels
-
         B = pixels.shape[0]
         pixels = rearrange(pixels, "b t ... -> (b t) ...")
-        pixels = self.encoder_transform(pixels)
-        pixels_embed = self.backbone(pixels).last_hidden_state.detach()
-        pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
-        pixels_embed = rearrange(pixels_embed, "(b t) p d -> b t p d", b=B)
+        proprio = obs["proprio"].float()  # (B, T, P)
 
-        # == improve the embedding
-        n_patches = pixels_embed.shape[2]
-        embedding = pixels_embed
-        info[f"pixels_{target}"] = pixels_embed
+        # -- pixels embeddings
+        pixels = self.encoder_transform(pixels)  # split into patches
+        z_pixels = self.backbone(pixels)
 
-        # == proprio embeddings
-        if proprio_key is not None:
-            proprio = info[proprio_key].float()
-            proprio_embed = self.proprio_encoder(proprio)  # (B, T, P) -> (B, T, P_emb)
-            info[f"proprio_{target}"] = proprio_embed
+        # z_pixels = z_pixels[:, 1:, :]  # drop cls token
+        z_pixels = rearrange(z_pixels, "(b t) p d -> b t p d", b=B)
 
-            # copy proprio embedding across patches for each time step
-            proprio_tiled = repeat(proprio_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
+        # -- proprio embeddings
+        z_proprio = self.encode_proprio(proprio)  # (B, T, P) -> (B, T, P_emb)
 
-            # concatenate along feature dimension
-            embedding = torch.cat([pixels_embed, proprio_tiled], dim=3)
+        return {"pixels": z_pixels, "proprio": z_proprio}
 
-        # == action embeddings
-        if action_key is not None:
-            action = info[action_key].float()
-            action_embed = self.action_encoder(action)  # (B, T, A) -> (B, T, A_emb)
-            info[f"action_{target}"] = action_embed
-
-            # copy action embedding across patches for each time step
-            action_tiled = repeat(action_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
-
-            # concatenate along feature dimension
-            embedding = torch.cat([embedding, action_tiled], dim=3)
-
-        info[target] = embedding  # (B, T, P, d)
-
-        return info
-
-    def predict(self, embedding):
+    def predict(self, z):
         """predict next latent state
         Args:
-            embedding: (B, T, P, d)
+            z: (B, T, P, d)
         Returns:
             preds: (B, T, P, d)
         """
-
-        T = embedding.shape[1]
-        embedding = rearrange(embedding, "b t p d -> b (t p) d")
-        preds = self.predictor(embedding)
+        T = z.shape[1]
+        z = rearrange(z, "b t p d -> b (t p) d")
+        preds = self.predictor(z)
         preds = rearrange(preds, "b (t p) d -> b t p d", t=T)
-
         return preds
 
-    def decode(self, info):
-        assert "pixels_embed" in info, "pixels_embed not in info_dict"
-        pixels_embed = info["pixels_embed"]
-        num_frames = pixels_embed.shape[1]
+    # def forward(self, obs, actions):  # obs, actions, proprio):
+    #     """world model forward pass.
+    #     Args:
+    #         obs: dict with all the observation modalities (img, proprio, etc)
+    #     Returns:
+    #         z_pred: predicted next latent states (B, T, P, d)
+    #     """
 
-        pixels, diff = self.decoder(pixels_embed)  # (b*num_frames, 3, 224, 224)
-        pixels = rearrange(pixels, "(b t) c h w -> b t c h w", t=num_frames)
+    #     obs = torch.from_numpy(states["pixels"]).float()
+    #     proprio = torch.from_numpy(states["proprio"]).float()
 
-        info["reconstructed_pixels"] = pixels
-        info["reconstruction_diff"] = diff
+    #     # normalize proprio and actions
+    #     actions = self.normalize_actions(actions)
+    #     proprio = self.normalize_proprio(proprio)
 
-        return info
+    #     # add dummy temporal dimension if needed
+    #     if obs.ndim == 4:
+    #         obs = obs.unsqueeze(1)  # (B, T, C, H, W)
+    #         proprio = proprio.unsqueeze(1)  # (B, T, P)
+    #         actions = actions.unsqueeze(1)  # (B, T, A)
 
-    def split_embedding(self, embedding, action_dim, proprio_dim):
-        split_embed = {}
-        pixel_dim = embedding.shape[-1] - action_dim - proprio_dim
+    #     # -- move to device
+    #     obs = obs.to(self.device)
+    #     actions = actions.to(self.device)
+    #     proprio = proprio.to(self.device)
 
-        # == pixels embedding
-        split_embed["pixels_embed"] = embedding[..., :pixel_dim]
+    #     # -- embed dim
+    #     action_emb_dim = actions.shape[-1]
+    #     proprio_emb_dim = proprio.shape[-1]
 
-        # == proprio embedding
-        if proprio_dim > 0:
-            split_embed["proprio_embed"] = embedding[..., pixel_dim : pixel_dim + proprio_dim]
+    #     # -- preprocess inputs
+    #     if type(actions) is dict:
+    #         actions = [a.flatten(2) for a in actions.values()]
+    #         actions = torch.cat(actions, -1)
+    #     else:
+    #         actions.flatten(2)
 
-        if action_dim > 0:
-            split_embed["action_embed"] = embedding[..., -action_dim:]
+    #     # -- infer next state
+    #     z = self.encode(obs, actions, proprio)
+    #     z_preds = self.predict(z)
 
-        return split_embed
+    #     # TODO should check from their code
+    #     # z_src = z[:, : Config.num_hist, :, :]
+    #     # z_tgt = z[:, Config.num_pred :, :, :]
 
-    def replace_action_in_embedding(self, embedding, act):
+    #     # keep only the part corresponding to the visual features
+    #     # TODO check if need to remove proprio as well
+    #     z_pred_visual = z_preds[..., : -action_emb_dim - proprio_emb_dim]
+
+    #     return z_pred_visual
+
+    def replace_actions_from_z(self, z, act):
         """Replace the action embeddings in the latent state z with the provided actions."""
-        n_patches = embedding.shape[2]
-        z_act = self.action_encoder(act)  # (B, T, A_emb)
-        action_dim = z_act.shape[-1]
+        n_patches = z.shape[2]
+        z_act = self.encode_action(act)
         act_tiled = repeat(z_act.unsqueeze(2), "b t 1 a -> b t p a", p=n_patches)
         # z (B, T, P, d) with d = dim + proprio_emb_dim + action_emb_dim
         # replace the last 'action_emb_dim' dims of z with the action embeddings
-        embedding[..., -action_dim:] = act_tiled
-        return embedding
+        z[..., -self.action_emb_dim :] = act_tiled
+        return z
 
-    def rollout(self, info, action_sequence):
+    def split_embeddings(self, z):
+        """Unmerge embedding z into separate modalities.
+        Args:
+            z (B, T, P, d) where d = dim + proprio_emb_dim + action_emb_dim
+        Returns:
+            z_obs: dict with separate modalities
+            z_act: (B, T, P, action_emb_dim)
+        """
+
+        A = self.action_emb_dim
+        P = self.proprio_emb_dim
+
+        z_pixels = z[..., : -(P + A)]  # (B, T, P, D)
+        z_proprio = z[:, :, 0, -(P + A) : -A]  # (B, T, 1, P_emb)
+        z_act = z[:, :, 0, -A:]  # (B, T, 1, A_emb)
+
+        z_obs = {"pixels": z_pixels, "proprio": z_proprio}
+        return z_obs, z_act
+
+    def decode_obs(self, z_obs):
+        """
+        input :   z: (b, num_frames, num_patches, emb_dim)
+        output: obs: (b, num_frames, 3, img_size, img_size)
+        """
+        b, num_frames, num_patches, emb_dim = z_obs["pixels"].shape
+        pixels, diff = self.decoder(z_obs["pixels"])  # (b*num_frames, 3, 224, 224)
+        pixels = rearrange(pixels, "(b t) c h w -> b t c h w", t=num_frames)
+        obs = {
+            "pixels": pixels,
+            "proprio": z_obs["proprio"],  # Note: no decoder for proprio for now!
+        }
+        return obs, diff
+
+    def rollout(self, obs_0, actions):
         """Rollout the world model given an initial observation and a sequence of actions.
 
         Params:
@@ -189,94 +242,74 @@ class DINOWM(torch.nn.Module):
         z: predicted latent states (B, n+t+1, n_patches, D)
         """
 
-        assert "pixels" in info, "pixels not in info_dict"
-        n_obs = info["pixels"].shape[1]
+        n_obs = obs_0["pixels"].shape[1]
 
-        # == add action to info dict
-        act_0 = action_sequence[:, :n_obs]
-        info["action"] = act_0
+        act_0 = actions[:, :n_obs]
+        action = actions[:, n_obs:]
 
-        proprio_key = "proprio" if "proprio" in info else None
-        info = self.encode(
-            info,
-            pixels_key="pixels",
-            target="embed",
-            proprio_key=proprio_key,
-            action_key="action",
-        )
+        z = self.encode(obs_0, act_0)
 
-        # number of step to predict
-        act_pred = action_sequence[:, n_obs:]
-        n_steps = act_pred.shape[1]
-
-        # == initial embedding
-        z = info["embed"]
+        # simulate action taken in the world model
+        n_steps = action.shape[1]
 
         for t in range(n_steps):
-            # predict the next state
-            pred_embed = self.predict(z[:, -self.history_size :])  # (B, hist_size, P, D)
-            new_embed = pred_embed[:, -1:, ...]  # (B, 1, P, D)
+            # predict next state based on the history size
 
-            # add corresponding action to new embedding
-            new_action = act_pred[:, t : t + 1, :]  # (B, action_dim)
-            new_embed = self.replace_action_in_embedding(new_embed, new_action)
+            z_pred = self.predict(z[:, -self.history_size :])  # (B, hist_size, P, D)
+            z_new = z_pred[:, -1:, ...]  # (B, 1, P, D)
 
-            # append new embedding to the sequence
-            z = torch.cat([z, new_embed], dim=1)  # (B, n+t, P, D)
+            # update z_new with the new action
+            next_action = action[:, t : t + 1, :]  # (B, action_dim)
+            z_new = self.replace_actions_from_z(z_new, next_action)
+            z = torch.cat([z, z_new], dim=1)  # (B, n+t, P, D)
 
-        # predict the last state (n+t+1)
-        pred_embed = self.predict(z[:, -self.history_size :])  # (B, hist_size, P, D)
-        new_embed = pred_embed[:, -1:, ...]
-        z = torch.cat([z, new_embed], dim=1)  # (B, n+t+1, P, D)
+        # predict n+t+1 state
+        z_pred = self.predict(z[:, -self.history_size :])
+        z_new = z_pred[:, -1:, ...]
+        z = torch.cat([z, z_new], dim=1)  # (B, n+t+1, P, D)
+        z_obs, z_act = self.split_embeddings(z)
 
-        # == update info dict with predicted embeddings
-        info["predicted_embedding"] = z
-        # get the dimension of each part of the embedding
-        action_dim = 0 if "action_embed" not in info else info["action_embed"].shape[-1]
-        proprio_dim = 0 if "proprio_embed" not in info else info["proprio_embed"].shape[-1]
-        splitted_embed = self.split_embedding(z, action_dim, proprio_dim)
-        info.update({f"predicted_{k}": v for k, v in splitted_embed.items()})
+        return z_obs, z
 
-        return info
+    def normalize_actions(self, actions):
+        """Normalize actions using the defined normalization parameters."""
+        return (actions - self.action_mean) / self.action_std
 
-    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
-        info_dict = transform(info_dict, device=self.device)
+    def normalize_proprio(self, proprio):
+        """Normalize proprioceptive data using the defined normalization parameters."""
+        return (proprio - self.proprio_mean) / self.proprio_std
 
-        assert "action" in info_dict, "action key must be in info_dict"
-        assert "pixels" in info_dict, "pixels key must be in info_dict"
+    def denormalize_actions(self, actions):
+        """Denormalize actions using the defined normalization parameters."""
+        return actions * self.action_std + self.action_mean
 
-        # == get the goal embedding
-        proprio_key = "goal_proprio" if "goal_proprio" in info_dict else None
-        info_dict = self.encode(
-            info_dict,
-            target="goal_embed",
-            pixels_key="goal",
-            proprio_key=proprio_key,
-            action_key=None,
-        )
+    def denormalize_proprio(self, proprio):
+        """Denormalize proprioceptive data using the defined normalization parameters."""
+        return proprio * self.proprio_std + self.proprio_mean
 
-        # == run world model
-        info_dict = self.rollout(info_dict, action_candidates)
 
-        # == get the pixels cost
-        pixels_preds = info_dict["predicted_pixels_embed"]  # (B, T, P, d)
-        pixels_goal = info_dict["pixels_goal_embed"]
-        pixels_cost = F.mse_loss(pixels_preds[:, -1:], pixels_goal, reduction="none").mean(
-            dim=tuple(range(1, pixels_preds.ndim))
-        )
+class DinoV2Encoder(nn.Module):
+    def __init__(self, name, feature_key):
+        super().__init__()
+        self.name = name
+        self.base_model = torch.hub.load("facebookresearch/dinov2", name)
+        self.feature_key = feature_key
+        self.emb_dim = self.base_model.num_features
+        if feature_key == "x_norm_patchtokens":
+            self.latent_ndim = 2
+        elif feature_key == "x_norm_clstoken":
+            self.latent_ndim = 1
+        else:
+            raise ValueError(f"Invalid feature key: {feature_key}")
 
-        cost = pixels_cost
+        self.patch_size = self.base_model.patch_size
 
-        if proprio_key is not None:
-            # == get the proprio cost
-            proprio_preds = info_dict["predicted_proprio_embed"]
-            proprio_goal = info_dict["proprio_goal_embed"]
-            proprio_cost = F.mse_loss(proprio_preds[:, -1:], proprio_goal, reduction="none").mean(
-                dim=tuple(range(1, proprio_preds.ndim))
-            )
-            cost = cost + proprio_cost
+    def forward(self, x):
+        emb = self.base_model.forward_features(x)[self.feature_key]
 
-        return cost
+        if self.latent_ndim == 1:
+            emb = emb.unsqueeze(1)  # dummy patch dim
+        return emb
 
 
 class Embedder(torch.nn.Module):
