@@ -129,8 +129,9 @@ def AutoCostModel(model_name, cache_dir=None):
     cache_dir = Path(cache_dir or swm.data.get_cache_dir())
     path = cache_dir / f"{model_name}_object.ckpt"
     assert path.exists(), f"World model named {model_name} not found. Should launch pretraining first."
+
+    print(path)
     spt_module = torch.load(path, weights_only=False)
-    # assert hasattr(spt_module, "model"), "Loaded world model should have a model attribute"
 
     def scan_module(module):
         if hasattr(module, "get_cost"):

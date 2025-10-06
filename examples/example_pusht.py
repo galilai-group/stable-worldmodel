@@ -31,7 +31,7 @@ if __name__ == "__main__":
     ################
 
     # swm.pretraining(
-    #     "scripts/train/dummy.py",
+    #     "scripts/train/dinowm.py",
     #     dataset_name="example-pusht",
     #     output_model_name="dummy_pusht",
     #     dump_object=True,
@@ -41,14 +41,14 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    # NOTE: make sure to match action_block with the one used during training!
+    # NOTE for user: make sure to match action_block with the one used during training!
 
-    model = swm.policy.AutoCostModel("dummy_pusht")
+    model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
     config = swm.PlanConfig(horizon=25, receding_horizon=25, action_block=5)
-    solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30)
+    solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
 
     world.set_policy(policy)
-    results = world.evaluate(episodes=50, seed=2347)
+    results = world.evaluate(episodes=5, seed=2347)
 
     print(results)
