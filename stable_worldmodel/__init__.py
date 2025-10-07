@@ -1,3 +1,5 @@
+__version__ = "0.0.1a0"
+
 from gymnasium.envs import registration
 
 from stable_worldmodel import (

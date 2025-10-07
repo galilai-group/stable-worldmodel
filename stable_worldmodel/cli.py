@@ -47,7 +47,7 @@ from rich.tree import Tree
 
 from stable_worldmodel import data
 
-from .__about__ import __version__
+from . import __version__
 
 
 console = Console()
