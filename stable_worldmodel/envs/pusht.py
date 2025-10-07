@@ -323,14 +323,19 @@ class PushT(gym.Env):
     def _get_info(self):
         n_steps = int(1 / self.dt * self.control_hz)
         n_contact_points_per_step = int(np.ceil(self.n_contact_points / n_steps))
+        goal_proprio = np.concatenate((self.goal_state[:2], self.goal_state[-2:]))
+
         info = {
             "pos_agent": np.array(self.agent.position),
             "vel_agent": np.array(self.agent.velocity),
             "block_pose": np.array(list(self.block.position) + [self.block.angle]),
             "goal_pose": self.goal_pose,
+            "goal_state": self.goal_state,
+            "goal_proprio": goal_proprio,
             "n_contacts": n_contact_points_per_step,
             "goal": self._goal,
         }
+
         return info
 
     def _render_frame(self, mode):

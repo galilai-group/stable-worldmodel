@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import hydra
@@ -5,7 +6,9 @@ import lightning as pl
 import stable_pretraining as spt
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
+from omegaconf import OmegaConf
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import AutoModel
@@ -13,27 +16,39 @@ from transformers import AutoModel
 import stable_worldmodel as swm
 
 
+@dataclass
+class Config:
+    dataset_name: str
+    img_size: int = 224
+    batch_size: int = 32
+    num_workers: int = 4
+
+
 def get_data(dataset_name):
     """Return data and action space dim for training predictor."""
-    # -- make transform operations
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
+
+    # == image transformations
+    def get_img_pipeling(key, target, img_size=224):
+        return spt.data.transforms.Compose(
+            spt.data.transforms.ToImage(
+                **spt.data.dataset_stats.ImageNet,
+                source=key,
+                target=target,
+            ),
+            spt.data.transforms.Resize(img_size, source=key, target=target),
+            spt.data.transforms.CenterCrop(img_size, source=key, target=target),
+        )
+
+    IMG_SIZE = 224
     transform = spt.data.transforms.Compose(
-        spt.data.transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="pixels",
-            target="pixels",
-        ),
-        spt.data.transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="goal",
-            target="goal",
-        ),
+        get_img_pipeling("pixels", "pixels", IMG_SIZE),
+        get_img_pipeling("goal", "goal", IMG_SIZE),
     )
 
-    # -- load dataset
+    # == action transformations
+    # TODO
+
+    # == load dataset
     data_dir = swm.data.get_cache_dir()
     dataset = swm.data.StepsDataset(
         "parquet",
@@ -62,20 +77,30 @@ def forward(self, batch, stage):
     """Forward pass for predictor training"""
 
     proprio_key = "proprio" if "proprio" in batch else None
+
+    # make action and proprio NaN (last action) at 0
+    if proprio_key is not None:
+        nan_mask = torch.isnan(batch[proprio_key])
+        batch[proprio_key][nan_mask] = 0.0
+
+    if "action" in batch:
+        nan_mask = torch.isnan(batch["action"])
+        batch["action"][nan_mask] = 0.0
+
     batch = self.model.encode(
         batch,
-        target="embedding",
+        target="embed",
         pixels_key="pixels",
         proprio_key=proprio_key,
         action_key="action",
     )
 
     # predictions
-    embedding = batch["embedding"][:, : self.model.history_size, :, :]  # (B, history_size, P, d)
+    embedding = batch["embed"][:, :-1, :, :]  # (B, history_size, P, d)
     pred_embedding = self.model.predict(embedding)
 
     # targets values
-    target_embedding = batch["embedding"][:, self.model.num_pred :, :, :]  # (B, T-history_size, P, d)
+    target_embedding = batch["embed"][:, 1:, :, :]  # (B, T-history_size, P, d)
 
     # == pixels loss
     pixels_dim = batch["pixels_embed"].shape[-1]
@@ -95,9 +120,9 @@ def forward(self, batch, stage):
         loss = loss + proprio_loss
 
     batch["loss"] = loss
-
+    prefix = "" if self.training else "val_"
     # == logging
-    losses_dict = {k: v.item() for k, v in batch.items() if "loss" in k}
+    losses_dict = {f"{prefix}{k}": v.item() for k, v in batch.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, on_epoch=True, sync_dist=True)
 
     return batch
@@ -166,13 +191,79 @@ def get_world_model(action_dim):
     world_model = spt.Module(
         model=world_model,
         forward=forward,
+        optim={
+            "encoder_opt": {
+                "modules": "model.backbone",
+                "optimizer": {"type": "AdamW", "lr": 1e-6},
+                "scheduler": {
+                    "type": "OneCycleLR",
+                    "max_lr": 1e-6,
+                    "total_steps": 10000,
+                },
+                "interval": "step",
+                "frequency": 1,
+            },
+            "predictor_opt": {
+                "modules": "model.predictor",
+                "optimizer": {"type": "AdamW", "lr": 5e-4},
+                "scheduler": {
+                    "type": "OneCycleLR",
+                    "max_lr": 5e-4,
+                    "total_steps": 10000,
+                },
+                "interval": "step",
+                "frequency": 1,
+            },
+            "proprio_opt": {
+                "modules": "model.proprio_encoder",
+                "optimizer": {"type": "AdamW", "lr": 5e-4},
+                "scheduler": {
+                    "type": "OneCycleLR",
+                    "max_lr": 5e-4,
+                    "total_steps": 10000,
+                },
+                "interval": "step",
+                "frequency": 1,
+            },
+            "action_opt": {
+                "modules": "model.action_encoder",
+                "optimizer": {"type": "AdamW", "lr": 5e-4},
+                "scheduler": {
+                    "type": "OneCycleLR",
+                    "max_lr": 5e-4,
+                    "total_steps": 10000,
+                },
+                "interval": "step",
+                "frequency": 1,
+            },
+        },
     )
     return world_model
+
+
+def setup_pl_logger(cfg):
+    if not cfg.wandb.enable:
+        return None
+
+    wandb_run_id = cfg.wandb.get("run_id", None)
+    wandb_logger = WandbLogger(
+        name="dino_wm",
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
+        resume="allow" if wandb_run_id else None,
+        id=wandb_run_id,
+    )
+
+    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
+    return wandb_logger
 
 
 @hydra.main(version_base=None, config_path="./", config_name="config")
 def run(cfg):
     """Run training of predictor"""
+
+    wandb_logger = setup_pl_logger(cfg)
+
     data, action_dim = get_data(cfg.dataset_name)
     world_model = get_world_model(action_dim)
 
@@ -182,11 +273,11 @@ def run(cfg):
     )  # , save_last=True)
 
     trainer = pl.Trainer(
-        max_epochs=1,
+        max_epochs=10,
         callbacks=[checkpoint_callback],
         num_sanity_val_steps=1,
-        precision="16-mixed",
-        logger=False,
+        logger=wandb_logger,
+        # precision="16-mixed",
         enable_checkpointing=True,
     )
 

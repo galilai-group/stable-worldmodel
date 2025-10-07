@@ -10,11 +10,6 @@ from torch.utils.data import DataLoader
 import stable_worldmodel as swm
 
 
-##########
-# TODO: need to investigate slow down linked with action dim increase
-##########
-
-
 def get_data(dataset_name):
     """Return data and action space dim for training predictor."""
     # -- make transform operations

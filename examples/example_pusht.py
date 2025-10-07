@@ -51,4 +51,4 @@ if __name__ == "__main__":
     world.set_policy(policy)
     results = world.evaluate(episodes=5, seed=2347)
 
-    print(results)
+    # print(results)
