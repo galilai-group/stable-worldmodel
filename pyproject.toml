@@ -59,7 +59,7 @@ dev = [
 ]
 
 # Documentation tools
-doc = [
+docs = [
     "sphinx",
     "sphinx-gallery",
     "sphinx-book-theme",
