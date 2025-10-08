@@ -3,12 +3,14 @@ from pathlib import Path
 
 import datasets
 import gymnasium as gym
+import imageio.v3 as iio
 import numpy as np
-from datasets import Dataset, Features, Image, Value, load_dataset
+from datasets import Dataset, Features, Value, load_dataset
 from loguru import logger as logging
 from rich import print
 
 import stable_worldmodel as swm
+from stable_worldmodel.data import is_image
 
 from .wrappers import MegaWrapper, VariationWrapper
 
@@ -290,10 +292,7 @@ class World:
         dataset_path = Path(cache_dir, dataset_name)
         dataset_path.mkdir(parents=True, exist_ok=True)
 
-        hf_dataset = None
         recorded_episodes = 0
-        dataset_path = Path(dataset_path)
-        dataset_path.mkdir(parents=True, exist_ok=True)
 
         self.terminateds = np.zeros(self.num_envs)
         self.truncateds = np.zeros(self.num_envs)
@@ -366,79 +365,97 @@ class World:
         counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"]) + 1)
         records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
 
-        # determine feature
-        features = {
-            "pixels": Image(),
-            "episode_idx": Value("int32"),
-            "step_idx": Value("int32"),
-            "episode_len": Value("int32"),
-        }
+        ########################
+        # Save dataset to disk #
+        ########################
 
-        if "goal" in records:
-            features["goal"] = Image()
-        for k in records:
-            if k in features:
-                continue
-            if type(records[k][0]) is str:
-                state_feature = Value("string")
-            elif records[k][0].ndim == 1:
-                state_feature = datasets.Sequence(
-                    feature=Value(dtype=records[k][0].dtype.name),
-                    length=len(records[k][0]),
-                )
-            elif 2 <= records[k][0].ndim <= 6:
-                feature_cls = getattr(datasets, f"Array{records[k][0].ndim}D")
-                state_feature = feature_cls(shape=records[k][0].shape, dtype=records[k][0].dtype.name)
-            else:
-                state_feature = Value(records[k][0].dtype.name)
-            features[k] = state_feature
+        assert "pixels" in records, "pixels key is required in records"
+        assert "episode_idx" in records, "episode_idx key is required in records"
+        assert "step_idx" in records, "step_idx key is required in records"
+        assert "episode_len" in records, "episode_len key is required in records"
 
-        features = Features(features)
+        # Create the dataset directory structure
+        dataset_path.mkdir(parents=True, exist_ok=True)
 
-        # make dataset
-        hf_dataset = Dataset.from_dict(records, features=features)
+        # save all jpeg images
+        image_cols = {col for col in records if is_image(records[col][0])}
 
-        # determine shard index and num episode recorded so far
-        shard_idx = 0
-        while True:
-            if not (dataset_path / f"data_shard_{shard_idx:05d}.parquet").is_file():
-                break
-            shard_idx += 1
+        # pre-create all directories
+        for ep_idx in set(records["episode_idx"]):
+            img_folder = dataset_path / "img" / f"{ep_idx}"
+            img_folder.mkdir(parents=True, exist_ok=True)
 
-        episode_counter = 0
-        if shard_idx > 0:
-            shard_dataset = load_dataset(
-                "parquet",
-                split="train",
-                data_files=str(dataset_path / f"data_shard_{shard_idx - 1:05d}.parquet"),
-            )
-            episode_counter = np.max(shard_dataset["episode_idx"]) + 1
+        # dump all data
+        for i in range(len(records["episode_idx"])):
+            ep_idx = records["episode_idx"][i]
+            step_idx = records["step_idx"][i]
+            for img_col in image_cols:
+                img = records[img_col][i]
+                img_folder = dataset_path / "img" / f"{ep_idx}"
+                img_path = img_folder / f"{step_idx}_{img_col}.jpeg"
+                iio.imwrite(img_path, img)
 
-        # flush incomplete episode
-        ep_col = np.array(hf_dataset["episode_idx"])
-        non_complete_episodes = np.array(episode_idx[~(self.terminateds | self.truncateds)])
-        keep_episode = np.nonzero(~np.isin(ep_col, non_complete_episodes))[0].tolist()
-        hf_dataset = hf_dataset.select(keep_episode)
+                # replace image in records with relative path
+                records[img_col][i] = str(img_path.relative_to(dataset_path))
 
-        # re-index remaining episode starting from the last shard episode number
-        unique_eps = np.unique(hf_dataset["episode_idx"])
-        id_map = {old: new for new, old in enumerate(unique_eps, start=episode_counter)}
-        hf_dataset = hf_dataset.map(lambda row: {"episode_idx": id_map[row["episode_idx"]]})
+        def determine_features(records):
+            features = {
+                "episode_idx": Value("int32"),
+                "step_idx": Value("int32"),
+                "episode_len": Value("int32"),
+            }
 
-        # flush all extra episode saved for the current shard
-        hf_dataset = hf_dataset.filter(lambda row: (row["episode_idx"] - episode_counter) < episodes)
+            for col_name in records:
+                if col_name in features:
+                    continue
 
-        hf_dataset.to_parquet(dataset_path / f"data_shard_{shard_idx:05d}.parquet")
+                first_elem = records[col_name][0]
 
-        # display info
-        final_num_episodes = np.unique(hf_dataset["episode_idx"])
-        episode_range = (
-            final_num_episodes.min().item(),
-            final_num_episodes.max().item(),
-        )
-        print(
-            f"Dataset saved to {shard_idx}th shard file ({dataset_path}) with {len(final_num_episodes)} episodes, range: {episode_range}"
-        )
+                if type(first_elem) is str:
+                    features[col_name] = Value("string")
+
+                elif isinstance(first_elem, np.ndarray):
+                    if first_elem.ndim == 1:
+                        state_feature = datasets.Sequence(
+                            feature=Value(dtype=first_elem.dtype.name),
+                            length=len(first_elem),
+                        )
+                    elif 2 <= first_elem.ndim <= 6:
+                        feature_cls = getattr(datasets, f"Array{first_elem.ndim}D")
+                        state_feature = feature_cls(shape=first_elem.shape, dtype=first_elem.dtype.name)
+                    else:
+                        state_feature = Value(first_elem.dtype.name)
+                    features[col_name] = state_feature
+
+                elif isinstance(first_elem, (np.generic)):
+                    features[col_name] = Value(first_elem.dtype.name)
+                else:
+                    features[col_name] = Value(type(first_elem).__name__)
+
+            return Features(features)
+
+        records_feat = determine_features(records)
+        records_ds = Dataset.from_dict(records, features=records_feat)
+
+        # flush incomplete episodes
+        # get episodes that are currently running (not done)
+        incomplete_episodes = episode_idx[~(self.terminateds | self.truncateds)]
+        # keep only episodes that are NOT in the incomplete list
+        keep_mask = ~np.isin(records_ds["episode_idx"], incomplete_episodes)
+        records_ds = records_ds.select(np.nonzero(keep_mask)[0])
+
+        # flush all extra episodes saved (keep only first N episodes)
+        episodes_to_keep = np.unique(records_ds["episode_idx"])[:episodes]
+        keep_mask = np.isin(records_ds["episode_idx"], episodes_to_keep)
+        records_ds = records_ds.select(np.nonzero(keep_mask)[0])
+
+        # save dataset
+        records_path = dataset_path / "records"
+        num_chunks = episodes // 500
+        records_path.mkdir(parents=True, exist_ok=True)
+        records_ds.save_to_disk(records_path, num_shards=num_chunks or 1)
+
+        print(f"Dataset saved to {dataset_path} with {episodes} episodes!")
 
     def record_video_from_dataset(
         self,
@@ -581,7 +598,9 @@ class World:
                     metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
 
                     logging.error(
-                        "EXTRACTED SEED : ", metrics["seeds"][ep_idx], self.envs.envs[i].unwrapped.np_random_seed
+                        "EXTRACTED SEED : ",
+                        metrics["seeds"][ep_idx],
+                        self.envs.envs[i].unwrapped.np_random_seed,
                     )
 
                     if eval_keys:

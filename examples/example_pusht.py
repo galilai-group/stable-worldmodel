@@ -18,13 +18,13 @@ if __name__ == "__main__":
     # ##  Data Collection  ##
     # #######################
 
-    world.set_policy(swm.policy.RandomPolicy())
-    world.record_dataset(
-        "example-pusht",
-        episodes=100,
-        seed=2347,
-        options=None,
-    )
+    # world.set_policy(swm.policy.RandomPolicy())
+    # world.record_dataset(
+    #     "example-pusht",
+    #     episodes=100,
+    #     seed=2347,
+    #     options=None,
+    # )
 
     ################
     ##  Pretrain  ##
@@ -43,12 +43,12 @@ if __name__ == "__main__":
 
     # NOTE for user: make sure to match action_block with the one used during training!
 
-    model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
-    config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
-    solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
-    policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
+    # model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
+    # config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
+    # solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
+    # policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
 
-    world.set_policy(policy)
-    results = world.evaluate(episodes=5, seed=2347)
+    # world.set_policy(policy)
+    # results = world.evaluate(episodes=5, seed=2347)
 
     # print(results)

@@ -15,7 +15,7 @@ def test_raises_when_script_not_exists(monkeypatch):
     monkeypatch.setattr("os.path.isfile", lambda p: False)
 
     with pytest.raises(ValueError, match=r"does not exist"):
-        pretraining("non_existent_script.py")
+        pretraining("non_existent_script.py", "test_dataset", "test_model")
 
 
 def test_pretraining_success(monkeypatch):
@@ -23,7 +23,7 @@ def test_pretraining_success(monkeypatch):
     mock_run = MagicMock(return_value=MagicMock(returncode=0))
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    pretraining("fake_script.py", "--epochs 10")
+    pretraining("fake_script.py", "test_dataset", "test_model", args="--epochs 10")
 
     assert mock_run.called
 
@@ -34,7 +34,7 @@ def test_pretraining_exits_on_failure(monkeypatch):
     monkeypatch.setattr("subprocess.run", mock_run)
 
     with pytest.raises(SystemExit, match="1"):
-        pretraining("fake_script.py", "--epochs 10")
+        pretraining("fake_script.py", "test_dataset", "test_model", args="--epochs 10")
 
 
 def test_pretraining_parses_single_arg(monkeypatch):
@@ -42,11 +42,13 @@ def test_pretraining_parses_single_arg(monkeypatch):
     mock_run = MagicMock()
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    pretraining("fake_script.py", "batch-size=32")
+    pretraining("fake_script.py", "test_dataset", "test_model", args="batch-size=32")
 
     cmd = mock_run.call_args[0][0]
     assert "fake_script.py" in cmd
     assert "batch-size=32" in cmd
+    assert "dataset_name=test_dataset" in cmd
+    assert "output_model_name=test_model" in cmd
     assert mock_run.call_args[1]["check"] is True
 
 
@@ -55,12 +57,14 @@ def test_pretraining_parses_multiple_args(monkeypatch):
     mock_run = MagicMock()
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    pretraining("fake_script.py", "batch-size=32 ++dump_object=True")
+    pretraining("fake_script.py", "test_dataset", "test_model", dump_object=True, args="batch-size=32")
 
     cmd = mock_run.call_args[0][0]
     assert "fake_script.py" in cmd
     assert "batch-size=32" in cmd
     assert "++dump_object=True" in cmd
+    assert "dataset_name=test_dataset" in cmd
+    assert "output_model_name=test_model" in cmd
 
 
 def test_pretraining_with_empty_args(monkeypatch):
@@ -68,11 +72,13 @@ def test_pretraining_with_empty_args(monkeypatch):
     mock_run = MagicMock()
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    pretraining("fake_script.py")
+    pretraining("fake_script.py", "test_dataset", "test_model")
 
     cmd = mock_run.call_args[0][0]
     assert "fake_script.py" in cmd
-    assert len(cmd) == 2
+    assert "dataset_name=test_dataset" in cmd
+    assert "output_model_name=test_model" in cmd
+    assert "++dump_object=True" in cmd
 
 
 ########################
