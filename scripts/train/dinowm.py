@@ -27,6 +27,8 @@ class Config:
 def get_data(dataset_name):
     """Return data and action space dim for training predictor."""
 
+    N_STEPS = 2
+
     # == image transformations
     def get_img_pipeling(key, target, img_size=224):
         return spt.data.transforms.Compose(
@@ -41,20 +43,16 @@ def get_data(dataset_name):
 
     IMG_SIZE = 224
     transform = spt.data.transforms.Compose(
-        get_img_pipeling("pixels", "pixels", IMG_SIZE),
-        get_img_pipeling("goal", "goal", IMG_SIZE),
+        *[get_img_pipeling(f"{col}.{i}", f"{col}.{i}", IMG_SIZE) for col in ["pixels", "goal"] for i in range(N_STEPS)]
     )
 
     # == action transformations
     # TODO
 
     # == load dataset
-    data_dir = swm.data.get_cache_dir()
     dataset = swm.data.StepsDataset(
-        "parquet",
-        data_files=str(Path(data_dir, dataset_name, "*.parquet")),
-        split="train",
-        num_steps=2,
+        dataset_name,
+        num_steps=N_STEPS,
         frameskip=5,
         transform=transform,
     )
@@ -63,8 +61,17 @@ def get_data(dataset_name):
 
     print(f"Train set size: {len(train_set)}, Val set size: {len(val_set)}")
 
-    train = DataLoader(train_set, batch_size=32, num_workers=4, drop_last=True)
-    val = DataLoader(val_set, batch_size=32, num_workers=4)
+    train = DataLoader(
+        train_set,
+        batch_size=32,
+        num_workers=40,
+        drop_last=True,
+        persistent_workers=True,
+        pin_memory=True,
+        prefetch_factor=2,
+        shuffle=True,
+    )
+    val = DataLoader(val_set, batch_size=32, num_workers=40, persistent_workers=True, pin_memory=True)
     data_module = spt.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
