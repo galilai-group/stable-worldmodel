@@ -26,5 +26,5 @@ wandb:
   project: xenoworlds
   entity: simon-lacoste-julien
 
-dataset_name: simple-pointmaze
+dataset_name: example-pusht
 output_model_name: world_model

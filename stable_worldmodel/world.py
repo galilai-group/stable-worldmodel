@@ -451,7 +451,7 @@ class World:
 
         # save dataset
         records_path = dataset_path / "records"
-        num_chunks = episodes // 500
+        num_chunks = episodes // 50
         records_path.mkdir(parents=True, exist_ok=True)
         records_ds.save_to_disk(records_path, num_shards=num_chunks or 1)
 
@@ -504,6 +504,7 @@ class World:
             for i in episode_idx
         ]
 
+        # TODO: should load from disk directly
         dataset = load_dataset("parquet", data_files=str(Path(dataset_path, "*.parquet")), split="train")
 
         for i, o in zip(episode_idx, out):
@@ -598,9 +599,7 @@ class World:
                     metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
 
                     logging.error(
-                        "EXTRACTED SEED : ",
-                        metrics["seeds"][ep_idx],
-                        self.envs.envs[i].unwrapped.np_random_seed,
+                        "EXTRACTED SEED : ", metrics["seeds"][ep_idx], self.envs.envs[i].unwrapped.np_random_seed
                     )
 
                     if eval_keys:

@@ -159,10 +159,12 @@ class DINOWM(torch.nn.Module):
 
         # == proprio embedding
         if proprio_dim > 0:
-            split_embed["proprio_embed"] = embedding[..., pixel_dim : pixel_dim + proprio_dim]
+            proprio_emb = embedding[..., pixel_dim : pixel_dim + proprio_dim]
+            split_embed["proprio_embed"] = proprio_emb[:, :, 0]  # all patches are the same
 
         if action_dim > 0:
-            split_embed["action_embed"] = embedding[..., -action_dim:]
+            action_emb = embedding[..., -action_dim:]
+            split_embed["action_embed"] = action_emb[:, :, 0]  # all patches are the same
 
         return split_embed
 
@@ -271,6 +273,7 @@ class DINOWM(torch.nn.Module):
             # == get the proprio cost
             proprio_preds = info_dict["predicted_proprio_embed"]
             proprio_goal = info_dict["proprio_goal_embed"]
+
             proprio_cost = F.mse_loss(proprio_preds[:, -1:], proprio_goal, reduction="none").mean(
                 dim=tuple(range(1, proprio_preds.ndim))
             )

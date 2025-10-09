@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # world.set_policy(swm.policy.RandomPolicy())
     # world.record_dataset(
     #     "example-pusht",
-    #     episodes=100,
+    #     episodes=1000,
     #     seed=2347,
     #     options=None,
     # )
