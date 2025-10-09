@@ -26,9 +26,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[docs]"
 
-      - name: Remove all .rst files except index.rst
-        run: |
-          find docs/source -type f -name "*.rst" ! -name "index.rst" -exec rm -f {} \;
+      # - name: Remove all .rst files except index.rst
+      #   run: |
+      #     find docs/source -type f -name "*.rst" ! -name "index.rst" -exec rm -f {} \;
 
       - name: Generate .rst files from package
         run: |
