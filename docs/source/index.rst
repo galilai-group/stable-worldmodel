@@ -39,6 +39,7 @@ Example
    :lines: 1-37
 
 .. toctree::
+    :hidden:
     :caption: Introduction
     :titlesonly:
 
@@ -47,10 +48,15 @@ Example
     introduction/showcase
 
 .. toctree::
-   :hidden:
-   :caption: API
+    :hidden:
+    :caption: API Reference
+    :titlesonly:
 
-   api/
+    api/data
+    api/world
+    api/policy
+    api/spaces
+    api/wrappers
 
 .. toctree::
     :hidden:

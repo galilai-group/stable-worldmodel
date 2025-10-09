@@ -37,8 +37,12 @@ extensions = [
     "myst_parser",
 ]
 
-todo_include_todos = True
+todo_include_todos = False
+
 autosummary_generate = True
+autosummary_filename_map = {}
+add_module_names = False
+
 autodoc_default_options = {
     "members": True,
     "undoc-members": False,
