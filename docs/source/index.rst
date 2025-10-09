@@ -63,7 +63,6 @@ Example
     :hidden:
     :caption: Worlds
     :titlesonly:
-    :maxdepth: 2
 
     world/simple-pointmaze
     world/OGBench/index
