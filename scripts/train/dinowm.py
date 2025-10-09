@@ -3,6 +3,7 @@ from pathlib import Path
 
 import hydra
 import lightning as pl
+import numpy as np
 import stable_pretraining as spt
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -41,21 +42,45 @@ def get_data(dataset_name):
             spt.data.transforms.CenterCrop(img_size, source=key, target=target),
         )
 
-    IMG_SIZE = 224
-    transform = spt.data.transforms.Compose(
-        *[get_img_pipeling(f"{col}.{i}", f"{col}.{i}", IMG_SIZE) for col in ["pixels", "goal"] for i in range(N_STEPS)]
-    )
-
-    # == action transformations
-    # TODO
+    def norm_col_transform(dataset, col="pixels"):
+        data = np.array(dataset[col])
+        mean = torch.from_numpy(np.mean(data, 0)).unsqueeze(0)
+        std = torch.from_numpy(np.std(data, 0)).unsqueeze(0)
+        return lambda x: (x - mean) / std
 
     # == load dataset
     dataset = swm.data.StepsDataset(
         dataset_name,
         num_steps=N_STEPS,
         frameskip=5,
-        transform=transform,
+        transform=None,
     )
+
+    IMG_SIZE = (224 // 16) * 14
+
+    norm_action_transform = norm_col_transform(dataset.dataset, "action")
+    norm_proprio_transform = norm_col_transform(dataset.dataset, "proprio")
+
+    transform = spt.data.transforms.Compose(
+        *[
+            get_img_pipeling(f"{col}.{i}", f"{col}.{i}", IMG_SIZE)
+            for col in ["pixels", "goal"]
+            for i in range(N_STEPS)
+        ],
+        spt.data.transforms.WrapTorchTransform(
+            norm_action_transform,
+            source="action",
+            target="action",
+        ),
+        spt.data.transforms.WrapTorchTransform(
+            norm_proprio_transform,
+            source="proprio",
+            target="proprio",
+        ),
+    )
+
+    # override dataset transform
+    dataset.transform = transform
 
     train_set, val_set = spt.data.random_split(dataset, lengths=[0.9, 0.1])
 
@@ -64,14 +89,16 @@ def get_data(dataset_name):
     train = DataLoader(
         train_set,
         batch_size=32,
-        num_workers=40,
+        num_workers=10,  # Reduced from 10 to avoid OOM
         drop_last=True,
         persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
         shuffle=True,
     )
-    val = DataLoader(val_set, batch_size=32, num_workers=40, persistent_workers=True, pin_memory=True)
+    val = DataLoader(
+        val_set, batch_size=32, num_workers=2, persistent_workers=False, pin_memory=True
+    )  # Reduced workers
     data_module = spt.data.DataModule(train=train, val=val)
 
     # -- determine action space dimension
@@ -154,11 +181,6 @@ def get_world_model(action_dim):
 
     logging.info(f"Encoder: {encoder}, emb_dim: {emb_dim}, num_patches: {num_patches}")
 
-    encoder.train(False)
-    encoder.requires_grad_(False)
-
-    encoder.eval()
-
     # -- create predictor
     predictor = swm.wm.dinowm.CausalPredictor(
         num_patches=num_patches,
@@ -185,7 +207,7 @@ def get_world_model(action_dim):
     logging.info(f"Proprio dim: {proprio_dim}, proprio emb dim: {proprio_emb_dim}")
 
     world_model = swm.wm.DINOWM(
-        encoder=encoder,
+        encoder=spt.backbone.EvalOnly(encoder),
         predictor=predictor,
         action_encoder=action_encoder,
         proprio_encoder=proprio_encoder,
@@ -199,17 +221,17 @@ def get_world_model(action_dim):
         model=world_model,
         forward=forward,
         optim={
-            "encoder_opt": {
-                "modules": "model.backbone",
-                "optimizer": {"type": "AdamW", "lr": 1e-6},
-                "scheduler": {
-                    "type": "OneCycleLR",
-                    "max_lr": 1e-6,
-                    "total_steps": 10000,
-                },
-                "interval": "step",
-                "frequency": 1,
-            },
+            # "encoder_opt": {
+            #     "modules": "model.backbone",
+            #     "optimizer": {"type": "AdamW", "lr": 1e-6},
+            #     "scheduler": {
+            #         "type": "OneCycleLR",
+            #         "max_lr": 1e-6,
+            #         "total_steps": 10000,
+            #     },
+            #     "interval": "step",
+            #     "frequency": 1,
+            # },
             "predictor_opt": {
                 "modules": "model.predictor",
                 "optimizer": {"type": "AdamW", "lr": 5e-4},
@@ -284,7 +306,7 @@ def run(cfg):
         callbacks=[checkpoint_callback],
         num_sanity_val_steps=1,
         logger=wandb_logger,
-        # precision="16-mixed",
+        precision="16-mixed",
         enable_checkpointing=True,
     )
 

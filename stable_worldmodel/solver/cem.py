@@ -93,8 +93,6 @@ class CEMSolver:
         for step in range(self.n_steps):
             costs = []
 
-            print(f"CEM Step {step + 1}/{self.n_steps}")
-
             # TODO: could flatten the batch dimension and process all samples together
             # rem: need many memory and split before computing top k
 
@@ -139,6 +137,9 @@ class CEMSolver:
             outputs["costs"].append(np.mean(costs))
             outputs["mean"].append(mean.detach().cpu().clone())
             outputs["var"].append(var.detach().cpu().clone())
+
+            # PRINT COST
+            print(f"  CEM step {step + 1}/{self.n_steps}, cost: {outputs['costs'][-1]:.4f}")
 
         outputs["actions"] = mean.detach().cpu()
 
