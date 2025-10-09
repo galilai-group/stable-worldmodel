@@ -1,5 +1,51 @@
-.center-title {
-  text-align: center;
-  padding-top: 5rem;   /* space above */
-  padding-bottom: 1.5rem; /* space below */
+/* =========================
+   Light mode (when <html> does NOT have .dark)
+   ========================= */
+
+[class^="toctree-l"]{
+  margin-bottom: 0.15rem !important;
 }
+
+[class^="toctree-l"] > a {
+  color: #6b7280 !important;
+}
+
+[class^="toctree-l"] > a:hover {
+  background-color: #f3f4f6 !important;
+  color: #121a29 !important;
+  text-decoration: none !important;
+  transition: background-color 0.1s ease;
+}
+
+[class^="toctree-l"] > a.current {
+  background-color: #e0effe !important;
+  font-weight: 600 !important;
+  color: #0051a3 !important;
+  border-color: transparent !important;
+}
+
+pre {
+  background-color: #f8f8f8 !important;
+  border-radius: var(--radius) !important;
+  border-color: transparent !important;
+}
+
+/* =========================
+   Dark mode (when <html> has .dark)
+   ========================= */
+
+html.dark [class^="toctree-l"] > a:hover,
+html.dark [class^="toctree-l"] > a.current {
+  background-color:  #132034 !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  text-decoration: none !important;
+  transition: background-color 0.1s ease;
+}
+
+html.dark pre {
+  background-color: #1d2229 !important;
+  border-radius: var(--radius) !important;
+  border-color: transparent !important;
+}
+
