@@ -1,3 +1,12 @@
+footer > .container {
+  height: 2rem !important;
+}
+
+img[alt="Logo"] {
+  height: 64;
+  width: 64;
+}
+
 /* =========================
    Light mode (when <html> does NOT have .dark)
    ========================= */
@@ -48,4 +57,3 @@ html.dark pre {
   border-radius: var(--radius) !important;
   border-color: transparent !important;
 }
-

@@ -3,40 +3,73 @@
    :twitter:description: Create functional and beautiful websites for your documentation with Sphinx and the Awesome Sphinx Theme.
 
 
-Welcome!
-========
+stable-worldmodel
+=================
 
 .. rst-class:: lead
 
-   Create functional and beautiful websites for your documentation with Sphinx.
+A python API for simple ``World Model`` research.
 
 ----
 
-Quick Start
-============
+Welcome to the docs for stable-worldmodel, a library that provides a simple and flexible interface for pre-training, fine-tuning, but foremost, evaluating world models.
+Disclaimer: This library is still in its early stages, and we are actively working on adding more features and improving the existing ones. We welcome contributions from the community!
 
-Installation
--------------
+We recommend using ``python>=3.10``, and installation using ``uv``:
 
-To install stable-worldmodel with minimal dependencies, run:
+.. tab-set::
 
-.. code-block:: bash
+    .. tab-item:: uv
 
-   pip install stable-worldmodel
+        .. code-block:: bash
 
-To install stable-worldmodel with all optional dependencies, run:
+            uv add stable-worldmodel
 
-.. code-block:: bash
+    .. tab-item:: pip
 
-   pip install "stable-worldmodel[all]"
+        .. code-block:: bash
+
+            pip install stable-worldmodel
 
 
+
+.. attention::
+
+    If you encounter ``Failed building wheel for box2d-py`` or similar errors, you might need to install ``swig`` first
+    (e.g. ``apt-get install swig`` on Ubuntu or ``brew install swig`` on macOS ).
+    
 Example
 -------
 
 .. literalinclude:: examples/example.py
    :language: python
    :lines: 1-37
+
+Differences from Gymnasium
+---------------------------
+
+``stable-worldmodel`` builds upon the popular ``gymnasium`` library, extending its functionality to better suit the needs of world model research.
+Traditionally, gymnasium has been designed for online reinforcement learning, where environments are interacted with in a step-by-step manner.
+
+In contrast, ``stable-worldmodel`` proposes a more flexible approach that allows for both online and offline interactions with environments.
+This is particularly useful for training world models, which often require access to entire trajectories of data rather than just individual steps. However, ``stable-worldmodel`` still supports online interactions, perfect for evaluating learned policies or models.
+
+For each supported environment, ``stable-worldmodel`` provides a set of pre-defined variations and initial conditions that can be easily sampled and configured.
+This allows researchers to quickly experiment with different environment configurations without having to manually set up each variation. Perfect for out-of-distribution and generalization research.
+
+Citation
+--------
+
+If you find this library useful in your research, please consider citing us:
+
+.. code-block::
+
+    @misc{stable-worldmodel,
+      author = {},
+      title = {},
+      year = {2025},
+      howpublished = {}
+    }
 
 .. toctree::
     :hidden:
@@ -63,7 +96,8 @@ Example
     :caption: Tutorials
     :titlesonly:
 
-    tutorials/
+    tutorials/dinowm
+    tutorials/new-world
 
 .. toctree::
     :hidden:
@@ -72,10 +106,3 @@ Example
 
     world/simple-pointmaze
     world/OGBench/index
-
-.. toctree::
-   :hidden:
-   :caption: Development
-
-   Github <https://github.com/rbalestr-lab/stable-worldmodel>
-   Contribute to the Docs <https://github.com/rbalestr-lab/stable-worldmodel/tree/main/docs>
