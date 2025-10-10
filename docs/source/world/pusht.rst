@@ -1,11 +1,11 @@
-Simple Point-Maze
-==================
+PushT
+=====
 
 .. table::
    :width: 20%
 
    ================ ==========================
-   id               ``swm/SimplePointMaze-v0``
+   id               ``swm/PushT-v1``
    difficulty       :bdg-success:`easy`
    render time      ``TBD``
-   ================ ==========================
+   ================ ==========================  

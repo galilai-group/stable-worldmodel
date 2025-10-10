@@ -12,7 +12,7 @@ A python API for simple ``World Model`` research.
 
 ----
 
-Welcome to the docs for stable-worldmodel, a library that provides a simple and flexible interface for pre-training, fine-tuning, but foremost, evaluating world models.
+Welcome to the docs for stable-worldmodel, a library that provides a simple and flexible interface for pre-training, fine-tuning, and, foremost, evaluating world models.
 Disclaimer: This library is still in its early stages, and we are actively working on adding more features and improving the existing ones. We welcome contributions from the community!
 
 We recommend using ``python>=3.10``, and installation using ``uv``:
@@ -32,18 +32,21 @@ We recommend using ``python>=3.10``, and installation using ``uv``:
             pip install stable-worldmodel
 
 
-
 .. attention::
 
     If you encounter ``Failed building wheel for box2d-py`` or similar errors, you might need to install ``swig`` first
     (e.g. ``apt-get install swig`` on Ubuntu or ``brew install swig`` on macOS ).
-    
-Example
--------
 
-.. literalinclude:: examples/example.py
-   :language: python
-   :lines: 1-37
+If you would like to start testing or contribute to ``stable-worldmodel`` then please install this project from source with:
+
+.. code-block:: bash
+
+    git clone https://github.com/rbalestr-lab/stable-worldmodel.git --single-branch
+    cd stable-worldmodel
+    pip install -e ".[all]"
+
+We recommend using a conda environment to manage dependencies. We support Python with minimum version 3.10 on Linux and macOS.
+
 
 Differences from Gymnasium
 ---------------------------
@@ -55,7 +58,7 @@ In contrast, ``stable-worldmodel`` proposes a more flexible approach that allows
 This is particularly useful for training world models, which often require access to entire trajectories of data rather than just individual steps. However, ``stable-worldmodel`` still supports online interactions, perfect for evaluating learned policies or models.
 
 For each supported environment, ``stable-worldmodel`` provides a set of pre-defined variations and initial conditions that can be easily sampled and configured.
-This allows researchers to quickly experiment with different environment configurations without having to manually set up each variation. Perfect for out-of-distribution and generalization research.
+This allows researchers to quickly experiment with different environment configurations without manually setting up each variation. Perfect for out-of-distribution and generalization research.
 
 Citation
 --------
@@ -77,7 +80,6 @@ If you find this library useful in your research, please consider citing us:
     :titlesonly:
 
     introduction/quickstart
-    introduction/dinowm
     introduction/showcase
 
 .. toctree::
@@ -104,5 +106,8 @@ If you find this library useful in your research, please consider citing us:
     :caption: Worlds
     :titlesonly:
 
+    world/pusht
     world/simple-pointmaze
+    world/two_room
+    world/voidrun
     world/OGBench/index

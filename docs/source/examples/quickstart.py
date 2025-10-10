@@ -1,10 +1,6 @@
 import stable_worldmodel as swm
 
 
-######################
-##  World Creation  ##
-######################
-
 world = swm.World(
     "swm/PushT-v1",
     num_envs=5,
@@ -14,10 +10,6 @@ world = swm.World(
 
 print("Available variations: ", world.single_variation_space.names())
 
-# #######################
-# ##  Data Collection  ##
-# #######################
-
 world.set_policy(swm.policy.RandomPolicy())
 world.record_dataset(
     "example-pusht",
@@ -26,22 +18,12 @@ world.record_dataset(
     options=None,
 )
 
-################
-##  Pretrain  ##
-################
-
 swm.pretraining(
     "scripts/train/dinowm.py",
     dataset_name="example-pusht",
     output_model_name="dummy_pusht",
     dump_object=True,
 )
-
-################
-##  Evaluate  ##
-################
-
-# NOTE for user: make sure to match action_block with the one used during training!
 
 model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
 config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)

@@ -1,6 +1,11 @@
 Cube
-=====================
+====
 
-``difficulty:`` :bdg-danger:`hard`
+.. table::
+   :width: 20%
 
-Create functional and beautiful websites for your documentation with Sphinx.
+   ================= =========================
+   id                ``swm/OGBCube-v0``
+   difficulty        :bdg-danger:`hard`
+   render time       ``TBD``
+   ================= =========================

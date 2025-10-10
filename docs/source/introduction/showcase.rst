@@ -1,4 +1,4 @@
 Showcase
 =========
 
-This tutorial introduces DINO-WM at a high level and shows you how to get set up quickly.
+The following page lists some works that have used ``stable-worldmodel`` in their research or projects.

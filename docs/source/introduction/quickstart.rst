@@ -1,4 +1,6 @@
 Quick Start
 ===========
 
-This tutorial introduces DINO-WM at a high level and shows you how to get set up quickly.
+.. literalinclude:: ../examples/quickstart.py
+   :language: python
+   :lines: 1-35
