@@ -8,7 +8,7 @@
   <img src="./assets/stable-worldmodel-logo.png" alt="stable-worldmodel logo" width="500px"/>
 </p>
 
-A stable library for world model research and evaluation, providing unified interfaces for data collection, model training, and policy evaluation.
+A stable library for world model research and evaluation that provides unified interfaces for data collection, model training, and policy evaluation.
 
 ## Features
 

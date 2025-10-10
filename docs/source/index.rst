@@ -81,6 +81,7 @@ If you find this library useful in your research, please consider citing us:
 
     introduction/quickstart
     introduction/showcase
+    introduction/contributing
 
 .. toctree::
     :hidden:

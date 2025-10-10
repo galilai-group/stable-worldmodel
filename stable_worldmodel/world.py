@@ -16,93 +16,7 @@ from .wrappers import MegaWrapper, VariationWrapper
 
 
 class World:
-    """A high-level environment manager for vectorized gym environments with support for
-    goal-conditioned tasks, video recording, dataset generation, and evaluation.
-
-    The `World` class wraps multiple parallel environments using Gymnasium’s vectorized API and
-    integrates with custom wrappers (e.g., `MegaWrapper`) to handle image-based observations and goals.
-    It provides utility methods for recording trajectories, saving datasets in HuggingFace Datasets .parquet format,
-    evaluating policies, and exporting video rollouts.
-
-    Parameters
-    ----------
-    env_name : str
-        The name of the Gymnasium environment to instantiate.
-    num_envs : int
-        Number of parallel environments to run.
-    image_shape : tuple[int]
-        Shape of image observations (C, H, W).
-    image_transform : callable, optional
-        Transformation function applied to image observations.
-    goal_shape : tuple[int], optional
-        Shape of goal image observations.
-    goal_transform : callable, optional
-        Transformation function applied to goal observations.
-    seed : int, default=2349867
-        Random seed for environment initialization and goal sampling.
-    max_episode_steps : int, default=100
-        Maximum number of steps per episode.
-    **kwargs : dict
-        Additional keyword arguments passed to `gym.make_vec`.
-
-    Attributes:
-    ----------
-    envs : gym.vector.VectorEnv
-        Vectorized environments wrapped with `MegaWrapper`.
-    goal_envs : gym.vector.VectorEnv
-        Separate vectorized environments for goal sampling.
-    seed : int
-        Random seed for reproducibility.
-    goal_seed : int
-        Secondary random seed for sampling goals.
-    policy : object
-        Policy instance with `get_action` and `set_env` methods.
-
-    Properties
-    ----------
-    num_envs : int
-        Number of environments in the vectorized setup.
-    observation_space : gym.Space
-        Observation space of the environments.
-    action_space : gym.Space
-        Action space of the environments.
-    single_action_space : gym.Space
-        Action space for a single environment.
-    single_observation_space : gym.Space
-        Observation space for a single environment.
-
-    Methods:
-    -------
-    close(**kwargs)
-        Closes all managed environments.
-    denormalize(x)
-        Converts normalized images in [-1, 1] back to [0, 1].
-    set_policy(policy)
-        Assigns a policy object for interaction.
-    reset(seed=None, options=None)
-        Resets the environments and returns initial states and infos.
-    step()
-        Steps all environments using the current policy’s actions.
-    __iter__()
-        Prepares the iterator by resetting environments.
-    __next__()
-        Iterates over environment states until all episodes are done.
-    record_video(video_path, max_steps=500, fps=30, seed=None, options=None)
-        Records a rollout video for each environment.
-    record_dataset(dataset_name, episodes=10, seed=None, options=None)
-        Collects episodes into a HuggingFace Dataset and saves as Parquet shards.
-    record_video_from_dataset(video_path, dataset_name, episode_idx, max_steps=500, fps=30, num_proc=4)
-        Replays stored dataset episodes and exports them as videos.
-    evaluate(episodes=10, eval_keys=None, seed=None, options=None)
-        Evaluates the policy across multiple episodes and computes metrics.
-
-    Notes:
-    -----
-    - Supports parallelized rollout collection with episode tracking.
-    - Integrates tightly with HuggingFace Datasets for storage and replay.
-    - Provides success-rate evaluation with optional custom metrics.
-    - Video export uses `imageio` with `libx264` encoding.
-    """
+    """A high-level environment manager for vectorized gym environments with support for"""
 
     def __init__(
         self,
@@ -195,27 +109,7 @@ class World:
             self.policy.set_seed(self.policy.seed)
 
     def record_video(self, video_path, max_steps=500, fps=30, seed=None, options=None):
-        """Record rollout videos for each environment under the current policy.
-
-        Parameters
-        ----------
-        video_path : str or Path
-            Directory to which MP4 files will be written; one file per env named ``env_{i}.mp4``.
-        max_steps : int, default=500
-            Maximum number of steps to record per environment.
-        fps : int, default=30
-            Frames per second for the output video.
-        seed : int, optional
-            Seed to use for the initial reset prior to recording.
-        options : dict, optional
-            Env reset options.
-
-        Notes:
-        -----
-        - If ``infos`` contains ``"goal"``, the goal image is vertically stacked
-          beneath the observation pixels in the output frames.
-        - Uses ``imageio.get_writer(..., codec="libx264")`` for MP4 encoding.
-        """
+        """Record rollout videos for each environment under the current policy."""
         import imageio
 
         out = [
@@ -249,45 +143,7 @@ class World:
         print(f"Video saved to {video_path}")
 
     def record_dataset(self, dataset_name, episodes=10, seed=None, cache_dir=None, options=None):
-        """Collect episodes with the current policy and save them as a HuggingFace Dataset (Parquet shards).
-
-        Parameters
-        ----------
-        dataset_name : str
-            Name of the dataset directory under the stable_worldmodel cache dir.
-        episodes : int, default=10
-            Number of *complete* episodes to record (across all envs, total).
-        seed : int, optional
-            Base seed used for the initial reset; subsequent resets for per-env continuation
-            derive unique seeds from this value.
-        options : dict, optional
-            Env reset options.
-
-        Side Effects
-        ------------
-        - Creates ``{cache_dir}/{dataset_name}/data_shard_{NNNNN}.parquet`` files.
-        - Appends only *complete* episodes to the shard (partial episodes are dropped).
-        - Re-indexes ``episode_idx`` to be contiguous across shards.
-
-        Dataset Schema
-        --------------
-        The resulting dataset includes (at minimum):
-            - ``pixels`` : :class:`datasets.Image`
-            - ``episode_idx`` : :class:`datasets.Value("int32")`
-            - ``step_idx`` : :class:`datasets.Value("int32")`
-            - ``episode_len`` : :class:`datasets.Value("int32")`
-
-        If available, it may also include:
-            - ``goal`` : :class:`datasets.Image`
-            - ``action`` : array-like feature shaped like the env action space
-            - Per-step scalar/vector fields exposed by the wrapper in ``infos``
-
-        Notes:
-        -----
-        - The function handles action shifting to ensure alignment with continuing episodes.
-        - Sharding logic ensures a new shard index is chosen if prior shards exist.
-        - Only the first ``episodes`` fully completed episodes are persisted for the new shard.
-        """
+        """Collect episodes with the current policy and save them as a HuggingFace Dataset (Parquet shards)."""
         cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
         dataset_path.mkdir(parents=True, exist_ok=True)
@@ -467,24 +323,7 @@ class World:
         num_proc=4,
         cache_dir=None,
     ):
-        """Replay stored dataset episodes and export them as MP4 videos.
-
-        Parameters
-        ----------
-        video_path : str or Path
-            Directory to which MP4 files will be written; one file per requested episode
-            named ``episode_{idx}.mp4``.
-        dataset_name : str
-            Name of the dataset directory under the stable_worldmodel cache dir.
-        episode_idx : int or list[int]
-            Episode index or indices to render from the dataset.
-        max_steps : int, default=500
-            Maximum number of steps to render per episode (truncates longer episodes).
-        fps : int, default=30
-            Frames per second for the output video(s).
-        num_proc : int, default=4
-            Degree of parallelism for dataset filtering.
-        """
+        """Replay stored dataset episodes and export them as MP4 videos."""
         import imageio
 
         cache_dir = cache_dir or swm.data.get_cache_dir()
@@ -532,36 +371,7 @@ class World:
         print(f"Video saved to {video_path}")
 
     def evaluate(self, episodes=10, eval_keys=None, seed=None, options=None):
-        """Evaluate the current policy across multiple episodes and compute metrics.
-
-        Parameters
-        ----------
-        episodes : int, default=10
-            Number of complete episodes to evaluate.
-        eval_keys : list[str], optional
-            Additional keys in ``infos`` to log as episode-wise metrics. Each key will
-            produce a vector of length ``episodes`` in the returned metrics dict.
-        seed : int, optional
-            Base seed for the initial reset; per-env continuation seeds derive from this value.
-        options : dict, optional
-            Env reset options.
-
-        Returns:
-        -------
-        dict
-            Metrics dictionary with the following entries:
-            - ``"success_rate"`` : float
-                Percentage of successful episodes (terminations) in [0, 100].
-            - ``"episode_successes"`` : np.ndarray, shape (episodes,)
-                Boolean array indicating success (True) or failure (False) per episode.
-            - ``"seeds"`` : np.ndarray, shape (episodes,)
-                The per-episode seeds used for evaluation.
-            - Additional arrays for each key in ``eval_keys``, each of shape (episodes,).
-
-        Notes:
-        -----
-        Success is counted using the ``terminated`` signal observed prior to an env's auto-reset.
-        """
+        """Evaluate the current policy over a number of episodes and return metrics."""
         metrics = {
             "success_rate": 0,
             "episode_successes": np.zeros(episodes),
