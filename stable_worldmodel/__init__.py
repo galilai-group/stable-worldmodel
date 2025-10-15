@@ -50,6 +50,11 @@ register(
     entry_point="stable_worldmodel.envs.voidrun:VoidRunEnv",
 )
 
+register(
+    id="swm/OGBCube-v0",
+    entry_point="stable_worldmodel.envs.ogbench_cube:CubeEnv",
+)
+
 __all__ = [
     "World",
     "PlanConfig",
