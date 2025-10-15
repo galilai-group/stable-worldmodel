@@ -31,7 +31,8 @@ dependencies = [
     "datasets",
     "pygame",
     "pymunk",
-    "shapely"
+    "shapely",
+    "ogbench",
 ]
 
 dynamic = ["version"]
