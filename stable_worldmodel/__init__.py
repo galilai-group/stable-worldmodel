@@ -20,8 +20,8 @@ from stable_worldmodel.world import World
 WORLDS = set()
 
 
-def register(id, entry_point):
-    registration.register(id=id, entry_point=entry_point)
+def register(id, entry_point, **kwargs):
+    registration.register(id=id, entry_point=entry_point, kwargs=kwargs)
     WORLDS.add(id)
 
 
@@ -54,6 +54,19 @@ register(
     id="swm/OGBCube-v0",
     entry_point="stable_worldmodel.envs.ogbench_cube:CubeEnv",
 )
+
+register(
+    id="swm/OGBAntMaze-v0",
+    entry_point="stable_worldmodel.envs.ogbench_antmaze:AntMazeEnv",
+)
+
+register(
+    id="swm/OGBAntMaze-Inside-v0",
+    entry_point="stable_worldmodel.envs.ogbench_antmaze:AntMazeEnv",
+    inside=True,
+    camera_name="back",
+)
+
 
 __all__ = [
     "World",
