@@ -91,6 +91,7 @@ If you find this library useful in your research, please consider citing us:
     api/data
     api/world
     api/policy
+    api/solver
     api/spaces
     api/wrappers
 
