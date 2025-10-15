@@ -1,116 +1,165 @@
-import gymnasium as gym
+import numpy as np
 import torch
+from gymnasium.spaces import Box
+from loguru import logger as logging
 
-from .solver import BasePlanner
-
-
-"""
-Adapted from the official implementation of TDMPC2: https://github.com/nicklashansen/tdmpc2/
-"""
+from .solver import Costable
 
 
-class MPPI(BasePlanner):
+class MPPISolver:
+    """Model Predictive Path Integral Solver.
+
+    proposed in https://arxiv.org/abs/1509.01149
+    algorithm from: https://acdslab.github.io/mppi-generic-website/docs/mppi.html
+
+    Note:
+        The original MPPI compute the cost as a summation of costs along the trajectory.
+        Here, we use the final cost only, which should be updated in future updates.
+    """
+
     def __init__(
         self,
-        world_model: torch.nn.Module,
-        action_space: gym.spaces.Box,
-        horizon: int = 3,
-        iterations: int = 6,
-        num_samples: int = 512,
-        num_elites: int = 64,
-        min_std: float = 0.05,
-        max_std: float = 2.0,
-        temperature: float = 0.5,
-        compile: bool = True,
+        model: Costable,
+        num_samples,
+        num_elites,
+        var_scale,
+        n_steps,
+        use_elites=True,
+        temperature=0.5,
+        device="cpu",
     ):
-        super().__init__(world_model, action_space)
-
-        self.horizon = horizon
-        self.iterations = iterations
+        self.model = model
+        self.var_scale = var_scale
+        self.use_elites = use_elites
         self.num_samples = num_samples
         self.num_elites = num_elites
-        self.min_std = min_std
-        self.max_std = max_std
         self.temperature = temperature
+        self.n_steps = n_steps
+        self.device = device
 
-        self.compile = compile
+    def configure(self, *, action_space, n_envs: int, config) -> None:
+        self._action_space = action_space
+        self._n_envs = n_envs
+        self._config = config
+        self._action_dim = int(np.prod(action_space.shape[1:]))
+        self._configured = True
+
+        # warning if action space is discrete
+        if not isinstance(action_space, Box):
+            logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
 
     @property
-    def plan(self):
-        if self.compile:
-            plan = torch.compile(self._plan, mode="reduce-overhead")
-        else:
-            plan = self._plan
-        self._plan_val = plan
-        return self._plan_val
+    def n_envs(self) -> int:
+        return self._n_envs
 
-    @torch.no_grad()
-    def _plan(self, obs, goal, t0):
-        # Initialize state and parameters
-        z = self.world_model.encode(
-            obs
-        )  # NOTE: the encode method should be the identity if the world model is not latent
-        z_g = self.world_model.encode(goal)
+    @property
+    def action_dim(self) -> int:
+        return self._action_dim * self._config.action_block
 
-        z = z.repeat(self.num_samples, 1)
-        z_g = z_g.repeat(self.num_samples, 1)
-        mean = torch.zeros(self.horizon, self.action_dim, device=self.device)
-        std = torch.full(
-            (self.horizon, self.action_dim),
-            self.max_std,
-            dtype=torch.float,
-            device=self.device,
-        )
-        if not t0:
-            mean[:-1] = self._prev_mean[1:]
-        actions = torch.empty(self.horizon, self.num_samples, self.action_dim, device=self.device)
+    @property
+    def horizon(self) -> int:
+        return self._config.horizon
 
-        # Iterate MPPI
-        for _ in range(self.iterations):
-            # Sample actions
-            r = torch.randn(self.horizon, self.num_samples, self.action_dim, device=std.device)
-            actions_sample = mean.unsqueeze(1) + std.unsqueeze(1) * r
-            actions_sample = actions_sample.clamp(-1, 1)
-            actions = actions_sample
+    def __call__(self, *args, **kwargs) -> torch.Tensor:
+        return self.solve(*args, **kwargs)
 
-            # Compute elite actions
-            value = self._evaluate_action_sequence(z, actions, z_g).nan_to_num(0)
-            elite_idxs = torch.topk(value.squeeze(1), self.num_elites, dim=0).indices
-            elite_value, elite_actions = value[elite_idxs], actions[:, elite_idxs]
+    def init_action_distrib(self, actions=None):
+        """Initialize the action distribution params (mu, sigma) given the initial condition.
 
-            # Update parameters
-            max_value = elite_value.max(0).values
-            score = torch.exp(self.temperature * (elite_value - max_value))
-            score = score / score.sum(0)
-            mean = (score.unsqueeze(0) * elite_actions).sum(dim=1) / (score.sum(0) + 1e-9)
-            std = (
-                (score.unsqueeze(0) * (elite_actions - mean.unsqueeze(1)) ** 2).sum(dim=1) / (score.sum(0) + 1e-9)
-            ).sqrt()
-            std = std.clamp(self.min_std, self.max_std)
+        Args:
+            actions (n_envs, T, action_dim): initial actions, T <= horizon
+        """
+        var = self.var_scale * torch.ones([self.n_envs, self.horizon, self.action_dim])
 
-        # Select action
-        rand_idx = gumbel_softmax_sample(score.squeeze(1))
-        actions = torch.index_select(elite_actions, 1, rand_idx).squeeze(1)
-        a, std = actions[0], std[0]
-        self._prev_mean.copy_(mean)
-        return a.clamp(-1, 1)
+        mean = torch.zeros([self.n_envs, 0, self.action_dim]) if actions is None else actions
 
-    @torch.no_grad()
-    def _evaluate_action_sequence(self, z, actions, z_g):
-        """Estimate value of a trajectory starting at latent state z and executing given actions"""
-        G = 0
-        for t in range(self.cfg.horizon):
-            z = self.world_model.next(z, actions[t])
-            G = G + self.world_model.reward(z, z_g)
-        return G
+        # -- fill remaining actions with random sample
+        remaining = self.horizon - mean.shape[1]
 
+        if remaining > 0:
+            device = mean.device
+            new_mean = torch.zeros([self.n_envs, remaining, self.action_dim])
+            mean = torch.cat([mean, new_mean], dim=1).to(device)
 
-def gumbel_softmax_sample(p, temperature=1.0, dim=0):
-    """Sample from the Gumbel-Softmax distribution."""
-    logits = p.log()
-    gumbels = (
-        -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
-    )  # ~Gumbel(0,1)
-    gumbels = (logits + gumbels) / temperature  # ~Gumbel(logits,tau)
-    y_soft = gumbels.softmax(dim)
-    return y_soft.argmax(-1)
+        return mean, var
+
+    def compute_trajectory_weights(self, costs: torch.Tensor) -> torch.Tensor:
+        """Compute trajectory weights from costs using softmin with temperature.
+
+        Args:
+            costs (num_samples,): Tensor of trajectory costs.
+
+        Returns:
+            Tensor of trajectory weights.
+        """
+        stable_costs = costs - costs.min()
+        weights = torch.softmax(-stable_costs / self.temperature, dim=0)
+        return weights
+
+    @torch.inference_mode()
+    def solve(self, info_dict, init_action=None):
+        outputs = {
+            "costs": [],
+            "mean": [],
+            "var": [],
+        }
+
+        # -- initialize the action distribution
+        mean, var = self.init_action_distrib(init_action)
+        mean = mean.to(self.device)
+        var = var.to(self.device)
+        n_envs = mean.shape[0]
+
+        # -- optimization loop
+        for step in range(self.n_steps):
+            costs = []
+
+            # TODO: could flatten the batch dimension and process all samples together
+            # rem: need many memory and split before computing top k
+
+            for traj in range(n_envs):
+                expanded_infos = {}
+
+                for k, v in info_dict.items():
+                    v_traj = v[traj]
+                    if torch.is_tensor(v):
+                        v_traj = v_traj.unsqueeze(0).repeat_interleave(self.num_samples, dim=0)
+                    elif isinstance(v, np.ndarray):
+                        v_traj = np.repeat(v_traj[None, ...], self.num_samples, axis=0)
+
+                    expanded_infos[k] = v_traj
+
+                # sample noisy actions sequences
+                candidates = torch.randn(self.num_samples, self.horizon, self.action_dim, device=self.device)
+                candidates = candidates * var[traj] + mean[traj]
+
+                # make the first action seq being mean
+                candidates[0] = mean[traj]
+
+                # get the costs
+                cost = self.model.get_cost(expanded_infos, candidates)
+
+                assert type(cost) is torch.Tensor, f"Expected cost to be a torch.Tensor, got {type(cost)}"
+                assert cost.ndim == 1 and len(cost) == self.num_samples, (
+                    f"Expected cost to be of shape num_samples ({self.num_samples},), got {cost.shape}"
+                )
+
+                if self.use_elites:
+                    elite_idx = torch.argsort(cost)[: self.num_elites]
+                    candidates = candidates[elite_idx]
+                    cost = cost[elite_idx]
+
+                costs.append(cost.max().item())
+
+                # update nominal sequence with weighted candidates
+                weights = self.compute_trajectory_weights(cost)
+                mean[traj] = (weights * candidates).sum(dim=0)
+
+            outputs["costs"].append(np.mean(costs))
+            outputs["nominal_action"].append(mean.detach().cpu().clone())
+
+            print(f"MMPI step {step + 1}/{self.n_steps}, cost: {outputs['costs'][-1]:.4f}")
+
+        outputs["actions"] = mean.detach().cpu()
+
+        return outputs

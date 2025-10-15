@@ -1,9 +1,7 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 import hydra
 import lightning as pl
-import numpy as np
 import stable_pretraining as spt
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -17,24 +15,20 @@ from transformers import AutoModel
 import stable_worldmodel as swm
 
 
-@dataclass
-class Config:
-    dataset_name: str
-    img_size: int = 224
-    batch_size: int = 32
-    num_workers: int = 4
+DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
 
 
-def get_data(dataset_name):
-    """Return data and action space dim for training predictor."""
+# ============================================================================
+# Data Setup
+# ============================================================================
+def get_data(cfg):
+    """Setup dataset with image transforms and normalization."""
 
-    N_STEPS = 2
-
-    # == image transformations
-    def get_img_pipeling(key, target, img_size=224):
+    def get_img_pipeline(key, target, img_size=224):
         return spt.data.transforms.Compose(
             spt.data.transforms.ToImage(
-                **spt.data.dataset_stats.ImageNet,
+                mean=[0.5, 0.5, 0.5],
+                std=[0.5, 0.5, 0.5],
                 source=key,
                 target=target,
             ),
@@ -43,30 +37,28 @@ def get_data(dataset_name):
         )
 
     def norm_col_transform(dataset, col="pixels"):
-        data = np.array(dataset[col])
-        mean = torch.from_numpy(np.mean(data, 0)).unsqueeze(0)
-        std = torch.from_numpy(np.std(data, 0)).unsqueeze(0)
+        """Normalize column to zero mean, unit variance."""
+        data = dataset[col][:]
+        mean = data.mean(0).unsqueeze(0)
+        std = data.std(0).unsqueeze(0)
         return lambda x: (x - mean) / std
 
-    # == load dataset
     dataset = swm.data.StepsDataset(
-        dataset_name,
-        num_steps=N_STEPS,
-        frameskip=5,
+        cfg.dataset_name,
+        num_steps=cfg.n_steps,
+        frameskip=cfg.frameskip,
         transform=None,
     )
 
-    IMG_SIZE = (224 // 16) * 14
+    # Image size must be multiple of DINO patch size (14)
+    img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
 
     norm_action_transform = norm_col_transform(dataset.dataset, "action")
     norm_proprio_transform = norm_col_transform(dataset.dataset, "proprio")
 
+    # Apply transforms to all steps
     transform = spt.data.transforms.Compose(
-        *[
-            get_img_pipeling(f"{col}.{i}", f"{col}.{i}", IMG_SIZE)
-            for col in ["pixels", "goal"]
-            for i in range(N_STEPS)
-        ],
+        *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
         spt.data.transforms.WrapTorchTransform(
             norm_action_transform,
             source="action",
@@ -79,197 +71,130 @@ def get_data(dataset_name):
         ),
     )
 
-    # override dataset transform
     dataset.transform = transform
 
-    train_set, val_set = spt.data.random_split(dataset, lengths=[0.9, 0.1])
-
-    print(f"Train set size: {len(train_set)}, Val set size: {len(val_set)}")
+    train_set, val_set = spt.data.random_split(dataset, lengths=[cfg.train_split, 1 - cfg.train_split])
+    logging.info(f"Train: {len(train_set)}, Val: {len(val_set)}")
 
     train = DataLoader(
         train_set,
-        batch_size=32,
-        num_workers=10,  # Reduced from 10 to avoid OOM
+        batch_size=cfg.batch_size,
+        num_workers=cfg.num_workers,
         drop_last=True,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=2,
-        shuffle=True,
+        sampler=spt.data.sampler.RepeatedRandomSampler(train_set),
     )
-    val = DataLoader(
-        val_set, batch_size=32, num_workers=2, persistent_workers=False, pin_memory=True
-    )  # Reduced workers
-    data_module = spt.data.DataModule(train=train, val=val)
+    val = DataLoader(val_set, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True)
 
-    # -- determine action space dimension
-    action = dataset[0]["action"]
-    action_dim = action[0].shape[-1]
-    return data_module, action_dim
+    return spt.data.DataModule(train=train, val=val)
 
 
+# ============================================================================
+# Model Architecture
+# ============================================================================
 def forward(self, batch, stage):
-    """Forward pass for predictor training"""
+    """Forward: encode observations, predict next states, compute losses."""
 
     proprio_key = "proprio" if "proprio" in batch else None
 
-    # make action and proprio NaN (last action) at 0
+    # Replace NaN values with 0 (occurs at sequence boundaries)
     if proprio_key is not None:
-        nan_mask = torch.isnan(batch[proprio_key])
-        batch[proprio_key][nan_mask] = 0.0
-
+        batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
     if "action" in batch:
-        nan_mask = torch.isnan(batch["action"])
-        batch["action"][nan_mask] = 0.0
+        batch["action"] = torch.nan_to_num(batch["action"], 0.0)
 
-    batch = self.model.encode(
-        batch,
-        target="embed",
-        pixels_key="pixels",
-        proprio_key=proprio_key,
-        action_key="action",
-    )
+    # Encode all timesteps into latent embeddings
+    batch = self.model.encode(batch, target="embed", pixels_key="pixels", proprio_key=proprio_key, action_key="action")
 
-    # predictions
-    embedding = batch["embed"][:, :-1, :, :]  # (B, history_size, P, d)
+    # Use history to predict next states
+    embedding = batch["embed"][:, :-1, :, :]  # (B, T-1, patches, dim)
     pred_embedding = self.model.predict(embedding)
+    target_embedding = batch["embed"][:, 1:, :, :]  # (B, T-1, patches, dim)
 
-    # targets values
-    target_embedding = batch["embed"][:, 1:, :, :]  # (B, T-history_size, P, d)
-
-    # == pixels loss
+    # Compute pixel reconstruction loss
     pixels_dim = batch["pixels_embed"].shape[-1]
     pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
-
-    batch["pixels_loss"] = pixels_loss
     loss = pixels_loss
+    batch["pixels_loss"] = pixels_loss
 
-    # == proprio loss
+    # Add proprioception loss if available
     if proprio_key is not None:
         proprio_dim = batch["proprio_embed"].shape[-1]
         proprio_loss = F.mse_loss(
             pred_embedding[..., pixels_dim : pixels_dim + proprio_dim],
             target_embedding[..., pixels_dim : pixels_dim + proprio_dim].detach(),
         )
-        batch["proprio_loss"] = proprio_loss
         loss = loss + proprio_loss
+        batch["proprio_loss"] = proprio_loss
 
     batch["loss"] = loss
-    prefix = "" if self.training else "val_"
-    # == logging
-    losses_dict = {f"{prefix}{k}": v.item() for k, v in batch.items() if "loss" in k}
-    self.log_dict(losses_dict, on_step=True, on_epoch=True, sync_dist=True)
+
+    # Log all losses
+    prefix = "train/" if self.training else "val/"
+    losses_dict = {f"{prefix}{k}": v.detach() for k, v in batch.items() if "_loss" in k}
+    self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
     return batch
 
 
-def get_world_model(action_dim):
-    """Return stable_spt module with world model"""
+def get_world_model(cfg):
+    """Build world model: frozen DINO encoder + trainable causal predictor."""
 
-    # encoder = swm.wm.dinowm.DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens")
+    # Load frozen DINO encoder
     encoder = AutoModel.from_pretrained("facebook/dinov2-small")
-    emb_dim = encoder.config.hidden_size  # encoder.emb_dim  # 384 for vits14
+    embedding_dim = encoder.config.hidden_size
 
-    HISTORY_SIZE = 3
-    PREDICTION_HORIZON = 1
-    proprio_dim = 4
-    proprio_emb_dim = 10
-    action_emb_dim = 10
-    image_size = 224  # 224 for dinov2_vits14
-    patch_size = 16  # 16 size for create 14 patches
+    num_patches = (cfg.image_size // cfg.patch_size) ** 2
+    embedding_dim += cfg.dinowm.proprio_embed_dim + cfg.dinowm.action_embed_dim  # Total embedding size
 
-    num_patches = (image_size // patch_size) ** 2  # 256 for 224×224
+    logging.info(f"Patches: {num_patches}, Embedding dim: {embedding_dim}")
 
-    logging.info(f"Encoder: {encoder}, emb_dim: {emb_dim}, num_patches: {num_patches}")
-
-    # -- create predictor
+    # Build causal predictor (transformer that predicts next latent states)
     predictor = swm.wm.dinowm.CausalPredictor(
         num_patches=num_patches,
-        num_frames=HISTORY_SIZE,
-        dim=emb_dim + proprio_emb_dim + action_emb_dim,
-        depth=6,
-        heads=16,
-        mlp_dim=2048,
-        pool="mean",
-        dim_head=64,
-        dropout=0.1,
-        emb_dropout=0.0,
+        num_frames=cfg.dinowm.history_size,
+        dim=embedding_dim,
+        **cfg.predictor,
     )
 
-    logging.info(f"Predictor: {predictor}")
+    # Build action and proprioception encoders
+    effective_act_dim = cfg.frameskip * cfg.dinowm.action_dim
+    action_encoder = swm.wm.dinowm.Embedder(in_chans=effective_act_dim, emb_dim=cfg.dinowm.action_embed_dim)
+    proprio_encoder = swm.wm.dinowm.Embedder(in_chans=cfg.dinowm.proprio_dim, emb_dim=cfg.dinowm.proprio_embed_dim)
 
-    # -- create action encoder
-    action_encoder = swm.wm.dinowm.Embedder(in_chans=action_dim, emb_dim=action_emb_dim)
+    logging.info(f"Action dim: {effective_act_dim}, Proprio dim: {cfg.dinowm.proprio_dim}")
 
-    logging.info(f"Action dim: {action_dim}, action emb dim: {action_emb_dim}")
-
-    # -- create proprioceptive encoder
-    proprio_encoder = swm.wm.dinowm.Embedder(in_chans=proprio_dim, emb_dim=proprio_emb_dim)
-    logging.info(f"Proprio dim: {proprio_dim}, proprio emb dim: {proprio_emb_dim}")
-
+    # Assemble world model
     world_model = swm.wm.DINOWM(
-        encoder=spt.backbone.EvalOnly(encoder),
+        encoder=spt.backbone.EvalOnly(encoder),  # Freeze encoder
         predictor=predictor,
         action_encoder=action_encoder,
         proprio_encoder=proprio_encoder,
-        history_size=HISTORY_SIZE,
-        num_pred=PREDICTION_HORIZON,
+        history_size=cfg.dinowm.history_size,
+        num_pred=cfg.dinowm.num_preds,
         device="cuda",
     )
 
-    # -- world model as a stable_spt module
+    # Wrap in stable_spt Module with separate optimizers for each component
+    def add_opt(module_name, lr):
+        return {"modules": str(module_name), "optimizer": {"type": "AdamW", "lr": lr}}
+
     world_model = spt.Module(
         model=world_model,
         forward=forward,
         optim={
-            # "encoder_opt": {
-            #     "modules": "model.backbone",
-            #     "optimizer": {"type": "AdamW", "lr": 1e-6},
-            #     "scheduler": {
-            #         "type": "OneCycleLR",
-            #         "max_lr": 1e-6,
-            #         "total_steps": 10000,
-            #     },
-            #     "interval": "step",
-            #     "frequency": 1,
-            # },
-            "predictor_opt": {
-                "modules": "model.predictor",
-                "optimizer": {"type": "AdamW", "lr": 5e-4},
-                "scheduler": {
-                    "type": "OneCycleLR",
-                    "max_lr": 5e-4,
-                    "total_steps": 10000,
-                },
-                "interval": "step",
-                "frequency": 1,
-            },
-            "proprio_opt": {
-                "modules": "model.proprio_encoder",
-                "optimizer": {"type": "AdamW", "lr": 5e-4},
-                "scheduler": {
-                    "type": "OneCycleLR",
-                    "max_lr": 5e-4,
-                    "total_steps": 10000,
-                },
-                "interval": "step",
-                "frequency": 1,
-            },
-            "action_opt": {
-                "modules": "model.action_encoder",
-                "optimizer": {"type": "AdamW", "lr": 5e-4},
-                "scheduler": {
-                    "type": "OneCycleLR",
-                    "max_lr": 5e-4,
-                    "total_steps": 10000,
-                },
-                "interval": "step",
-                "frequency": 1,
-            },
+            "predictor_opt": add_opt("model.predictor", cfg.predictor_lr),
+            "proprio_opt": add_opt("model.proprio_encoder", cfg.proprio_encoder_lr),
+            "action_opt": add_opt("model.action_encoder", cfg.action_encoder_lr),
         },
     )
     return world_model
 
 
+# ============================================================================
+# Training Setup
+# ============================================================================
 def setup_pl_logger(cfg):
     if not cfg.wandb.enable:
         return None
@@ -281,42 +206,41 @@ def setup_pl_logger(cfg):
         entity=cfg.wandb.entity,
         resume="allow" if wandb_run_id else None,
         id=wandb_run_id,
+        log_model=False,
     )
 
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
     return wandb_logger
 
 
+# ============================================================================
+# Main Entry Point
+# ============================================================================
 @hydra.main(version_base=None, config_path="./", config_name="config")
 def run(cfg):
     """Run training of predictor"""
 
     wandb_logger = setup_pl_logger(cfg)
-
-    data, action_dim = get_data(cfg.dataset_name)
-    world_model = get_world_model(action_dim)
+    data = get_data(cfg)
+    world_model = get_world_model(cfg)
 
     cache_dir = swm.data.get_cache_dir()
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights"
-    )  # , save_last=True)
+    checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
-        max_epochs=10,
+        max_epochs=cfg.epochs,
         callbacks=[checkpoint_callback],
         num_sanity_val_steps=1,
         logger=wandb_logger,
+        log_every_n_steps=50,
         precision="16-mixed",
         enable_checkpointing=True,
     )
 
-    manager = spt.Manager(
-        trainer=trainer, module=world_model, data=data
-    )  # , ckpt_path=f"{cfg.output_model_name}_ckpt")
+    manager = spt.Manager(trainer=trainer, module=world_model, data=data)
     manager()
 
-    if hasattr(cfg, "dump_object") and cfg.dump_object:
-        # -- save the world model object
+    if trainer.is_global_zero and hasattr(cfg, "dump_object") and cfg.dump_object:
         output_path = Path(cache_dir, f"{cfg.output_model_name}_object.ckpt")
         torch.save(world_model.to("cpu"), output_path)
         print(f"Saved world model object to {output_path}")

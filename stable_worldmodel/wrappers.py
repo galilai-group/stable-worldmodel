@@ -111,8 +111,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["step_idx"] = self._step_counter
 
         # add all variations to info if needed
-        options = kwargs.get("options")
-        if options is not None and "variation" in options:
+        options = kwargs.get("options") or {}
+
+        if "variation" in options:
             var_opt = options["variation"]
             if len(var_opt) == 1 and var_opt[0] == "all":
                 self._variations_watch = self.env.unwrapped.variation_space.names()
@@ -145,9 +146,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         assert "reward" not in info
         info["reward"] = reward
         assert "terminated" not in info
-        info["terminated"] = terminated
+        info["terminated"] = bool(terminated)
         assert "truncated" not in info
-        info["truncated"] = truncated
+        info["truncated"] = bool(truncated)
         assert "action" not in info
         info["action"] = action
         assert "step_idx" not in info

@@ -1,4 +1,8 @@
 if __name__ == "__main__":
+    import datasets
+    from sklearn import preprocessing
+    from torchvision.transforms import v2 as transforms
+
     import stable_worldmodel as swm
 
     ######################
@@ -7,8 +11,9 @@ if __name__ == "__main__":
 
     world = swm.World(
         "swm/PushT-v1",
-        num_envs=5,
+        num_envs=2,
         image_shape=(224, 224),
+        max_episode_steps=25,
         render_mode="rgb_array",
     )
 
@@ -18,13 +23,19 @@ if __name__ == "__main__":
     # ##  Data Collection  ##
     # #######################
 
-    # world.set_policy(swm.policy.RandomPolicy())
-    # world.record_dataset(
-    #     "example-pusht",
-    #     episodes=1000,
-    #     seed=2347,
-    #     options=None,
-    # )
+    world.set_policy(swm.policy.RandomPolicy())
+    world.record_dataset(
+        "example-pusht",
+        episodes=10,
+        seed=2347,
+        options=None,
+    )
+
+    world.record_video_from_dataset(
+        "./",
+        "example-pusht",
+        episode_idx=[0, 1],
+    )
 
     ################
     ##  Pretrain  ##
@@ -37,18 +48,51 @@ if __name__ == "__main__":
         dump_object=True,
     )
 
+    #########################
+    ##  Transform/Process  ##
+    #########################
+
+    def img_transform():
+        transform = transforms.Compose(
+            [
+                transforms.Resize(size=224),
+                transforms.CenterCrop(size=224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            ]
+        )
+        return transform
+
+    transform = {
+        "pixels": img_transform(),
+        "goal": img_transform(),
+    }
+
+    dataset_path = swm.data.get_cache_dir() / "example-pusht"
+    dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
+
+    action_process = preprocessing.StandardScaler()
+    action_process.fit(dataset["action"][:])
+
+    proprio_process = preprocessing.StandardScaler()
+    proprio_process.fit(dataset["proprio"][:])
+
+    process = {
+        "action": action_process,
+        "proprio": proprio_process,
+        "goal_proprio": proprio_process,
+    }
+
     ################
     ##  Evaluate  ##
     ################
 
-    # NOTE for user: make sure to match action_block with the one used during training!
+    model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
+    config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
+    solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
+    policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
-    # model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
-    # config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
-    # solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
-    # policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
+    world.set_policy(policy)
+    results = world.evaluate(episodes=3, seed=2347)
 
-    # world.set_policy(policy)
-    # results = world.evaluate(episodes=5, seed=2347)
-
-    # print(results)
+    print(results)

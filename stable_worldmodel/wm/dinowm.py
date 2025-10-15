@@ -1,43 +1,11 @@
-import numpy as np
-import stable_pretraining as spt
 import torch
 import torch.nn.functional as F
+
+# from torchvision import transforms
+import torchvision.transforms.v2 as transforms
 from einops import rearrange, repeat
 from torch import distributed as dist
 from torch import nn
-from torchvision import transforms
-
-
-def transform(info_dict, device="cpu"):
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
-    transform = spt.data.transforms.Compose(
-        spt.data.transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="pixels",
-            target="pixels",
-        ),
-        spt.data.transforms.ToImage(
-            mean=mean,
-            std=std,
-            source="goal",
-            target="goal",
-        ),
-    )
-
-    info_dict = transform(info_dict)
-
-    # convert all numpy array to torch tensor
-    for k in info_dict:
-        if isinstance(info_dict[k], (np.ndarray | np.generic)):
-            # to torch tensor and add temporal dimension if needed
-            info_dict[k] = torch.from_numpy(info_dict[k])
-
-        if torch.is_tensor(info_dict[k]):
-            info_dict[k] = info_dict[k].unsqueeze(1).to(device)
-
-    return info_dict
 
 
 class DINOWM(torch.nn.Module):
@@ -109,6 +77,7 @@ class DINOWM(torch.nn.Module):
         # == action embeddings
         if action_key is not None:
             action = info[action_key].float()
+
             action_embed = self.action_encoder(action)  # (B, T, A) -> (B, T, A_emb)
             info[f"action_{target}"] = action_embed
 
@@ -242,10 +211,13 @@ class DINOWM(torch.nn.Module):
         return info
 
     def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
-        info_dict = transform(info_dict, device=self.device)
-
         assert "action" in info_dict, "action key must be in info_dict"
         assert "pixels" in info_dict, "pixels key must be in info_dict"
+
+        # move to device and unsqueeze time
+        for k, v in info_dict.items():
+            if torch.is_tensor(v):
+                info_dict[k] = v.unsqueeze(1).to(self.device)
 
         # == get the goal embedding
         proprio_key = "goal_proprio" if "goal_proprio" in info_dict else None
@@ -371,6 +343,7 @@ class Attention(nn.Module):
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
         self.register_buffer("bias", self.generate_mask_matrix(num_patches, num_frames))
+        # self.bias = self.generate_mask_matrix(num_patches, num_frames).cuda()
 
     def forward(self, x):
         B, T, C = x.size()

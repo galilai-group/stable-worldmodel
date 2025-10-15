@@ -38,6 +38,17 @@ class GDSolver(torch.nn.Module):
         if not isinstance(action_space, Box):
             logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
 
+    def set_seed(self, seed: int) -> None:
+        """Set random seed for deterministic behavior.
+
+        Args:
+            seed: Random seed to use for numpy and torch
+        """
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     @property
     def n_envs(self) -> int:
         return self._n_envs
@@ -83,6 +94,9 @@ class GDSolver(torch.nn.Module):
             "trajectory": [],
         }
 
+        # Set model to eval mode to ensure deterministic behavior
+        self.model.eval()
+
         with torch.no_grad():
             self.init_action(init_action)
 
@@ -90,7 +104,8 @@ class GDSolver(torch.nn.Module):
 
         # perform gradient descent
         for _ in range(self.n_steps):
-            cost = self.model.get_cost(info_dict, self.init)
+            # copy info dict to avoid in-place modification
+            cost = self.model.get_cost(dict(info_dict), self.init)
 
             assert type(cost) is torch.Tensor, f"Got {type(cost)} cost, expect torch.Tensor"
             assert cost.ndim == 1 and len(cost) == self.n_envs, f"Cost should be of shape (n_envs,), got {cost.shape}"
@@ -106,6 +121,8 @@ class GDSolver(torch.nn.Module):
 
             outputs["cost"].append(cost.item())
             outputs["trajectory"].extend([self.init.detach().cpu().clone()])
+
+            print(f" GD step {_ + 1}/{self.n_steps}, cost: {outputs['cost'][-1]:.4f}")
 
         # TODO break solving if finished self.eval? done break
 
