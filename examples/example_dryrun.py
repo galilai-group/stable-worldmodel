@@ -17,19 +17,22 @@ if __name__ == "__main__":
     # #######################
     # ##  Data Collection  ##
     # #######################
+    policy = swm.policy.RandomPolicy(42)
+    world.set_policy(policy)
+    world.record_dataset("simple-pointmaze", episodes=10, seed=2347, options=None)
 
-    world.set_policy(swm.policy.RandomPolicy())
-    world.record_dataset(
-        "simple-pointmaze",
-        episodes=10,
+    world.set_policy(policy)
+    world.record_video(
+        "./",
         seed=2347,
-        options=None,
+        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
     )
-    # world.record_video(
-    #     "./",
-    #     seed=2347,
-    #     options={"variation": ("walls.number", "walls.shape", "walls.positions")},
-    # )
+
+    world.record_video_from_dataset(
+        "./",
+        "simple-pointmaze",
+        episode_idx=list(range(10)),
+    )
 
     ################
     ##  Pretrain  ##

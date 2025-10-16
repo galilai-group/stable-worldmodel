@@ -132,9 +132,6 @@ class VoidRunEnv(gym.Env):
         if seed is not None:
             self._rng = np.random.default_rng(seed)
 
-        self.observation_space.seed(seed)
-        self.action_space.seed(seed)
-
         if hasattr(self, "variation_space"):
             self.variation_space.seed(seed)
 

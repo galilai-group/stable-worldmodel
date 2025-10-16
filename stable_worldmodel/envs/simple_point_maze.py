@@ -10,9 +10,7 @@ from matplotlib.patches import Circle, Rectangle
 import stable_worldmodel as swm
 
 
-DEFAULT_VARIATIONS = {
-    "agent.position",
-}
+DEFAULT_VARIATIONS = ("agent.position",)
 
 
 class SimplePointMazeEnv(gym.Env):
@@ -33,14 +31,14 @@ class SimplePointMazeEnv(gym.Env):
         self.height = 5.0
         self.render_mode = render_mode
 
-        self.observation_space = swm.spaces.Box(
+        self.observation_space = gym.spaces.Box(
             low=np.array([0.0, 0.0], dtype=np.float32),
             high=np.array([self.width, self.height], dtype=np.float32),
             shape=(2,),
             dtype=np.float32,
         )
 
-        self.action_space = swm.spaces.Box(
+        self.action_space = gym.spaces.Box(
             low=np.array([-0.2, -0.2], dtype=np.float32),
             high=np.array([0.2, 0.2], dtype=np.float32),
             dtype=np.float32,
@@ -152,8 +150,6 @@ class SimplePointMazeEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        self.observation_space.seed(seed)
-        self.action_space.seed(seed)
 
         if hasattr(self, "variation_space"):
             self.variation_space.seed(seed)

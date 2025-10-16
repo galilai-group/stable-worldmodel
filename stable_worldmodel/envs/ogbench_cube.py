@@ -132,7 +132,17 @@ class CubeEnv(ManipSpaceEnv):
         control, physics simulation, and base functionality.
     """
 
-    def __init__(self, env_type, ob_type="pixels", permute_blocks=True, multiview=False, *args, **kwargs):
+    def __init__(
+        self,
+        env_type="single",
+        ob_type="pixels",
+        permute_blocks=True,
+        multiview=False,
+        height=224,
+        width=224,
+        *args,
+        **kwargs,
+    ):
         """Initialize the CubeEnv with specified configuration.
 
         Sets up the manipulation environment with the specified number of cubes
@@ -179,7 +189,7 @@ class CubeEnv(ManipSpaceEnv):
         else:
             raise ValueError(f"Invalid env_type: {env_type}")
 
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, height=height, width=width, **kwargs)
 
         self._ob_type = ob_type
         self._cube_colors = np.stack(list(self._colors.values()))[:, :3]

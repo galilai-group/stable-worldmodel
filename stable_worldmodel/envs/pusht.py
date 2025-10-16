@@ -204,8 +204,7 @@ class PushT(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        self.observation_space.seed(seed)
-        self.action_space.seed(seed)
+
         self.rng = np.random.default_rng(seed)
 
         if hasattr(self, "variation_space"):
