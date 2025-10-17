@@ -33,6 +33,11 @@ if __name__ == "__main__":
         "simple-pointmaze",
         episode_idx=list(range(10)),
     )
+    world.record_video(
+        "./",
+        seed=2347,
+        options={"variation": ("walls.number", "walls.shape", "walls.positions")},
+    )
 
     ################
     ##  Pretrain  ##

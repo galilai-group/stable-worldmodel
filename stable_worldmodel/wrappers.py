@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import Callable, Iterable
 
@@ -13,27 +14,65 @@ from gymnasium.vector.utils import (
 from stable_worldmodel.utils import get_in
 
 
+# class EnsureInfoKeysWrapper(gym.Wrapper):
+#     """Gymnasium wrapper to ensure certain keys are present in the info dict.
+#     If a key is missing, it is added with a default value.
+#     """
+
+#     def __init__(self, env, required_keys):
+#         super().__init__(env)
+#         self.required_keys = required_keys
+
+#     def step(self, action):
+#         obs, reward, terminated, truncated, info = self.env.step(action)
+#         for key in self.required_keys:
+#             if key not in info:
+#                 raise RuntimeError(f"Key {key} is not present in the env output")
+#         return obs, reward, terminated, truncated, info
+
+#     def reset(self, *args, **kwargs):
+#         obs, info = self.env.reset(*args, **kwargs)
+#         for key in self.required_keys:
+#             if key not in info:
+#                 raise RuntimeError(f"Key {key} is not present in the env output")
+#         return obs, info
+
+
 class EnsureInfoKeysWrapper(gym.Wrapper):
-    """Gymnasium wrapper to ensure certain keys are present in the info dict.
-    If a key is missing, it is added with a default value.
+    """
+    Ensure certain keys are present in the info dict.
+    Keys can be exact strings or regex patterns.
+
+    Args:
+        env: The wrapped env.
+        required_keys: Iterable of str.
     """
 
-    def __init__(self, env, required_keys):
+    def __init__(self, env, required_keys: Iterable[str]):
         super().__init__(env)
-        self.required_keys = required_keys
+        self._patterns: list[re.Pattern] = []
+        for k in required_keys:
+            self._patterns.append(re.compile(k))
+        # else:
+        #     # exact match
+        #     self._patterns.append(re.compile(rf"^{re.escape(k)}$"))
+
+    def _check(self, info: dict, where: str):
+        keys = list(info.keys())
+        missing = [p.pattern for p in self._patterns if not any(p.fullmatch(k) for k in keys)]
+        if missing:
+            raise RuntimeError(
+                f"{where}: required info keys missing (patterns with no match): {missing}. Present keys: {keys}"
+            )
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        for key in self.required_keys:
-            if key not in info:
-                raise RuntimeError(f"Key {key} is not present in the env output")
+        self._check(info, "step()")
         return obs, reward, terminated, truncated, info
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        for key in self.required_keys:
-            if key not in info:
-                raise RuntimeError(f"Key {key} is not present in the env output")
+        self._check(info, "reset()")
         return obs, info
 
 
@@ -189,27 +228,43 @@ class AddPixelsWrapper(gym.Wrapper):
 
     def _get_pixels(self):
         # Render the environment as an RGB array
+        render = getattr(self.env.unwrapped, "render_multiview", None)
+        render = render if callable(render) else self.env.render
+
         t0 = time.time()
-        img = self.env.render()
+        img = render()
         t1 = time.time()
-        # Convert to PIL Image for resizing
-        pil_img = self.Image.fromarray(img)
-        pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
-        # Optionally apply torchvision transform
-        if self.torchvision_transform is not None:
-            pixels = self.torchvision_transform(pil_img)
+
+        def _process_img(img_array):
+            # Convert to PIL Image for resizing
+            pil_img = self.Image.fromarray(img_array)
+            pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
+            # Optionally apply torchvision transform
+            if self.torchvision_transform is not None:
+                pixels = self.torchvision_transform(pil_img)
+            else:
+                pixels = np.array(pil_img)
+            return pixels
+
+        if isinstance(img, dict):
+            pixels = {f"pixels.{k}": _process_img(v) for k, v in img.items()}
+        elif isinstance(img, (list | tuple)):
+            pixels = {f"pixels.{i}": _process_img(v) for i, v in enumerate(img)}
         else:
-            pixels = np.array(pil_img)
+            pixels = {"pixels": _process_img(img)}
+
         return pixels, t1 - t0
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        info["pixels"], info["render_time"] = self._get_pixels()
+        pixels, info["render_time"] = self._get_pixels()
+        info.update(pixels)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info["pixels"], info["render_time"] = self._get_pixels()
+        pixels, info["render_time"] = self._get_pixels()
+        info.update(pixels)
         return obs, reward, terminated, truncated, info
 
 
@@ -263,8 +318,7 @@ class MegaWrapper(gym.Wrapper):
         super().__init__(env)
         if required_keys is None:
             required_keys = []
-        required_keys.append("pixels")
-
+        required_keys.append(r"^pixels(?:\..*)?$")
         # this adds `pixels` key to info with optional transform
         env = AddPixelsWrapper(env, image_shape, pixels_transform)
         # this removes the info output, everything is in observation!

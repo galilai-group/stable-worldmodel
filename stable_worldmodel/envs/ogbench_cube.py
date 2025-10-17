@@ -26,7 +26,6 @@ Example:
             obs, reward, terminated, truncated, info = env.step(action)
             if info['success']:
                 break
-
 .. _OGBench:
    https://github.com/seohongpark/ogbench/
 """
@@ -718,7 +717,7 @@ class CubeEnv(ManipSpaceEnv):
         if self._reward_task_id == 0:
             self._reward_task_id = 2  # Default task.
 
-    def reset(self, options=None, *args, **kwargs):
+    def reset(self, seed=None, options=None, *args, **kwargs):
         """Reset the environment to an initial state.
 
         Resets the environment and optionally samples from the variation space to
@@ -751,6 +750,10 @@ class CubeEnv(ManipSpaceEnv):
 
                 obs, info = env.reset(options={'variation': ['cube.color', 'camera.angle_delta']})
         """
+
+        if hasattr(self, "variation_space"):
+            self.variation_space.seed(seed)
+
         options = options or {}
 
         self.variation_options = options.get("variation", {})
@@ -770,7 +773,7 @@ class CubeEnv(ManipSpaceEnv):
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
-        return super().reset(options, *args, **kwargs)
+        return super().reset(seed=seed, options=options, *args, **kwargs)
 
     def add_objects(self, arena_mjcf):
         """Add cube objects and cameras to the MuJoCo scene.
@@ -1368,36 +1371,63 @@ class CubeEnv(ManipSpaceEnv):
         *args,
         **kwargs,
     ):
-        """Render the current scene from specified camera view(s).
+        """Render the current scene from a specified camera view.
 
-        Generates RGB image(s) of the current environment state from one or more
-        camera viewpoints. Automatically handles multiview rendering when configured.
+        Generates an RGB image of the current environment state from a single
+        camera viewpoint. This method renders from one camera at a time.
 
         Args:
-            camera (str or list, optional): Camera name(s) to render from. Can be
-                a single camera name string or list of camera names. If multiview
-                is enabled, defaults to ['front_pixels', 'side_pixels']. Otherwise
-                defaults to 'front_pixels'. Supports any camera defined in self.cameras.
+            camera (str, optional): Camera name to render from. Defaults to
+                'front_pixels'. Supports any camera defined in self.cameras
+                (e.g., 'front_pixels', 'side_pixels').
             *args: Additional positional arguments passed to parent render method.
             **kwargs: Additional keyword arguments passed to parent render method.
 
         Returns:
-            ndarray: Rendered image(s). If camera is a single string, returns array
-                with shape (H, W, C). If camera is a list, returns array with shape
-                (N, H, W, C) where N is the number of views, stacked along first axis.
+            ndarray: Rendered image with shape (H, W, C) where H is height,
+                W is width, and C is the number of color channels (typically 3 for RGB).
 
         Note:
-            The multiview stacking is useful for policies that benefit from multiple
-            viewpoints, such as those learning 3D spatial reasoning. The 'front_pixels'
-            camera provides an oblique view while 'side_pixels' shows a perpendicular view.
+            For rendering from multiple cameras simultaneously, use the
+            `render_multiview()` method instead.
         """
-        camera = "front_pixels" if not self._multiview else ["front_pixels", "side_pixels"]
-        if isinstance(camera, list | tuple):
-            imgs = []
-            for cam in camera:
-                img = super().render(camera=cam, *args, **kwargs)
-                imgs.append(img)
-            stacked_views = np.stack(imgs, axis=0)
-            return stacked_views
-        else:
-            return super().render(camera=camera, *args, **kwargs)
+        return super().render(camera=camera, *args, **kwargs)
+
+    def render_multiview(
+        self,
+        camera="front_pixels",
+        *args,
+        **kwargs,
+    ):
+        """Render the current scene from multiple camera views or a fallback single view.
+
+        When multiview mode is enabled (`_multiview=True`), renders the scene from
+        both 'front_pixels' and 'side_pixels' cameras and returns them as a
+        dictionary. When multiview is disabled, falls back to rendering from a
+        single camera.
+
+        Args:
+            camera (str, optional): Camera name to use for fallback rendering when
+                multiview is disabled. Defaults to 'front_pixels'. Ignored when
+                multiview is enabled.
+            *args: Additional positional arguments passed to the render method.
+            **kwargs: Additional keyword arguments passed to the render method.
+
+        Returns:
+            dict or ndarray: If multiview is enabled, returns a dictionary with camera
+                names as keys ('front_pixels', 'side_pixels') and rendered images as
+                values, where each image has shape (H, W, C). If multiview is disabled,
+                returns a single rendered image array with shape (H, W, C).
+
+        Note:
+            The multiview dictionary format is useful for policies that process
+            multiple viewpoints separately. The 'front_pixels' camera provides an
+            oblique view while 'side_pixels' shows a perpendicular side view.
+        """
+
+        if not self._multiview:
+            return self.render(camera=camera, *args, **kwargs)
+
+        cam_names = ["front_pixels", "side_pixels"]
+        multi_view = {cam: self.render(camera=cam, *args, **kwargs) for cam in cam_names}
+        return multi_view
