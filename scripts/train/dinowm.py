@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import hydra
@@ -15,8 +14,6 @@ from transformers import AutoModel
 
 import stable_worldmodel as swm
 
-
-os.environ["WANDB_START_METHOD"] = "fork"
 
 DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
 
@@ -84,9 +81,9 @@ def get_data(cfg):
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         drop_last=True,
-        persistent_workers=False,
+        persistent_workers=True,
         pin_memory=True,
-        shuffle=True,
+        sampler=spt.data.sampler.RepeatedRandomSampler(train_set),
     )
     val = DataLoader(val_set, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True)
 
@@ -231,18 +228,22 @@ def run(cfg):
     checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
-        **cfg.trainer,
+        max_epochs=cfg.epochs,
         callbacks=[checkpoint_callback],
         num_sanity_val_steps=1,
         logger=wandb_logger,
         log_every_n_steps=50,
+        precision="16-mixed",
         enable_checkpointing=True,
+        accelerator="gpu",
+        devices=4,
+        strategy="ddp",
     )
 
     manager = spt.Manager(trainer=trainer, module=world_model, data=data)
     manager()
 
-    if hasattr(cfg, "dump_object") and cfg.dump_object:
+    if trainer.is_global_zero and hasattr(cfg, "dump_object") and cfg.dump_object:
         output_path = Path(cache_dir, f"{cfg.output_model_name}_object.ckpt")
         torch.save(world_model.to("cpu"), output_path)
         print(f"Saved world model object to {output_path}")

@@ -21,13 +21,6 @@ defaults:
 #   run:
 #     dir: .
 
-trainer:
-  accelerator: "gpu"
-  devices: 1
-  strategy: "ddp"
-  precision: "16-mixed"
-  max_epochs: 1
-
 wandb:
   enable: true
   project: xenoworlds
@@ -36,8 +29,9 @@ wandb:
 dataset_name: pusht_expert
 output_model_name: world_model
 
+epochs: 1
 batch_size: 32
-num_workers: 1
+num_workers: 8
 train_split: 0.9
 
 image_size: 224
