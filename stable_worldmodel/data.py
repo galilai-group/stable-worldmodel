@@ -151,7 +151,7 @@ class WorldInfo(TypedDict):
 
 def get_cache_dir() -> Path:
     """Return the cache directory for stable_worldmodel."""
-    cache_dir = os.getenv("XENOWORLDS_HOME", os.path.expanduser("~/.stable_worldmodel"))
+    cache_dir = os.getenv("STABLEWM_HOME", os.path.expanduser("~/.stable_worldmodel"))
     os.makedirs(cache_dir, exist_ok=True)
     return Path(cache_dir)
 

@@ -4,7 +4,7 @@ import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf
@@ -213,6 +213,26 @@ def setup_pl_logger(cfg):
     return wandb_logger
 
 
+class ModelObjectCallBack(Callback):
+    """Callback to pickle model after each epoch."""
+
+    def __init__(self, dirpath, filename="model_object.ckpt", epoch_interval: int = 1):
+        super().__init__()
+        self.dirpath = dirpath
+        self.filename = filename
+        self.epoch_interval = epoch_interval
+
+    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        super().on_train_epoch_end(trainer, pl_module)
+
+        if trainer.is_global_zero:
+            if (trainer.current_epoch + 1) % self.epoch_interval == 0:
+                output_path = Path(self.dirpath, f"{self.filename}_epoch_{trainer.current_epoch + 1}")
+                torch.save(pl_module.to("cpu"), output_path)
+                logging.info(f"Saved world model object to {output_path}")
+                pl_module.to(trainer.strategy.root_device)
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -225,28 +245,25 @@ def run(cfg):
     world_model = get_world_model(cfg)
 
     cache_dir = swm.data.get_cache_dir()
+    dump_object_callback = ModelObjectCallBack(dirpath=cache_dir, filename=f"{cfg.output_model_name}_object.ckpt")
     checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, dump_object_callback],
         num_sanity_val_steps=1,
         logger=wandb_logger,
         log_every_n_steps=50,
         precision="16-mixed",
         enable_checkpointing=True,
         accelerator="gpu",
-        devices=4,
+        devices="auto",
         strategy="ddp",
+        max_steps=10,
     )
 
     manager = spt.Manager(trainer=trainer, module=world_model, data=data)
     manager()
-
-    if trainer.is_global_zero and hasattr(cfg, "dump_object") and cfg.dump_object:
-        output_path = Path(cache_dir, f"{cfg.output_model_name}_object.ckpt")
-        torch.save(world_model.to("cpu"), output_path)
-        print(f"Saved world model object to {output_path}")
 
 
 if __name__ == "__main__":
