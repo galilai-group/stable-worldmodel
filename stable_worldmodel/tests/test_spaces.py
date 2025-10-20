@@ -1780,6 +1780,29 @@ def test_dict_space_update_check_assertion():
     assert space.check()
 
 
+def test_dict_space_update_all():
+    """Test update method with 'all' key to resample all values."""
+    space = spaces.Dict(
+        {
+            "x": spaces.Discrete(10, init_value=5),
+            "y": spaces.Discrete(10, init_value=6),
+            "z": spaces.Discrete(10, init_value=7),
+        }
+    )
+
+    # Update with "all" should resample all keys
+    space.update({"all"})
+
+    # All values should be valid (within their spaces)
+    assert space.check()
+    assert space.contains(space.value)
+
+    # Verify the values are within their valid ranges
+    assert 0 <= space["x"].value < 10
+    assert 0 <= space["y"].value < 10
+    assert 0 <= space["z"].value < 10
+
+
 def test_dict_space_sampling_order_invalid_key(monkeypatch):
     """Test update method with invalid key raises ValueError."""
     space = spaces.Dict(
