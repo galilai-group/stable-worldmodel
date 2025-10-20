@@ -14,30 +14,6 @@ from gymnasium.vector.utils import (
 from stable_worldmodel.utils import get_in
 
 
-# class EnsureInfoKeysWrapper(gym.Wrapper):
-#     """Gymnasium wrapper to ensure certain keys are present in the info dict.
-#     If a key is missing, it is added with a default value.
-#     """
-
-#     def __init__(self, env, required_keys):
-#         super().__init__(env)
-#         self.required_keys = required_keys
-
-#     def step(self, action):
-#         obs, reward, terminated, truncated, info = self.env.step(action)
-#         for key in self.required_keys:
-#             if key not in info:
-#                 raise RuntimeError(f"Key {key} is not present in the env output")
-#         return obs, reward, terminated, truncated, info
-
-#     def reset(self, *args, **kwargs):
-#         obs, info = self.env.reset(*args, **kwargs)
-#         for key in self.required_keys:
-#             if key not in info:
-#                 raise RuntimeError(f"Key {key} is not present in the env output")
-#         return obs, info
-
-
 class EnsureInfoKeysWrapper(gym.Wrapper):
     """
     Ensure certain keys are present in the info dict.
@@ -84,7 +60,7 @@ class EnsureImageShape(gym.Wrapper):
     def __init__(self, env, image_key, image_shape):
         super().__init__(env)
         self.image_key = image_key
-        self.image_shape = image_shape
+        self.image_shape = image_shape  # (height, width)
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
@@ -215,7 +191,7 @@ class AddPixelsWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        pixels_shape: tuple[int, int] = (84, 84),
+        pixels_shape: tuple[int, int] = (84, 84),  # (height, width)
         torchvision_transform: Callable | None = None,
     ):
         super().__init__(env)
@@ -238,7 +214,8 @@ class AddPixelsWrapper(gym.Wrapper):
         def _process_img(img_array):
             # Convert to PIL Image for resizing
             pil_img = self.Image.fromarray(img_array)
-            pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
+            height, width = self.pixels_shape
+            pil_img = pil_img.resize((width, height), self.Image.BILINEAR)
             # Optionally apply torchvision transform
             if self.torchvision_transform is not None:
                 pixels = self.torchvision_transform(pil_img)
@@ -272,7 +249,7 @@ class ResizeGoalWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        pixels_shape: tuple[int, int] = (84, 84),
+        pixels_shape: tuple[int, int] = (84, 84),  # (height, width)
         torchvision_transform: Callable | None = None,
     ):
         super().__init__(env)
@@ -286,7 +263,8 @@ class ResizeGoalWrapper(gym.Wrapper):
     def _format(self, img):
         # Convert to PIL Image for resizing
         pil_img = self.Image.fromarray(img)
-        pil_img = pil_img.resize(self.pixels_shape, self.Image.BILINEAR)
+        height, width = self.pixels_shape
+        pil_img = pil_img.resize((width, height), self.Image.BILINEAR)
         # Optionally apply torchvision transform
         if self.torchvision_transform is not None:
             pixels = self.torchvision_transform(pil_img)
