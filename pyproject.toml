@@ -112,6 +112,8 @@ omit = [
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
+    "@runtime_checkable",
+    "class .*Protocol",
     "raise",
     "except",
     "register_parameter"
