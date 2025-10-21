@@ -1,3 +1,16 @@
+"""Data management and dataset utilities for Stable World Model.
+
+This module provides utilities for managing datasets, models, and world
+information. It includes functionality for loading multi-step trajectories,
+querying cached data, and retrieving metadata about environments.
+
+The module supports:
+    - Multi-step trajectory datasets with frame skipping
+    - Dataset and model cache management
+    - World environment introspection
+    - Gymnasium space metadata extraction
+"""
+
 import os
 import re
 import shutil
@@ -17,6 +30,23 @@ import stable_worldmodel as swm
 
 
 class StepsDataset(spt.data.HFDataset):
+    """Dataset for loading multi-step trajectory sequences.
+
+    This dataset loads sequences of consecutive steps from episodic data,
+    supporting frame skipping and automatic image loading from file paths.
+    Inherits from stable_pretraining's HFDataset.
+
+    Attributes:
+        data_dir (Path): Directory containing the dataset.
+        num_steps (int): Number of steps per sequence.
+        frameskip (int): Number of steps to skip between frames.
+        episodes (np.ndarray): Array of unique episode indices.
+        episode_slices (dict): Mapping from episode index to dataset indices.
+        cum_slices (np.ndarray): Cumulative sum of valid samples per episode.
+        idx_to_ep (np.ndarray): Mapping from sample index to episode.
+        img_cols (set): Set of column names containing image paths.
+    """
+
     def __init__(
         self,
         path,
@@ -26,6 +56,20 @@ class StepsDataset(spt.data.HFDataset):
         cache_dir=None,
         **kwargs,
     ):
+        """Initialize the StepsDataset.
+
+        Args:
+            path (str): Name or path of the dataset within cache directory.
+            *args: Additional arguments passed to parent class.
+            num_steps (int, optional): Number of consecutive steps per sample. Defaults to 2.
+            frameskip (int, optional): Number of steps between sampled frames. Defaults to 1.
+            cache_dir (str, optional): Cache directory path. Defaults to None (uses default).
+            **kwargs: Additional keyword arguments passed to parent class.
+
+        Raises:
+            AssertionError: If required columns are missing from dataset.
+            ValueError: If episodes are too short for the requested num_steps and frameskip.
+        """
         data_dir = Path(cache_dir or swm.data.get_cache_dir(), path)
         super().__init__(str(data_dir), *args, **kwargs)
 
@@ -58,7 +102,18 @@ class StepsDataset(spt.data.HFDataset):
         self.img_cols = self.infer_img_path_columns()
 
     def get_episode_slice(self, episode_idx, episode_indices):
-        """Return number of possible slices for a given episode index"""
+        """Get dataset indices for a specific episode.
+
+        Args:
+            episode_idx (int): Episode index to retrieve.
+            episode_indices (array-like): Array of episode indices for all steps.
+
+        Returns:
+            np.ndarray: Indices of steps belonging to the specified episode.
+
+        Raises:
+            ValueError: If episode is too short for num_steps and frameskip.
+        """
         indices = np.flatnonzero(episode_indices == episode_idx)
         if len(indices) <= (self.num_steps * self.frameskip):
             raise ValueError(
@@ -67,9 +122,24 @@ class StepsDataset(spt.data.HFDataset):
         return indices
 
     def __len__(self):
+        """Get total number of valid step sequences in the dataset.
+
+        Returns:
+            int: Number of valid sequences across all episodes.
+        """
         return int(self.cum_slices[-1])
 
     def __getitem__(self, idx):
+        """Get a multi-step sequence at the given index.
+
+        Args:
+            idx (int): Index of the sequence to retrieve.
+
+        Returns:
+            dict: Dictionary containing the sequence data with keys for
+                observations, actions, and other dataset fields. Images are
+                loaded as PIL Images and actions are reshaped to (num_steps, action_dim).
+        """
         ep = self.idx_to_ep[idx]
         episode_indices = self.episode_slices[ep]
         offset = idx - self.cum_slices[ep]
@@ -101,8 +171,14 @@ class StepsDataset(spt.data.HFDataset):
         return steps
 
     def infer_img_path_columns(self):
-        """Return list of columns that contain image file paths."""
+        """Infer which dataset columns contain image file paths.
 
+        Checks the first dataset element to identify string columns with
+        common image file extensions.
+
+        Returns:
+            set: Set of column names containing image file paths.
+        """
         IMG_EXTENSIONS = (".jpeg", ".png", ".jpg")
 
         img_cols = set()
@@ -119,6 +195,15 @@ class StepsDataset(spt.data.HFDataset):
 
 
 def is_image(x):
+    """Check if input is a valid image array.
+
+    Args:
+        x: Input to check.
+
+    Returns:
+        bool: True if x is a uint8 numpy array with shape (H, W, C) where
+            C is 1 (grayscale), 3 (RGB), or 4 (RGBA).
+    """
     return type(x) is np.ndarray and x.ndim == 3 and x.shape[2] in [1, 3, 4] and x.dtype == np.uint8
 
 
@@ -128,21 +213,50 @@ def is_image(x):
 
 
 class SpaceInfo(TypedDict, total=False):
+    """Type specification for Gymnasium space metadata.
+
+    Attributes:
+        shape: Dimensions of the space.
+        type: Class name of the space (e.g., 'Box', 'Discrete').
+        dtype: Data type of the space elements.
+        low: Lower bounds for Box spaces.
+        high: Upper bounds for Box spaces.
+        n: Number of discrete values for Discrete spaces.
+    """
+
     shape: tuple[int, ...]
     type: str
     dtype: str
     low: Any
     high: Any
-    n: int  # for discrete spaces
+    n: int
 
 
 class VariationInfo(TypedDict):
+    """Type specification for environment variation metadata.
+
+    Attributes:
+        has_variation: Whether the environment supports variations.
+        type: Class name of the variation space if it exists.
+        names: List of variation parameter names.
+    """
+
     has_variation: bool
     type: str | None
     names: list[str] | None
 
 
 class WorldInfo(TypedDict):
+    """Type specification for world environment information.
+
+    Attributes:
+        name: Name/ID of the world environment.
+        observation_space: Metadata about the observation space.
+        action_space: Metadata about the action space.
+        variation: Information about environment variations.
+        config: Additional configuration parameters.
+    """
+
     name: str
     observation_space: SpaceInfo
     action_space: SpaceInfo
@@ -151,18 +265,38 @@ class WorldInfo(TypedDict):
 
 
 def get_cache_dir() -> Path:
-    """Return the cache directory for stable_worldmodel."""
+    """Get the cache directory for stable_worldmodel data.
+
+    The cache directory can be customized via the STABLEWM_HOME environment
+    variable. If not set, defaults to ~/.stable_worldmodel.
+
+    Returns:
+        Path: Path to the cache directory. Directory is created if it doesn't exist.
+    """
     cache_dir = os.getenv("STABLEWM_HOME", os.path.expanduser("~/.stable_worldmodel"))
     os.makedirs(cache_dir, exist_ok=True)
     return Path(cache_dir)
 
 
 def list_datasets():
+    """List all cached datasets.
+
+    Returns:
+        list[str]: Names of all dataset directories in the cache.
+    """
     with os.scandir(get_cache_dir()) as entries:
         return [e.name for e in entries if e.is_dir()]
 
 
 def list_models():
+    """List all cached model checkpoints.
+
+    Searches for files matching the pattern `<name>_weights*.ckpt` or
+    `<name>_object.ckpt` and returns unique model names.
+
+    Returns:
+        list[str]: Sorted list of model names found in cache.
+    """
     pattern = re.compile(r"^(.*?)(?=_(?:weights(?:-[^.]*)?|object)\.ckpt$)", re.IGNORECASE)
 
     cache_dir = get_cache_dir()
@@ -177,6 +311,26 @@ def list_models():
 
 
 def dataset_info(name):
+    """Get metadata about a cached dataset.
+
+    Args:
+        name (str): Name of the dataset.
+
+    Returns:
+        dict: Dictionary containing dataset metadata including:
+            - name: Dataset name
+            - num_episodes: Number of unique episodes
+            - num_steps: Total number of steps
+            - columns: List of column names
+            - obs_shape: Shape of observation images
+            - action_shape: Shape of action vectors
+            - goal_shape: Shape of goal images
+            - variation: Dict with variation information
+
+    Raises:
+        ValueError: If dataset is not found in cache.
+        AssertionError: If required columns are missing.
+    """
     # check name exists
     if name not in list_datasets():
         raise ValueError(f"Dataset '{name}' not found. Available: {list_datasets()}")
@@ -213,10 +367,26 @@ def dataset_info(name):
 
 
 def list_worlds():
-    return sorted(swm.WORLDS)
+    """List all registered world environments.
+
+    Returns:
+        list[str]: Sorted list of world environment IDs.
+    """
+    return sorted(swm.envs.WORLDS)
 
 
 def _space_meta(space) -> SpaceInfo | dict[str, SpaceInfo] | list[SpaceInfo]:
+    """Extract metadata from a Gymnasium space.
+
+    Recursively processes Dict, Tuple, and Sequence spaces.
+
+    Args:
+        space: A Gymnasium space object.
+
+    Returns:
+        SpaceInfo | dict | list: Space metadata. Returns a dict for Dict spaces,
+            a list for Tuple/Sequence spaces, or a SpaceInfo dict for simple spaces.
+    """
     if isinstance(space, gym.spaces.Dict):
         return {k: _space_meta(v) for k, v in space.spaces.items()}
 
@@ -246,7 +416,23 @@ def world_info(
     image_shape: tuple[int, int] = (224, 224),
     render_mode: str = "rgb_array",
 ) -> WorldInfo:
-    if name not in swm.WORLDS:
+    """Get metadata about a world environment.
+
+    Creates a temporary world instance to extract observation space, action
+    space, and variation information. Results are cached for efficiency.
+
+    Args:
+        name: ID of the world environment.
+        image_shape: Desired image shape for rendering. Defaults to (224, 224).
+        render_mode: Rendering mode for the environment. Defaults to "rgb_array".
+
+    Returns:
+        WorldInfo: Dictionary containing world metadata including spaces and variations.
+
+    Raises:
+        ValueError: If world name is not registered.
+    """
+    if name not in swm.envs.WORLDS:
         raise ValueError(f"World '{name}' not found. Available: {', '.join(list_worlds())}")
     world = None
 
@@ -285,6 +471,14 @@ def world_info(
 
 
 def delete_dataset(name):
+    """Delete a cached dataset and its associated files.
+
+    Args:
+        name (str): Name of the dataset to delete.
+
+    Note:
+        Prints success or error messages to console.
+    """
     from datasets import logging as ds_logging
 
     ds_logging.set_verbosity_error()
@@ -310,6 +504,17 @@ def delete_dataset(name):
 
 
 def delete_model(name):
+    """Delete cached model checkpoint files.
+
+    Removes all checkpoint files (weights and object files) matching the
+    given model name.
+
+    Args:
+        name (str): Name of the model to delete.
+
+    Note:
+        Prints success or error messages to console for each file deleted.
+    """
     pattern = re.compile(rf"^{re.escape(name)}(?:_[^-].*)?\.ckpt$")
     cache_dir = get_cache_dir()
 
