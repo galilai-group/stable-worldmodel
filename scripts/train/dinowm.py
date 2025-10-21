@@ -106,7 +106,13 @@ def forward(self, batch, stage):
         batch["action"] = torch.nan_to_num(batch["action"], 0.0)
 
     # Encode all timesteps into latent embeddings
-    batch = self.model.encode(batch, target="embed", pixels_key="pixels", proprio_key=proprio_key, action_key="action")
+    batch = self.model.encode(
+        batch,
+        target="embed",
+        pixels_key="pixels",
+        proprio_key=proprio_key,
+        action_key="action",
+    )
 
     # Use history to predict next states
     embedding = batch["embed"][:, :-1, :, :]  # (B, T-1, patches, dim)
@@ -217,7 +223,7 @@ def setup_pl_logger(cfg):
 class ModelObjectCallBack(Callback):
     """Callback to pickle model after each epoch."""
 
-    def __init__(self, dirpath, filename="model_object.ckpt", epoch_interval: int = 1):
+    def __init__(self, dirpath, filename="model_object", epoch_interval: int = 1):
         super().__init__()
         self.dirpath = dirpath
         self.filename = filename
@@ -228,10 +234,12 @@ class ModelObjectCallBack(Callback):
 
         if trainer.is_global_zero:
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
-                output_path = Path(self.dirpath, f"{self.filename}_epoch_{trainer.current_epoch + 1}")
-                torch.save(pl_module.to("cpu"), output_path)
+                output_path = Path(
+                    self.dirpath,
+                    f"{self.filename}_epoch_{trainer.current_epoch + 1}.ckpt",
+                )
+                torch.save(pl_module, output_path)
                 logging.info(f"Saved world model object to {output_path}")
-                pl_module.to(trainer.strategy.root_device)
 
 
 # ============================================================================
@@ -247,7 +255,7 @@ def run(cfg):
 
     cache_dir = swm.data.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(
-        dirpath=cache_dir, filename=f"{cfg.output_model_name}_object.ckpt", epoch_interval=10
+        dirpath=cache_dir, filename=f"{cfg.output_model_name}_object", epoch_interval=1
     )
     checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
