@@ -38,52 +38,7 @@ from ogbench.manipspace.envs.manipspace_env import ManipSpaceEnv
 
 import stable_worldmodel as swm
 
-
-def perturb_camera_angle(xyaxis, deg_dif=[3, 3]):
-    """Perturb camera orientation by applying yaw and pitch rotations.
-
-    Applies random rotations to the camera's coordinate frame defined by its
-    x and y axes. The perturbation helps create visual variations during training
-    to improve policy robustness.
-
-    Args:
-        xyaxis (array-like): Six-element array representing the camera's coordinate
-            frame in MuJoCo format. First three elements are the x-axis direction,
-            last three elements are the y-axis direction.
-        deg_dif (list, optional): Two-element list specifying [yaw, pitch] rotation
-            angles in degrees. Defaults to [3, 3].
-
-    Returns:
-        tuple: Six-element tuple containing the perturbed camera axes in MuJoCo
-            format (xaxis_new, yaxis_new).
-
-    Note:
-        The z-axis is computed from the cross product of x and y axes and used
-        to construct proper rotation matrices.
-    """
-    xaxis = np.array(xyaxis[:3])
-    yaxis = np.array(xyaxis[3:])
-
-    # Compute z-axis
-    zaxis = np.cross(xaxis, yaxis)
-    zaxis /= np.linalg.norm(zaxis)
-
-    # random rotation
-    yaw = np.deg2rad(deg_dif[0])
-    pitch = np.deg2rad(deg_dif[1])
-
-    # rotation matrices
-    R_yaw = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
-    R_pitch = np.array([[1, 0, 0], [0, np.cos(pitch), -np.sin(pitch)], [0, np.sin(pitch), np.cos(pitch)]])
-
-    # Combine and rotate the basis
-    R = R_pitch @ R_yaw
-    xaxis_new = R @ xaxis
-    yaxis_new = R @ yaxis
-
-    xyaxes_new = tuple(np.concatenate([xaxis_new, yaxis_new]))  # mujoco format
-
-    return xyaxes_new
+from .utils import perturb_camera_angle
 
 
 class CubeEnv(ManipSpaceEnv):
@@ -191,8 +146,36 @@ class CubeEnv(ManipSpaceEnv):
         super().__init__(*args, height=height, width=width, **kwargs)
 
         self._ob_type = ob_type
-        self._cube_colors = np.stack(list(self._colors.values()))[:, :3]
+
+        # Define constants.
+        self._cube_colors = np.array(
+            [
+                self._colors["red"],
+                self._colors["blue"],
+                self._colors["orange"],
+                self._colors["green"],
+                self._colors["purple"],
+                self._colors["yellow"],
+                self._colors["magenta"],
+                self._colors["gray"],
+            ]
+        )
+        self._cube_success_colors = np.array(
+            [
+                self._colors["lightred"],
+                self._colors["lightblue"],
+                self._colors["lightorange"],
+                self._colors["lightgreen"],
+                self._colors["lightpurple"],
+                self._colors["lightyellow"],
+                self._colors["lightmagenta"],
+                self._colors["white"],
+            ]
+        )
+
+        # Target info.
         self._target_task = "cube"
+        # The target cube position is stored in the mocap object.
         self._target_block = 0
 
         self.variation_space = swm.spaces.Dict(
@@ -205,7 +188,7 @@ class CubeEnv(ManipSpaceEnv):
                             high=1.0,
                             shape=(self._num_cubes, 3),
                             dtype=np.float64,
-                            init_value=self._cube_colors[: self._num_cubes].copy(),
+                            init_value=self._cube_colors[: self._num_cubes, :3].copy(),
                         ),
                         "size": swm.spaces.Box(
                             low=0.01,

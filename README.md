@@ -1,8 +1,8 @@
 <div align="center">
 
- # stable-worldmodel
- 
-*World Models Research Made Simple*
+# stable-worldmodel
+
+_World Models Research Made Simple_
 
 </div>
 
@@ -67,9 +67,9 @@ This includes testing tools (`pytest`, `coverage`) and documentation generators 
 ```
 stable_worldmodel/
 ├── envs/                   # Gymnasium environments
-│   ├── pusht.py            
+│   ├── pusht.py
 │   ├── simple_point_maze.py
-│   ├── two_room.py         
+│   ├── two_room.py
 │   └── ogbench_cube.py
 ├── solver/                 # Planning algorithms
 │   ├── cem.py               # Cross-Entropy Method
@@ -80,11 +80,11 @@ stable_worldmodel/
 │   ├── dinowm.py            # DINO World Model
 │   ├── dreamer.py           # Dreamer
 │   └── tdmpc.py             # Temporal Difference MPC
-├── policy.py       
+├── policy.py
 ├── spaces.py               # Extended Gymnasium spaces
-├── world.py        
-├── data.py         
-└── utils.py     
+├── world.py
+├── data.py
+└── utils.py
 ```
 
 ## Testing

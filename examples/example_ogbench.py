@@ -11,8 +11,9 @@ if __name__ == "__main__":
     ######################
 
     world = swm.World(
-        "swm/OGBCube-v0",
-        num_envs=2,
+        # "swm/OGBCube-v0",
+        "swm/OGBScene-v0",
+        num_envs=5,
         image_shape=(224, 224),
         max_episode_steps=200,
         env_type="double",
@@ -40,14 +41,15 @@ if __name__ == "__main__":
         "./",
         seed=2347,
         options={
-            "variation": (
-                "cube.color",
-                "cube.size",
-                "agent.color",
-                "floor.color",
-                "camera.angle_delta",
-                "light.intensity",
-            )
+            # "variation": (
+            #     "cube.color",
+            #     "cube.size",
+            #     "agent.color",
+            #     "floor.color",
+            #     "camera.angle_delta",
+            #     "light.intensity",
+            # )
+            "variation": ("all",)
         },
         viewname="pixels.front_pixels",
     )
