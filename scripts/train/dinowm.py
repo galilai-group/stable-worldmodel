@@ -59,7 +59,11 @@ def get_data(cfg):
 
     # Apply transforms to all steps
     transform = spt.data.transforms.Compose(
-        *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
+        *[
+            get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size)
+            for col in ["pixels", "goal"]
+            for i in range(cfg.n_steps)
+        ],
         spt.data.transforms.WrapTorchTransform(
             norm_action_transform,
             source="action",
