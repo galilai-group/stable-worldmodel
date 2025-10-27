@@ -29,7 +29,6 @@ class PushT(gym.Env):
     def __init__(
         self,
         block_cog=None,
-        damping=None,
         render_action=False,
         resolution=224,
         with_target=True,
@@ -135,6 +134,27 @@ class PushT(gym.Env):
                             shape=(2,),
                             dtype=np.float64,
                         ),
+                        "mass": swm.spaces.Box(
+                            low=0.1,
+                            high=10.0,
+                            init_value=1.0,
+                            shape=(),
+                            dtype=np.float64,
+                        ),
+                        "friction": swm.spaces.Box(
+                            low=0.0,
+                            high=1.0,
+                            init_value=1.0,
+                            shape=(),
+                            dtype=np.float64,
+                        ),
+                        "damping": swm.spaces.Box(
+                            low=0.0,
+                            high=1.0,
+                            init_value=0.9,
+                            shape=(),
+                            dtype=np.float64,
+                        ),
                     }
                 ),
                 "goal": swm.spaces.Dict(
@@ -177,7 +197,6 @@ class PushT(gym.Env):
         # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
 
         self.block_cog = block_cog
-        self.damping = damping
         self.render_action = render_action
         self.render_mode = render_mode
 
@@ -228,8 +247,6 @@ class PushT(gym.Env):
 
         if self.block_cog is not None:
             self.block.center_of_gravity = self.block_cog
-        if self.damping is not None:
-            self.space.damping = self.damping
 
         ### get the state
         goal_state = np.concatenate(
@@ -480,6 +497,7 @@ class PushT(gym.Env):
             "scale": self.variation_space["agent"]["scale"].value,
             "color": self.variation_space["agent"]["color"].value.tolist(),
             "shape": self.shapes[self.variation_space["agent"]["shape"].value],
+            "kinematic": True,
         }
 
         self.agent = self.add_shape(**agent_params)
@@ -489,6 +507,9 @@ class PushT(gym.Env):
         block_params = {
             "position": self.variation_space["block"]["start_position"].value.tolist(),
             "angle": self.variation_space["block"]["angle"].value,
+            "mass": self.variation_space["block"]["mass"].value,
+            "friction": self.variation_space["block"]["friction"].value,
+            "damping": self.variation_space["block"]["damping"].value,
             "scale": self.variation_space["block"]["scale"].value,
             "color": self.variation_space["block"]["color"].value.tolist(),
             "shape": self.shapes[self.variation_space["block"]["shape"].value],
@@ -519,23 +540,32 @@ class PushT(gym.Env):
         self,
         position,
         angle=0,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=1,
         color="RoyalBlue",
+        kinematic=False,
     ):
         base_radius = 0.375
-        body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        inertia = pymunk.moment_for_circle(mass, 0, base_radius * scale)
+        body = pymunk.Body(mass, inertia, body_type=pymunk.Body.KINEMATIC if kinematic else pymunk.Body.DYNAMIC)
         body.position = position
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         shape = pymunk.Circle(body, base_radius * scale)
         shape.color = pygame.Color(color)
         self.space.add(body, shape)
         return body
 
-    def add_box(self, position, height, width, color="LightSlateGray", scale=1, angle=0):
-        mass = 1
+    def add_box(
+        self, position, height, width, color="LightSlateGray", scale=1, angle=0, mass=1, friction=1, damping=0.9
+    ):
         inertia = pymunk.moment_for_box(mass, (height * scale, width * scale))
         body = pymunk.Body(mass, inertia)
         body.position = position
+        body.friction = friction
+        body.damping = damping
         shape = pymunk.Poly.create_box(body, (height * scale, width * scale))
         shape.color = pygame.Color(color)
         self.space.add(body, shape)
@@ -545,12 +575,14 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
         scale = 30
-        mass = 1
         length = 4
         vertices1 = [
             (-length * scale / 2, scale),
@@ -576,7 +608,8 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1, shape2)
         return body
 
@@ -584,11 +617,13 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
-        mass = 1
         vertices1 = [
             (-3 * scale / 2, scale),
             (3 * scale / 2, scale),
@@ -613,7 +648,8 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1, shape2)
         return body
 
@@ -621,6 +657,9 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
@@ -660,7 +699,8 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity + shape3.center_of_gravity) / 3
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1, shape2, shape3)
         return body
 
@@ -668,11 +708,13 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
-        mass = 1
         length = 2
         vertices1 = [
             (0, 0),
@@ -698,7 +740,8 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1, shape2)
         return body
 
@@ -706,11 +749,13 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
-        mass = 1
         length = 2
         vertices1 = [
             (0, 0),
@@ -736,7 +781,8 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1, shape2)
         return body
 
@@ -744,11 +790,13 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
-        mass = 1
         vertices1 = [
             (-scale, -scale),
             (-scale, scale),
@@ -763,7 +811,8 @@ class PushT(gym.Env):
         body.center_of_gravity = shape1.center_of_gravity
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1)
         return body
 
@@ -771,11 +820,13 @@ class PushT(gym.Env):
         self,
         position,
         angle,
+        mass=1,
+        friction=1,
+        damping=0.9,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
-        mass = 1
         vertices1 = [
             (-scale / 2, -scale * 2),
             (-scale / 2, scale * 2),
@@ -790,7 +841,8 @@ class PushT(gym.Env):
         body.center_of_gravity = shape1.center_of_gravity
         body.position = position
         body.angle = angle
-        body.friction = 1
+        body.friction = friction
+        body.damping = damping
         self.space.add(body, shape1)
         return body
 
