@@ -1,5 +1,6 @@
 if __name__ == "__main__":
     import datasets
+    import torch
     from sklearn import preprocessing
     from torchvision.transforms import v2 as transforms
 
@@ -57,7 +58,8 @@ if __name__ == "__main__":
             [
                 transforms.Resize(size=224),
                 transforms.CenterCrop(size=224),
-                transforms.ToTensor(),
+                transforms.ToImage(),
+                transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             ]
         )
