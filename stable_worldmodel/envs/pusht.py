@@ -463,32 +463,37 @@ class PushT(gym.Env):
         if isinstance(state, np.ndarray):
             state = state.tolist()
 
-        pos_agent = state[:2]
-        pos_block = state[2:4]
-        rot_block = state[4]
+        self.agent.position = state[:2]
+        self.block.angle = state[4]
+        self.block.position = state[2:4]
 
-        self.agent.position = pos_agent
-        self.block.angle = rot_block
-        self.block.position = pos_block
+        # Ensure shape caches are up to date
+        self.space.reindex_shapes_for_body(self.agent)
+        self.space.reindex_shapes_for_body(self.block)
 
         min_penetration = 0.0
         contacts = []
 
+        # Check for collisions between agent and block shapes
         for shape_a in self.agent.shapes:
-            for shape_b in self.block.shapes:
-                col_info = shape_a.shapes_collide(shape_b)
-                for p in col_info.points:
-                    penetration = -p.distance  # (since distance < 0 if overlapping)
-                    if penetration > tol:
-                        contacts.append((col_info.normal, penetration))
-                        min_penetration = max(min_penetration, penetration)
+            # Query for shapes colliding with shape_a
+            query_results = self.space.shape_query(shape_a)
+
+            for query_info in query_results:
+                shape_b = query_info.shape
+                # Check if the colliding shape belongs to the block
+                if shape_b.body == self.block:
+                    # If there's any contact points, we have a collision
+                    if query_info.contact_point_set.points:
+                        # Calculate penetration from contact points
+                        for point in query_info.contact_point_set.points:
+                            penetration = -point.distance  # distance is negative when overlapping
+                            if penetration > tol:
+                                contacts.append((query_info.contact_point_set.normal, penetration))
+                                min_penetration = max(min_penetration, penetration)
 
         valid = len(contacts) == 0
-        return {
-            "valid": valid,
-            "min_penetration": min_penetration,
-            "contacts": contacts,
-        }
+        return {"valid": valid, "min_penetration": min_penetration, "contacts": contacts}
 
     def _get_closest_valid_state(self, state, max_tries=100, tol=1e-6):
         """Project state to the nearest non-colliding configuration."""
