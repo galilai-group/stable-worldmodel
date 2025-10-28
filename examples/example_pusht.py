@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # ##  Data Collection  ##
     # #######################
 
-    world.set_policy(swm.policy.RandomPolicy())
+    world.set_policy(swm.policy.RandomPolicy(seed=2347))
     world.record_dataset(
         "example-pusht",
         episodes=10,
