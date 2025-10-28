@@ -18,7 +18,7 @@ from .utils import DrawOptions
 DEFAULT_VARIATIONS = (
     "agent.start_position",
     "block.start_position",
-    "block.angle",
+    "block.start_angle",
     "goal.block.position",
     "goal.block.angle",
     "goal.agent.position",
@@ -92,7 +92,7 @@ class PushT(gym.Env):
                             dtype=np.float32,
                         ),
                         "shape": swm.spaces.Discrete(len(self.shapes), start=0, init_value=0),
-                        "angle": swm.spaces.Box(
+                        "start_angle": swm.spaces.Box(
                             low=-2 * np.pi,
                             high=2 * np.pi,
                             init_value=0.0,
@@ -106,7 +106,7 @@ class PushT(gym.Env):
                             shape=(2,),
                             dtype=np.float64,
                         ),
-                        "velocity": swm.spaces.Box(
+                        "start_velocity": swm.spaces.Box(
                             low=0,
                             high=ws,
                             init_value=np.array((0.0, 0.0), dtype=np.float64),
@@ -128,7 +128,7 @@ class PushT(gym.Env):
                             dtype=np.float32,
                         ),
                         "shape": swm.spaces.Discrete(len(self.shapes) - 1, start=1, init_value=2),
-                        "angle": swm.spaces.Box(
+                        "start_angle": swm.spaces.Box(
                             low=-2 * np.pi,
                             high=2 * np.pi,
                             init_value=0.0,
@@ -314,8 +314,8 @@ class PushT(gym.Env):
             [
                 self.variation_space["agent"]["start_position"].value.tolist(),
                 self.variation_space["block"]["start_position"].value.tolist(),
-                [self.variation_space["block"]["angle"].value],
-                self.variation_space["agent"]["velocity"].value.tolist(),
+                [self.variation_space["block"]["start_angle"].value],
+                self.variation_space["agent"]["start_velocity"].value.tolist(),
             ]
         )
 
@@ -593,7 +593,7 @@ class PushT(gym.Env):
 
         agent_params = {
             "position": self.variation_space["agent"]["start_position"].value.tolist(),
-            "angle": self.variation_space["agent"]["angle"].value,
+            "angle": self.variation_space["agent"]["start_angle"].value,
             "scale": self.variation_space["agent"]["scale"].value,
             "color": self.variation_space["agent"]["color"].value.tolist(),
             "shape": self.shapes[self.variation_space["agent"]["shape"].value],
@@ -606,7 +606,7 @@ class PushT(gym.Env):
 
         block_params = {
             "position": self.variation_space["block"]["start_position"].value.tolist(),
-            "angle": self.variation_space["block"]["angle"].value,
+            "angle": self.variation_space["block"]["start_angle"].value,
             "mass": self.variation_space["block"]["mass"].value,
             "friction": self.variation_space["block"]["friction"].value,
             "damping": self.variation_space["block"]["damping"].value,
