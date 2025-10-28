@@ -128,8 +128,8 @@ class PushT(gym.Env):
                             dtype=np.float64,
                         ),
                         "start_position": swm.spaces.Box(
-                            low=100,
-                            high=400,
+                            low=150,
+                            high=350,
                             init_value=np.array((400, 100), dtype=np.float64),
                             shape=(2,),
                             dtype=np.float64,
