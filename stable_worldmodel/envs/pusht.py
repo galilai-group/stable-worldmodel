@@ -523,9 +523,6 @@ class PushT(gym.Env):
         self.block.angle = rot_block
         self.block.position = pos_block
 
-        # Run physics to take effect
-        self.space.step(self.dt)
-
     def _setup(self):
         ## create the space with physics
         self.space = pymunk.Space()
