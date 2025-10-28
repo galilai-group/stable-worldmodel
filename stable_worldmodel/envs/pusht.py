@@ -159,29 +159,69 @@ class PushT(gym.Env):
                 ),
                 "goal": swm.spaces.Dict(
                     {
-                        "color": swm.spaces.RGBBox(
-                            init_value=np.array(pygame.Color("LightGreen")[:3], dtype=np.uint8)
+                        "block": swm.spaces.Dict(
+                            {
+                                "color": swm.spaces.RGBBox(
+                                    init_value=np.array(pygame.Color("LightGreen")[:3], dtype=np.uint8)
+                                ),
+                                "scale": swm.spaces.Box(
+                                    low=20,
+                                    high=60,
+                                    init_value=40,
+                                    shape=(),
+                                    dtype=np.float32,
+                                ),
+                                "angle": swm.spaces.Box(
+                                    low=-2 * np.pi,
+                                    high=2 * np.pi,
+                                    init_value=np.pi / 4,
+                                    shape=(),
+                                    dtype=np.float64,
+                                ),
+                                "position": swm.spaces.Box(
+                                    low=50,
+                                    high=450,
+                                    init_value=np.array([256, 256], dtype=np.float64),
+                                    shape=(2,),
+                                    dtype=np.float64,
+                                ),
+                            }
                         ),
-                        "scale": swm.spaces.Box(
-                            low=20,
-                            high=60,
-                            init_value=40,
-                            shape=(),
-                            dtype=np.float32,
-                        ),
-                        "angle": swm.spaces.Box(
-                            low=-2 * np.pi,
-                            high=2 * np.pi,
-                            init_value=np.pi / 4,
-                            shape=(),
-                            dtype=np.float64,
-                        ),
-                        "position": swm.spaces.Box(
-                            low=50,
-                            high=450,
-                            init_value=np.array([256, 256], dtype=np.float64),
-                            shape=(2,),
-                            dtype=np.float64,
+                        "agent": swm.spaces.Dict(
+                            {
+                                "color": swm.spaces.RGBBox(
+                                    init_value=np.array(pygame.Color("RoyalBlue")[:3], dtype=np.uint8)
+                                ),
+                                "scale": swm.spaces.Box(
+                                    low=20,
+                                    high=60,
+                                    init_value=40,
+                                    shape=(),
+                                    dtype=np.float32,
+                                ),
+                                "shape": swm.spaces.Discrete(len(self.shapes), start=0, init_value=0),
+                                "angle": swm.spaces.Box(
+                                    low=-2 * np.pi,
+                                    high=2 * np.pi,
+                                    init_value=0.0,
+                                    shape=(),
+                                    dtype=np.float64,
+                                ),
+                                "position": swm.spaces.Box(
+                                    low=50,
+                                    high=450,
+                                    init_value=np.array((256, 400), dtype=np.float64),
+                                    shape=(2,),
+                                    dtype=np.float64,
+                                ),
+                                "velocity": swm.spaces.Box(
+                                    low=0,
+                                    high=ws,
+                                    init_value=np.array((0.0, 0.0), dtype=np.float64),
+                                    shape=(2,),
+                                    dtype=np.float64,
+                                ),
+                            }
                         ),
                     }
                 ),
@@ -193,8 +233,6 @@ class PushT(gym.Env):
             },
             sampling_order=["background", "goal", "block", "agent"],
         )
-
-        # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
 
         self.block_cog = block_cog
         self.render_action = render_action
@@ -251,10 +289,10 @@ class PushT(gym.Env):
         ### get the state
         goal_state = np.concatenate(
             [
-                self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
-                self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
-                [self.variation_space["block"]["angle"].sample(set_value=False)],
-                self.variation_space["agent"]["velocity"].value.tolist(),
+                self.variation_space["goal"]["agent"]["position"].value.tolist(),
+                self.variation_space["goal"]["block"]["position"].value.tolist(),
+                [self.variation_space["goal"]["block"]["angle"].value],
+                self.variation_space["goal"]["agent"]["velocity"].value.tolist(),
             ]
         )
 
@@ -305,8 +343,6 @@ class PushT(gym.Env):
 
         # make the observation
         state = self._get_obs()
-
-        # print(state)
 
         proprio = np.concatenate((state[:2], state[-2:]))
         observation = {"proprio": proprio, "state": state}
@@ -406,7 +442,7 @@ class PushT(gym.Env):
                 goal_points += [goal_points[0]]
                 pygame.draw.polygon(
                     canvas,
-                    self.variation_space["goal"]["color"].value,
+                    self.variation_space["goal"]["block"]["color"].value,
                     goal_points,
                 )
 
@@ -575,8 +611,8 @@ class PushT(gym.Env):
 
         self.goal_pose = np.concatenate(
             [
-                self.variation_space["goal"]["position"].value,
-                [self.variation_space["goal"]["angle"].value],
+                self.variation_space["goal"]["block"]["position"].value,
+                [self.variation_space["goal"]["block"]["angle"].value],
             ]
         )
 
