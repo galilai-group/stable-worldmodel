@@ -15,7 +15,15 @@ import stable_worldmodel as swm
 from .utils import DrawOptions
 
 
-DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
+DEFAULT_VARIATIONS = (
+    "agent.start_position",
+    "block.start_position",
+    "block.angle",
+    "goal.block.position",
+    "goal.block.angle",
+    "goal.agent.position",
+    "goal.agent.velocity",
+)
 
 
 class PushT(gym.Env):
@@ -179,8 +187,8 @@ class PushT(gym.Env):
                                     dtype=np.float64,
                                 ),
                                 "position": swm.spaces.Box(
-                                    low=50,
-                                    high=450,
+                                    low=150,
+                                    high=350,
                                     init_value=np.array([256, 256], dtype=np.float64),
                                     shape=(2,),
                                     dtype=np.float64,
