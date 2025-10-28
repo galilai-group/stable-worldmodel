@@ -259,8 +259,8 @@ class PushT(gym.Env):
         )
 
         ### generate goal
-        self.goal_state = goal_state
-        self._set_state(goal_state)
+        self.goal_state = self._get_closest_valid_state(goal_state)
+        self._set_state(self.goal_state)
         self._goal = self.render()
 
         # restore original pos
@@ -273,6 +273,7 @@ class PushT(gym.Env):
             ]
         )
 
+        state = self._get_closest_valid_state(state)
         self._set_state(state)
 
         #### OBS
@@ -456,6 +457,59 @@ class PushT(gym.Env):
 
     def _handle_collision(self, arbiter, space, data):
         self.n_contact_points += len(arbiter.contact_point_set.points)
+
+    def _is_state_valid(self, state, tol=1e-6):
+        """Check if agent and block are non-colliding within a tolerance."""
+        if isinstance(state, np.ndarray):
+            state = state.tolist()
+
+        pos_agent = state[:2]
+        pos_block = state[2:4]
+        rot_block = state[4]
+
+        self.agent.position = pos_agent
+        self.block.angle = rot_block
+        self.block.position = pos_block
+
+        min_penetration = 0.0
+        contacts = []
+
+        for shape_a in self.agent.shapes:
+            for shape_b in self.block.shapes:
+                col_info = shape_a.shapes_collide(shape_b)
+                for p in col_info.points:
+                    penetration = -p.distance  # (since distance < 0 if overlapping)
+                    if penetration > tol:
+                        contacts.append((col_info.normal, penetration))
+                        min_penetration = max(min_penetration, penetration)
+
+        valid = len(contacts) == 0
+        return {
+            "valid": valid,
+            "min_penetration": min_penetration,
+            "contacts": contacts,
+        }
+
+    def _get_closest_valid_state(self, state, max_tries=100, tol=1e-6):
+        """Project state to the nearest non-colliding configuration."""
+        state = np.array(state, dtype=float)
+
+        for _ in range(max_tries):
+            info = self._is_state_valid(state, tol=tol)
+            if info["valid"]:
+                return state
+
+            # Compute average correction vector from all contacts
+            correction = np.zeros(2)
+            for normal, penetration in info["contacts"]:
+                correction += normal * penetration / 2
+
+            # Move agent and block apart symmetrically
+            state[:2] -= correction
+            state[2:4] += correction
+
+        logging.warning("Could not find a valid state close to the given state.")
+        return state
 
     def _set_state(self, state):
         if isinstance(state, np.ndarray):
