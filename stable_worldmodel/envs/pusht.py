@@ -36,7 +36,6 @@ class PushT(gym.Env):
 
     def __init__(
         self,
-        block_cog=None,
         render_action=False,
         resolution=224,
         with_target=True,
@@ -242,7 +241,6 @@ class PushT(gym.Env):
             sampling_order=["background", "goal", "block", "agent"],
         )
 
-        self.block_cog = block_cog
         self.render_action = render_action
         self.render_mode = render_mode
 
@@ -321,9 +319,6 @@ class PushT(gym.Env):
 
         state = self._get_closest_valid_state(state)
         self._set_state(state)
-
-        if self.block_cog is not None:
-            self.block.center_of_gravity = self.block_cog
 
         #### OBS
         state = self._get_obs()
