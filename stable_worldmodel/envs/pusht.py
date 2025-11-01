@@ -506,7 +506,7 @@ class PushT(gym.Env):
 
     def _set_goal_state(self, goal_state):
         self.goal_state = goal_state[:5]
-        
+
     def _is_state_valid(self, state, tol=1e-6):
         """Check if agent and block are non-colliding within a tolerance."""
         if isinstance(state, np.ndarray):
