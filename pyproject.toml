@@ -43,10 +43,8 @@ swm = "stable_worldmodel.cli:app"
 [tool.setuptools]
 packages = ["stable_worldmodel"]
 
-[tool.setuptools_scm]
-tag_regex = "^v(?P<version>.+)$"
-write_to = "stable_pretraining/_version.py"
-write_to_template = "version = \"{version}\"\n"
+[tool.setuptools.dynamic]
+version = {attr = "stable_worldmodel.__version__"}
 
 [project.optional-dependencies]
 # Development tools
