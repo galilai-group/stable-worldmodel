@@ -811,3 +811,16 @@ class Dict(spaces.Dict):
                     raise ValueError(f"Key {v} not found in Dict space")
 
         assert self.check(debug=True), "Values must be within space!"
+
+    def to_str(self):
+        def _tree(d, indent=0):
+            lines = []
+            for k, v in d.items():
+                if isinstance(v, (dict | self.__class__ | spaces.Dict)):
+                    lines.append("    " * indent + f"{k}:")
+                    lines.append(_tree(v, indent + 1))
+                else:
+                    lines.append("    " * indent + f"{k}: {v}")
+            return "\n".join(lines)
+
+        return _tree(self.spaces)

@@ -194,11 +194,11 @@ class World:
             logging.info(f"{self.envs.action_space}")
 
             logging.info("👁️ 👁️ 👁️ Observation space 👁️ 👁️ 👁️")
-            logging.info(f"{self.envs.observation_space}")
+            logging.info(f"{str(self.envs.observation_space)}")
 
             if self.envs.variation_space is not None:
                 logging.info("⚗️ ⚗️ ⚗️ Variation space ⚗️ ⚗️ ⚗️")
-                print(self.envs.variation_space)
+                print(self.single_variation_space.to_str())
             else:
                 logging.warning("No variation space provided!")
 
