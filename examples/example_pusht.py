@@ -32,11 +32,11 @@ if __name__ == "__main__":
         options=None,
     )
 
-    world.record_video_from_dataset(
-        "./",
-        "example-pusht",
-        episode_idx=[0, 1],
-    )
+    # world.record_video_from_dataset(
+    #     "./",
+    #     "example-pusht",
+    #     episode_idx=[0, 1],
+    # )
 
     ################
     ##  Pretrain  ##
@@ -96,12 +96,14 @@ if __name__ == "__main__":
 
     world.set_policy(policy)
 
-    metrics = world.evaluate_from_dataset(
-        "example-pusht",
-        start_steps=[135],
-        episodes_idx=[0],
-        num_steps=25,
-        callables={"_set_state": "state", "_set_goal_state": "goal_state"},
-    )
+    results = world.evaluate(episodes=20, seed=42, dump_every=10)
 
-    print("Evaluation Metrics: ", metrics)
+    # metrics = world.evaluate_from_dataset(
+    #     "example-pusht",
+    #     start_steps=[135],
+    #     episodes_idx=[0],
+    #     num_steps=25,
+    #     callables={"_set_state": "state", "_set_goal_state": "goal_state"},
+    # )
+
+    print("Evaluation results: ", results)

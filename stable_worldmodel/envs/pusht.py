@@ -372,8 +372,6 @@ class PushT(gym.Env):
         success = pos_diff < 20 and angle_diff < np.pi / 9
         state_dist = np.linalg.norm(goal_state[:5] - cur_state[:5])
 
-        print(pos_diff, angle_diff, success, state_dist)
-
         return success, state_dist
 
     def render(self):

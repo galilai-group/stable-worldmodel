@@ -10,7 +10,7 @@ The World class handles:
     - Policy attachment and execution
     - Episode data collection with automatic sharding
     - Video recording from live rollouts or stored datasets
-    - Policy evaluation with comprehensive metrics
+    - Policy evaluation with comprehensive results
     - Visual domain randomization through variation spaces
 
 Example:
@@ -32,8 +32,8 @@ Example:
         world.set_policy(policy)
 
         # Evaluate the policy
-        metrics = world.evaluate(episodes=100, seed=42)
-        print(f"Success rate: {metrics['success_rate']:.2f}%")
+        results = world.evaluate(episodes=100, seed=42)
+        print(f"Success rate: {results['success_rate']:.2f}%")
 
     Data collection example::
 
@@ -52,6 +52,9 @@ Todo:
    https://gymnasium.farama.org/
 """
 
+import hashlib
+import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -739,16 +742,16 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def evaluate(self, episodes=10, eval_keys=None, seed=None, options=None):
-        """Evaluate the current policy over multiple episodes and return comprehensive metrics.
+    def evaluate(self, episodes=10, eval_keys=None, seed=None, options=None, dump_every=-1):
+        """Evaluate the current policy over multiple episodes and return comprehensive results.
 
         Runs the attached policy for a specified number of episodes, tracking success
-        rates and optionally other metrics from environment info. Handles episode
+        rates and optionally other results from environment info. Handles episode
         boundaries and ensures reproducibility through seeding.
 
         Args:
             episodes (int, optional): Total number of episodes to evaluate. More
-                episodes provide more statistically reliable metrics. Defaults to 10.
+                episodes provide more statistically reliable results. Defaults to 10.
             eval_keys (list of str, optional): Additional info keys to track across
                 episodes. Must be keys present in self.infos (e.g., 'reward_total',
                 'steps_to_success'). Defaults to None (track only success rate).
@@ -756,9 +759,10 @@ class World:
                 episode gets an incremental offset. Defaults to None (non-deterministic).
             options (dict, optional): Reset options passed to environments (e.g.,
                 task selection, variation settings). Defaults to None.
+            dump_every (int, optional): Frequency of logging intermediate results into tmp file. Defaults to -1 (disabled).
 
         Returns:
-            dict: Dictionary containing evaluation metrics:
+            dict: Dictionary containing evaluation results:
                 - 'success_rate' (float): Percentage of successful episodes (0-100)
                 - 'episode_successes' (ndarray): Boolean array of episode outcomes
                 - 'seeds' (ndarray): Random seeds used for each episode
@@ -778,49 +782,78 @@ class World:
         Example:
             Basic evaluation::
 
-                metrics = world.evaluate(episodes=100, seed=42)
-                print(f"Success: {metrics['success_rate']:.1f}%")
+                results = world.evaluate(episodes=100, seed=42)
+                print(f"Success: {results['success_rate']:.1f}%")
 
-            Evaluate with additional metrics::
+            Evaluate with additional results::
 
-                metrics = world.evaluate(
+                results = world.evaluate(
                     episodes=100,
                     eval_keys=['reward_total', 'episode_length'],
                     seed=42,
                     options={'task_id': 3}
                 )
-                print(f"Success: {metrics['success_rate']:.1f}%")
-                print(f"Avg reward: {metrics['reward_total'].mean():.2f}")
+                print(f"Success: {results['success_rate']:.1f}%")
+                print(f"Avg reward: {results['reward_total'].mean():.2f}")
 
             Evaluate across different variations::
 
                 for var_type in ['none', 'color', 'light', 'all']:
                     options = {'variation': [var_type]} if var_type != 'none' else None
-                    metrics = world.evaluate(episodes=50, seed=42, options=options)
-                    print(f"{var_type}: {metrics['success_rate']:.1f}%")
+                    results = world.evaluate(episodes=50, seed=42, options=options)
+                    print(f"{var_type}: {results['success_rate']:.1f}%")
         """
 
         options = options or {}
 
-        metrics = {
+        results = {
+            "episode_count": 0,
             "success_rate": 0,
             "episode_successes": np.zeros(episodes),
-            "seeds": np.empty(episodes, dtype=int),
+            "seeds": np.zeros(episodes, dtype=np.int32),
         }
 
         if eval_keys:
             for key in eval_keys:
-                metrics[key] = np.zeros(episodes)
+                results[key] = np.zeros(episodes)
 
         self.terminateds = np.zeros(self.num_envs)
         self.truncateds = np.zeros(self.num_envs)
 
         episode_idx = np.arange(self.num_envs)
-        self.reset(seed, options)
+        self.reset(seed=seed, options=options)
         root_seed = seed + self.num_envs if seed is not None else None
 
-        eval_ep_count = 0
         eval_done = False
+
+        # determine "unique" hash for this eval run
+        config = {
+            "episodes": episodes,
+            "eval_keys": tuple(sorted(eval_keys)) if eval_keys else None,
+            "seed": seed,
+            "options": tuple(sorted(options.items())) if options else None,
+            "dump_every": dump_every,
+        }
+
+        config_str = json.dumps(config, sort_keys=True)
+        run_hash = hashlib.sha256(config_str.encode()).hexdigest()[:8]
+        run_tmp_path = Path(f"eval_tmp_{run_hash}.npy")
+
+        # load back intermediate results if file exists
+        if run_tmp_path.exists():
+            tmp_results = np.load(run_tmp_path, allow_pickle=True).item()
+            results.update(tmp_results)
+
+            ep_count = results["episode_count"]
+            episode_idx = np.arange(ep_count, ep_count + self.num_envs)
+
+            # reset seed where we left off
+            last_seed = seed + ep_count if seed is not None else None
+            self.reset(seed=last_seed, options=options)
+
+            logging.success(
+                f"Found existing eval tmp file {run_tmp_path}, resuming from episode {ep_count}/{episodes}"
+            )
 
         while True:
             self.step()
@@ -830,26 +863,35 @@ class World:
                 if self.terminateds[i] or self.truncateds[i]:
                     # record eval info
                     ep_idx = episode_idx[i]
-                    metrics["episode_successes"][ep_idx] = self.terminateds[i]
-                    metrics["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
+                    results["episode_successes"][ep_idx] = self.terminateds[i]
+                    results["seeds"][ep_idx] = self.envs.envs[i].unwrapped.np_random_seed
 
                     if eval_keys:
                         for key in eval_keys:
                             assert key in self.infos, f"key {key} not found in infos"
-                            metrics[key][ep_idx] = self.infos[key][i]
+                            results[key][ep_idx] = self.infos[key][i]
 
                     # determine new episode idx
                     # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = root_seed + eval_ep_count if seed is not None else None
+                    new_seed = root_seed + results["episode_count"] if seed is not None else None
                     next_ep_idx = episode_idx.max() + 1
                     episode_idx[i] = next_ep_idx
-                    eval_ep_count += 1
+                    results["episode_count"] += 1
 
                     # break if enough episodes evaluated
-                    if eval_ep_count >= episodes:
+                    if results["episode_count"] >= episodes:
                         eval_done = True
+                        if run_tmp_path.exists():
+                            logging.info(f"Eval done, deleting tmp file {run_tmp_path}")
+                            os.remove(run_tmp_path)
                         break
 
+                    # dump temporary results in a file
+                    if dump_every > 0 and (results["episode_count"] % dump_every == 0):
+                        np.save(run_tmp_path, results)
+                        logging.success(
+                            f"Dumped intermediate eval results to {run_tmp_path} ({results['episode_count']}/{episodes})"
+                        )
                     self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
                     _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 
@@ -863,13 +905,13 @@ class World:
                 break
 
         # compute success rate
-        metrics["success_rate"] = float(np.sum(metrics["episode_successes"])) / episodes * 100.0
+        results["success_rate"] = float(np.sum(results["episode_successes"])) / episodes * 100.0
 
-        assert eval_ep_count == episodes, f"eval_ep_count {eval_ep_count} != episodes {episodes}"
+        assert results["episode_count"] == episodes, f"episode_count {results['episode_count']} != episodes {episodes}"
 
-        assert np.unique(metrics["seeds"]).shape[0] == episodes, "Some episode seeds are identical!"
+        assert np.unique(results["seeds"]).shape[0] == episodes, "Some episode seeds are identical!"
 
-        return metrics
+        return results
 
     def evaluate_from_dataset(
         self,
@@ -983,7 +1025,7 @@ class World:
                 for k, v in info.items():
                     self.infos[k][i] = np.asarray(v)
 
-        metrics = {
+        results = {
             "success_rate": 0,
             "episode_successes": np.zeros(len(episodes_idx)),
             "seeds": seeds,
@@ -994,7 +1036,7 @@ class World:
             self.infos.update(goal_info)
             self.step()
 
-            metrics["episode_successes"] = np.logical_or(metrics["episode_successes"], self.terminateds)
+            results["episode_successes"] = np.logical_or(results["episode_successes"], self.terminateds)
 
             # for auto-reset
             self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
@@ -1002,9 +1044,9 @@ class World:
         n_episodes = len(episodes_idx)
 
         # compute success rate
-        metrics["success_rate"] = float(np.sum(metrics["episode_successes"])) / n_episodes * 100.0
+        results["success_rate"] = float(np.sum(results["episode_successes"])) / n_episodes * 100.0
 
-        if metrics["seeds"] is not None:
-            assert np.unique(metrics["seeds"]).shape[0] == n_episodes, "Some episode seeds are identical!"
+        if results["seeds"] is not None:
+            assert np.unique(results["seeds"]).shape[0] == n_episodes, "Some episode seeds are identical!"
 
-        return metrics
+        return results
