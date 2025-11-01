@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     world = swm.World(
         "swm/PushT-v1",
-        num_envs=2,
+        num_envs=1,
         image_shape=(224, 224),
         max_episode_steps=25,
         render_mode="rgb_array",
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # ##  Data Collection  ##
     # #######################
 
-    world.set_policy(swm.policy.RandomPolicy(seed=1234))
+    world.set_policy(swm.policy.RandomPolicy())
     world.record_dataset(
         "example-pusht",
         episodes=10,
@@ -95,6 +95,13 @@ if __name__ == "__main__":
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
     world.set_policy(policy)
-    results = world.evaluate(episodes=3, seed=2347)
 
-    print(results)
+    metrics = world.evaluate_from_dataset(
+        "example-pusht",
+        start_steps=[135],
+        episodes_idx=[0],
+        num_steps=25,
+        callables={"_set_state": "state", "_set_goal_state": "goal_state"},
+    )
+
+    print("Evaluation Metrics: ", metrics)

@@ -57,6 +57,7 @@ from pathlib import Path
 
 import datasets
 import gymnasium as gym
+import imageio
 import imageio.v3 as iio
 import numpy as np
 from datasets import Dataset, Features, Value, load_from_disk
@@ -361,7 +362,6 @@ class World:
                     seed=42
                 )
         """
-        import imageio
 
         viewname = [viewname] if isinstance(viewname, str) else viewname
         out = [
@@ -690,7 +690,6 @@ class World:
                     max_steps=100
                 )
         """
-        import imageio
 
         cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
@@ -869,5 +868,143 @@ class World:
         assert eval_ep_count == episodes, f"eval_ep_count {eval_ep_count} != episodes {episodes}"
 
         assert np.unique(metrics["seeds"]).shape[0] == episodes, "Some episode seeds are identical!"
+
+        return metrics
+
+    def evaluate_from_dataset(
+        self,
+        dataset_name: str,
+        episodes_idx: int | list[int],
+        start_steps: int | list[int],
+        num_steps: int,
+        cache_dir: str | None = None,
+        callables: dict | None = None,
+    ):
+        # Rem: only support dataset generated from by stable-worldmodel
+        # TODO: check max_steps in self.envs doesn't make trouble here
+        # TODO push-t env has the image not corresponding with the state!
+
+        if isinstance(episodes_idx, int):
+            episodes_idx = [episodes_idx]
+
+        if isinstance(start_steps, int):
+            start_steps = [start_steps]
+
+        episodes_idx = np.array(episodes_idx)
+        start_steps = np.array(start_steps)
+        end_steps_idx = start_steps + num_steps
+
+        if not (len(episodes_idx) == len(start_steps)):
+            raise ValueError("episodes_idx and start_steps must have the same length")
+
+        if len(episodes_idx) != self.num_envs:
+            raise ValueError("Number of episodes to evaluate must match number of envs")
+
+        dataset_path = Path(cache_dir or swm.data.get_cache_dir()) / dataset_name
+        dataset = load_from_disk(dataset_path).with_format("numpy")
+        columns = set(dataset.column_names)
+
+        assert "episode_idx" in columns, "'episode_idx' column not found in dataset"
+        assert "step_idx" in columns, "'step_idx' column not found in dataset"
+
+        episode_mask = np.isin(dataset["episode_idx"][:], episodes_idx)
+        dataset = dataset.select(np.nonzero(episode_mask)[0])
+
+        episodes_col = dataset["episode_idx"][:]
+        row_steps_idx = []
+        for i, ep in enumerate(episodes_idx):
+            ep_mask = episodes_col == ep
+            ep_indices = np.nonzero(ep_mask)[0]
+            sorted_order = np.sort(ep_indices)
+            row_steps_idx.append(sorted_order)
+
+            if len(ep_indices) < end_steps_idx[i]:
+                raise ValueError(f"Episode {ep} is too short for the requested steps")
+
+        first_steps = dataset[[idxs[0] for idxs in row_steps_idx]]
+        end_steps = dataset[[idxs[e_step] for e_step, idxs in zip(end_steps_idx, row_steps_idx)]]
+        seeds = first_steps.get("seed", None)
+
+        # goal subdict
+        goal_info = {}
+        for key, value in end_steps.items():
+            if key == "pixels":
+                goal_info["goal"] = [
+                    np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value
+                ]
+                continue
+
+            key = f"goal_{key}" if not key.startswith("goal") else key
+            goal_info[key] = value
+
+        # extract variations used
+        vkey = "variation."
+        variations = [col.removeprefix(vkey) for col in columns if col.startswith(vkey)]
+        options = {"variations": variations or None}
+
+        self.reset(seed=seeds, options=options)  # set seeds for all envs
+
+        # apply callable list (e.g used for set initial position if not access to seed)
+        callables = callables or {}
+        for i, env in enumerate(self.envs.unwrapped.envs):
+            env = env.unwrapped
+            for method_name, col_name in callables.items():
+                if not hasattr(env, method_name):
+                    logging.warning(f"Env {env} has no method {method_name}, skipping callable")
+                    continue
+
+                if col_name not in first_steps:
+                    logging.warning(f"Column {col_name} not found in dataset, skipping callable for env {env}")
+                    continue
+
+                method = getattr(env, method_name)
+                data = first_steps[col_name][i]
+                method(data)
+
+        # replay all actions until start_steps and record video
+        self.rewards = np.zeros(self.num_envs)
+        self.terminateds = np.zeros(self.num_envs)
+        self.truncateds = np.zeros(self.num_envs)
+
+        # replay actions and record each frame
+        for i, env in enumerate(self.envs.unwrapped.envs):
+            episode_steps_idx = row_steps_idx[i]
+
+            for step_idx in range(start_steps[i]):
+                sample_idx = episode_steps_idx[step_idx]
+                data = dataset[sample_idx]
+                action = data["action"]
+
+                _, _, terminated, truncated, info = env.step(action)
+
+                self.terminateds[i] = terminated
+                self.truncateds[i] = truncated
+
+                for k, v in info.items():
+                    self.infos[k][i] = np.asarray(v)
+
+        metrics = {
+            "success_rate": 0,
+            "episode_successes": np.zeros(len(episodes_idx)),
+            "seeds": seeds,
+        }
+
+        # run normal evaluation for num_steps and record video
+        for step in range(num_steps):
+            self.infos.update(goal_info)
+            self.step()
+
+            metrics["episode_successes"] = np.logical_or(metrics["episode_successes"], self.terminateds)
+
+            # for auto-reset
+            self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
+
+        n_episodes = len(episodes_idx)
+
+        # compute success rate
+        metrics["success_rate"] = float(np.sum(metrics["episode_successes"])) / n_episodes * 100.0
+
+        if metrics["seeds"] is not None:
+            assert np.unique(metrics["seeds"]).shape[0] == n_episodes, "Some episode seeds are identical!"
 
         return metrics
