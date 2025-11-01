@@ -47,6 +47,7 @@ trainer:
 batch_size: 64
 num_workers: 8
 train_split: 0.9
+seed: 42
 
 image_size: 224
 patch_size: 16

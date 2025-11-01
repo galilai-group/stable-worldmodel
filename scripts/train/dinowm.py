@@ -77,8 +77,10 @@ def get_data(cfg):
     )
 
     dataset.transform = transform
-
-    train_set, val_set = spt.data.random_split(dataset, lengths=[cfg.train_split, 1 - cfg.train_split])
+    rnd_gen = torch.Generator().manual_seed(cfg.seed)
+    train_set, val_set = spt.data.random_split(
+        dataset, lengths=[cfg.train_split, 1 - cfg.train_split], generator=rnd_gen
+    )
     logging.info(f"Train: {len(train_set)}, Val: {len(val_set)}")
 
     train = DataLoader(
@@ -89,6 +91,7 @@ def get_data(cfg):
         persistent_workers=True,
         pin_memory=True,
         shuffle=True,
+        generator=rnd_gen,
     )
     val = DataLoader(val_set, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True)
 
