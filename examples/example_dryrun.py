@@ -10,6 +10,7 @@ if __name__ == "__main__":
         num_envs=5,
         image_shape=(224, 224),
         render_mode="rgb_array",
+        extra_wrappers=[lambda env: swm.wrappers.StackedWrapper(env, "pixels", n_stacks=3)],
     )
 
     print("Available variations: ", world.single_variation_space.names())

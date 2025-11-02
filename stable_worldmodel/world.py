@@ -124,6 +124,7 @@ class World:
         seed: int = 2349867,
         max_episode_steps: int = 100,
         verbose: int = 1,
+        extra_wrappers: list | None = None,
         **kwargs,
     ):
         """Initialize the World with vectorized environments.
@@ -153,6 +154,9 @@ class World:
             max_episode_steps (int, optional): Maximum number of steps per episode
                 before truncation. Episodes terminate early on task success.
                 Defaults to 100.
+            extra_wrappers (list, optional): List of extra wrappers to apply to each
+                environment. Useful for adding custom behavior or modifications.
+                Defaults to None.
             verbose (int, optional): Verbosity level. 0 for silent, 1 for basic info,
                 2+ for detailed debugging information. Defaults to 1.
             **kwargs: Additional keyword arguments passed to gym.make_vec() and
@@ -179,7 +183,8 @@ class World:
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform, goal_shape, goal_transform)],
+            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform, goal_shape, goal_transform)]
+            + (extra_wrappers or []),
             max_episode_steps=max_episode_steps,
             **kwargs,
         )

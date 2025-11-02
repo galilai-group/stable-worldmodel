@@ -1623,3 +1623,97 @@ def test_variation_wrapper_with_different_variation_spaces(mock_vector_env):
 
     # Should succeed with different mode
     assert wrapped_env.variation_space is not None
+
+
+###########################
+## test StackedWrapper ##
+###########################
+
+
+def test_stacked_wrapper_reset_numpy_k3_and_step(minimal_env):
+    """Test that StackedWrapper stacks numpy arrays over reset() and step()."""
+    import numpy as np
+
+    obs = {"observation": "test_obs"}
+    # initial array shape (2,)
+    init = np.array([1, 2])
+    minimal_env.reset.return_value = (obs, {"stack_key": init})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="stack_key", n_stacks=3)
+    _, info = wrapped.reset()
+
+    # After reset the key should be stacked n_stacks times -> shape (3, 2)
+    assert "stack_key" in info
+    assert info["stack_key"].shape == (3, 2)
+    # All entries should equal the initial value
+    assert np.array_equal(info["stack_key"][0], init)
+    assert np.array_equal(info["stack_key"][1], init)
+    assert np.array_equal(info["stack_key"][2], init)
+
+    # Now step with a new value
+    new = np.array([3, 4])
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"stack_key": new})
+    _, _, _, _, info2 = wrapped.step(0.5)
+
+    # Buffer should now contain [init, init, new]
+    assert info2["stack_key"].shape == (3, 2)
+    assert np.array_equal(info2["stack_key"][0], init)
+    assert np.array_equal(info2["stack_key"][1], init)
+    assert np.array_equal(info2["stack_key"][2], new)
+
+
+def test_stacked_wrapper_torch_k2(minimal_env):
+    """Test that StackedWrapper handles torch.Tensor stacking correctly."""
+    import torch
+
+    obs = {"observation": "o"}
+    t0 = torch.tensor([1.0, 2.0])
+    minimal_env.reset.return_value = (obs, {"t": t0})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="t", n_stacks=2)
+    _, info = wrapped.reset()
+
+    # After reset should be a torch.Tensor stacked along dim 0 with shape (2, 2)
+    assert "t" in info
+    assert isinstance(info["t"], torch.Tensor)
+    assert info["t"].shape == (2, 2)
+    assert torch.allclose(info["t"][0], t0)
+    assert torch.allclose(info["t"][1], t0)
+
+    # Step with a new tensor
+    t1 = torch.tensor([3.0, 4.0])
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"t": t1})
+    _, _, _, _, info2 = wrapped.step(0.1)
+
+    assert isinstance(info2["t"], torch.Tensor)
+    assert info2["t"].shape == (2, 2)
+    # Buffer should be [t0, t1]
+    assert torch.allclose(info2["t"][0], t0)
+    assert torch.allclose(info2["t"][1], t1)
+
+
+def test_stacked_wrapper_k1_returns_raw(minimal_env):
+    """k=1 should return the raw element (no extra stacking dimension)."""
+    import numpy as np
+
+    obs = {"observation": "o"}
+    arr = np.array([9, 9, 9])
+    minimal_env.reset.return_value = (obs, {"a": arr})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="a", n_stacks=1)
+    _, info = wrapped.reset()
+
+    # For n_stacks==1, the wrapper should set the key to the raw element (not stacked)
+    assert "a" in info
+    assert isinstance(info["a"], np.ndarray)
+    assert info["a"].shape == arr.shape
+    assert np.array_equal(info["a"], arr)
+
+
+def test_stacked_wrapper_empty_buffer(minimal_env):
+    """Test that get_buffer_data returns empty list when buffer is empty."""
+    wrapped = wrappers.StackedWrapper(minimal_env, key="test_key", n_stacks=3)
+
+    # Before reset, buffer should be empty
+    result = wrapped.get_buffer_data()
+    assert result == []

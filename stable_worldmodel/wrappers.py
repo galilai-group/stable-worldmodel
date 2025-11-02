@@ -1,9 +1,11 @@
 import re
 import time
+from collections import deque
 from collections.abc import Callable, Iterable
 
 import gymnasium as gym
 import numpy as np
+import torch
 from gymnasium.spaces.utils import is_space_dtype_shape_equiv
 from gymnasium.vector import VectorWrapper
 from gymnasium.vector.utils import (
@@ -347,6 +349,65 @@ class ResizeGoalWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
+class StackedWrapper(gym.Wrapper):
+    """Stacked a given key in the info dict over the last k steps.
+
+    The initial reset will fill the stack with the initial value.
+
+    Note:
+        Stacked values into a tensor/array along a new first dimension, if the
+        data type is a torch.Tensor or np.ndarray.
+
+    Args:
+        env: The Gymnasium environment to wrap.
+        key: The key in the info dict to stack.
+        n_stacks: The number of steps to stack.
+    """
+
+    def __init__(
+        self,
+        env,
+        key: str,
+        n_stacks: int,
+    ):
+        super().__init__(env)
+        self.key = key
+        self.n_stacks = n_stacks
+        self.buffer = deque([], maxlen=n_stacks)
+
+    def get_buffer_data(self):
+        if not self.buffer:
+            return []
+
+        if self.n_stacks == 1:
+            return self.buffer[0]
+
+        new_info = list(self.buffer)
+        first_elem = new_info[0]
+
+        if torch.is_tensor(first_elem):
+            new_info = torch.stack(new_info, dim=0)
+        elif isinstance(first_elem, np.ndarray):
+            new_info = np.stack(new_info, axis=0)
+        return new_info
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        assert self.key in info, f"Key {self.key} not found in info dict during reset."
+        self.buffer.clear()
+        data = info.get(self.key)
+        self.buffer.extend([data] * self.n_stacks)
+        info[self.key] = self.get_buffer_data()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        assert self.key in info, f"Key {self.key} not found in info dict during step."
+        self.buffer.append(info.get(self.key))
+        info[self.key] = self.get_buffer_data()
+        return obs, reward, terminated, truncated, info
+
+
 class MegaWrapper(gym.Wrapper):
     """Combines multiple wrappers for comprehensive environment preprocessing.
 
@@ -387,6 +448,9 @@ class MegaWrapper(gym.Wrapper):
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
         env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
+
+        #
+
         self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
     def reset(self, *args, **kwargs):
