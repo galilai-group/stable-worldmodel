@@ -1,0 +1,31 @@
+defaults:
+  - launcher: local
+  - _self_
+
+world:
+  env_name: swm/PushT-v1
+  num_envs: 1
+  max_episode_steps: 25
+
+seed: 42
+policy: random # ckpt name or random
+preprocess_dataset: pusht_expert
+
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5 # frameskip
+
+# only consider CEM
+solver:
+  num_samples: 300
+  var_scale: 1.0
+  n_steps: 30
+  topk: 30
+  device: "cuda"
+
+# evaluation from dataset (replay expert trajectories)
+eval:
+  num_eval: 1
+  num_steps: 25
+  dataset_name: pusht_eval

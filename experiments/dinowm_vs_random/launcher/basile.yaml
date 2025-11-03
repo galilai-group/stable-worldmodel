@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+n_gpus: 8
+cpus_per_gpu: 16
+cpus_per_task: ${n_gpus} * ${cpus_per_gpu}
+mem_per_gpu_gb: 64
+cache_dir: null # Use stable-worldmodel default cache
+
+wandb_entity: stable-wm
+wandb_project: stable-wm
+
+hydra:
+  mode: MULTIRUN
+
+  launcher:
+    timeout_min: 4320 # 72 hours
+    cpus_per_task: ${cpus_per_task}
+    mem_gb: ${n_gpus} * ${mem_per_gpu_gb}
+    gpus_per_node: ${n_gpus}
+    tasks_per_node: 8
+    nodes: 1
+    partition: long
+    account: fair_amaia_cw_video
+    qos: explore,lowest
