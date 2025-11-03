@@ -989,6 +989,7 @@ class World:
         variations = [col.removeprefix(vkey) for col in columns if col.startswith(vkey)]
         options = {"variations": variations or None}
 
+        first_steps.update(goal_info)
         self.reset(seed=seeds, options=options)  # set seeds for all envs
 
         # apply callable list (e.g used for set initial position if not access to seed)
