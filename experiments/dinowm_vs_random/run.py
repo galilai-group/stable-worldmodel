@@ -46,7 +46,10 @@ def run(cfg: DictConfig):
     }
     dataset_path = Path(cfg.cache_dir or swm.data.get_cache_dir(), cfg.eval.dataset_name)
     dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
-    ep_indices = np.unique(dataset["episode_idx"][:], return_index=True)[1]
+    ep_indices, ep_start_indices = np.unique(dataset["episode_idx"][:], return_index=True)
+    print("Number of episodes in dataset:", len(ep_start_indices) - 1)
+    print("ep_start_indices:", ep_start_indices)
+    print("ep_indices:", ep_indices)
 
     # create the processing
     action_process = preprocessing.StandardScaler()
@@ -70,28 +73,27 @@ def run(cfg: DictConfig):
         solver = swm.solver.CEMSolver(model, **cfg.solver)
         policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
-    # sample the episodes
-    g = np.random.default_rng(cfg.seed)
-    random_episode_indices = g.choice(len(ep_indices) - 1, size=cfg.eval.num_eval, replace=False)
-    eval_episodes = dataset[random_episode_indices]["episode_idx"]
-    episode_len = get_episodes_length(dataset, eval_episodes)
-
-    # drop episodes that are too short
+    # sample the episodes and the starting indices
+    episode_len = get_episodes_length(dataset, ep_indices)
     max_start_idx = episode_len - cfg.eval.num_steps - 1
-    eval_episodes = eval_episodes[max_start_idx >= 0]
-    episode_len = episode_len[max_start_idx >= 0]
+    # remove all the lines of dataset for which dataset['step_idx'] > max_start_idx[dataset['episode_idx']]
+    valid_mask = dataset["step_idx"] <= max_start_idx[dataset["episode_idx"]]
+
+    dataset_start = dataset.select(np.nonzero(valid_mask)[0])
+    g = np.random.default_rng(cfg.seed)
+    random_episode_indices = g.choice(len(dataset_start) - 1, size=cfg.eval.num_eval, replace=False)
+    eval_episodes = dataset_start[random_episode_indices]["episode_idx"]
+    eval_start_idx = dataset_start[random_episode_indices]["step_idx"]
 
     if len(eval_episodes) < cfg.eval.num_eval:
         raise ValueError("Not enough episodes with sufficient length for evaluation.")
-
-    rnd_start_idx = g.integers(0, max_start_idx + 1, size=len(eval_episodes))
 
     world.set_policy(policy)
 
     metrics = world.evaluate_from_dataset(
         cfg.eval.dataset_name,
         num_steps=cfg.eval.num_steps,
-        start_steps=rnd_start_idx.tolist(),
+        start_steps=eval_start_idx.tolist(),
         episodes_idx=eval_episodes.tolist(),
         cache_dir=cfg.get("cache_dir", None),
         callables={
