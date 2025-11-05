@@ -44,7 +44,7 @@ def run(cfg: DictConfig):
         "pixels": img_transform(),
         "goal": img_transform(),
     }
-    dataset_path = Path(cfg.cache_dir or swm.data.get_cache_dir(), cfg.preprocess_dataset)
+    dataset_path = Path(cfg.cache_dir or swm.data.get_cache_dir(), cfg.eval.dataset_name)
     dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
     ep_indices = np.unique(dataset["episode_idx"][:], return_index=True)[1]
 
