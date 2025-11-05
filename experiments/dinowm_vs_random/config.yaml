@@ -4,7 +4,7 @@ defaults:
 
 world:
   env_name: swm/PushT-v1
-  num_envs: 1
+  num_envs: ${eval.num_eval}
   max_episode_steps: 25
 
 seed: 42

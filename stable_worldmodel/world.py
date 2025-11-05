@@ -927,7 +927,23 @@ class World:
         cache_dir: str | None = None,
         callables: dict | None = None,
     ):
-        # Rem: only support dataset generated from by stable-worldmodel
+        """Evaluate the current policy similarly to `evaluate` but on goals sampled from a dataset.
+        Note: it only supports datasets generated from stable-worldmodel.
+
+        Args:
+            dataset_name (str): Name of the dataset to load (must exist in cache_dir).
+            episodes_idx (int or list of int): Index or list of indices of the episodes to evaluate from the dataset.
+            start_steps (int or list of int): Step index or list of step indices to  from which to start the evaluation in each episode.
+            num_steps (int): Number of steps forward from the starting steps used to sample the goal.
+            cache_dir (str or Path, optional): Root directory where dataset is stored.
+
+        Returns:
+            dict: Dictionary containing evaluation results:
+                - 'success_rate' (float): Percentage of successful episodes (0-100)
+                - 'episode_successes' (ndarray): Boolean array of episode outcomes
+                - 'seeds' (ndarray): Random seeds used for each episode
+                - Additional keys from eval_keys if specified (ndarray)
+        """
         # TODO: check max_steps in self.envs doesn't make trouble here
         # TODO push-t env has the image not corresponding with the state!
 
