@@ -47,9 +47,6 @@ def run(cfg: DictConfig):
     dataset_path = Path(cfg.cache_dir or swm.data.get_cache_dir(), cfg.eval.dataset_name)
     dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
     ep_indices, ep_start_indices = np.unique(dataset["episode_idx"][:], return_index=True)
-    print("Number of episodes in dataset:", len(ep_start_indices) - 1)
-    print("ep_start_indices:", ep_start_indices)
-    print("ep_indices:", ep_indices)
 
     # create the processing
     action_process = preprocessing.StandardScaler()
