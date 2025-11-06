@@ -7,5 +7,7 @@ defaults:
 n_gpus: 1
 cpus_per_task: 4
 cache_dir: null # Use stable-worldmodel default cache
-entity: stable-wm
-wandb_project: stable-wm
+wandb:
+  use_wandb: true
+  entity: stable-wm
+  project: stable-wm
