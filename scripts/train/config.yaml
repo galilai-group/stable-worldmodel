@@ -33,9 +33,9 @@ wandb:
   project: xenoworlds
   entity: simon-lacoste-julien
 
-dataset_name: pusht_expert
+dataset_name: pusht_expert_train
 # cache_dir: null #${oc.env:SLURM_TMPDIR, null}
-output_model_name: world_model
+output_model_name: dinowm
 
 trainer:
   max_epochs: 100
@@ -44,7 +44,7 @@ trainer:
   accelerator: gpu
   precision: 16-mixed
 
-batch_size: 64
+batch_size: 32
 num_workers: 8
 train_split: 0.9
 seed: 42

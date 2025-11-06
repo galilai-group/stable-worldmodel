@@ -1,0 +1,52 @@
+defaults:
+  - launcher: local
+  - _self_
+
+wandb:
+  enable: false
+  project: pyro
+  entity: simon-lacoste-julien
+
+dataset_name: pusht_expert_train
+cache_dir: null #${oc.env:SLURM_TMPDIR, null}
+output_model_name: pyro_test
+
+trainer:
+  max_epochs: 100
+  strategy: ddp
+  devices: auto
+  accelerator: gpu
+  precision: 16-mixed
+
+batch_size: 32
+num_workers: 8
+train_split: 0.9
+seed: 42
+
+image_size: 224
+patch_size: 16
+
+backbone: facebook/dinov2-small
+
+n_steps: 2
+frameskip: 5
+
+pyro:
+  history_size: 3
+  num_preds: 1
+  encoding: # key: target dim
+    action: 10
+    proprio: 10
+
+predictor:
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+
+predictor_lr: 5e-4
+encoding_lr: 5e-4
+
+dump_object: True

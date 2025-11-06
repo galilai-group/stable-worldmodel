@@ -2,47 +2,44 @@ import torch
 import torch.nn.functional as F
 
 # from torchvision import transforms
-import torchvision.transforms.v2 as transforms
 from einops import rearrange, repeat
 from torch import distributed as dist
 from torch import nn
 
 
-class DINOWM(torch.nn.Module):
+class PYRO(torch.nn.Module):
     def __init__(
         self,
         encoder,
         predictor,
-        action_encoder,
-        proprio_encoder,
+        extra_encoders=None,
         decoder=None,
         history_size=3,
         num_pred=1,
+        cost_keys=None,
         device="cpu",
     ):
         super().__init__()
 
         self.backbone = encoder
         self.predictor = predictor
-        self.action_encoder = action_encoder
-        self.proprio_encoder = proprio_encoder
+        self.extra_encoders = extra_encoders or {}
+        self.cost_keys = cost_keys or ["pixels"]
         self.decoder = decoder
         self.history_size = history_size
         self.num_pred = num_pred
         self.device = device
 
-        decoder_scale = 16  # from vqvae
-        num_side_patches = 224 // decoder_scale
-        self.encoder_image_size = num_side_patches * 14
-        self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
+        # decoder_scale = 16  # from vqvae
+        # num_side_patches = 224 // decoder_scale
+        # self.encoder_image_size = num_side_patches * 14
+        # self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
 
     def encode(
         self,
         info,
         pixels_key="pixels",
         target="embed",
-        proprio_key=None,
-        action_key=None,
     ):
         assert target not in info, f"{target} key already in info_dict"
 
@@ -52,40 +49,32 @@ class DINOWM(torch.nn.Module):
 
         B = pixels.shape[0]
         pixels = rearrange(pixels, "b t ... -> (b t) ...")
-        pixels = self.encoder_transform(pixels)
-        pixels_embed = self.backbone(pixels).last_hidden_state.detach()
-        pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
-        pixels_embed = rearrange(pixels_embed, "(b t) p d -> b t p d", b=B)
+        # pixels = self.encoder_transform(pixels)
+        pixels_embed = self.backbone(pixels)
+
+        if hasattr(pixels_embed, "last_hidden_state"):
+            pixels_embed = pixels_embed.last_hidden_state
+            pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
+        else:
+            pixels_embed = pixels_embed.unsqueeze(1)  # (B*T, 1, emb_dim)
+
+        pixels_embed = rearrange(pixels_embed.detach(), "(b t) p d -> b t p d", b=B)
 
         # == improve the embedding
         n_patches = pixels_embed.shape[2]
         embedding = pixels_embed
         info[f"pixels_{target}"] = pixels_embed
 
-        # == proprio embeddings
-        if proprio_key is not None:
-            proprio = info[proprio_key].float()
-            proprio_embed = self.proprio_encoder(proprio)  # (B, T, P) -> (B, T, P_emb)
-            info[f"proprio_{target}"] = proprio_embed
+        for key, extr_enc in self.extra_encoders.items():
+            extra_input = info[key].float()  # (B, T, dim)
+            extra_embed = extr_enc(extra_input)  # (B, T, dim) -> (B, T, emb_dim)
+            info[f"{key}_{target}"] = extra_embed
 
-            # copy proprio embedding across patches for each time step
-            proprio_tiled = repeat(proprio_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
-
-            # concatenate along feature dimension
-            embedding = torch.cat([pixels_embed, proprio_tiled], dim=3)
-
-        # == action embeddings
-        if action_key is not None:
-            action = info[action_key].float()
-
-            action_embed = self.action_encoder(action)  # (B, T, A) -> (B, T, A_emb)
-            info[f"action_{target}"] = action_embed
-
-            # copy action embedding across patches for each time step
-            action_tiled = repeat(action_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
+            # copy extra embedding across patches for each time step
+            extra_tiled = repeat(extra_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
 
             # concatenate along feature dimension
-            embedding = torch.cat([embedding, action_tiled], dim=3)
+            embedding = torch.cat([embedding, extra_tiled], dim=3)
 
         info[target] = embedding  # (B, T, P, d)
 
@@ -119,33 +108,40 @@ class DINOWM(torch.nn.Module):
 
         return info
 
-    def split_embedding(self, embedding, action_dim, proprio_dim):
+    def split_embedding(self, embedding, extra_dims):  # action_dim, proprio_dim):
         split_embed = {}
-        pixel_dim = embedding.shape[-1] - action_dim - proprio_dim
+        pixel_dim = embedding.shape[-1] - sum(extra_dims)
 
         # == pixels embedding
         split_embed["pixels_embed"] = embedding[..., :pixel_dim]
 
-        # == proprio embedding
-        if proprio_dim > 0:
-            proprio_emb = embedding[..., pixel_dim : pixel_dim + proprio_dim]
-            split_embed["proprio_embed"] = proprio_emb[:, :, 0]  # all patches are the same
-
-        if action_dim > 0:
-            action_emb = embedding[..., -action_dim:]
-            split_embed["action_embed"] = action_emb[:, :, 0]  # all patches are the same
+        # == extra embeddings
+        start_dim = pixel_dim
+        for i, (key, _) in enumerate(self.extra_encoders.items()):
+            dim = extra_dims[i]
+            extra_emb = embedding[..., start_dim : start_dim + dim]
+            split_embed[f"{key}_embed"] = extra_emb[:, :, 0]  # all patches are the same
+            start_dim += dim
 
         return split_embed
 
     def replace_action_in_embedding(self, embedding, act):
         """Replace the action embeddings in the latent state z with the provided actions."""
+        assert "action" in self.extra_encoders, "No action encoder defined in the model."
         n_patches = embedding.shape[2]
-        z_act = self.action_encoder(act)  # (B, T, A_emb)
+        z_act = self.extra_encoders["action"](act)  # (B, T, action_dim)
         action_dim = z_act.shape[-1]
         act_tiled = repeat(z_act.unsqueeze(2), "b t 1 a -> b t p a", p=n_patches)
-        # z (B, T, P, d) with d = dim + proprio_emb_dim + action_emb_dim
-        # replace the last 'action_emb_dim' dims of z with the action embeddings
-        embedding[..., -action_dim:] = act_tiled
+        # z (B, T, P, d) with d = dim + extra_dims
+        # determine where action starts in the embedding
+        start = 0
+        for key, encoder in self.extra_encoders.items():
+            if key == "action":
+                break
+            start += encoder.embedding_dim
+
+        embedding[..., start : start + action_dim] = act_tiled
+
         return embedding
 
     def rollout(self, info, action_sequence):
@@ -167,13 +163,13 @@ class DINOWM(torch.nn.Module):
         act_0 = action_sequence[:, :n_obs]
         info["action"] = act_0
 
-        proprio_key = "proprio" if "proprio" in info else None
+        # proprio_key = "proprio" if "proprio" in info else None
         info = self.encode(
             info,
             pixels_key="pixels",
             target="embed",
-            proprio_key=proprio_key,
-            action_key="action",
+            # proprio_key=proprio_key,
+            # action_key="action",
         )
 
         # number of step to predict
@@ -203,9 +199,17 @@ class DINOWM(torch.nn.Module):
         # == update info dict with predicted embeddings
         info["predicted_embedding"] = z
         # get the dimension of each part of the embedding
-        action_dim = 0 if "action_embed" not in info else info["action_embed"].shape[-1]
-        proprio_dim = 0 if "proprio_embed" not in info else info["proprio_embed"].shape[-1]
-        splitted_embed = self.split_embedding(z, action_dim, proprio_dim)
+        # action_dim = 0 if "action_embed" not in info else info["action_embed"].shape[-1]
+        # proprio_dim = 0 if "proprio_embed" not in info else info["proprio_embed"].shape[-1]
+
+        extra_dims = []
+        for key in self.extra_encoders:
+            if f"{key}_embed" not in info:
+                raise ValueError(f"{key}_embed not in info dict")
+
+            extra_dims.append(info[f"{key}_embed"].shape[-1])
+
+        splitted_embed = self.split_embedding(z, extra_dims)
         info.update({f"predicted_{k}": v for k, v in splitted_embed.items()})
 
         return info
@@ -220,36 +224,21 @@ class DINOWM(torch.nn.Module):
                 info_dict[k] = v.unsqueeze(1).to(self.device)
 
         # == get the goal embedding
-        proprio_key = "goal_proprio" if "goal_proprio" in info_dict else None
         info_dict = self.encode(
             info_dict,
             target="goal_embed",
             pixels_key="goal",
-            proprio_key=proprio_key,
-            action_key=None,
         )
 
         # == run world model
         info_dict = self.rollout(info_dict, action_candidates)
 
-        # == get the pixels cost
-        pixels_preds = info_dict["predicted_pixels_embed"]  # (B, T, P, d)
-        pixels_goal = info_dict["pixels_goal_embed"]
-        pixels_cost = F.mse_loss(pixels_preds[:, -1:], pixels_goal, reduction="none").mean(
-            dim=tuple(range(1, pixels_preds.ndim))
-        )
+        cost = 0.0
 
-        cost = pixels_cost
-
-        if proprio_key is not None:
-            # == get the proprio cost
-            proprio_preds = info_dict["predicted_proprio_embed"]
-            proprio_goal = info_dict["proprio_goal_embed"]
-
-            proprio_cost = F.mse_loss(proprio_preds[:, -1:], proprio_goal, reduction="none").mean(
-                dim=tuple(range(1, proprio_preds.ndim))
-            )
-            cost = cost + proprio_cost
+        for key in self.cost_keys:
+            preds = info_dict[f"predicted_{key}_embed"]
+            goal = info_dict[f"{key}_goal_embed"]
+            cost = cost + F.mse_loss(preds[:, -1:], goal, reduction="none").mean(dim=tuple(range(1, preds.ndim)))
 
         return cost
 
@@ -268,14 +257,13 @@ class Embedder(torch.nn.Module):
         self.tubelet_size = tubelet_size
         self.in_chans = in_chans
         self.emb_dim = emb_dim
-
         self.patch_embed = torch.nn.Conv1d(in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size)
 
     def forward(self, x):
-        # Keep input dtype for mixed precision compatibility
-        x = x.permute(0, 2, 1)  # (B, T, B) -> (B, D, T)
-        x = self.patch_embed(x)
-        x = x.permute(0, 2, 1)  # (B, D, T) -> (B, T, D)
+        with torch.amp.autocast(enabled=False, device_type=x.device.type):
+            x = x.permute(0, 2, 1)  # (B, T, B) -> (B, D, T)
+            x = self.patch_embed(x)
+            x = x.permute(0, 2, 1)  # (B, D, T) -> (B, T, D)
         return x
 
 

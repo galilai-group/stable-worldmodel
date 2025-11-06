@@ -27,8 +27,7 @@ def get_data(cfg):
     def get_img_pipeline(key, target, img_size=224):
         return spt.data.transforms.Compose(
             spt.data.transforms.ToImage(
-                mean=[0.5, 0.5, 0.5],
-                std=[0.5, 0.5, 0.5],
+                **spt.data.dataset_stats.ImageNet,
                 source=key,
                 target=target,
             ),
@@ -59,11 +58,7 @@ def get_data(cfg):
 
     # Apply transforms to all steps
     transform = spt.data.transforms.Compose(
-        *[
-            get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size)
-            for col in ["pixels", "goal"]
-            for i in range(cfg.n_steps)
-        ],
+        *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
         spt.data.transforms.WrapTorchTransform(
             norm_action_transform,
             source="action",
@@ -181,7 +176,7 @@ def get_world_model(cfg):
 
     # Assemble world model
     world_model = swm.wm.DINOWM(
-        encoder=spt.backbone.EvalOnly(encoder),  # Freeze encoder
+        encoder=spt.backbone.EvalOnly(encoder),
         predictor=predictor,
         action_encoder=action_encoder,
         proprio_encoder=proprio_encoder,
@@ -243,7 +238,7 @@ class ModelObjectCallBack(Callback):
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
                 output_path = Path(
                     self.dirpath,
-                    f"{self.filename}_epoch_{trainer.current_epoch + 1}.ckpt",
+                    f"{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt",
                 )
                 torch.save(pl_module, output_path)
                 logging.info(f"Saved world model object to {output_path}")
@@ -266,9 +261,7 @@ def run(cfg):
     world_model = get_world_model(cfg)
 
     cache_dir = swm.data.get_cache_dir()
-    dump_object_callback = ModelObjectCallBack(
-        dirpath=cache_dir, filename=f"{cfg.output_model_name}_object", epoch_interval=1
-    )
+    dump_object_callback = ModelObjectCallBack(dirpath=cache_dir, filename=cfg.output_model_name, epoch_interval=1)
     checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
