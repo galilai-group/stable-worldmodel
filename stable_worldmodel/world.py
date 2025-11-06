@@ -946,8 +946,12 @@ class World:
                 - 'seeds' (ndarray): Random seeds used for each episode
                 - Additional keys from eval_keys if specified (ndarray)
         """
-        # TODO: check max_steps in self.envs doesn't make trouble here
         # TODO push-t env has the image not corresponding with the state!
+
+        assert (
+            self.envs.envs[0].spec.max_episode_steps is None
+            or self.envs.envs[0].spec.max_episode_steps >= eval_num_steps
+        ), "env max_episode_steps must be greater than eval_num_steps"
 
         if isinstance(episodes_idx, int):
             episodes_idx = [episodes_idx]
