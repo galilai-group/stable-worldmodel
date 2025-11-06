@@ -46,13 +46,20 @@ def run(cfg: DictConfig):
     }
     dataset_path = Path(cfg.cache_dir or swm.data.get_cache_dir(), cfg.eval.dataset_name)
     dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
-    ep_indices, ep_start_indices = np.unique(dataset["episode_idx"][:], return_index=True)
+    ep_indices, _ = np.unique(dataset["episode_idx"][:], return_index=True)
 
     # create the processing
+    # values taken from original dino_wm repo https://github.com/gaoyuezhou/dino_wm/blob/main/datasets/pusht_dset.py#L14
+    ACTION_MEAN = np.array([-0.0087, 0.0068])
+    ACTION_STD = np.array([0.2019, 0.2002])
+    PROPRIO_MEAN = np.array([236.6155, 264.5674, -2.93032027, 2.54307914])
+    PROPRIO_STD = np.array([101.1202, 87.0112, 74.84556075, 74.14009094])
     action_process = preprocessing.StandardScaler()
-    action_process.fit(dataset["action"][:])
+    action_process.mean_ = ACTION_MEAN
+    action_process.scale_ = ACTION_STD
     proprio_process = preprocessing.StandardScaler()
-    proprio_process.fit(dataset["proprio"][:])
+    proprio_process.mean_ = PROPRIO_MEAN
+    proprio_process.scale_ = PROPRIO_STD
 
     process = {
         "action": action_process,
