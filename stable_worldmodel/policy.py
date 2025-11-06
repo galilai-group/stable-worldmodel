@@ -159,7 +159,6 @@ def AutoCostModel(model_name, cache_dir=None):
     path = cache_dir / f"{model_name}_object.ckpt"
     assert path.exists(), f"World model named {model_name} not found. Should launch pretraining first."
 
-    print(path)
     spt_module = torch.load(path, weights_only=False)
 
     def scan_module(module):

@@ -923,7 +923,8 @@ class World:
         dataset_name: str,
         episodes_idx: int | list[int],
         start_steps: int | list[int],
-        num_steps: int,
+        goal_offset_steps: int,
+        eval_num_steps: int,
         cache_dir: str | None = None,
         callables: dict | None = None,
     ):
@@ -934,7 +935,8 @@ class World:
             dataset_name (str): Name of the dataset to load (must exist in cache_dir).
             episodes_idx (int or list of int): Index or list of indices of the episodes to evaluate from the dataset.
             start_steps (int or list of int): Step index or list of step indices to  from which to start the evaluation in each episode.
-            num_steps (int): Number of steps forward from the starting steps used to sample the goal.
+            goal_offset_steps (int): Number of steps ahead of start_steps to sample the goal from the dataset.
+            eval_num_steps (int): Number of steps to run the evaluation after setting the goal (it corresponds to the number of MPC iterations).
             cache_dir (str or Path, optional): Root directory where dataset is stored.
 
         Returns:
@@ -955,7 +957,7 @@ class World:
 
         episodes_idx = np.array(episodes_idx)
         start_steps = np.array(start_steps)
-        end_steps_idx = start_steps + num_steps
+        end_steps_idx = start_steps + goal_offset_steps
 
         if not (len(episodes_idx) == len(start_steps)):
             raise ValueError("episodes_idx and start_steps must have the same length")
@@ -1054,7 +1056,7 @@ class World:
         }
 
         # run normal evaluation for num_steps and record video
-        for step in range(num_steps):
+        for step in range(eval_num_steps):
             self.infos.update(goal_info)
             self.step()
 

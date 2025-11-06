@@ -79,7 +79,7 @@ def run(cfg: DictConfig):
 
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
-    max_start_idx = episode_len - cfg.eval.num_steps - 1
+    max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1
     # remove all the lines of dataset for which dataset['step_idx'] > max_start_idx[dataset['episode_idx']]
     valid_mask = dataset["step_idx"] <= max_start_idx[dataset["episode_idx"]]
 
@@ -96,8 +96,9 @@ def run(cfg: DictConfig):
 
     metrics = world.evaluate_from_dataset(
         cfg.eval.dataset_name,
-        num_steps=cfg.eval.num_steps,
         start_steps=eval_start_idx.tolist(),
+        goal_offset_steps=cfg.eval.goal_offset_steps,
+        eval_num_steps=cfg.eval.eval_num_steps,
         episodes_idx=eval_episodes.tolist(),
         cache_dir=cfg.get("cache_dir", None),
         callables={
