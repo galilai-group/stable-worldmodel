@@ -238,7 +238,7 @@ class PushT(gym.Env):
                     }
                 ),
             },
-            sampling_order=["background", "goal", "block", "agent"],
+            sampling_order=["background", "physics", "goal", "block", "agent"],
         )
 
         self.render_action = render_action
