@@ -9,7 +9,6 @@ world:
 
 seed: 42
 policy: random # ckpt name or random
-preprocess_dataset: pusht_expert
 
 plan_config:
   horizon: 5
@@ -28,4 +27,4 @@ solver:
 eval:
   num_eval: 1
   num_steps: 25
-  dataset_name: pusht_eval
+  dataset_name: pusht_expert_dataset_val
