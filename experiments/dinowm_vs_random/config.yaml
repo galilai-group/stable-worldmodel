@@ -25,7 +25,7 @@ solver:
 
 # evaluation from dataset (replay expert trajectories)
 eval:
-  num_eval: 1
+  num_eval: 20
   goal_offset_steps: 1
   eval_num_steps: 20
   dataset_name: pusht_expert_dataset_val
