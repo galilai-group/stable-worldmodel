@@ -89,9 +89,12 @@ def run(cfg: DictConfig):
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
     max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1
+    max_start_idx_dict = {ep_id: max_start_idx[i] for i, ep_id in enumerate(ep_indices)}
+    # Map each dataset row’s episode_idx to its max_start_idx
+    max_start_per_row = np.array([max_start_idx_dict[ep_id] for ep_id in dataset["episode_idx"]])
 
-    # remove all the lines of dataset for which dataset['step_idx'] > max_start_idx[dataset['episode_idx']]
-    valid_mask = dataset["step_idx"] <= max_start_idx[dataset["episode_idx"]]
+    # remove all the lines of dataset for which dataset['step_idx'] > max_start_per_row
+    valid_mask = dataset["step_idx"] <= max_start_per_row
     dataset_start = dataset.select(np.nonzero(valid_mask)[0])
 
     g = np.random.default_rng(cfg.seed)
