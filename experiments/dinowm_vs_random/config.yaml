@@ -27,5 +27,5 @@ solver:
 eval:
   num_eval: 20
   goal_offset_steps: 1
-  eval_budget: 20
+  eval_budget: 25
   dataset_name: pusht_expert_dataset_val
