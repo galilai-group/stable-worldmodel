@@ -37,6 +37,9 @@ def get_episodes_length(dataset, episodes):
 @hydra.main(version_base=None, config_path=".", config_name="config")
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
+    assert cfg.plan_config.horizon * cfg.plan_config.action_block <= cfg.eval.eval_budget, (
+        "Planning horizon must be smaller than or equal to eval_budget"
+    )
     if cfg.wandb.use_wandb:
         # Initialize wandb
         wandb.init(project=cfg.wandb.project, entity=cfg.wandb.entity, config=dict(cfg))
