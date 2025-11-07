@@ -924,7 +924,7 @@ class World:
         episodes_idx: int | list[int],
         start_steps: int | list[int],
         goal_offset_steps: int,
-        eval_num_steps: int,
+        eval_budget: int,
         cache_dir: str | None = None,
         callables: dict | None = None,
     ):
@@ -936,7 +936,7 @@ class World:
             episodes_idx (int or list of int): Index or list of indices of the episodes to evaluate from the dataset.
             start_steps (int or list of int): Step index or list of step indices to  from which to start the evaluation in each episode.
             goal_offset_steps (int): Number of steps ahead of start_steps to sample the goal from the dataset.
-            eval_num_steps (int): Number of steps to run the evaluation after setting the goal (it corresponds to the number of MPC iterations).
+            eval_budget (int): Number of steps to actually run in the environment.
             cache_dir (str or Path, optional): Root directory where dataset is stored.
 
         Returns:
@@ -949,9 +949,8 @@ class World:
         # TODO push-t env has the image not corresponding with the state!
 
         assert (
-            self.envs.envs[0].spec.max_episode_steps is None
-            or self.envs.envs[0].spec.max_episode_steps >= eval_num_steps
-        ), "env max_episode_steps must be greater than eval_num_steps"
+            self.envs.envs[0].spec.max_episode_steps is None or self.envs.envs[0].spec.max_episode_steps >= eval_budget
+        ), "env max_episode_steps must be greater than eval_budget"
 
         if isinstance(episodes_idx, int):
             episodes_idx = [episodes_idx]
@@ -1060,7 +1059,7 @@ class World:
         }
 
         # run normal evaluation for num_steps and record video
-        for step in range(eval_num_steps):
+        for step in range(eval_budget):
             self.infos.update(goal_info)
             self.step()
 

@@ -105,7 +105,7 @@ def run(cfg: DictConfig):
         cfg.eval.dataset_name,
         start_steps=eval_start_idx.tolist(),
         goal_offset_steps=cfg.eval.goal_offset_steps,
-        eval_num_steps=cfg.eval.eval_num_steps,
+        eval_budget=cfg.eval.eval_budget,
         episodes_idx=eval_episodes.tolist(),
         cache_dir=cfg.get("cache_dir", None),
         callables={
