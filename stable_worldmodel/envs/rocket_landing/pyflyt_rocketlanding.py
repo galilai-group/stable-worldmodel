@@ -383,7 +383,6 @@ class RocketLandingEnv(RocketBaseEnv):
 
         state = self.state.copy()
         info = dict(self.info)
-
         return state, info
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
@@ -516,16 +515,28 @@ class RocketLandingEnv(RocketBaseEnv):
         # number taken from here:
         # https://cosmosmagazine.com/space/launch-land-repeat-reusable-rockets-explained/
         # but doing so is kinda impossible for RL, so I've lessened the requirement to 1.0
-        if np.linalg.norm(self.previous_ang_vel) > 0.35 or np.linalg.norm(self.previous_lin_vel) > 1.0:
+        # if np.linalg.norm(self.previous_ang_vel) > 0.35 or np.linalg.norm(self.previous_lin_vel) > 1.0:
+        #     self.termination |= True
+        #     self.info["fatal_collision"] = True
+        #     return
+
+        if np.linalg.norm(self.previous_ang_vel) > 10.0 or np.linalg.norm(self.previous_lin_vel) > 5.0:
             self.termination |= True
             self.info["fatal_collision"] = True
             return
 
         # if our both velocities are less than 0.02 m/s and we upright, we LANDED!
+        # if (
+        #     np.linalg.norm(self.previous_ang_vel) < 0.02
+        #     and np.linalg.norm(self.previous_lin_vel) < 0.02
+        #     and np.linalg.norm(self.ang_pos[:2]) < 0.1
+        # ):
+
         if (
-            np.linalg.norm(self.previous_ang_vel) < 0.02
-            and np.linalg.norm(self.previous_lin_vel) < 0.02
-            and np.linalg.norm(self.ang_pos[:2]) < 0.1
+            np.linalg.norm(self.previous_ang_vel) < 5.0
+            and np.linalg.norm(self.previous_lin_vel) < 0.5
+            and np.linalg.norm(self.ang_pos[:2]) < 0.5  # NEED TO ADJUST WITH CORRECT COORDINATE FRAME ORIENTATION
+            and np.linalg.norm(self.lin_pos[:2]) < 3.0
         ):
             self.truncation |= True
             self.info["env_complete"] = True

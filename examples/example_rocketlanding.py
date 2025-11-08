@@ -7,7 +7,7 @@ if __name__ == "__main__":
 
     world = swm.World(
         "swm/PFRocketLanding-v0",
-        num_envs=2,
+        num_envs=1,
         image_shape=(224, 224),
         max_episode_steps=1000,
         render_mode="rgb_array",
@@ -18,8 +18,9 @@ if __name__ == "__main__":
     # #######################
     # ##  Data Collection  ##
     # #######################
+    from stable_worldmodel.envs.rocket_landing import ExpertPolicy
 
-    world.set_policy(swm.policy.RandomPolicy())
+    world.set_policy(ExpertPolicy())
     world.record_dataset(
         "example-pfrl",
         episodes=2,
