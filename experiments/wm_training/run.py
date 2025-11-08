@@ -187,25 +187,19 @@ def get_data(cfg):
         cache_dir=cfg.get("cache_dir", None),
     )
 
+    all_norm_transforms = []
+    for key in cfg.pyro.get("encoding", {}):
+        trans_fn = norm_col_transform(dataset.dataset, key)
+        trans_fn = spt.data.transforms.WrapTorchTransform(trans_fn, source=key, target=key)
+        all_norm_transforms.append(trans_fn)
+
     # Image size must be multiple of DINO patch size (14)
     img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
-
-    norm_action_transform = norm_col_transform(dataset.dataset, "action")
-    norm_proprio_transform = norm_col_transform(dataset.dataset, "proprio")
 
     # Apply transforms to all steps
     transform = spt.data.transforms.Compose(
         *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
-        spt.data.transforms.WrapTorchTransform(
-            norm_action_transform,
-            source="action",
-            target="action",
-        ),
-        spt.data.transforms.WrapTorchTransform(
-            norm_proprio_transform,
-            source="proprio",
-            target="proprio",
-        ),
+        *all_norm_transforms,
     )
 
     dataset.transform = transform
