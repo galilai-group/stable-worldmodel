@@ -388,27 +388,23 @@ class RocketLandingGNC:
 
 
 def parse_observation(observation: np.ndarray, angle_rep: str = "quaternion"):
-    obs = np.asarray(observation, dtype=float).squeeze()
-    pos = obs[0:3] if obs.size >= 3 else np.zeros(3)
-    vel = obs[3:6] if obs.size >= 6 else np.zeros(3)
-    idx = 6
-    if angle_rep == "quaternion":
-        quat = obs[idx : idx + 4] if obs.size >= idx + 4 else np.array([1, 0, 0, 0], dtype=float)
-        idx += 4
-    else:
-        eul = obs[idx : idx + 3] if obs.size >= idx + 3 else np.zeros(3)
-        q = Rotation.from_euler("xyz", eul).as_quat()
-        quat = np.array([q[3], q[0], q[1], q[2]], dtype=float)
-        idx += 3
-    ang_vel = obs[idx : idx + 3] if obs.size >= idx + 3 else np.zeros(3)
-    idx += 3
-    fuel_obs = None
-    if obs.size > idx:
-        potential_fuel = float(obs[idx])
-        if 0.0 <= potential_fuel <= 1.0:
-            fuel_obs = potential_fuel
-        idx += 1
-    target_rel = obs[idx : idx + 3] if obs.size >= idx + 3 else np.zeros(3)
+    """Parse observation array into structured dictionary.
+    obs[0:3]   - position (x, y, z) [meters]
+    obs[3:6]   - velocity (vx, vy, vz) [m/s]
+    obs[6:10]  - quaternion (w, x, y, z) [unitless]
+    obs[10:13] - angular_velocity (wx, wy, wz) [rad/s]
+    obs[13]    - fuel_fraction [0-1]
+    obs[14:17] - target_relative (dx, dy, dz) [meters]
+    """
+    obs = np.asarray(observation, dtype=float).flatten()
+
+    pos = obs[0:3]
+    vel = obs[3:6]
+    quat = obs[6:10]
+    ang_vel = obs[10:13]
+    fuel_obs = float(obs[13])
+    target_rel = obs[14:17]
+
     return {
         "position": pos,
         "velocity": vel,
@@ -430,10 +426,18 @@ class ExpertPolicy(BasePolicy):
         self.gnc = RocketLandingGNC(params=controller_params, angle_representation="quaternion")
 
     def get_action(self, info_dict, **kwargs):
+        """
+        Returns:
+            action: numpy array of shape (7,) containing:
+                [finlet_x, finlet_y, finlet_roll, ignition, throttle, gimbal_x, gimbal_y]
+        """
         # TODO need to handle multiple envs
-        state_dict = parse_observation(info_dict["observation"], "quaternion")
+        obs = info_dict["state"] if "state" in info_dict else info_dict["observation"]
+        state_dict = parse_observation(obs, "quaternion")
         action = self.gnc.compute_control(state_dict)
         self.gnc.post_step_update()
+        action = np.asarray(action, dtype=np.float32).flatten()
+        print(action)
         return action
 
     def reset(self):

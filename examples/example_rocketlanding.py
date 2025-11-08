@@ -21,18 +21,8 @@ if __name__ == "__main__":
     from stable_worldmodel.envs.rocket_landing import ExpertPolicy
 
     world.set_policy(ExpertPolicy())
-    world.record_dataset(
-        "example-pfrl",
-        episodes=2,
-        seed=2347,
-        options={"variation": ("all",)},
-    )
-
-    world.record_video_from_dataset(
-        "./",
-        "example-pfrl",
-        episode_idx=[0, 1],
-    )
+    world.record_dataset("example-pfrl", episodes=2, seed=2347, options=None)
+    world.record_video_from_dataset("./", "example-pfrl", episode_idx=[0, 1])
 
     # ################
     # ##  Evaluate  ##
