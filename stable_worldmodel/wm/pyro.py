@@ -24,7 +24,6 @@ class PYRO(torch.nn.Module):
         self.backbone = encoder
         self.predictor = predictor
         self.extra_encoders = extra_encoders or {}
-        self.cost_keys = cost_keys or ["pixels"]
         self.decoder = decoder
         self.history_size = history_size
         self.num_pred = num_pred
@@ -39,9 +38,12 @@ class PYRO(torch.nn.Module):
         self,
         info,
         pixels_key="pixels",
+        emb_keys=None,
         target="embed",
     ):
         assert target not in info, f"{target} key already in info_dict"
+
+        emb_keys = emb_keys or self.extra_encoders.keys()
 
         # == pixels embeddings
         pixels = info[pixels_key].float()  # (B, T, 3, H, W)
@@ -65,7 +67,8 @@ class PYRO(torch.nn.Module):
         embedding = pixels_embed
         info[f"pixels_{target}"] = pixels_embed
 
-        for key, extr_enc in self.extra_encoders.items():
+        for key in emb_keys:
+            extr_enc = self.extra_encoders[key]
             extra_input = info[key].float()  # (B, T, dim)
             extra_embed = extr_enc(extra_input)  # (B, T, dim) -> (B, T, emb_dim)
             info[f"{key}_{target}"] = extra_embed
@@ -223,11 +226,15 @@ class PYRO(torch.nn.Module):
             if torch.is_tensor(v):
                 info_dict[k] = v.unsqueeze(1).to(self.device)
 
+        # == non action embeddings keys
+        emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
+
         # == get the goal embedding
         info_dict = self.encode(
             info_dict,
             target="goal_embed",
             pixels_key="goal",
+            emb_keys=emb_keys,
         )
 
         # == run world model
@@ -235,7 +242,7 @@ class PYRO(torch.nn.Module):
 
         cost = 0.0
 
-        for key in self.cost_keys:
+        for key in emb_keys + ["pixels"]:
             preds = info_dict[f"predicted_{key}_embed"]
             goal = info_dict[f"{key}_goal_embed"]
             cost = cost + F.mse_loss(preds[:, -1:], goal, reduction="none").mean(dim=tuple(range(1, preds.ndim)))
@@ -295,6 +302,7 @@ class CausalPredictor(nn.Module):
 
     def forward(self, x):  # x: (b, window_size * H/patch_size * W/patch_size, 384)
         b, n, _ = x.shape
+        print(x.shape)
         x = x + self.pos_embedding[:, :n]
         x = self.dropout(x)
         x = self.transformer(x)
