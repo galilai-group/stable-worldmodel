@@ -420,10 +420,21 @@ class ExpertPolicy(BasePolicy):
         super().__init__(**kwargs)
 
         # Create the GNC controller with provided or default parameters
-        if controller_params is None:
-            controller_params = ControllerParams()
+        self._controller_params = controller_params or ControllerParams()
+        self.controllers = [self._make_controller()]  # TODO num_envs!
 
-        self.gnc = RocketLandingGNC(params=controller_params, angle_representation="quaternion")
+    def _make_controller(self):
+        return RocketLandingGNC(params=self._controller_params, angle_representation="quaternion")
+
+    def _ensure_controller_count(self, count: int) -> None:
+        if count <= 0:
+            raise ValueError("Controller count must be positive.")
+
+        if len(self.controllers) < count:
+            for _ in range(count - len(self.controllers)):
+                self.controllers.append(self._make_controller())
+        elif len(self.controllers) > count:
+            self.controllers = self.controllers[:count]
 
     def get_action(self, info_dict, **kwargs):
         """
@@ -431,20 +442,33 @@ class ExpertPolicy(BasePolicy):
             action: numpy array of shape (7,) containing:
                 [finlet_x, finlet_y, finlet_roll, ignition, throttle, gimbal_x, gimbal_y]
         """
-        # TODO need to handle multiple envs
         obs = info_dict["state"] if "state" in info_dict else info_dict["observation"]
-        state_dict = parse_observation(obs, "quaternion")
-        action = self.gnc.compute_control(state_dict)
-        self.gnc.post_step_update()
-        action = np.asarray(action, dtype=np.float32).flatten()
-        print(action)
-        return action
+        batched = obs.ndim > 1
+        obs_batch = obs if batched else obs[None, :]
+
+        self._ensure_controller_count(obs_batch.shape[0])
+
+        actions = []
+        for idx, single_obs in enumerate(obs_batch):
+            state_dict = parse_observation(single_obs, "quaternion")
+            controller = self.controllers[idx]
+            action = controller.compute_control(state_dict)
+            controller.post_step_update()
+            actions.append(action)
+
+        actions = np.stack(actions, axis=0)
+        return actions if batched else actions[0]
 
     def reset(self):
-        self.gnc.reset()
+        for controller in self.controllers:
+            controller.reset()
 
     def get_telemetry(self):
-        return self.gnc.get_telemetry()
+        if len(self.controllers) == 1:
+            return self.controllers[0].get_telemetry()
+        return [controller.get_telemetry() for controller in self.controllers]
 
     def get_fuel_report(self):
-        return self.gnc.get_fuel_report()
+        if len(self.controllers) == 1:
+            return self.controllers[0].get_fuel_report()
+        return [controller.get_fuel_report() for controller in self.controllers]
