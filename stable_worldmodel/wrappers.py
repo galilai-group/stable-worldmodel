@@ -192,7 +192,6 @@ class EverythingToInfoWrapper(gym.Wrapper):
             raise NotImplementedError
         else:
             info["action"] *= np.nan
-
         return obs, info
 
     def step(self, action):
@@ -350,72 +349,78 @@ class ResizeGoalWrapper(gym.Wrapper):
 
 
 class StackedWrapper(gym.Wrapper):
-    """Stacked a given key in the info dict over the last k steps.
+    """Stacks specified key(s) in the info dict over the last k steps.
 
-    The initial reset will fill the stack with the initial value.
+    The initial reset will fill the stack(s) with the initial value(s).
 
     Note:
-        Stacked values into a tensor/array along a new first dimension, if the
-        data type is a torch.Tensor or np.ndarray.
+        Stacked values are combined into a tensor/array along a new first
+        dimension if the data type is a torch.Tensor or np.ndarray.
 
     Args:
         env: The Gymnasium environment to wrap.
-        key: The key in the info dict to stack.
+        key: The key or list of keys in the info dict to stack.
         n_stacks: The number of steps to stack.
     """
 
     def __init__(
         self,
-        env,
-        key: str,
+        env: gym.Env,
+        key: str | list[str],
         n_stacks: int,
     ):
         super().__init__(env)
-        self.key = key
+        self.keys = [key] if isinstance(key, str) else key
         self.n_stacks = n_stacks
-        self.buffer = deque([], maxlen=n_stacks)
+        self.buffers: dict[str, deque] = {k: deque([], maxlen=n_stacks) for k in self.keys}
 
-    def get_buffer_data(self):
-        if not self.buffer:
+    def get_buffer_data(self, key: str):
+        buffer = self.buffers[key]
+        if not buffer:
             return []
 
         if self.n_stacks == 1:
-            return self.buffer[0]
+            return buffer[0]
 
-        new_info = list(self.buffer)
+        new_info = list(buffer)
         first_elem = new_info[0]
 
         if torch.is_tensor(first_elem):
-            new_info = torch.stack(new_info, dim=0)
+            return torch.stack(new_info, dim=0)
         elif isinstance(first_elem, np.ndarray):
-            new_info = np.stack(new_info, axis=0)
-        return new_info
+            return np.stack(new_info, axis=0)
+        else:
+            return new_info
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        assert self.key in info, f"Key {self.key} not found in info dict during reset."
-        self.buffer.clear()
-        data = info.get(self.key)
-        self.buffer.extend([data] * self.n_stacks)
-        info[self.key] = self.get_buffer_data()
+        for k in self.keys:
+            assert k in info, f"Key {k} not found in info dict during reset."
+            data = info[k]
+            buffer = self.buffers[k]
+            buffer.clear()
+            buffer.extend([data] * self.n_stacks)
+            info[k] = self.get_buffer_data(k)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        assert self.key in info, f"Key {self.key} not found in info dict during step."
-        self.buffer.append(info.get(self.key))
-        info[self.key] = self.get_buffer_data()
+        for k in self.keys:
+            assert k in info, f"Key {k} not found in info dict during step."
+            self.buffers[k].append(info[k])
+            info[k] = self.get_buffer_data(k)
         return obs, reward, terminated, truncated, info
 
 
 class MegaWrapper(gym.Wrapper):
     """Combines multiple wrappers for comprehensive environment preprocessing.
 
-    Applies in sequence: AddPixelsWrapper → EverythingToInfoWrapper →
-    EnsureInfoKeysWrapper → EnsureGoalInfoWrapper → ResizeGoalWrapper.
+    Applies in sequence:
+        AddPixelsWrapper → EverythingToInfoWrapper → EnsureInfoKeysWrapper →
+        EnsureGoalInfoWrapper → ResizeGoalWrapper → StackedWrapper
 
     This provides a complete preprocessing pipeline with rendered pixels, unified
-    info dict, key validation, goal checking, and goal resizing.
+    info dict, key validation, goal checking, goal resizing, and temporal stacking.
 
     Args:
         env: The Gymnasium environment to wrap.
@@ -425,6 +430,7 @@ class MegaWrapper(gym.Wrapper):
         required_keys: Additional regex patterns for keys that must be in info.
             Pattern ``^pixels(?:\\..*)?$`` is always added.
         separate_goal: If True, validates 'goal' is present in info. Defaults to True.
+        n_stacks: Number of steps to stack (passed to StackedWrapper).
     """
 
     def __init__(
@@ -434,12 +440,16 @@ class MegaWrapper(gym.Wrapper):
         pixels_transform: Callable | None = None,
         goal_transform: Callable | None = None,
         required_keys: Iterable | None = None,
-        separate_goal: Iterable | None = True,
+        separate_goal: Iterable = True,
+        n_stacks: int = 1,
     ):
         super().__init__(env)
+
         if required_keys is None:
             required_keys = []
         required_keys.append(r"^pixels(?:\..*)?$")
+
+        # Build pipeline
         # this adds `pixels` key to info with optional transform
         env = AddPixelsWrapper(env, image_shape, pixels_transform)
         # this removes the info output, everything is in observation!
@@ -448,15 +458,37 @@ class MegaWrapper(gym.Wrapper):
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
         env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
+        env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
-        #
+        # We will wrap with StackedWrapper dynamically after we know the keys
+        self.env = env
+        self._n_stacks = n_stacks
+        self._stack_initialized = False
 
-        self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
+    def _init_stack(self, info):
+        """Attach a StackedWrapper around self.env dynamically."""
+        keys = list(info.keys())
+        self.env = StackedWrapper(self.env, keys, self._n_stacks)
+        self._stack_initialized = True
+
+        # Initialize buffers manually from the current info
+        for k in self.env.keys:
+            buf = self.env.buffers[k]
+            buf.clear()
+            buf.extend([info[k]] * self.env.n_stacks)
+            info[k] = self.env.get_buffer_data(k)
 
     def reset(self, *args, **kwargs):
-        return self.env.reset(*args, **kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
+
+        if not self._stack_initialized:
+            self._init_stack(info)
+
+        return obs, info
 
     def step(self, action):
+        if not self._stack_initialized:
+            raise RuntimeError("StackedWrapper not yet initialized — call reset() first.")
         return self.env.step(action)
 
 
