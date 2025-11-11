@@ -58,27 +58,31 @@ Notes:
 Run the training script from the repository root. Below are several example commands for different backbones. Adjust `backbone` and `output_model_name` as needed.
 
 ```bash
-# ResNet example
+# ResNet models
+# python experiments/wm_training/run.py backbone=microsoft/resnet-18 output_model_name=resnet18
 python experiments/wm_training/run.py backbone=microsoft/resnet-50 output_model_name=resnet50
 
-# ViT example
+# ViT models
 python experiments/wm_training/run.py backbone=google/vit-base-patch16-224 output_model_name=vit_base
 
-# DINO v1 examples
+# DINO v1
+# python experiments/wm_training/run.py backbone=facebook/dino-vitb16 output_model_name=dino_vitb16
 python experiments/wm_training/run.py backbone=facebook/dino-vits16 output_model_name=dino_vits16
 
 # DINOv2
 python experiments/wm_training/run.py backbone=facebook/dinov2-small output_model_name=dinov2_small
 
-# DINOv3 (example)
+# DINOv3
 python experiments/wm_training/run.py backbone=facebook/dinov3-vits16-pretrain-lvd1689m output_model_name=dinov3_vits16
+#python experiments/wm_training/run.py backbone=facebook/dinov3-vitb16-pretrain-lvd1689m output_model_name=dinov3_vitb16
 
 # MAE
 python experiments/wm_training/run.py backbone=facebook/vit-mae-base output_model_name=vit_mae_base
 
 # IJEPA
+#python experiments/wm_training/run.py backbone=facebook/ijepa_vith14_1k output_model_name=ijepa_vith14_1k
 python experiments/wm_training/run.py backbone=facebook/ijepa_vith14_22k output_model_name=ijepa_vith14_22k
 
-# CLIP (example)
+# CLIP
 python experiments/wm_training/run.py backbone=timm/vit_base_patch32_clip_224.metaclip_400m output_model_name=metaclip_vit_base
 ```
