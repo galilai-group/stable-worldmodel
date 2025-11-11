@@ -1715,5 +1715,5 @@ def test_stacked_wrapper_empty_buffer(minimal_env):
     wrapped = wrappers.StackedWrapper(minimal_env, key="test_key", n_stacks=3)
 
     # Before reset, buffer should be empty
-    result = wrapped.get_buffer_data()
+    result = wrapped.get_buffer_data("test_key")
     assert result == []
