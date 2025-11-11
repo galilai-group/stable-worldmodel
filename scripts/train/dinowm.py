@@ -4,7 +4,7 @@ import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf
@@ -262,14 +262,15 @@ def run(cfg):
 
     cache_dir = swm.data.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(dirpath=cache_dir, filename=cfg.output_model_name, epoch_interval=1)
-    checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
+    # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[checkpoint_callback, dump_object_callback],
+        callbacks=[dump_object_callback],
         num_sanity_val_steps=1,
         logger=wandb_logger,
         enable_checkpointing=True,
+        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
     )
 
     manager = spt.Manager(trainer=trainer, module=world_model, data=data)

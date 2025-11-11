@@ -16,7 +16,6 @@ class PYRO(torch.nn.Module):
         decoder=None,
         history_size=3,
         num_pred=1,
-        cost_keys=None,
         device="cpu",
     ):
         super().__init__()

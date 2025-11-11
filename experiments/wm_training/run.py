@@ -235,55 +235,59 @@ def get_data(cfg):
 # ============================================================================
 # Model Architecture
 # ============================================================================
-def forward(self, batch, stage):
-    """Forward: encode observations, predict next states, compute losses."""
-
-    # Replace NaN values with 0 (occurs at sequence boundaries)
-    for key in self.model.extra_encoders.keys():
-        batch[key] = torch.nan_to_num(batch[key], 0.0)
-
-    # Encode all timesteps into latent embeddings
-    batch = self.model.encode(batch, target="embed")
-
-    # Use history to predict next states
-    embedding = batch["embed"][:, :-1, :, :]  # (B, T-1, patches, dim)
-    pred_embedding = self.model.predict(embedding)
-    target_embedding = batch["embed"][:, 1:, :, :]  # (B, T-1, patches, dim)
-
-    # Compute pixel reconstruction loss
-    pixels_dim = batch["pixels_embed"].shape[-1]
-    pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
-    loss = pixels_loss
-    batch["pixels_loss"] = pixels_loss
-
-    start = pixels_dim
-    for key in self.model.extra_encoders.keys():
-        emb_dim = batch[f"{key}_embed"].shape[-1]
-        pred_embedding[..., start : start + emb_dim]
-        target_embedding[..., start : start + emb_dim]
-
-        if key in self.model.cost_keys:
-            extra_loss = F.mse_loss(
-                pred_embedding[..., start : start + emb_dim],
-                target_embedding[..., start : start + emb_dim].detach(),
-            )
-            loss = loss + extra_loss
-            batch[f"{key}_loss"] = extra_loss
-
-        start += emb_dim
-
-    batch["loss"] = loss
-
-    # Log all losses
-    prefix = "train/" if self.training else "val/"
-    losses_dict = {f"{prefix}{k}": v.detach() for k, v in batch.items() if "_loss" in k}
-    self.log_dict(losses_dict, on_step=True, sync_dist=True)  # , on_epoch=True, sync_dist=True)
-
-    return batch
 
 
 def get_world_model(cfg):
     """Build world model: frozen DINO encoder + trainable causal predictor."""
+
+    def forward(self, batch, stage):
+        """Forward: encode observations, predict next states, compute losses."""
+
+        # Replace NaN values with 0 (occurs at sequence boundaries)
+        for key in self.model.extra_encoders.keys():
+            batch[key] = torch.nan_to_num(batch[key], 0.0)
+
+        # Encode all timesteps into latent embeddings
+        batch = self.model.encode(batch, target="embed")
+
+        # Use history to predict next states
+        embedding = batch["embed"][:, : cfg.pyro.history_size, :, :]  # (B, T-1, patches, dim)
+        pred_embedding = self.model.predict(embedding)
+        target_embedding = batch["embed"][:, cfg.pyro.num_preds :, :, :]  # (B, T-1, patches, dim)
+
+        # Compute pixel reconstruction loss
+        pixels_dim = batch["pixels_embed"].shape[-1]
+        pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
+        loss = pixels_loss
+        batch["pixels_loss"] = pixels_loss
+
+        start = pixels_dim
+        for key in self.model.extra_encoders.keys():
+            if key == "action":
+                continue  # skip action encoding loss
+
+            emb_dim = batch[f"{key}_embed"].shape[-1]
+            pred_embedding[..., start : start + emb_dim]
+            target_embedding[..., start : start + emb_dim]
+
+            if key in self.model.extra_encoders:
+                extra_loss = F.mse_loss(
+                    pred_embedding[..., start : start + emb_dim],
+                    target_embedding[..., start : start + emb_dim].detach(),
+                )
+                loss = loss + extra_loss
+                batch[f"{key}_loss"] = extra_loss
+
+            start += emb_dim
+
+        batch["loss"] = loss
+
+        # Log all losses
+        prefix = "train/" if self.training else "val/"
+        losses_dict = {f"{prefix}{k}": v.detach() for k, v in batch.items() if "_loss" in k}
+        self.log_dict(losses_dict, on_step=True, sync_dist=True)  # , on_epoch=True, sync_dist=True)
+
+        return batch
 
     encoder, embedding_dim, num_patches = get_encoder(cfg)
     embedding_dim += sum(emb_dim for emb_dim in cfg.pyro.get("encoding", {}).values())  # add all extra dims
@@ -316,7 +320,6 @@ def get_world_model(cfg):
         extra_encoders=extra_encoders,
         history_size=cfg.pyro.history_size,
         num_pred=cfg.pyro.num_preds,
-        cost_keys=["pixels", "proprio"],
         device="cuda",
     )
 

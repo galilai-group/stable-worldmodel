@@ -15,7 +15,7 @@ if __name__ == "__main__":
         "swm/PushT-v1",
         num_envs=1,
         image_shape=(224, 224),
-        max_episode_steps=25,
+        max_episode_steps=50,
         render_mode="rgb_array",
     )
 
@@ -90,7 +90,9 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoCostModel("pyro_test_epoch_45").to("cuda")
+    model = swm.policy.AutoCostModel("pyro_test_epoch_40").to("cuda")
+    model = model.eval()
+    model.requires_grad_(False)
     config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
     solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
@@ -100,9 +102,10 @@ if __name__ == "__main__":
     # results = world.evaluate(episodes=20, seed=42, dump_every=10)
     results = world.evaluate_from_dataset(
         "pusht_expert_val",
-        start_steps=[35],
-        episodes_idx=[6],
-        num_steps=25,
+        start_steps=[25],
+        episodes_idx=[3],
+        goal_offset_steps=25,
+        eval_budget=25,
         callables={"_set_state": "state", "_set_goal_state": "goal_state"},
     )
 

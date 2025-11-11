@@ -3,8 +3,8 @@ defaults:
   - _self_
 
 wandb:
-  enable: false
-  project: pyro
+  enable: true
+  project: xenoworlds
   entity: simon-lacoste-julien
 
 dataset_name: pusht_expert_train
@@ -28,7 +28,7 @@ patch_size: 16
 
 backbone: facebook/dinov2-small
 
-n_steps: 2
+n_steps: ${eval:'${pyro.num_preds} + ${pyro.history_size}'}
 frameskip: 5
 
 pyro:
