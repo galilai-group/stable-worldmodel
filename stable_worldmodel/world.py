@@ -123,6 +123,7 @@ class World:
         image_transform: Callable | None = None,
         seed: int = 2349867,
         max_episode_steps: int = 100,
+        n_stacks: int = 1,
         verbose: int = 1,
         extra_wrappers: list | None = None,
         **kwargs,
@@ -183,7 +184,7 @@ class World:
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform, goal_shape, goal_transform)]
+            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform, goal_shape, goal_transform, n_stacks)]
             + (extra_wrappers or []),
             max_episode_steps=max_episode_steps,
             **kwargs,

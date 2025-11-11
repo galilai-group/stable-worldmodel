@@ -17,38 +17,8 @@ if __name__ == "__main__":
         image_shape=(224, 224),
         max_episode_steps=50,
         render_mode="rgb_array",
+        n_stacks=3,
     )
-
-    print("Available variations: ", world.single_variation_space.names())
-
-    # #######################
-    # ##  Data Collection  ##
-    # #######################
-
-    # world.set_policy(swm.policy.RandomPolicy())
-    # world.record_dataset(
-    #     "example-pusht",
-    #     episodes=10,
-    #     seed=2347,
-    #     options=None,
-    # )
-
-    # world.record_video_from_dataset(
-    #     "./",
-    #     "example-pusht",
-    #     episode_idx=[0, 1],
-    # )
-
-    ################
-    ##  Pretrain  ##
-    ################
-
-    # swm.pretraining(
-    #     "scripts/train/dinowm.py",
-    #     dataset_name="example-pusht",
-    #     output_model_name="dummy_pusht",
-    #     dump_object=True,
-    # )
 
     #########################
     ##  Transform/Process  ##
