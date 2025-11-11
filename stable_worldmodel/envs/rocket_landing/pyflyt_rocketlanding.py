@@ -125,8 +125,8 @@ class RocketLandingEnv(RocketBaseEnv):
                             dtype=np.float32,
                         ),
                         "start_horizontal_offset": swm.spaces.Box(
-                            low=-20.0,
-                            high=20.0,
+                            low=-2.0,
+                            high=2.0,
                             init_value=np.array([0.0, 0.0], dtype=np.float32),
                             shape=(2,),
                             dtype=np.float32,
@@ -151,6 +151,8 @@ class RocketLandingEnv(RocketBaseEnv):
         # Track modified URDF paths
         self.modified_rocket_urdf = None
         self.modified_pad_urdf = None
+        self._spawn_offset_limit = 2.0  # meters
+        self._entry_speed_limit = -30.0  # m/s (downwards)
 
     def _modify_rocket_urdf(self) -> str:
         """Modify rocket URDF with current variation colors.
@@ -245,16 +247,16 @@ class RocketLandingEnv(RocketBaseEnv):
 
         """
         if options is None:
-            options = {
-                "randomize_drop": True,
-                "accelerate_drop": True,
-            }
+            options = {}
+        options = dict(options)
+        options.setdefault("randomize_drop", False)
+        options.setdefault("accelerate_drop", True)
 
         # Handle variations
         self.variation_space.seed(seed)
         self.variation_space.reset()
 
-        variation_options = options.get("variation", [])
+        variation_options = list(options.get("variation", []))
         if variation_options:
             from collections.abc import Sequence
 
@@ -262,6 +264,11 @@ class RocketLandingEnv(RocketBaseEnv):
                 raise ValueError("variation option must be a Sequence containing variation names to sample")
 
             self.variation_space.update(variation_options)
+
+        variation_controls_offset = any(
+            opt == "all" or opt == "environment" or opt.startswith("environment.start_horizontal_offset")
+            for opt in variation_options
+        )
 
         # Apply start position variations
         start_height_ratio = self.variation_space["environment"]["start_height_ratio"].value
@@ -291,6 +298,33 @@ class RocketLandingEnv(RocketBaseEnv):
         self.previous_lin_vel = np.zeros((3,))
         self.previous_lin_pos = np.zeros((3,))
         self.previous_ground_lin_vel = np.zeros((3,))
+
+        # Limit initial displacement and entry speed
+        rocket_id = self.env.drones[0].Id
+        limit = self._spawn_offset_limit
+        if options["randomize_drop"] and not variation_controls_offset:
+            spawn_offset = self.np_random.uniform(-limit, limit, size=2)
+        else:
+            spawn_offset = np.clip(start_offset, -limit, limit)
+
+        base_pos, base_orn = p.getBasePositionAndOrientation(rocket_id, physicsClientId=self.env._client)
+        base_pos = np.array(base_pos, dtype=np.float64)
+        base_pos[:2] = spawn_offset
+        p.resetBasePositionAndOrientation(
+            rocket_id,
+            base_pos,
+            base_orn,
+            physicsClientId=self.env._client,
+        )
+
+        if options["accelerate_drop"]:
+            lin_vel, ang_vel = p.getBaseVelocity(rocket_id, physicsClientId=self.env._client)
+            lin_vel = np.array(lin_vel, dtype=np.float64)
+            ang_vel = np.array(ang_vel, dtype=np.float64)
+            lin_vel[2] = self._entry_speed_limit
+            self.env.resetBaseVelocity(rocket_id, lin_vel.tolist(), ang_vel.tolist())
+
+        self.compute_state()
 
         # Apply color variations to rocket and pad
         if variation_options and (
@@ -353,30 +387,23 @@ class RocketLandingEnv(RocketBaseEnv):
                             rocket_id, i, rgbaColor=list(booster_color) + [1.0], physicsClientId=self.env._client
                         )
 
-        # Note: Sky/background color variation is tracked in variation_space but not visually applied
-        # PyBullet doesn't provide a direct API to change background color in headless/rgb_array mode
-        # The sky_color value can still be used programmatically (e.g., for data augmentation)
 
-        # Generate goal image: render the rocket on the landing pad
-        # Save the current initial state
-        init_state_id = p.saveState(physicsClientId=self.env._client)
-
-        # Set rocket to landed position on the pad (upright, centered)
-        landed_position = [0.0, 0.0, 1.5]  # slightly above pad
-        landed_orientation = p.getQuaternionFromEuler([0.0, 0.0, 0.0])  # upright
-        p.resetBasePositionAndOrientation(
-            self.env.drones[0].Id,
-            landed_position,
-            landed_orientation,
-            physicsClientId=self.env._client,
-        )
-
-        # Render to get the goal image
-        self.current_goal = self.render()
-
-        # Restore the original initial state
-        p.restoreState(stateId=init_state_id, physicsClientId=self.env._client)
-        p.removeState(stateUniqueId=init_state_id, physicsClientId=self.env._client)
+        if self.render_mode is not None:
+            init_state_id = p.saveState(physicsClientId=self.env._client)
+            landed_position = [0.0, 0.0, 1.5]  # slightly above pad
+            landed_orientation = p.getQuaternionFromEuler([0.0, 0.0, 0.0])  # upright
+            p.resetBasePositionAndOrientation(
+                self.env.drones[0].Id,
+                landed_position,
+                landed_orientation,
+                physicsClientId=self.env._client,
+            )
+            self.current_goal = self.render()
+            p.restoreState(stateId=init_state_id, physicsClientId=self.env._client)
+            p.removeState(stateUniqueId=init_state_id, physicsClientId=self.env._client)
+        else:
+            height, width = self.render_resolution
+            self.current_goal = np.zeros((height, width, 3), dtype=np.uint8)
 
         # Add goal to info dict
         self.info["goal"] = self.current_goal
@@ -510,33 +537,19 @@ class RocketLandingEnv(RocketBaseEnv):
             self.landing_pad_contact = 0.0
             return
 
-        # if collision has more than 0.35 rad/s angular velocity, we dead
-        # truthfully, if collision has more than 0.55 m/s linear acceleration, we dead
-        # number taken from here:
-        # https://cosmosmagazine.com/space/launch-land-repeat-reusable-rockets-explained/
-        # but doing so is kinda impossible for RL, so I've lessened the requirement to 1.0
-        # if np.linalg.norm(self.previous_ang_vel) > 0.35 or np.linalg.norm(self.previous_lin_vel) > 1.0:
-        #     self.termination |= True
-        #     self.info["fatal_collision"] = True
-        #     return
 
         if np.linalg.norm(self.previous_ang_vel) > 10.0 or np.linalg.norm(self.previous_lin_vel) > 5.0:
             self.termination |= True
             self.info["fatal_collision"] = True
             return
 
-        # if our both velocities are less than 0.02 m/s and we upright, we LANDED!
-        # if (
-        #     np.linalg.norm(self.previous_ang_vel) < 0.02
-        #     and np.linalg.norm(self.previous_lin_vel) < 0.02
-        #     and np.linalg.norm(self.ang_pos[:2]) < 0.1
-        # ):
 
         if (
             np.linalg.norm(self.previous_ang_vel) < 5.0
-            and np.linalg.norm(self.previous_lin_vel) < 0.5
-            and np.linalg.norm(self.ang_pos[:2]) < 0.5  # NEED TO ADJUST WITH CORRECT COORDINATE FRAME ORIENTATION
-            and np.linalg.norm(self.lin_pos[:2]) < 3.0
+            and np.linalg.norm(self.previous_lin_vel) < 4.0
+            and np.linalg.norm(self.ang_pos[:2]) < 0.6
+            and np.linalg.norm(self.lin_pos[:2]) < 12.0
+            and self.lin_pos[2] < 3.0
         ):
             self.truncation |= True
             self.info["env_complete"] = True

@@ -17,7 +17,7 @@ from stable_worldmodel.policy import BasePolicy
 @dataclass
 class ControllerParams:
     guidance_hz: float = 5.0
-    mpc_horizon: int = 15
+    mpc_horizon: int = 25
     tracking_hz: float = 20.0
     kp_pos: np.ndarray = None
     kd_pos: np.ndarray = None
@@ -215,13 +215,26 @@ class TrackingController:
         pos_error = ref_pos - pos
         vel_error = ref_vel - vel
         height = pos[2]
+
+        kp_vec = np.array(self.params.kp_pos, copy=True)
+        kd_vec = np.array(self.params.kd_pos, copy=True)
+        if height < 20.0:
+            lateral_boost = 1.5 if height < 10.0 else 1.25
+            damping_boost = 2.0 if height < 10.0 else 1.4
+            kp_vec[:2] *= lateral_boost
+            kd_vec[:2] *= damping_boost
         if height < 3.0:
-            kp_scale, kd_scale = 0.7, 1.3
+            kp_vec[:2] *= 1.6
+            kp_scale, kd_scale = 0.8, 1.2
         elif height < 10.0:
-            kp_scale, kd_scale = 1.0, 1.0
+            kp_scale, kd_scale = 1.1, 1.1
         else:
             kp_scale, kd_scale = 1.2, 0.9
-        accel_cmd = self.params.kp_pos * kp_scale * pos_error + self.params.kd_pos * kd_scale * vel_error
+
+        accel_cmd = kp_vec * kp_scale * pos_error + kd_vec * kd_scale * vel_error
+        if height < 15.0:
+            extra_damp = 0.8 if height < 5.0 else 0.5
+            accel_cmd[:2] -= extra_damp * vel[:2]
         accel_cmd[2] += self.params.g
         thrust_mag = np.linalg.norm(accel_cmd) + 1e-9
         thrust_dir = accel_cmd / thrust_mag
@@ -388,22 +401,35 @@ class RocketLandingGNC:
 
 
 def parse_observation(observation: np.ndarray, angle_rep: str = "quaternion"):
-    """Parse observation array into structured dictionary.
-    obs[0:3]   - position (x, y, z) [meters]
-    obs[3:6]   - velocity (vx, vy, vz) [m/s]
-    obs[6:10]  - quaternion (w, x, y, z) [unitless]
-    obs[10:13] - angular_velocity (wx, wy, wz) [rad/s]
-    obs[13]    - fuel_fraction [0-1]
-    obs[14:17] - target_relative (dx, dy, dz) [meters]
-    """
-    obs = np.asarray(observation, dtype=float).flatten()
+    """Parse PyFlyt rocket observation into structured fields."""
 
-    pos = obs[0:3]
-    vel = obs[3:6]
-    quat = obs[6:10]
-    ang_vel = obs[10:13]
-    fuel_obs = float(obs[13])
-    target_rel = obs[14:17]
+    obs = np.asarray(observation, dtype=float).flatten()
+    if obs.size < 30:
+        padded = np.zeros(30, dtype=float)
+        padded[: obs.size] = obs
+        obs = padded
+
+    ang_vel = obs[0:3]
+
+    if angle_rep == "quaternion":
+        raw_quat_xyzw = obs[3:7]
+        rot = Rotation.from_quat(raw_quat_xyzw)
+        quat = np.array([raw_quat_xyzw[3], raw_quat_xyzw[0], raw_quat_xyzw[1], raw_quat_xyzw[2]], dtype=float)
+        idx = 7
+    else:
+        raw_eul = obs[3:6]
+        rot = Rotation.from_euler("xyz", raw_eul)
+        q = rot.as_quat()
+        quat = np.array([q[3], q[0], q[1], q[2]], dtype=float)
+        idx = 6
+
+    vel_body = obs[idx : idx + 3]
+    vel = rot.apply(vel_body)
+    pos = obs[idx + 3 : idx + 6]
+    aux = obs[idx + 13 : idx + 22]  # skip previous action (7 values)
+
+    fuel_obs = float(np.clip(aux[5], 0.0, 1.0))
+    target_rel = -pos
 
     return {
         "position": pos,
