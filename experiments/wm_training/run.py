@@ -396,7 +396,7 @@ def run(cfg):
     world_model = get_world_model(cfg)
 
     cache_dir = swm.data.get_cache_dir()
-    dump_object_callback = ModelObjectCallBack(dirpath=cache_dir, filename=cfg.output_model_name, epoch_interval=1)
+    dump_object_callback = ModelObjectCallBack(dirpath=cache_dir, filename=cfg.output_model_name, epoch_interval=10)
     # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
@@ -405,10 +405,14 @@ def run(cfg):
         num_sanity_val_steps=1,
         logger=wandb_logger,
         enable_checkpointing=True,
-        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
     )
 
-    manager = spt.Manager(trainer=trainer, module=world_model, data=data)
+    manager = spt.Manager(
+        trainer=trainer,
+        module=world_model,
+        data=data,
+        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
+    )
     manager()
 
 
