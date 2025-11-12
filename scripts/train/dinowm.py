@@ -248,7 +248,7 @@ class ModelObjectCallBack(Callback):
                 logging.info(f"Saved world model object to {output_path}")
             # Additionally, save at final epoch
             if (trainer.current_epoch + 1) == trainer.max_epochs:
-                final_path = self.dirpath / f"{self.filename}.ckpt"
+                final_path = self.dirpath / f"{self.filename}_object.ckpt"
                 torch.save(pl_module, final_path)
                 logging.info(f"Saved final world model object to {final_path}")
 
