@@ -58,7 +58,11 @@ def get_data(cfg):
 
     # Apply transforms to all steps
     transform = spt.data.transforms.Compose(
-        *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
+        *[
+            get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size)
+            for col in ["pixels", "goal"]
+            for i in range(cfg.n_steps)
+        ],
         spt.data.transforms.WrapTorchTransform(
             norm_action_transform,
             source="action",
@@ -270,10 +274,11 @@ def run(cfg):
         num_sanity_val_steps=1,
         logger=wandb_logger,
         enable_checkpointing=True,
-        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
     )
 
-    manager = spt.Manager(trainer=trainer, module=world_model, data=data)
+    manager = spt.Manager(
+        trainer=trainer, module=world_model, data=data, ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt"
+    )
     manager()
 
 
