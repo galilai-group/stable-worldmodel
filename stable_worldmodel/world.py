@@ -122,6 +122,8 @@ class World:
         goal_transform: Callable | None = None,
         image_transform: Callable | None = None,
         seed: int = 2349867,
+        history_size: int = 1,
+        frame_skip: int = 1,
         max_episode_steps: int = 100,
         n_stacks: int = 1,
         verbose: int = 1,
@@ -180,11 +182,22 @@ class World:
                     seed=42
                 )
         """
+
         self.envs = gym.make_vec(
             env_name,
             num_envs=num_envs,
             vectorization_mode="sync",
-            wrappers=[lambda x: MegaWrapper(x, image_shape, image_transform, goal_shape, goal_transform, n_stacks)]
+            wrappers=[
+                lambda x: MegaWrapper(
+                    x,
+                    image_shape,
+                    image_transform,
+                    goal_shape,
+                    goal_transform,
+                    history_size=history_size,
+                    frame_skip=frame_skip,
+                )
+            ]
             + (extra_wrappers or []),
             max_episode_steps=max_episode_steps,
             **kwargs,
@@ -192,6 +205,8 @@ class World:
 
         self.envs = VariationWrapper(self.envs)
         self.envs.unwrapped.autoreset_mode = gym.vector.AutoresetMode.DISABLED
+
+        self._history_size = history_size
 
         if verbose > 0:
             logging.info(f"🌍🌍🌍 World {env_name} initialized 🌍🌍🌍")
@@ -386,9 +401,20 @@ class World:
         self.reset(seed, options)
 
         for i, o in enumerate(out):
-            frame = np.vstack([self.infos[v_name][i] for v_name in viewname])
+            frames_to_stack = []
+            for v_name in viewname:
+                frame_data = self.infos[v_name][i]
+                # if frame_data has a history dimension, take the last frame
+                if frame_data.ndim > 3:
+                    frame_data = frame_data[-1]
+                frames_to_stack.append(frame_data)
+            frame = np.vstack(frames_to_stack)
+
             if "goal" in self.infos:
-                frame = np.vstack([frame, self.infos["goal"][i]])
+                goal_data = self.infos["goal"][i]
+                if goal_data.ndim > 3:
+                    goal_data = goal_data[-1]
+                frame = np.vstack([frame, goal_data])
             o.append_data(frame)
 
         for _ in range(max_steps):
@@ -398,9 +424,20 @@ class World:
                 break
 
             for i, o in enumerate(out):
-                frame = np.vstack([self.infos[v_name][i] for v_name in viewname])
+                frames_to_stack = []
+                for v_name in viewname:
+                    frame_data = self.infos[v_name][i]
+                    # if frame_data has a history dimension, take the last frame
+                    if frame_data.ndim > 3:
+                        frame_data = frame_data[-1]
+                    frames_to_stack.append(frame_data)
+                frame = np.vstack(frames_to_stack)
+
                 if "goal" in self.infos:
-                    frame = np.vstack([frame, self.infos["goal"][i]])
+                    goal_data = self.infos["goal"][i]
+                    if goal_data.ndim > 3:
+                        goal_data = goal_data[-1]
+                    frame = np.vstack([frame, goal_data])
                 o.append_data(frame)
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
@@ -476,6 +513,9 @@ class World:
                     options={'task_id': 2}
                 )
         """
+        if self._history_size > 1:
+            raise NotImplementedError("Dataset recording with frame history > 1 is not supported.")
+
         cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
         dataset_path.mkdir(parents=True, exist_ok=True)
@@ -544,6 +584,11 @@ class World:
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
 
+        # flatten time dimension
+        for k, v in records.items():
+            if isinstance(v[0], np.ndarray):
+                records[k] = [item.squeeze() for item in v]
+
         # add the episode length
         counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"]) + 1)
         records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
@@ -572,6 +617,7 @@ class World:
         for i in range(len(records["episode_idx"])):
             ep_idx = records["episode_idx"][i]
             step_idx = records["step_idx"][i]
+
             for img_col in image_cols:
                 img = records[img_col][i]
                 img_folder = dataset_path / "img" / f"{ep_idx}"
@@ -699,7 +745,6 @@ class World:
                     max_steps=100
                 )
         """
-
         cache_dir = cache_dir or swm.data.get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
         assert dataset_path.is_dir(), f"Dataset {dataset_name} not found in cache dir {swm.data.get_cache_dir()}"
@@ -998,9 +1043,9 @@ class World:
         goal_info = {}
         for key, value in end_steps.items():
             if key == "pixels":
-                goal_info["goal"] = [
-                    np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value
-                ]
+                goal_info["goal"] = np.stack(
+                    [np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value]
+                )
                 continue
 
             key = f"goal_{key}" if not key.startswith("goal") else key
@@ -1013,6 +1058,12 @@ class World:
 
         first_steps.update(goal_info)
         self.reset(seed=seeds, options=options)  # set seeds for all envs
+
+        # broadcast goal info to match envs infos shape
+        goal_info = {
+            k: (np.broadcast_to(v[:, None, ...], self.infos[k].shape) if k in self.infos else v)
+            for k, v in goal_info.items()
+        }
 
         # apply callable list (e.g used for set initial position if not access to seed)
         callables = callables or {}

@@ -132,7 +132,7 @@ def test_each_env(env, temp_path):
 
     for key in world.infos:
         if key.startswith("pixels"):
-            assert world.infos[key].shape[:3] == (1, 224, 224), f"image shape is {world.infos[key].shape}"
+            assert world.infos[key].shape[:4] == (1, 1, 224, 224), f"image shape is {world.infos[key].shape}"
 
     world.step()
 
@@ -141,6 +141,6 @@ def test_each_env(env, temp_path):
 
     for key in world.infos:
         if key.startswith("pixels"):
-            assert world.infos[key].shape[:3] == (1, 224, 224), f"image shape is {world.infos[key].shape}"
+            assert world.infos[key].shape[:4] == (1, 1, 224, 224), f"image shape is {world.infos[key].shape}"
 
     return

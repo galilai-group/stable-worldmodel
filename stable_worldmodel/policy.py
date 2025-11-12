@@ -117,16 +117,52 @@ class WorldModelPolicy(BasePolicy):
 
         assert isinstance(self.solver, Solver), "Solver must implement the Solver protocol"
 
+    def _prepare_info(self, info_dict):
+        # pre-process and transform observations
+        for k, v in info_dict.items():
+            is_numpy = isinstance(v, (np.ndarray | np.generic))
+
+            if k in self.process:
+                if not is_numpy:
+                    raise ValueError(f"Expected numpy array for key '{k}' in process, got {type(v)}")
+
+                # flatten extra dimensions if needed
+                shape = v.shape
+                if len(shape) > 2:
+                    v = v.reshape(-1, *shape[2:])
+
+                # process and reshape back
+                v = self.process[k].transform(v)
+                v = v.reshape(shape)
+
+            # collapse env and time dimensions for transform (e, t, ...) -> (e * t, ...)
+            # then restore after transform
+            if k in self.transform:
+                shape = None
+                if is_numpy or torch.is_tensor(v):
+                    if v.ndim > 2:
+                        shape = v.shape
+                        v = v.reshape(-1, *shape[2:])
+
+                v = torch.stack([self.transform[k](x) for x in v])
+                is_numpy = isinstance(v, (np.ndarray | np.generic))
+
+                if shape is not None:
+                    v = v.reshape(*shape[:2], *v.shape[1:])
+
+            if is_numpy and v.dtype != object:
+                v = torch.from_numpy(v)
+
+            info_dict[k] = v
+
+        return info_dict
+
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
         assert "pixels" in info_dict, "'pixels' must be provided in info_dict"
         assert "goal" in info_dict, "'goal' must be provided in info_dict"
 
-        # pre-process and transform observations
-        for k, v in info_dict.items():
-            v = self.process[k].transform(v) if k in self.process else v
-            v = torch.stack([self.transform[k](x) for x in v]) if k in self.transform else v
-            info_dict[k] = torch.from_numpy(v) if isinstance(v, (np.ndarray | np.generic)) else v
+        info_dict = self._prepare_info(info_dict)
 
         # need to replan if action buffer is empty
         if len(self._action_buffer) == 0:

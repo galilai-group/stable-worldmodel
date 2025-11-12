@@ -360,47 +360,66 @@ class StackedWrapper(gym.Wrapper):
     Args:
         env: The Gymnasium environment to wrap.
         key: The key or list of keys in the info dict to stack.
-        n_stacks: The number of steps to stack.
+        frameskip: Number of frames to skip between stacked entries.
+        history_size: Number of past entries to stack.
     """
 
     def __init__(
         self,
         env: gym.Env,
         key: str | list[str],
-        n_stacks: int,
+        history_size: int = 1,
+        frameskip: int = 1,
     ):
         super().__init__(env)
         self.keys = [key] if isinstance(key, str) else key
-        self.n_stacks = n_stacks
-        self.buffers: dict[str, deque] = {k: deque([], maxlen=n_stacks) for k in self.keys}
+        self.history_size = history_size
+        self.frameskip = frameskip
+        self.buffers: dict[str, deque] = {k: deque([], maxlen=self.capacity) for k in self.keys}
+
+    @property
+    def capacity(self):
+        return self.history_size * self.frameskip
 
     def get_buffer_data(self, key: str):
         buffer = self.buffers[key]
         if not buffer:
             return []
 
-        if self.n_stacks == 1:
-            return buffer[0]
+        new_info = list(buffer)[:: -self.frameskip][::-1]
+        assert len(new_info) == self.history_size, f"Buffer for key {key} has incorrect length."
 
-        new_info = list(buffer)
-        first_elem = new_info[0]
+        return self._stack_elements(new_info)
+
+    def _stack_elements(self, elements: list):
+        """Stack elements based on their type."""
+        if not elements:
+            return elements
+
+        first_elem = elements[0]
 
         if torch.is_tensor(first_elem):
-            return torch.stack(new_info, dim=0)
+            return torch.stack(elements)
         elif isinstance(first_elem, np.ndarray):
-            return np.stack(new_info, axis=0)
+            return np.stack(elements)
+        elif type(first_elem) in [int, float, bool] or issubclass(type(first_elem), np.number):
+            return np.array(elements)
         else:
-            return new_info
+            return elements
 
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
+    def init_buffer(self, info: dict):
         for k in self.keys:
-            assert k in info, f"Key {k} not found in info dict during reset."
+            assert k in info, f"Key {k} not found in info dict during buffer initialization."
             data = info[k]
             buffer = self.buffers[k]
             buffer.clear()
-            buffer.extend([data] * self.n_stacks)
+            buffer.extend([data] * self.capacity)
             info[k] = self.get_buffer_data(k)
+        return info
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        info = self.init_buffer(info)
         return obs, info
 
     def step(self, action):
@@ -441,7 +460,8 @@ class MegaWrapper(gym.Wrapper):
         goal_transform: Callable | None = None,
         required_keys: Iterable | None = None,
         separate_goal: Iterable = True,
-        n_stacks: int = 1,
+        history_size: int = 1,
+        frame_skip: int = 1,
     ):
         super().__init__(env)
 
@@ -462,21 +482,17 @@ class MegaWrapper(gym.Wrapper):
 
         # We will wrap with StackedWrapper dynamically after we know the keys
         self.env = env
-        self._n_stacks = n_stacks
+        self._history_size = history_size
+        self._frameskip = frame_skip
         self._stack_initialized = False
 
     def _init_stack(self, info):
         """Attach a StackedWrapper around self.env dynamically."""
         keys = list(info.keys())
-        self.env = StackedWrapper(self.env, keys, self._n_stacks)
+        self.env = StackedWrapper(self.env, keys, self._history_size, self._frameskip)
         self._stack_initialized = True
-
-        # Initialize buffers manually from the current info
-        for k in self.env.keys:
-            buf = self.env.buffers[k]
-            buf.clear()
-            buf.extend([info[k]] * self.env.n_stacks)
-            info[k] = self.env.get_buffer_data(k)
+        self.env.init_buffer(info)
+        return
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
