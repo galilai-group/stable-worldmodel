@@ -18,7 +18,6 @@ class DINOWM(torch.nn.Module):
         decoder=None,
         history_size=3,
         num_pred=1,
-        device="cpu",
     ):
         super().__init__()
 
@@ -29,7 +28,6 @@ class DINOWM(torch.nn.Module):
         self.decoder = decoder
         self.history_size = history_size
         self.num_pred = num_pred
-        self.device = device
 
         decoder_scale = 16  # from vqvae
         num_side_patches = 224 // decoder_scale
@@ -217,7 +215,7 @@ class DINOWM(torch.nn.Module):
         # move to device and unsqueeze time
         for k, v in info_dict.items():
             if torch.is_tensor(v):
-                info_dict[k] = v.unsqueeze(1).to(self.device)
+                info_dict[k] = v.unsqueeze(1).to(next(self.parameters()).device)
 
         # == get the goal embedding
         proprio_key = "goal_proprio" if "goal_proprio" in info_dict else None
