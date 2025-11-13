@@ -14,11 +14,13 @@ class GDSolver(torch.nn.Module):
         model: Costable,
         n_steps: int,
         action_noise=0.0,
+        num_samples=1,
         device="cpu",
     ):
         super().__init__()
         self.model = model
         self.n_steps = n_steps
+        self.num_samples = num_samples
         self.action_noise = action_noise
         self.device = device
 
@@ -79,6 +81,10 @@ class GDSolver(torch.nn.Module):
             new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
             actions = torch.cat([actions, new_actions], dim=1)
 
+        actions = actions.unsqueeze(1).repeat_interleave(self.num_samples, dim=1)  # add sample dim
+        actions[:, 1:] += (
+            torch.randn_like(actions[:, 1:]) * self.action_noise
+        )  # add small noise to all samples except the first one
         actions = actions.to(self.device)
 
         # reset actions
@@ -105,13 +111,25 @@ class GDSolver(torch.nn.Module):
         # perform gradient descent
         for _ in range(self.n_steps):
             # copy info dict to avoid in-place modification
-            cost = self.model.get_cost(dict(info_dict), self.init)
+            expanded_infos = {}
+            for k, v in info_dict.items():
+                if torch.is_tensor(v):
+                    v = v.unsqueeze(1)  # add sample dim
+                    v = v.expand(self.n_envs, self.num_samples, *v.shape[2:])
+                elif isinstance(v, np.ndarray):
+                    v = np.repeat(v[:, None, ...], self.num_samples, axis=1)
+                expanded_infos[k] = v
 
-            assert type(cost) is torch.Tensor, f"Got {type(cost)} cost, expect torch.Tensor"
-            assert cost.ndim == 1 and len(cost) == self.n_envs, f"Cost should be of shape (n_envs,), got {cost.shape}"
-            assert cost.requires_grad, "Cost must requires_grad for GD solver."
+            actions = self.init.detach().requires_grad_(True)
+            costs = self.model.get_cost(expanded_infos, actions)
 
-            cost = cost.sum()  # independent cost for each env
+            assert isinstance(costs, torch.Tensor), f"Got {type(costs)} cost, expect torch.Tensor"
+            assert costs.ndim == 2 and costs.shape[0] == self.n_envs and costs.shape[1] == self.num_samples, (
+                f"Cost should be of shape ({self.n_envs}, {self.num_samples}), got {costs.shape}"
+            )
+            assert costs.requires_grad, "Cost must requires_grad for GD solver."
+
+            cost = costs.sum()  # independent cost for each env and each sample
             cost.backward()
             optim.step()
             optim.zero_grad(set_to_none=True)
@@ -126,7 +144,9 @@ class GDSolver(torch.nn.Module):
 
         # TODO break solving if finished self.eval? done break
 
-        # get the actions to return
-        outputs["actions"] = self.init.detach().cpu()
+        # get the best actions to return
+        top_idx = torch.argsort(costs, dim=1)[:, 0]
+        top_actions = self.init[:, top_idx].squeeze(1)
+        outputs["actions"] = top_actions.detach().cpu()
 
         return outputs

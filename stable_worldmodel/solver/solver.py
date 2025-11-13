@@ -24,8 +24,12 @@ class Costable(Protocol):
         Args:
             info_dict: Dictionary containing environment state information.
                 Typically includes keys like 'pixels', 'goal', 'proprio', 'predicted_states', etc.
-            action_candidates: Tensor of shape (B, horizon, action_dim)
-                containing action sequences to evaluate.
+                Note: the shape of tensors in info_dict should be (B, N, ...) where B is the number of trajectories
+                and N is the number of samples (action candidates). This means that the tensors are repeated
+                along the N dimension for each action candidate.
+            action_candidates: Tensor of shape (B, N, horizon, action_dim)
+                containing action sequences to evaluate. B and N should match the corresponding dimensions
+                in info_dict.
 
         Returns:
             Tensor of shape (n_envs,) containing the cost of each environment action sequence
