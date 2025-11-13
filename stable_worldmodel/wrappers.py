@@ -168,6 +168,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = self.env.action_space.sample()
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
+        assert "id" not in info
+        self._id = self.env.unwrapped.np_random.integers(0, np.iinfo(np.int64).max)
+        info["id"] = self._id
 
         # add all variations to info if needed
         options = kwargs.get("options") or {}
@@ -214,6 +217,8 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = action
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
+        assert "id" not in info
+        info["id"] = self._id
 
         for key in self._variations_watch:
             var_key = f"variation.{key}"
