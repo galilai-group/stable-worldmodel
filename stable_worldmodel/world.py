@@ -125,7 +125,6 @@ class World:
         history_size: int = 1,
         frame_skip: int = 1,
         max_episode_steps: int = 100,
-        n_stacks: int = 1,
         verbose: int = 1,
         extra_wrappers: list | None = None,
         **kwargs,
