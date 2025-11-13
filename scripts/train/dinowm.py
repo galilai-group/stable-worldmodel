@@ -186,8 +186,7 @@ def get_world_model(cfg):
         proprio_encoder=proprio_encoder,
         history_size=cfg.dinowm.history_size,
         num_pred=cfg.dinowm.num_preds,
-        device="cuda",
-    )
+    ).to("cuda")
 
     # Wrap in stable_spt Module with separate optimizers for each component
     def add_opt(module_name, lr):
