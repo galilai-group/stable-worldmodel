@@ -16,6 +16,8 @@ if __name__ == "__main__":
         image_shape=(224, 224),
         max_episode_steps=25,
         render_mode="rgb_array",
+        history_size=3,
+        frame_skip=5,
     )
 
     print("Available variations: ", world.single_variation_space.names())
@@ -24,13 +26,13 @@ if __name__ == "__main__":
     # ##  Data Collection  ##
     # #######################
 
-    world.set_policy(swm.policy.RandomPolicy())
-    world.record_dataset(
-        "example-pusht",
-        episodes=10,
-        seed=2347,
-        options=None,
-    )
+    # world.set_policy(swm.policy.RandomPolicy())
+    # world.record_dataset(
+    #     "example-pusht",
+    #     episodes=10,
+    #     seed=2347,
+    #     options=None,
+    # )
 
     # world.record_video_from_dataset(
     #     "./",
@@ -42,12 +44,12 @@ if __name__ == "__main__":
     ##  Pretrain  ##
     ################
 
-    swm.pretraining(
-        "scripts/train/dinowm.py",
-        dataset_name="example-pusht",
-        output_model_name="dummy_pusht",
-        dump_object=True,
-    )
+    # swm.pretraining(
+    #     "scripts/train/dinowm.py",
+    #     dataset_name="example-pusht",
+    #     output_model_name="dummy_pusht",
+    #     dump_object=True,
+    # )
 
     #########################
     ##  Transform/Process  ##
@@ -89,21 +91,22 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoCostModel("dummy_pusht").to("cuda")
+    model = swm.policy.AutoCostModel("dinowm_pusht").to("cuda")
     config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
     solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
     world.set_policy(policy)
 
-    results = world.evaluate(episodes=20, seed=42, dump_every=10)
+    # results = world.evaluate(episodes=20, seed=42, dump_every=10)
 
-    # metrics = world.evaluate_from_dataset(
-    #     "example-pusht",
-    #     start_steps=[135],
-    #     episodes_idx=[0],
-    #     num_steps=25,
-    #     callables={"_set_state": "state", "_set_goal_state": "goal_state"},
-    # )
+    results = world.evaluate_from_dataset(
+        "pusht_expert_val",
+        start_steps=[10],
+        episodes_idx=[8],
+        goal_offset_steps=25,
+        eval_budget=25,
+        callables={"_set_state": "state", "_set_goal_state": "goal_state"},
+    )
 
     print("Evaluation results: ", results)

@@ -28,10 +28,9 @@ class PYRO(torch.nn.Module):
         self.num_pred = num_pred
         self.device = device
 
-        # decoder_scale = 16  # from vqvae
-        # num_side_patches = 224 // decoder_scale
-        # self.encoder_image_size = num_side_patches * 14
-        # self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
+        # cache for embedding
+        # self._goal_cached_info = None
+        # self._init_state_cached_info = None
 
     def encode(
         self,
@@ -74,7 +73,6 @@ class PYRO(torch.nn.Module):
 
             # copy extra embedding across patches for each time step
             extra_tiled = repeat(extra_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
-
             # concatenate along feature dimension
             embedding = torch.cat([embedding, extra_tiled], dim=3)
 
@@ -159,27 +157,64 @@ class PYRO(torch.nn.Module):
         """
 
         assert "pixels" in info, "pixels not in info_dict"
-        n_obs = info["pixels"].shape[1]
+        n_obs = info["pixels"].shape[2]
+        n_samples = action_sequence.shape[1]
+
+        # initial state is the same across samples so we only encode the first one
+        init_state_info_dict = {}
+        for k, v in info.items():
+            if torch.is_tensor(v):
+                init_state_info_dict[k] = v[:, 0]  # (B, n, ...)
 
         # == add action to info dict
-        act_0 = action_sequence[:, :n_obs]
-        info["action"] = act_0
+        act_0 = action_sequence[:, 0, :n_obs]
+        init_state_info_dict["action"] = act_0
 
         # proprio_key = "proprio" if "proprio" in info else None
-        info = self.encode(
-            info,
-            pixels_key="pixels",
-            target="embed",
-            # proprio_key=proprio_key,
-            # action_key="action",
-        )
+
+        if (
+            hasattr(self, "_init_state_cached_info")
+            and torch.equal(self._init_state_cached_info["id"], info["id"][:, 0])
+            and torch.equal(self._init_state_cached_info["step_idx"], info["step_idx"][:, 0])
+        ):
+            init_state_info_dict = self._init_state_cached_info
+        else:
+            init_state_info_dict = self.encode(
+                init_state_info_dict,
+                pixels_key="pixels",
+                target="embed",
+            )
+
+            self._init_state_cached_info = {
+                k: v.detach() if torch.is_tensor(v) else v for k, v in init_state_info_dict.items()
+            }
+            self._init_state_cached_info["id"] = info["id"][:, 0]
+            self._init_state_cached_info["step_idx"] = info["step_idx"][:, 0]
+
+        # repeat the embedding for each action candidate
+        info["embed"] = (
+            init_state_info_dict["embed"].unsqueeze(1).repeat_interleave(action_sequence.shape[1], dim=1)
+        )  # (B, N, ...)
+
+        info["pixels_embed"] = (
+            init_state_info_dict["pixels_embed"]
+            .unsqueeze(1)
+            .expand(-1, action_sequence.shape[1], *([-1] * (init_state_info_dict["pixels_embed"].ndim - 1)))
+        )  # (B, N, ...)
+
+        for key in self.extra_encoders:
+            info[f"{key}_embed"] = (
+                init_state_info_dict[f"{key}_embed"].unsqueeze(1).repeat_interleave(action_sequence.shape[1], dim=1)
+            )  # (B, N, ...)
+
+        # actually compute the embedding for candidates
+        z = rearrange(info["embed"], "b n ... -> (b n) ...")
+        action_flat = rearrange(action_sequence[:, :, :n_obs], "b n ... -> (b n) ...")
+        z = self.replace_action_in_embedding(z, action_flat)
 
         # number of step to predict
-        act_pred = action_sequence[:, n_obs:]
+        act_pred = action_flat[:, n_obs:]
         n_steps = act_pred.shape[1]
-
-        # == initial embedding
-        z = info["embed"]
 
         for t in range(n_steps):
             # predict the next state
@@ -199,7 +234,7 @@ class PYRO(torch.nn.Module):
         z = torch.cat([z, new_embed], dim=1)  # (B, n+t+1, P, D)
 
         # == update info dict with predicted embeddings
-        info["predicted_embedding"] = z
+        info["predicted_embedding"] = rearrange(z, "(b n) ... -> b n ...", n=n_samples)
         # get the dimension of each part of the embedding
         # action_dim = 0 if "action_embed" not in info else info["action_embed"].shape[-1]
         # proprio_dim = 0 if "proprio_embed" not in info else info["proprio_embed"].shape[-1]
@@ -212,6 +247,8 @@ class PYRO(torch.nn.Module):
             extra_dims.append(info[f"{key}_embed"].shape[-1])
 
         splitted_embed = self.split_embedding(z, extra_dims)
+        for k, v in splitted_embed.items():
+            splitted_embed[k] = rearrange(v, "(b n) ... -> b n ...", n=n_samples)
         info.update({f"predicted_{k}": v for k, v in splitted_embed.items()})
 
         return info
@@ -219,22 +256,56 @@ class PYRO(torch.nn.Module):
     def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
         assert "action" in info_dict, "action key must be in info_dict"
         assert "pixels" in info_dict, "pixels key must be in info_dict"
+        assert action_candidates.shape[0] == info_dict["pixels"].shape[0], (
+            "Batch size of action_candidates must match that of info_dict"
+        )
+        assert action_candidates.shape[1] == info_dict["pixels"].shape[1], (
+            "Number of action candidates must match that of info_dict"
+        )
 
-        # move to device and unsqueeze time
+        # move to device and prepare goal_info_dict
+        goal_info_dict = {}
         for k, v in info_dict.items():
             if torch.is_tensor(v):
-                info_dict[k] = v.unsqueeze(1).to(self.device)
+                info_dict[k] = v.to(next(self.parameters()).device)
+                # goal is the same across samples so we will only embed it once
+                goal_info_dict[k] = info_dict[k][:, 0]  # (B, 1, ...)
 
         # == non action embeddings keys
         emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
 
         # == get the goal embedding
-        info_dict = self.encode(
-            info_dict,
-            target="goal_embed",
-            pixels_key="goal",
-            emb_keys=emb_keys,
-        )
+        if (
+            hasattr(self, "_goal_cached_info")
+            and torch.equal(self._goal_cached_info["id"], info_dict["id"][:, 0])
+            and torch.equal(self._goal_cached_info["step_idx"], info_dict["step_idx"][:, 0])
+        ):
+            goal_info_dict = self._goal_cached_info
+        else:
+            goal_info_dict = self.encode(
+                goal_info_dict,
+                target="goal_embed",
+                pixels_key="goal",
+                emb_keys=emb_keys,
+            )
+
+            self._goal_cached_info = {k: v.detach() if torch.is_tensor(v) else v for k, v in goal_info_dict.items()}
+            self._goal_cached_info["id"] = info_dict["id"][:, 0]
+            self._goal_cached_info["step_idx"] = info_dict["step_idx"][:, 0]
+
+        # repeat the goal for each action candidate
+        info_dict["pixels_goal_embed"] = (
+            goal_info_dict["pixels_goal_embed"]
+            .unsqueeze(1)
+            .expand(-1, action_candidates.shape[1], *([-1] * (goal_info_dict["pixels_goal_embed"].ndim - 1)))
+        )  # (B, N, ...)
+
+        for key in emb_keys:
+            info_dict[f"{key}_goal_embed"] = (
+                goal_info_dict[f"{key}_goal_embed"]
+                .unsqueeze(1)
+                .expand(-1, action_candidates.shape[1], *([-1] * (goal_info_dict[f"{key}_goal_embed"].ndim - 1)))
+            )  # (B, N, ...)
 
         # == run world model
         info_dict = self.rollout(info_dict, action_candidates)
@@ -244,7 +315,7 @@ class PYRO(torch.nn.Module):
         for key in emb_keys + ["pixels"]:
             preds = info_dict[f"predicted_{key}_embed"]
             goal = info_dict[f"{key}_goal_embed"]
-            cost = cost + F.mse_loss(preds[:, -1:], goal, reduction="none").mean(dim=tuple(range(1, preds.ndim)))
+            cost = cost + F.mse_loss(preds[:, :, -1:], goal, reduction="none").mean(dim=tuple(range(2, preds.ndim)))
 
         return cost
 
@@ -301,7 +372,6 @@ class CausalPredictor(nn.Module):
 
     def forward(self, x):  # x: (b, window_size * H/patch_size * W/patch_size, 384)
         b, n, _ = x.shape
-        print(x.shape)
         x = x + self.pos_embedding[:, :n]
         x = self.dropout(x)
         x = self.transformer(x)

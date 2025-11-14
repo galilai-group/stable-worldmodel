@@ -17,7 +17,8 @@ if __name__ == "__main__":
         image_shape=(224, 224),
         max_episode_steps=50,
         render_mode="rgb_array",
-        n_stacks=3,
+        history_size=3,
+        frame_skip=5,
     )
 
     #########################
@@ -75,7 +76,7 @@ if __name__ == "__main__":
         start_steps=[25],
         episodes_idx=[3],
         goal_offset_steps=25,
-        eval_budget=25,
+        eval_budget=50,
         callables={"_set_state": "state", "_set_goal_state": "goal_state"},
     )
 

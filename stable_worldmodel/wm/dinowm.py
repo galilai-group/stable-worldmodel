@@ -35,8 +35,8 @@ class DINOWM(torch.nn.Module):
         self.encoder_transform = transforms.Compose([transforms.Resize(self.encoder_image_size)])
 
         # cache for embedding
-        self._goal_cached_info = None
-        self._init_state_cached_info = None
+        # self._goal_cached_info = None
+        # self._init_state_cached_info = None
 
     def encode(
         self,
@@ -178,7 +178,7 @@ class DINOWM(torch.nn.Module):
 
         proprio_key = "proprio" if "proprio" in info else None
         if (
-            self._init_state_cached_info is not None
+            hasattr(self, "_init_state_cached_info")
             and torch.equal(self._init_state_cached_info["id"], info["id"][:, 0])
             and torch.equal(self._init_state_cached_info["step_idx"], info["step_idx"][:, 0])
         ):
@@ -275,7 +275,7 @@ class DINOWM(torch.nn.Module):
         # == get the goal embedding
         proprio_key = "goal_proprio" if "goal_proprio" in goal_info_dict else None
         if (
-            self._goal_cached_info is not None
+            hasattr(self, "_goal_cached_info")
             and torch.equal(self._goal_cached_info["id"], info_dict["id"][:, 0])
             and torch.equal(self._goal_cached_info["step_idx"], info_dict["step_idx"][:, 0])
         ):
