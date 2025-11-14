@@ -28,6 +28,6 @@ solver:
 # evaluation from dataset (replay expert trajectories)
 eval:
   num_eval: 20
-  goal_offset_steps: 1
+  goal_offset_steps: 25
   eval_budget: 50
   dataset_name: pusht_expert_dataset_val
