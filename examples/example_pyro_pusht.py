@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     world = swm.World(
         "swm/PushT-v1",
-        num_envs=1,
+        num_envs=5,
         image_shape=(224, 224),
         max_episode_steps=50,
         render_mode="rgb_array",
@@ -73,10 +73,10 @@ if __name__ == "__main__":
     # results = world.evaluate(episodes=20, seed=42, dump_every=10)
     results = world.evaluate_from_dataset(
         "pusht_expert_val",
-        start_steps=[25],
-        episodes_idx=[3],
+        start_steps=[25, 40, 5, 15, 30],
+        episodes_idx=[3, 7, 11, 1, 5],
         goal_offset_steps=25,
-        eval_budget=50,
+        eval_budget=25,
         callables={"_set_state": "state", "_set_goal_state": "goal_state"},
     )
 
