@@ -19,7 +19,7 @@ class CEMSolver:
         self.n_steps = n_steps
         self.topk = topk
         self.device = device
-        self.torch_gen = torch.Generator(device="cuda").manual_seed(seed)
+        self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
     def configure(self, *, action_space, n_envs: int, config) -> None:
         self._action_space = action_space
