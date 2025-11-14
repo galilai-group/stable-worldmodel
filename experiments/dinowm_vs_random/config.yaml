@@ -24,6 +24,7 @@ solver:
   n_steps: 30
   topk: 30
   device: "cuda"
+  seed: ${seed}
 
 # evaluation from dataset (replay expert trajectories)
 eval:
