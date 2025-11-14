@@ -246,8 +246,7 @@ class RocketLandingEnv(RocketBaseEnv):
                 - 'accelerate_drop': whether to add downward velocity
 
         """
-        if options is None:
-            options = {}
+        options = options or {}
         options = dict(options)
         options.setdefault("randomize_drop", False)
         options.setdefault("accelerate_drop", True)
@@ -386,7 +385,6 @@ class RocketLandingEnv(RocketBaseEnv):
                         p.changeVisualShape(
                             rocket_id, i, rgbaColor=list(booster_color) + [1.0], physicsClientId=self.env._client
                         )
-
 
         if self.render_mode is not None:
             init_state_id = p.saveState(physicsClientId=self.env._client)
@@ -537,12 +535,10 @@ class RocketLandingEnv(RocketBaseEnv):
             self.landing_pad_contact = 0.0
             return
 
-
         if np.linalg.norm(self.previous_ang_vel) > 10.0 or np.linalg.norm(self.previous_lin_vel) > 5.0:
             self.termination |= True
             self.info["fatal_collision"] = True
             return
-
 
         if (
             np.linalg.norm(self.previous_ang_vel) < 5.0
