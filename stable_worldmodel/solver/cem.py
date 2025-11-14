@@ -12,21 +12,14 @@ class CEMSolver:
     adapted from https://github.com/gaoyuezhou/dino_wm/blob/main/planning/cem.py
     """
 
-    def __init__(
-        self,
-        model: Costable,
-        num_samples,
-        var_scale,
-        n_steps,
-        topk,
-        device="cpu",
-    ):
+    def __init__(self, model: Costable, num_samples, var_scale, n_steps, topk, device="cpu", seed: int = 1234):
         self.model = model
         self.var_scale = var_scale
         self.num_samples = num_samples
         self.n_steps = n_steps
         self.topk = topk
         self.device = device
+        self.torch_gen = torch.Generator(device="cuda").manual_seed(seed)
 
     def configure(self, *, action_space, n_envs: int, config) -> None:
         self._action_space = action_space
@@ -105,7 +98,9 @@ class CEMSolver:
             # -- optimization loop for this trajectory
             for step in range(self.n_steps):
                 # sample action sequences candidation from normal distrib
-                candidates = torch.randn(self.num_samples, self.horizon, self.action_dim, device=self.device)
+                candidates = torch.randn(
+                    self.num_samples, self.horizon, self.action_dim, generator=self.torch_gen, device=self.device
+                )
                 # scale and shift
                 candidates = candidates * var[traj] + mean[traj]
                 # make the first action seq being mean
