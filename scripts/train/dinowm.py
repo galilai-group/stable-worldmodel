@@ -100,59 +100,58 @@ def get_data(cfg):
 # ============================================================================
 # Model Architecture
 # ============================================================================
-def forward(self, batch, stage):
-    """Forward: encode observations, predict next states, compute losses."""
-
-    proprio_key = "proprio" if "proprio" in batch else None
-
-    # Replace NaN values with 0 (occurs at sequence boundaries)
-    if proprio_key is not None:
-        batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
-    if "action" in batch:
-        batch["action"] = torch.nan_to_num(batch["action"], 0.0)
-
-    # Encode all timesteps into latent embeddings
-    batch = self.model.encode(
-        batch,
-        target="embed",
-        pixels_key="pixels",
-        proprio_key=proprio_key,
-        action_key="action",
-    )
-
-    # Use history to predict next states
-    embedding = batch["embed"][:, :-1, :, :]  # (B, T-1, patches, dim)
-    pred_embedding = self.model.predict(embedding)
-    target_embedding = batch["embed"][:, 1:, :, :]  # (B, T-1, patches, dim)
-
-    # Compute pixel reconstruction loss
-    pixels_dim = batch["pixels_embed"].shape[-1]
-    pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
-    loss = pixels_loss
-    batch["pixels_loss"] = pixels_loss
-
-    # Add proprioception loss if available
-    if proprio_key is not None:
-        proprio_dim = batch["proprio_embed"].shape[-1]
-        proprio_loss = F.mse_loss(
-            pred_embedding[..., pixels_dim : pixels_dim + proprio_dim],
-            target_embedding[..., pixels_dim : pixels_dim + proprio_dim].detach(),
-        )
-        loss = loss + proprio_loss
-        batch["proprio_loss"] = proprio_loss
-
-    batch["loss"] = loss
-
-    # Log all losses
-    prefix = "train/" if self.training else "val/"
-    losses_dict = {f"{prefix}{k}": v.detach() for k, v in batch.items() if "_loss" in k}
-    self.log_dict(losses_dict, on_step=True, sync_dist=True)  # , on_epoch=True, sync_dist=True)
-
-    return batch
-
-
 def get_world_model(cfg):
     """Build world model: frozen DINO encoder + trainable causal predictor."""
+
+    def forward(self, batch, stage):
+        """Forward: encode observations, predict next states, compute losses."""
+
+        proprio_key = "proprio" if "proprio" in batch else None
+
+        # Replace NaN values with 0 (occurs at sequence boundaries)
+        if proprio_key is not None:
+            batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
+        if "action" in batch:
+            batch["action"] = torch.nan_to_num(batch["action"], 0.0)
+
+        # Encode all timesteps into latent embeddings
+        batch = self.model.encode(
+            batch,
+            target="embed",
+            pixels_key="pixels",
+            proprio_key=proprio_key,
+            action_key="action",
+        )
+
+        # Use history to predict next states
+        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
+        pred_embedding = self.model.predict(embedding)
+        target_embedding = batch["embed"][:, cfg.dinowm.num_preds :, :, :]  # (B, T-1, patches, dim)
+
+        # Compute pixel reconstruction loss
+        pixels_dim = batch["pixels_embed"].shape[-1]
+        pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
+        loss = pixels_loss
+        batch["pixels_loss"] = pixels_loss
+
+        # Add proprioception loss if available
+        if proprio_key is not None:
+            proprio_dim = batch["proprio_embed"].shape[-1]
+            proprio_loss = F.mse_loss(
+                pred_embedding[..., pixels_dim : pixels_dim + proprio_dim],
+                target_embedding[..., pixels_dim : pixels_dim + proprio_dim].detach(),
+            )
+            loss = loss + proprio_loss
+            batch["proprio_loss"] = proprio_loss
+
+        batch["loss"] = loss
+
+        # Log all losses
+        prefix = "train/" if self.training else "val/"
+        losses_dict = {f"{prefix}{k}": v.detach() for k, v in batch.items() if "_loss" in k}
+        self.log_dict(losses_dict, on_step=True, sync_dist=True)  # , on_epoch=True, sync_dist=True)
+
+        return batch
 
     # Load frozen DINO encoder
     encoder = AutoModel.from_pretrained("facebook/dinov2-small")
@@ -186,7 +185,7 @@ def get_world_model(cfg):
         proprio_encoder=proprio_encoder,
         history_size=cfg.dinowm.history_size,
         num_pred=cfg.dinowm.num_preds,
-    ).to("cuda")
+    )
 
     # Wrap in stable_spt Module with separate optimizers for each component
     def add_opt(module_name, lr):
