@@ -83,7 +83,7 @@ def run(cfg: DictConfig):
     if cfg.policy != "random":
         model = swm.policy.AutoCostModel(cfg.policy).to("cuda")
         config = swm.PlanConfig(**cfg.plan_config)
-        solver = swm.solver.CEMSolver(model, seed=cfg.seed, **cfg.solver)
+        solver = swm.solver.CEMSolver(model, **cfg.solver)
         policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
     # sample the episodes and the starting indices
