@@ -18,7 +18,6 @@ class DINOWM(torch.nn.Module):
         decoder=None,
         history_size=3,
         num_pred=1,
-        device="cpu",
     ):
         super().__init__()
 
@@ -29,7 +28,6 @@ class DINOWM(torch.nn.Module):
         self.decoder = decoder
         self.history_size = history_size
         self.num_pred = num_pred
-        self.device = device
 
         decoder_scale = 16  # from vqvae
         num_side_patches = 224 // decoder_scale
@@ -270,7 +268,7 @@ class DINOWM(torch.nn.Module):
         goal_info_dict = {}
         for k, v in info_dict.items():
             if torch.is_tensor(v):
-                info_dict[k] = v.to(self.device)
+                info_dict[k] = v.to(next(self.parameters()).device)
                 # goal is the same across samples so we will only embed it once
                 goal_info_dict[k] = info_dict[k][:, 0]  # (B, 1, ...)
 
