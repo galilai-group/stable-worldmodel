@@ -335,23 +335,23 @@ class Attention(nn.Module):
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
         self.register_buffer("bias", self.generate_mask_matrix(num_patches, num_frames))
-        # self.bias = self.generate_mask_matrix(num_patches, num_frames).cuda()
 
     def forward(self, x):
         B, T, C = x.size()
         x = self.norm(x)
 
+        # q, k, v: (B, heads, T, dim_head)
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = (rearrange(t, "b n (h d) -> b h n d", h=self.heads) for t in qkv)
 
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-        dots = dots.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+        attn_mask = self.bias[:, :, :T, :T] == 1  # bool mask
 
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
+        out = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=attn_mask, dropout_p=self.dropout.p if self.training else 0.0, is_causal=False
+        )
 
-        out = torch.matmul(attn, v)
         out = rearrange(out, "b h n d -> b n (h d)")
+
         return self.to_out(out)
 
     def generate_mask_matrix(self, npatch, nwindow):
