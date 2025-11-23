@@ -129,7 +129,7 @@ def run(cfg: DictConfig):
     # dump results
     print(metrics)
     # ---- dump results to a txt file ----
-    results_path = Path(__file__).parent / "results.txt"
+    results_path = Path(__file__).parent / cfg.output.filename
     with results_path.open("a") as f:
         f.write("\n")  # separate from previous runs
         f.write(f"policy: {cfg.policy}\n")
