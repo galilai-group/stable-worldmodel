@@ -138,6 +138,7 @@ def run(cfg: DictConfig):
         f.write(f"eval_budget: {cfg.eval.eval_budget}\n")
         f.write(f"horizon: {cfg.plan_config.horizon}\n")
         f.write(f"receding_horizon: {cfg.plan_config.receding_horizon}\n")
+        f.write(f"seed: {cfg.seed}\n")
         f.write(f"metrics: {metrics}\n")
 
 
