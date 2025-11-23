@@ -15,15 +15,7 @@ import stable_worldmodel as swm
 from .utils import DrawOptions
 
 
-DEFAULT_VARIATIONS = (
-    "agent.start_position",
-    "block.start_position",
-    "block.start_angle",
-    "goal.block.position",
-    "goal.block.angle",
-    "goal.agent.position",
-    "goal.agent.velocity",
-)
+DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
 
 
 class PushT(gym.Env):
@@ -36,6 +28,8 @@ class PushT(gym.Env):
 
     def __init__(
         self,
+        block_cog=None,
+        damping=None,
         render_action=False,
         resolution=224,
         with_target=True,
@@ -53,6 +47,8 @@ class PushT(gym.Env):
         self.control_hz = self.metadata["render_fps"]
         self.k_p, self.k_v = 100, 20
         self.dt = 0.01
+
+        self.goal_state = None
 
         self.shapes = ["o", "L", "T", "Z", "square", "I", "small_tee", "+"]
 
@@ -78,6 +74,10 @@ class PushT(gym.Env):
             {
                 "agent": swm.spaces.Dict(
                     {
+                        # "shape": swm.spaces.Categorical(
+                        #     categories=["circle", "square", "triangle"],   SHOULD IMPLEMENT THIS
+                        #     init_value="circle",
+                        # ),
                         "color": swm.spaces.RGBBox(init_value=np.array(pygame.Color("RoyalBlue")[:3], dtype=np.uint8)),
                         "scale": swm.spaces.Box(
                             low=20,
@@ -87,7 +87,7 @@ class PushT(gym.Env):
                             dtype=np.float32,
                         ),
                         "shape": swm.spaces.Discrete(len(self.shapes), start=0, init_value=0),
-                        "start_angle": swm.spaces.Box(
+                        "angle": swm.spaces.Box(
                             low=-2 * np.pi,
                             high=2 * np.pi,
                             init_value=0.0,
@@ -101,7 +101,7 @@ class PushT(gym.Env):
                             shape=(2,),
                             dtype=np.float64,
                         ),
-                        "start_velocity": swm.spaces.Box(
+                        "velocity": swm.spaces.Box(
                             low=0,
                             high=ws,
                             init_value=np.array((0.0, 0.0), dtype=np.float64),
@@ -123,7 +123,7 @@ class PushT(gym.Env):
                             dtype=np.float32,
                         ),
                         "shape": swm.spaces.Discrete(len(self.shapes) - 1, start=1, init_value=2),
-                        "start_angle": swm.spaces.Box(
+                        "angle": swm.spaces.Box(
                             low=-2 * np.pi,
                             high=2 * np.pi,
                             init_value=0.0,
@@ -131,86 +131,39 @@ class PushT(gym.Env):
                             dtype=np.float64,
                         ),
                         "start_position": swm.spaces.Box(
-                            low=160,
-                            high=340,
-                            init_value=np.array((340, 160), dtype=np.float64),
+                            low=100,
+                            high=400,
+                            init_value=np.array((400, 100), dtype=np.float64),
                             shape=(2,),
-                            dtype=np.float64,
-                        ),
-                        "mass": swm.spaces.Box(
-                            low=0.1,
-                            high=10.0,
-                            init_value=1.0,
-                            shape=(),
                             dtype=np.float64,
                         ),
                     }
                 ),
                 "goal": swm.spaces.Dict(
                     {
-                        "block": swm.spaces.Dict(
-                            {
-                                "color": swm.spaces.RGBBox(
-                                    init_value=np.array(pygame.Color("LightGreen")[:3], dtype=np.uint8)
-                                ),
-                                "scale": swm.spaces.Box(
-                                    low=20,
-                                    high=60,
-                                    init_value=40,
-                                    shape=(),
-                                    dtype=np.float32,
-                                ),
-                                "angle": swm.spaces.Box(
-                                    low=-2 * np.pi,
-                                    high=2 * np.pi,
-                                    init_value=np.pi / 4,
-                                    shape=(),
-                                    dtype=np.float64,
-                                ),
-                                "position": swm.spaces.Box(
-                                    low=160,
-                                    high=340,
-                                    init_value=np.array([256, 256], dtype=np.float64),
-                                    shape=(2,),
-                                    dtype=np.float64,
-                                ),
-                            }
+                        "color": swm.spaces.RGBBox(
+                            init_value=np.array(pygame.Color("LightGreen")[:3], dtype=np.uint8)
                         ),
-                        "agent": swm.spaces.Dict(
-                            {
-                                "color": swm.spaces.RGBBox(
-                                    init_value=np.array(pygame.Color("RoyalBlue")[:3], dtype=np.uint8)
-                                ),
-                                "scale": swm.spaces.Box(
-                                    low=20,
-                                    high=60,
-                                    init_value=40,
-                                    shape=(),
-                                    dtype=np.float32,
-                                ),
-                                "shape": swm.spaces.Discrete(len(self.shapes), start=0, init_value=0),
-                                "angle": swm.spaces.Box(
-                                    low=-2 * np.pi,
-                                    high=2 * np.pi,
-                                    init_value=0.0,
-                                    shape=(),
-                                    dtype=np.float64,
-                                ),
-                                "position": swm.spaces.Box(
-                                    low=50,
-                                    high=450,
-                                    init_value=np.array((256, 400), dtype=np.float64),
-                                    shape=(2,),
-                                    dtype=np.float64,
-                                ),
-                                "velocity": swm.spaces.Box(
-                                    low=0,
-                                    high=ws,
-                                    init_value=np.array((0.0, 0.0), dtype=np.float64),
-                                    shape=(2,),
-                                    dtype=np.float64,
-                                ),
-                            }
+                        "scale": swm.spaces.Box(
+                            low=20,
+                            high=60,
+                            init_value=40,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                        "angle": swm.spaces.Box(
+                            low=-2 * np.pi,
+                            high=2 * np.pi,
+                            init_value=np.pi / 4,
+                            shape=(),
+                            dtype=np.float64,
+                        ),
+                        "position": swm.spaces.Box(
+                            low=50,
+                            high=450,
+                            init_value=np.array([256, 256], dtype=np.float64),
+                            shape=(2,),
+                            dtype=np.float64,
                         ),
                     }
                 ),
@@ -219,28 +172,14 @@ class PushT(gym.Env):
                         "color": swm.spaces.RGBBox(init_value=np.array(np.array([255, 255, 255], dtype=np.uint8))),
                     }
                 ),
-                "physics": swm.spaces.Dict(
-                    {
-                        "damping": swm.spaces.Box(
-                            low=0.0,
-                            high=1.0,
-                            init_value=0.9,
-                            shape=(),
-                            dtype=np.float64,
-                        ),
-                        "gravity": swm.spaces.Box(
-                            low=-10.0,
-                            high=10.0,
-                            init_value=np.array((0, 0), dtype=np.float64),  # (0, 9.81) for downward gravity
-                            shape=(2,),
-                            dtype=np.float64,
-                        ),
-                    }
-                ),
             },
-            sampling_order=["background", "physics", "goal", "block", "agent"],
+            sampling_order=["background", "goal", "block", "agent"],
         )
 
+        # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
+
+        self.block_cog = block_cog
+        self.damping = damping
         self.render_action = render_action
         self.render_mode = render_mode
 
@@ -289,23 +228,24 @@ class PushT(gym.Env):
         ### setup pymunk space
         self._setup()
 
-        self.space.gravity = self.variation_space["physics"]["gravity"].value.tolist()
-        self.space.damping = self.variation_space["physics"]["damping"].value
+        if self.block_cog is not None:
+            self.block.center_of_gravity = self.block_cog
+        if self.damping is not None:
+            self.space.damping = self.damping
 
         ### get the state
         goal_state = np.concatenate(
             [
-                self.variation_space["goal"]["agent"]["position"].value.tolist(),
-                self.variation_space["goal"]["block"]["position"].value.tolist(),
-                [self.variation_space["goal"]["block"]["angle"].value],
-                self.variation_space["goal"]["agent"]["velocity"].value.tolist(),
+                self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
+                self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
+                [self.variation_space["block"]["angle"].sample(set_value=False)],
+                self.variation_space["agent"]["velocity"].value.tolist(),
             ]
         )
 
         ### generate goal
-        valid_goal_state = self._get_closest_valid_state(goal_state)
-        self._set_goal_state(valid_goal_state)
-        self._set_state(valid_goal_state)
+        self._set_state(goal_state)
+        self._set_goal_state(goal_state)
         self._goal = self.render()
 
         # restore original pos
@@ -313,12 +253,11 @@ class PushT(gym.Env):
             [
                 self.variation_space["agent"]["start_position"].value.tolist(),
                 self.variation_space["block"]["start_position"].value.tolist(),
-                [self.variation_space["block"]["start_angle"].value],
-                self.variation_space["agent"]["start_velocity"].value.tolist(),
+                [self.variation_space["block"]["angle"].value],
+                self.variation_space["agent"]["velocity"].value.tolist(),
             ]
         )
 
-        state = self._get_closest_valid_state(state)
         self._set_state(state)
 
         #### OBS
@@ -338,7 +277,7 @@ class PushT(gym.Env):
 
         if self.relative:
             action = self.agent.position + action * self.action_scale
-            action = np.clip(action, 0, self.window_size)
+            # action = np.clip(action, 0, self.window_size)
 
         for _ in range(n_steps):
             # Step PD control.
@@ -350,7 +289,6 @@ class PushT(gym.Env):
 
         # make the observation
         state = self._get_obs()
-
         proprio = np.concatenate((state[:2], state[-2:]))
         observation = {"proprio": proprio, "state": state}
 
@@ -370,7 +308,7 @@ class PushT(gym.Env):
         angle_diff = np.abs(goal_state[4] - cur_state[4])
         angle_diff = np.minimum(angle_diff, 2 * np.pi - angle_diff)
         success = pos_diff < 20 and angle_diff < np.pi / 9
-        state_dist = np.linalg.norm(goal_state[:5] - cur_state[:5])
+        state_dist = np.linalg.norm(goal_state - cur_state)
 
         return success, state_dist
 
@@ -450,7 +388,7 @@ class PushT(gym.Env):
                 goal_points += [goal_points[0]]
                 pygame.draw.polygon(
                     canvas,
-                    self.variation_space["goal"]["block"]["color"].value,
+                    self.variation_space["goal"]["color"].value,
                     goal_points,
                 )
 
@@ -502,67 +440,6 @@ class PushT(gym.Env):
     def _handle_collision(self, arbiter, space, data):
         self.n_contact_points += len(arbiter.contact_point_set.points)
 
-    def _set_goal_state(self, goal_state):
-        self.goal_state = goal_state[:5]
-
-    def _is_state_valid(self, state, tol=1e-6):
-        """Check if agent and block are non-colliding within a tolerance."""
-        if isinstance(state, np.ndarray):
-            state = state.tolist()
-
-        self.agent.position = state[:2]
-        self.block.angle = state[4]
-        self.block.position = state[2:4]
-
-        # Ensure shape caches are up to date
-        self.space.reindex_shapes_for_body(self.agent)
-        self.space.reindex_shapes_for_body(self.block)
-
-        min_penetration = 0.0
-        contacts = []
-
-        # Check for collisions between agent and block shapes
-        for shape_a in self.agent.shapes:
-            # Query for shapes colliding with shape_a
-            query_results = self.space.shape_query(shape_a)
-
-            for query_info in query_results:
-                shape_b = query_info.shape
-                # Check if the colliding shape belongs to the block
-                if shape_b.body == self.block:
-                    # If there's any contact points, we have a collision
-                    if query_info.contact_point_set.points:
-                        # Calculate penetration from contact points
-                        for point in query_info.contact_point_set.points:
-                            penetration = -point.distance  # distance is negative when overlapping
-                            if penetration > tol:
-                                contacts.append((query_info.contact_point_set.normal, penetration))
-                                min_penetration = max(min_penetration, penetration)
-
-        valid = len(contacts) == 0
-        return {"valid": valid, "min_penetration": min_penetration, "contacts": contacts}
-
-    def _get_closest_valid_state(self, state, max_tries=100, tol=1e-6):
-        """Project state to the nearest non-colliding configuration."""
-        state = np.array(state, dtype=float)
-
-        for _ in range(max_tries):
-            info = self._is_state_valid(state, tol=tol)
-            if info["valid"]:
-                return state
-
-            # Compute average correction vector from all contacts
-            correction = np.zeros(2)
-            for normal, penetration in info["contacts"]:
-                correction += normal * penetration / 2
-
-            # Move agent and block apart symmetrically
-            state[:2] -= correction
-            state[2:4] += correction
-
-        logging.warning("Could not find a valid state close to the given state.")
-        return state
-
     def _set_state(self, state):
         if isinstance(state, np.ndarray):
             state = state.tolist()
@@ -575,10 +452,16 @@ class PushT(gym.Env):
         self.block.angle = rot_block
         self.block.position = pos_block
 
+        # Run physics to take effect
+        # self.space.step(self.dt)
+
+    def _set_goal_state(self, goal_state):
+        self.goal_state = goal_state
+
     def _setup(self):
         ## create the space with physics
         self.space = pymunk.Space()
-        self.space.gravity = 0, 0
+        self.space.gravity = 0, 0  # TODO add physics support
         self.space.damping = 0
         self.render_buffer = []
 
@@ -596,11 +479,10 @@ class PushT(gym.Env):
 
         agent_params = {
             "position": self.variation_space["agent"]["start_position"].value.tolist(),
-            "angle": self.variation_space["agent"]["start_angle"].value,
+            "angle": self.variation_space["agent"]["angle"].value,
             "scale": self.variation_space["agent"]["scale"].value,
             "color": self.variation_space["agent"]["color"].value.tolist(),
             "shape": self.shapes[self.variation_space["agent"]["shape"].value],
-            "kinematic": True,
         }
 
         self.agent = self.add_shape(**agent_params)
@@ -609,8 +491,7 @@ class PushT(gym.Env):
 
         block_params = {
             "position": self.variation_space["block"]["start_position"].value.tolist(),
-            "angle": self.variation_space["block"]["start_angle"].value,
-            "mass": self.variation_space["block"]["mass"].value,
+            "angle": self.variation_space["block"]["angle"].value,
             "scale": self.variation_space["block"]["scale"].value,
             "color": self.variation_space["block"]["color"].value.tolist(),
             "shape": self.shapes[self.variation_space["block"]["shape"].value],
@@ -620,8 +501,8 @@ class PushT(gym.Env):
 
         self.goal_pose = np.concatenate(
             [
-                self.variation_space["goal"]["block"]["position"].value,
-                [self.variation_space["goal"]["block"]["angle"].value],
+                self.variation_space["goal"]["position"].value,
+                [self.variation_space["goal"]["angle"].value],
             ]
         )
 
@@ -641,21 +522,20 @@ class PushT(gym.Env):
         self,
         position,
         angle=0,
-        mass=1,
         scale=1,
         color="RoyalBlue",
-        kinematic=False,
     ):
         base_radius = 0.375
-        inertia = pymunk.moment_for_circle(mass, 0, base_radius * scale)
-        body = pymunk.Body(mass, inertia, body_type=pymunk.Body.KINEMATIC if kinematic else pymunk.Body.DYNAMIC)
+        body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         body.position = position
+        body.friction = 1
         shape = pymunk.Circle(body, base_radius * scale)
         shape.color = pygame.Color(color)
         self.space.add(body, shape)
         return body
 
-    def add_box(self, position, height, width, color="LightSlateGray", scale=1, angle=0, mass=1):
+    def add_box(self, position, height, width, color="LightSlateGray", scale=1, angle=0):
+        mass = 1
         inertia = pymunk.moment_for_box(mass, (height * scale, width * scale))
         body = pymunk.Body(mass, inertia)
         body.position = position
@@ -668,11 +548,12 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
+        scale = 30
+        mass = 1
         length = 4
         vertices1 = [
             (-length * scale / 2, scale),
@@ -698,6 +579,7 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1, shape2)
         return body
 
@@ -705,11 +587,11 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
+        mass = 1
         vertices1 = [
             (-3 * scale / 2, scale),
             (3 * scale / 2, scale),
@@ -734,6 +616,7 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1, shape2)
         return body
 
@@ -741,7 +624,6 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
@@ -781,6 +663,7 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity + shape3.center_of_gravity) / 3
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1, shape2, shape3)
         return body
 
@@ -788,11 +671,11 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
+        mass = 1
         length = 2
         vertices1 = [
             (0, 0),
@@ -818,6 +701,7 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1, shape2)
         return body
 
@@ -825,11 +709,11 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
+        mass = 1
         length = 2
         vertices1 = [
             (0, 0),
@@ -855,6 +739,7 @@ class PushT(gym.Env):
         body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1, shape2)
         return body
 
@@ -862,11 +747,11 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
+        mass = 1
         vertices1 = [
             (-scale, -scale),
             (-scale, scale),
@@ -881,6 +766,7 @@ class PushT(gym.Env):
         body.center_of_gravity = shape1.center_of_gravity
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1)
         return body
 
@@ -888,11 +774,11 @@ class PushT(gym.Env):
         self,
         position,
         angle,
-        mass=1,
         scale=30,
         color="LightSlateGray",
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
+        mass = 1
         vertices1 = [
             (-scale / 2, -scale * 2),
             (-scale / 2, scale * 2),
@@ -907,6 +793,7 @@ class PushT(gym.Env):
         body.center_of_gravity = shape1.center_of_gravity
         body.position = position
         body.angle = angle
+        body.friction = 1
         self.space.add(body, shape1)
         return body
 

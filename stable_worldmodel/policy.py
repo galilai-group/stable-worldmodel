@@ -199,7 +199,7 @@ def AutoCostModel(model_name, cache_dir=None):
 
     def scan_module(module):
         if hasattr(module, "get_cost"):
-            if isinstance(module.get_cost, torch.nn.Module):
+            if isinstance(module, torch.nn.Module):
                 module = module.eval()
             return module
         for child in module.children():

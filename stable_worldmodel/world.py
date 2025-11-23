@@ -56,6 +56,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 
 import datasets
@@ -973,28 +974,9 @@ class World:
         cache_dir: str | None = None,
         callables: dict | None = None,
     ):
-        """Evaluate the current policy similarly to `evaluate` but on goals sampled from a dataset.
-        Note: it only supports datasets generated from stable-worldmodel.
-
-        Args:
-            dataset_name (str): Name of the dataset to load (must exist in cache_dir).
-            episodes_idx (int or list of int): Index or list of indices of the episodes to evaluate from the dataset.
-            start_steps (int or list of int): Step index or list of step indices to  from which to start the evaluation in each episode.
-            goal_offset_steps (int): Number of steps ahead of start_steps to sample the goal from the dataset.
-            eval_budget (int): Number of steps to actually run in the environment.
-            cache_dir (str or Path, optional): Root directory where dataset is stored.
-
-        Returns:
-            dict: Dictionary containing evaluation results:
-                - 'success_rate' (float): Percentage of successful episodes (0-100)
-                - 'episode_successes' (ndarray): Boolean array of episode outcomes
-                - 'seeds' (ndarray): Random seeds used for each episode
-                - Additional keys from eval_keys if specified (ndarray)
-        """
-        # TODO push-t env has the image not corresponding with the state!
-
         assert (
-            self.envs.envs[0].spec.max_episode_steps is None or self.envs.envs[0].spec.max_episode_steps >= eval_budget
+            self.envs.envs[0].spec.max_episode_steps is None
+            or self.envs.envs[0].spec.max_episode_steps >= goal_offset_steps
         ), "env max_episode_steps must be greater than eval_budget"
 
         if isinstance(episodes_idx, int):
@@ -1020,49 +1002,58 @@ class World:
         assert "episode_idx" in columns, "'episode_idx' column not found in dataset"
         assert "step_idx" in columns, "'step_idx' column not found in dataset"
 
-        episode_mask = np.isin(dataset["episode_idx"][:], episodes_idx)
-        dataset = dataset.select(np.nonzero(episode_mask)[0])
-
         episodes_col = dataset["episode_idx"][:]
-        row_steps_idx = []
+        dataset_steps_idx = []
         for i, ep in enumerate(episodes_idx):
-            ep_mask = episodes_col == ep
-            ep_indices = np.nonzero(ep_mask)[0]
-            sorted_order = np.sort(ep_indices)
-            row_steps_idx.append(sorted_order)
+            ep_indices_in_dataset = np.nonzero(episodes_col == ep)[0]
+            episode_len = len(ep_indices_in_dataset)
+            ep_indices_in_dataset.sort()  # ensure sorted order
+            replay_slice = ep_indices_in_dataset[start_steps[i] : end_steps_idx[i]]
+            dataset_steps_idx.append(replay_slice)
 
-            if len(ep_indices) < end_steps_idx[i]:
-                raise ValueError(f"Episode {ep} is too short for the requested steps")
+            if episode_len < start_steps[i]:
+                raise ValueError(f"Episode {ep} is too short for the requested start step {start_steps[i]}")
 
-        first_steps = dataset[[idxs[0] for idxs in row_steps_idx]]
-        end_steps = dataset[[idxs[e_step] for e_step, idxs in zip(end_steps_idx, row_steps_idx)]]
-        seeds = first_steps.get("seed", None)
+            if episode_len < end_steps_idx[i]:
+                raise ValueError(f"Episode {ep} is too short for the requested end step {end_steps_idx[i]}")
 
-        # goal subdict
-        goal_info = {}
-        for key, value in end_steps.items():
+            # check episode length
+            if len(replay_slice) != goal_offset_steps:
+                raise ValueError(f"Episode {ep} has length {len(replay_slice)}, should be {goal_offset_steps}")
+        dataset_steps_idx = np.array(dataset_steps_idx)
+
+        _init_step = dataset[dataset_steps_idx[:, 0]]
+        _goal_step = dataset[dataset_steps_idx[:, -1]]
+
+        init_step = {}
+        for key, value in _init_step.items():
             if key == "pixels":
-                goal_info["goal"] = np.stack(
+                init_step["pixels"] = np.stack(
+                    [np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value]
+                )
+                continue
+            init_step[key] = value
+
+        goal_step = {}
+        for key, value in _goal_step.items():
+            if key == "pixels":
+                goal_step["goal"] = np.stack(
                     [np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value]
                 )
                 continue
 
             key = f"goal_{key}" if not key.startswith("goal") else key
-            goal_info[key] = value
+            goal_step[key] = value
 
-        # extract variations used
+        # get dataset info
+        seeds = init_step.get("seed")
+        # get dataset variation
         vkey = "variation."
         variations = [col.removeprefix(vkey) for col in columns if col.startswith(vkey)]
         options = {"variations": variations or None}
 
-        first_steps.update(goal_info)
+        init_step.update(deepcopy(goal_step))
         self.reset(seed=seeds, options=options)  # set seeds for all envs
-
-        # broadcast goal info to match envs infos shape
-        goal_info = {
-            k: (np.broadcast_to(v[:, None, ...], self.infos[k].shape) if k in self.infos else v)
-            for k, v in goal_info.items()
-        }
 
         # apply callable list (e.g used for set initial position if not access to seed)
         callables = callables or {}
@@ -1073,35 +1064,20 @@ class World:
                     logging.warning(f"Env {env} has no method {method_name}, skipping callable")
                     continue
 
-                if col_name not in first_steps:
+                if col_name not in init_step:
                     logging.warning(f"Column {col_name} not found in dataset, skipping callable for env {env}")
                     continue
 
                 method = getattr(env, method_name)
-                data = first_steps[col_name][i]
+                data = deepcopy(init_step[col_name][i])
                 method(data)
 
-        # replay all actions until start_steps and record video
-        self.rewards = np.zeros(self.num_envs)
-        self.terminateds = np.zeros(self.num_envs)
-        self.truncateds = np.zeros(self.num_envs)
-
-        # replay actions and record each frame
         for i, env in enumerate(self.envs.unwrapped.envs):
-            episode_steps_idx = row_steps_idx[i]
-
-            for step_idx in range(start_steps[i]):
-                sample_idx = episode_steps_idx[step_idx]
-                data = dataset[sample_idx]
-                action = data["action"]
-
-                _, _, terminated, truncated, info = env.step(action)
-
-                self.terminateds[i] = terminated
-                self.truncateds[i] = truncated
-
-                for k, v in info.items():
-                    self.infos[k][i] = np.asarray(v)
+            env = env.unwrapped
+            assert np.allclose(init_step["state"][i], env._get_obs()), "State info does not match at reset"
+            assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
+                "Goal state info does not match at reset"
+            )
 
         results = {
             "success_rate": 0,
@@ -1109,13 +1085,30 @@ class World:
             "seeds": seeds,
         }
 
-        # run normal evaluation for num_steps and record video
-        for step in range(eval_budget):
-            self.infos.update(goal_info)
+        # broadcast info dict from dataset to match envs infos shape
+        goal_step = {
+            k: (np.broadcast_to(v[:, None, ...], self.infos[k].shape) if k in self.infos else v)
+            for k, v in goal_step.items()
+        }
+
+        # TODO get the data from the previous step in the dataset for history
+        init_step = {
+            k: (np.broadcast_to(v[:, None, ...], self.infos[k].shape) if k in self.infos else v)
+            for k, v in init_step.items()
+        }
+
+        # update the reset with our new init and goal infos
+        self.infos.update(deepcopy(init_step))
+        self.infos.update(deepcopy(goal_step))
+
+        assert np.allclose(self.infos["goal"], goal_step["goal"]), "Goal info does not match"
+
+        # TODO assert goal and start state are identical as in the rollout
+        # run normal evaluation for eval_budget and TODO: record video
+        for _ in range(eval_budget):
+            self.infos.update(deepcopy(goal_step))
             self.step()
-
             results["episode_successes"] = np.logical_or(results["episode_successes"], self.terminateds)
-
             # for auto-reset
             self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
 

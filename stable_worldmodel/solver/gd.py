@@ -16,6 +16,7 @@ class GDSolver(torch.nn.Module):
         action_noise=0.0,
         num_samples=1,
         device="cpu",
+        seed: int = 1234,
     ):
         super().__init__()
         self.model = model
@@ -23,6 +24,7 @@ class GDSolver(torch.nn.Module):
         self.num_samples = num_samples
         self.action_noise = action_noise
         self.device = device
+        self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
         self._configured = False
         self._n_envs = None
@@ -39,17 +41,6 @@ class GDSolver(torch.nn.Module):
         # warning if action space is discrete
         if not isinstance(action_space, Box):
             logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
-
-    def set_seed(self, seed: int) -> None:
-        """Set random seed for deterministic behavior.
-
-        Args:
-            seed: Random seed to use for numpy and torch
-        """
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
 
     @property
     def n_envs(self) -> int:
@@ -83,7 +74,7 @@ class GDSolver(torch.nn.Module):
 
         actions = actions.unsqueeze(1).repeat_interleave(self.num_samples, dim=1)  # add sample dim
         actions[:, 1:] += (
-            torch.randn_like(actions[:, 1:]) * self.action_noise
+            torch.randn(actions[:, 1:].shape, generator=self.torch_gen) * self.action_noise
         )  # add small noise to all samples except the first one
         actions = actions.to(self.device)
 
@@ -100,28 +91,24 @@ class GDSolver(torch.nn.Module):
             "trajectory": [],
         }
 
-        # Set model to eval mode to ensure deterministic behavior
-        self.model.eval()
-
         with torch.no_grad():
             self.init_action(init_action)
 
         optim = torch.optim.SGD([self.init], lr=1.0)
 
+        expanded_infos = {}
+        for k, v in info_dict.items():
+            if torch.is_tensor(v):
+                v = v.unsqueeze(1)  # add sample dim
+                v = v.expand(self.n_envs, self.num_samples, *v.shape[2:])
+            elif isinstance(v, np.ndarray):
+                v = np.repeat(v[:, None, ...], self.num_samples, axis=1)
+            expanded_infos[k] = v
+
         # perform gradient descent
         for _ in range(self.n_steps):
-            # copy info dict to avoid in-place modification
-            expanded_infos = {}
-            for k, v in info_dict.items():
-                if torch.is_tensor(v):
-                    v = v.unsqueeze(1)  # add sample dim
-                    v = v.expand(self.n_envs, self.num_samples, *v.shape[2:])
-                elif isinstance(v, np.ndarray):
-                    v = np.repeat(v[:, None, ...], self.num_samples, axis=1)
-                expanded_infos[k] = v
-
-            actions = self.init.detach().requires_grad_(True)
-            costs = self.model.get_cost(expanded_infos, actions)
+            current_info = expanded_infos.copy()
+            costs = self.model.get_cost(current_info, self.init)
 
             assert isinstance(costs, torch.Tensor), f"Got {type(costs)} cost, expect torch.Tensor"
             assert costs.ndim == 2 and costs.shape[0] == self.n_envs and costs.shape[1] == self.num_samples, (
@@ -135,7 +122,7 @@ class GDSolver(torch.nn.Module):
             optim.zero_grad(set_to_none=True)
 
             if self.action_noise > 0:
-                self.init.data += torch.randn_like(self.init) * self.action_noise
+                self.init.data += torch.randn(self.init.shape, generator=self.torch_gen) * self.action_noise
 
             outputs["cost"].append(cost.item())
             outputs["trajectory"].extend([self.init.detach().cpu().clone()])
@@ -146,7 +133,8 @@ class GDSolver(torch.nn.Module):
 
         # get the best actions to return
         top_idx = torch.argsort(costs, dim=1)[:, 0]
-        top_actions = self.init[:, top_idx].squeeze(1)
+        batch_indices = torch.arange(self.init.size(0))
+        top_actions = self.init[batch_indices, top_idx]
         outputs["actions"] = top_actions.detach().cpu()
 
         return outputs

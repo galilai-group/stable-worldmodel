@@ -1,0 +1,2 @@
+backbone: facebook/dinov2-small
+output_model_name: dinov2_small

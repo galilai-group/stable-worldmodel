@@ -109,18 +109,16 @@ def get_encoder(cfg):
             "model_class": AutoModelForImageClassification,
             "embedding_attr": lambda model: model.config.hidden_sizes[-1],
             "post_init": lambda model: setattr(model.classifier, "1", torch.nn.Identity()),
-        },
-        "clip": {
-            "prefix": "timm/vit_base_patch32_clip_",
-            "embedding_attr": lambda model: model.config.num_features,
+            "interpolate_pos_encoding": False,
         },
         "vit": {"prefix": "google/vit-"},
         "dino": {"prefix": "facebook/dino-"},
         "dinov2": {"prefix": "facebook/dinov2-"},
         "dinov3": {"prefix": "facebook/dinov3-"},  # TODO handle resnet base in dinov3
         "mae": {"prefix": "facebook/vit-mae-"},
-        "ijepa": {"prefix": "facebook/ijepa-"},
+        "ijepa": {"prefix": "facebook/ijepa"},
         "vjepa2": {"prefix": "facebook/vjepa2-vit"},
+        "siglip2": {"prefix": "google/siglip2-"},
     }
 
     # Find matching encoder
@@ -138,6 +136,10 @@ def get_encoder(cfg):
     # Load model
     backbone = config.get("model_class", AutoModel).from_pretrained(cfg.backbone)
 
+    # CLIP style model
+    if hasattr(backbone, "vision_model"):
+        backbone = backbone.vision_model
+
     # Post-initialization if needed (e.g., ResNet)
     if "post_init" in config:
         config["post_init"](backbone)
@@ -149,7 +151,9 @@ def get_encoder(cfg):
     is_cnn = encoder_type == "resnet"
     num_patches = 1 if is_cnn else (cfg.image_size // cfg.patch_size) ** 2
 
-    return backbone, embedding_dim, num_patches
+    interp_pos_enc = config.get("interpolate_pos_encoding", True)
+
+    return backbone, embedding_dim, num_patches, interp_pos_enc
 
 
 DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
@@ -258,12 +262,14 @@ def get_world_model(cfg):
         # Compute pixel reconstruction loss
         pixels_dim = batch["pixels_embed"].shape[-1]
         pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
-        loss = pixels_loss
         batch["pixels_loss"] = pixels_loss
 
         start = pixels_dim
+        action_dim_range = [0, 0]
         for key in self.model.extra_encoders.keys():
+            emb_dim = batch[f"{key}_embed"].shape[-1]
             if key == "action":
+                action_dim_range = [start, start + emb_dim]
                 continue  # skip action encoding loss
 
             emb_dim = batch[f"{key}_embed"].shape[-1]
@@ -275,12 +281,21 @@ def get_world_model(cfg):
                     pred_embedding[..., start : start + emb_dim],
                     target_embedding[..., start : start + emb_dim].detach(),
                 )
-                loss = loss + extra_loss
+                # loss = loss + extra_loss
                 batch[f"{key}_loss"] = extra_loss
 
             start += emb_dim
 
-        batch["loss"] = loss
+        # Total loss
+        actionless_pred = torch.cat(
+            [pred_embedding[..., : action_dim_range[0]], pred_embedding[..., action_dim_range[1] :]], dim=-1
+        )
+
+        actionless_target = torch.cat(
+            [target_embedding[..., : action_dim_range[0]], target_embedding[..., action_dim_range[1] :]], dim=-1
+        )
+
+        batch["loss"] = F.mse_loss(actionless_pred, actionless_target.detach())
 
         # Log all losses
         prefix = "train/" if self.training else "val/"
@@ -289,12 +304,15 @@ def get_world_model(cfg):
 
         return batch
 
-    encoder, embedding_dim, num_patches = get_encoder(cfg)
+    encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(cfg)
     embedding_dim += sum(emb_dim for emb_dim in cfg.pyro.get("encoding", {}).values())  # add all extra dims
 
     logging.info(f"Patches: {num_patches}, Embedding dim: {embedding_dim}")
 
     # Build causal predictor (transformer that predicts next latent states)
+
+    print(">>>> DIM PREDICTOR:", embedding_dim)
+
     predictor = swm.wm.dinowm.CausalPredictor(
         num_patches=num_patches,
         num_frames=cfg.pyro.history_size,
@@ -315,12 +333,10 @@ def get_world_model(cfg):
     world_model = swm.wm.PYRO(
         encoder=spt.backbone.EvalOnly(encoder),
         predictor=predictor,
-        # action_encoder=action_encoder,
-        # proprio_encoder=proprio_encoder,
         extra_encoders=extra_encoders,
         history_size=cfg.pyro.history_size,
         num_pred=cfg.pyro.num_preds,
-        device="cuda",
+        interpolate_pos_encoding=interp_pos_enc,
     )
 
     # Wrap in stable_spt Module with separate optimizers for each component
@@ -379,7 +395,7 @@ class ModelObjectCallBack(Callback):
                 logging.info(f"Saved world model object to {output_path}")
             # Additionally, save at final epoch
             if (trainer.current_epoch + 1) == trainer.max_epochs:
-                final_path = self.dirpath / f"{self.filename}.ckpt"
+                final_path = self.dirpath / f"{self.filename}_object.ckpt"
                 torch.save(pl_module, final_path)
                 logging.info(f"Saved final world model object to {final_path}")
 
@@ -396,8 +412,11 @@ def run(cfg):
     world_model = get_world_model(cfg)
 
     cache_dir = swm.data.get_cache_dir()
-    dump_object_callback = ModelObjectCallBack(dirpath=cache_dir, filename=cfg.output_model_name, epoch_interval=10)
-    # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
+    dump_object_callback = ModelObjectCallBack(
+        dirpath=cache_dir,
+        filename=cfg.output_model_name,
+        epoch_interval=10,
+    )
 
     trainer = pl.Trainer(
         **cfg.trainer,

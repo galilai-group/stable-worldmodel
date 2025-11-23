@@ -8,7 +8,7 @@ cpus_per_task: 8
 cache_dir: /network/scratch/l/lucas.maes/datasets/datasets/
 
 wandb_entity: simon-lacoste-julien
-wandb_project: stable-wm
+wandb_project: xenoworlds
 
 hydra:
   mode: MULTIRUN
@@ -16,7 +16,9 @@ hydra:
   launcher:
     timeout_min: 10080 # 1 week
     cpus_per_task: ${cpus_per_task}
-    mem_gb: 256
+    mem_gb: 64
     gpus_per_node: ${n_gpus}
     tasks_per_node: ${n_gpus}
     partition: long
+    signal_delay_s: 120
+    constraint: lovelace
