@@ -128,6 +128,17 @@ def run(cfg: DictConfig):
 
     # dump results
     print(metrics)
+    # ---- dump results to a txt file ----
+    results_path = Path(__file__).parent / "results.txt"
+    with results_path.open("a") as f:
+        f.write("\n")  # separate from previous runs
+        f.write(f"policy: {cfg.policy}\n")
+        f.write(f"dataset_name: {cfg.eval.dataset_name}\n")
+        f.write(f"goal_offset_steps: {cfg.eval.goal_offset_steps}\n")
+        f.write(f"eval_budget: {cfg.eval.eval_budget}\n")
+        f.write(f"horizon: {cfg.plan_config.horizon}\n")
+        f.write(f"receding_horizon: {cfg.plan_config.receding_horizon}\n")
+        f.write(f"metrics: {metrics}\n")
 
 
 if __name__ == "__main__":
