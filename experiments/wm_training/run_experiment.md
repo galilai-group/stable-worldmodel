@@ -55,6 +55,12 @@ Notes:
 
 ## 5. Run training experiments
 
+**Important: Make sure you are on the `experiments` branch before running the experiments:**
+
+```bash
+git checkout experiments
+```
+
 Run the training script from the repository root. Below are several example commands for different backbones. Adjust `backbone` and `output_model_name` as needed.
 
 ```bash
