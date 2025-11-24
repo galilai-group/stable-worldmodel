@@ -4,7 +4,7 @@ import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf
@@ -27,8 +27,7 @@ def get_data(cfg):
     def get_img_pipeline(key, target, img_size=224):
         return spt.data.transforms.Compose(
             spt.data.transforms.ToImage(
-                mean=[0.5, 0.5, 0.5],
-                std=[0.5, 0.5, 0.5],
+                **spt.data.dataset_stats.ImageNet,
                 source=key,
                 target=target,
             ),
@@ -59,11 +58,7 @@ def get_data(cfg):
 
     # Apply transforms to all steps
     transform = spt.data.transforms.Compose(
-        *[
-            get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size)
-            for col in ["pixels", "goal"]
-            for i in range(cfg.n_steps)
-        ],
+        *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
         spt.data.transforms.WrapTorchTransform(
             norm_action_transform,
             source="action",
@@ -89,6 +84,7 @@ def get_data(cfg):
         num_workers=cfg.num_workers,
         drop_last=True,
         persistent_workers=True,
+        prefetch_factor=2,
         pin_memory=True,
         shuffle=True,
         generator=rnd_gen,
@@ -132,7 +128,6 @@ def get_world_model(cfg):
         # Compute pixel reconstruction loss
         pixels_dim = batch["pixels_embed"].shape[-1]
         pixels_loss = F.mse_loss(pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim].detach())
-        loss = pixels_loss
         batch["pixels_loss"] = pixels_loss
 
         # Add proprioception loss if available
@@ -142,10 +137,12 @@ def get_world_model(cfg):
                 pred_embedding[..., pixels_dim : pixels_dim + proprio_dim],
                 target_embedding[..., pixels_dim : pixels_dim + proprio_dim].detach(),
             )
-            loss = loss + proprio_loss
             batch["proprio_loss"] = proprio_loss
 
-        batch["loss"] = loss
+        batch["loss"] = F.mse_loss(
+            pred_embedding[..., : pixels_dim + proprio_dim],
+            target_embedding[..., : pixels_dim + proprio_dim].detach(),
+        )
 
         # Log all losses
         prefix = "train/" if self.training else "val/"
@@ -180,7 +177,7 @@ def get_world_model(cfg):
 
     # Assemble world model
     world_model = swm.wm.DINOWM(
-        encoder=spt.backbone.EvalOnly(encoder),  # Freeze encoder
+        encoder=spt.backbone.EvalOnly(encoder),
         predictor=predictor,
         action_encoder=action_encoder,
         proprio_encoder=proprio_encoder,
@@ -241,7 +238,7 @@ class ModelObjectCallBack(Callback):
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
                 output_path = Path(
                     self.dirpath,
-                    f"{self.filename}_epoch_{trainer.current_epoch + 1}.ckpt",
+                    f"{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt",
                 )
                 torch.save(pl_module, output_path)
                 logging.info(f"Saved world model object to {output_path}")
@@ -265,20 +262,25 @@ def run(cfg):
 
     cache_dir = swm.data.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(
-        dirpath=cache_dir, filename=f"{cfg.output_model_name}_object", epoch_interval=1
+        dirpath=cache_dir,
+        filename=cfg.output_model_name,
+        epoch_interval=10,
     )
-    checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
+    # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[checkpoint_callback, dump_object_callback],
+        callbacks=[dump_object_callback],
         num_sanity_val_steps=1,
         logger=wandb_logger,
         enable_checkpointing=True,
     )
 
     manager = spt.Manager(
-        trainer=trainer, module=world_model, data=data, ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt"
+        trainer=trainer,
+        module=world_model,
+        data=data,
+        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
     )
     manager()
 
