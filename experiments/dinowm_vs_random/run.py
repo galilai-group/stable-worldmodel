@@ -45,7 +45,9 @@ def run(cfg: DictConfig):
         wandb.init(project=cfg.wandb.project, entity=cfg.wandb.entity, config=dict(cfg))
 
     # create world environment
-    world = swm.World(**cfg.world, image_shape=(224, 224), render_mode="rgb_array")
+    world = swm.World(
+        **cfg.world, image_shape=(224, 224), render_mode="rgb_array", max_episode_steps=2 * cfg.eval.eval_budget
+    )
 
     # create the transform
     transform = {
