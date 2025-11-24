@@ -45,9 +45,8 @@ def run(cfg: DictConfig):
         wandb.init(project=cfg.wandb.project, entity=cfg.wandb.entity, config=dict(cfg))
 
     # create world environment
-    world = swm.World(
-        **cfg.world, image_shape=(224, 224), render_mode="rgb_array", max_episode_steps=2 * cfg.eval.eval_budget
-    )
+    cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
+    world = swm.World(**cfg.world, image_shape=(224, 224), render_mode="rgb_array")
 
     # create the transform
     transform = {
@@ -84,9 +83,6 @@ def run(cfg: DictConfig):
     policy = swm.policy.RandomPolicy(cfg.seed)
     if cfg.policy != "random":
         model = swm.policy.AutoCostModel(cfg.policy).to("cuda")
-        config = swm.PlanConfig(**cfg.plan_config)
-        solver = hydra.utils.instantiate(cfg.solver, model=model)
-        policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
         torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
 
         class DinoV2Encoder(torch.nn.Module):
@@ -111,7 +107,17 @@ def run(cfg: DictConfig):
                     emb = emb.unsqueeze(1)  # dummy patch dim
                 return emb
 
+        ckpt = torch.load(swm.data.get_cache_dir() / "dinowm_pusht_weights.ckpt")
         model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
+        model.predictor.load_state_dict(ckpt["predictor"], strict=False)
+        model.action_encoder.load_state_dict(ckpt["action_encoder"])
+        model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
+        model = model.to("cuda")
+        model = model.eval()
+
+        config = swm.PlanConfig(**cfg.plan_config)
+        solver = hydra.utils.instantiate(cfg.solver, model=model)
+        policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
