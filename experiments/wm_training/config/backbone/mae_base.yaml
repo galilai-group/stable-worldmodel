@@ -1,2 +1,2 @@
-backbone: facebook/vit-mae-base
+name: facebook/vit-mae-base
 output_model_name: vit_mae_base

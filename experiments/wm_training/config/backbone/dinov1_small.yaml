@@ -1,2 +1,2 @@
-backbone: facebook/dino-vits16
+name: facebook/dino-vits16
 output_model_name: dino_vits16

@@ -1,6 +1,6 @@
 defaults:
   - launcher: local
-  - backbones: dinov2_small
+  - backbone: dinov2_small
   - _self_
 
 wandb:

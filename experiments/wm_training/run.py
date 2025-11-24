@@ -124,17 +124,17 @@ def get_encoder(cfg):
     # Find matching encoder
     encoder_type = None
     for name, config in ENCODER_CONFIGS.items():
-        if cfg.backbone.startswith(config["prefix"]):
+        if cfg.backbone.name.startswith(config["prefix"]):
             encoder_type = name
             break
 
     if encoder_type is None:
-        raise ValueError(f"Unsupported backbone: {cfg.backbone}")
+        raise ValueError(f"Unsupported backbone: {cfg.backbone.name}")
 
     config = ENCODER_CONFIGS[encoder_type]
 
     # Load model
-    backbone = config.get("model_class", AutoModel).from_pretrained(cfg.backbone)
+    backbone = config.get("model_class", AutoModel).from_pretrained(cfg.backbone.name)
 
     # CLIP style model
     if hasattr(backbone, "vision_model"):
@@ -414,7 +414,7 @@ def run(cfg):
     cache_dir = swm.data.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
-        filename=cfg.output_model_name,
+        filename=cfg.backbone.output_model_name,
         epoch_interval=10,
     )
 
@@ -430,7 +430,7 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data,
-        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
+        ckpt_path=f"{cache_dir}/{cfg.backbone.output_model_name}_weights.ckpt",
     )
     manager()
 
