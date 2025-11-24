@@ -20,7 +20,7 @@ plan_config:
 
 # evaluation from dataset (replay expert trajectories)
 eval:
-  num_eval: 20
+  num_eval: 50
   goal_offset_steps: 25
   eval_budget: 50
   dataset_name: pusht_expert_train
