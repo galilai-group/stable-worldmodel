@@ -17,11 +17,10 @@ hydra:
 
   launcher:
     timeout_min: 4320 # 72 hours
-    cpus_per_task: ${cpus_per_task}
-    mem_gb: ${n_gpus} * ${mem_per_gpu_gb}
-    gpus_per_node: ${n_gpus}
+    cpus_per_task: 96
+    mem_gb: 512
+    gpus_per_node: 8
     tasks_per_node: 1
     nodes: 1
-    partition: long
     account: memorization
     qos: h200_alignment_shared,h200_lowest,h200_memorization_high,lowest,h100_alignment_share,h100_lowest
