@@ -64,5 +64,5 @@ git checkout experiments
 Run the training script from the repository root. Below are several example commands for different backbones. Adjust `backbone` and `output_model_name` as needed.
 
 ```bash
-python experiments/wm_training/run.py --config-name=pusht.yaml --multirun "backbones=glob(*)" launcher=your_name
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun "backbone=glob(*)" launcher=your_name
 ```
