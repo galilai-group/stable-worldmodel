@@ -5,7 +5,7 @@ defaults:
 
 n_gpus: 8
 cpus_per_gpu: 12
-cpus_per_task: ${n_gpus} * ${cpus_per_gpu}
+cpus_per_task: 96
 mem_per_gpu_gb: 64
 cache_dir: null # Use stable-worldmodel default cache
 
@@ -16,12 +16,12 @@ hydra:
   mode: MULTIRUN
 
   launcher:
-    timeout_min: 4320 # 72 hours
-    cpus_per_task: ${cpus_per_task}
-    mem_gb: ${n_gpus} * ${mem_per_gpu_gb}
-    gpus_per_node: ${n_gpus}
+    timeout_min: 4320
+    cpus_per_task: 96
+    mem_gb: 512
+    gpus_per_node: 8
     tasks_per_node: 1
     nodes: 1
-    partition: long
+    partition: null
     account: memorization
     qos: h100_memorization_high

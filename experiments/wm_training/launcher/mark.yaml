@@ -9,7 +9,7 @@ cpus_per_task: 96
 mem_per_gpu_gb: 64
 cache_dir: null # Use stable-worldmodel default cache
 
-wandb_entity: stable-wm
+wandb_entity: marksibrahim
 wandb_project: stable-wm
 
 hydra:
