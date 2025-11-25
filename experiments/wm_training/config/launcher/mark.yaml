@@ -12,6 +12,10 @@ cache_dir: null # Use stable-worldmodel default cache
 wandb_entity: marksibrahim
 wandb_project: stable-wm
 
+wandb:
+  entity: ${wandb_entity}
+  project: ${wandb_project}
+
 hydra:
   mode: MULTIRUN
 
