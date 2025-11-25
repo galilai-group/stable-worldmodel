@@ -16,11 +16,12 @@ hydra:
   mode: MULTIRUN
 
   launcher:
-    timeout_min: 4320 # 72 hours
+    timeout_min: 4320
     cpus_per_task: 96
     mem_gb: 512
     gpus_per_node: 8
     tasks_per_node: 1
     nodes: 1
+    partition: null
     account: memorization
-    qos: h200_alignment_shared,h200_lowest,h200_memorization_high,lowest,h100_alignment_share,h100_lowest
+    qos: h100_memorization_high
