@@ -137,5 +137,6 @@ class CEMSolver:
             outputs["var"].append(var[traj].detach().cpu().clone())
 
         outputs["actions"] = mean.detach().cpu()
-        print(f"CEM solve time: {time.time() - start_time:.4f} seconds")
+        outputs["solve_time"] = time.time() - start_time
+        print(f"CEM solve time: {outputs['solve_time']:.4f} seconds")
         return outputs

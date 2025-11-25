@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from gymnasium.spaces import Box
@@ -86,6 +88,7 @@ class GDSolver(torch.nn.Module):
 
     def solve(self, info_dict, init_action=None) -> torch.Tensor:
         """Solve the planning optimization problem using gradient descent."""
+        start_time = time.time()
         outputs = {
             "cost": [],
             "trajectory": [],
@@ -136,5 +139,7 @@ class GDSolver(torch.nn.Module):
         batch_indices = torch.arange(self.init.size(0))
         top_actions = self.init[batch_indices, top_idx]
         outputs["actions"] = top_actions.detach().cpu()
+        outputs["solve_time"] = time.time() - start_time
+        print(f"GD solve time: {outputs['solve_time']:.4f} seconds")
 
         return outputs
