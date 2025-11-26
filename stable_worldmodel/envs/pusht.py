@@ -33,7 +33,6 @@ class PushT(gym.Env):
         resolution=224,
         with_target=True,
         render_mode="rgb_array",
-        fix_action_sample=True,
         relative=True,
     ):
         self._seed = None
@@ -181,9 +180,6 @@ class PushT(gym.Env):
         self.damping = damping
         self.render_action = render_action
         self.render_mode = render_mode
-
-        if fix_action_sample:
-            self.fix_action_sample()
 
         """
         If human-rendering is used, `self.window` will be a reference
