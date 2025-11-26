@@ -7,7 +7,6 @@ import pygame
 import pymunk
 import pymunk.pygame_util
 from gymnasium import spaces
-from loguru import logger as logging
 from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
@@ -818,24 +817,3 @@ class PushT(gym.Env):
             return self.add_plus(*args, **kwargs)
         else:
             raise ValueError(f"Unknown shape type: {shape}")
-
-    def fix_action_sample(self):
-        logging.warning(
-            "The action space sample method is being overridden to improve sampling. "
-            "This is a temporary fix and will be removed in future versions."
-        )
-
-        # Save original sample method
-        self.original_sample = self.action_space.sample
-
-        def better_sample():
-            # sample in a 100x100 box around the block
-            block_pos = np.array((self.block.position.x, self.block.position.y))
-            action = self.rng.uniform(block_pos - 50, block_pos + 50) - self.agent.position
-
-            # Clip to action space bounds
-            action = np.clip(action, 0, self.window_size)
-            return action
-
-        # Override with new method
-        self.action_space.sample = better_sample
