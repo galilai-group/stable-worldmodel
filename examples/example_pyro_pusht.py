@@ -61,9 +61,11 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoCostModel("pyro_test_epoch_10").to("cuda")
+    model = swm.policy.AutoCostModel("pyro_test_epoch_20").to("cuda")
     model = model.eval()
     model.requires_grad_(False)
+
+    model.interpolate_pos_encoding = True
 
     config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
     solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")

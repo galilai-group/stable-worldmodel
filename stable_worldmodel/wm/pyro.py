@@ -119,7 +119,7 @@ class PYRO(torch.nn.Module):
         for i, (key, _) in enumerate(self.extra_encoders.items()):
             dim = extra_dims[i]
             extra_emb = embedding[..., start_dim : start_dim + dim]
-            split_embed[f"{key}_embed"] = extra_emb[:, :, 0]  # all patches are the same
+            split_embed[f"{key}_embed"] = extra_emb[:, :, :, 0]  # all patches are the same
             start_dim += dim
 
         return split_embed
@@ -127,11 +127,13 @@ class PYRO(torch.nn.Module):
     def replace_action_in_embedding(self, embedding, act):
         """Replace the action embeddings in the latent state z with the provided actions."""
         assert "action" in self.extra_encoders, "No action encoder defined in the model."
-        n_patches = embedding.shape[2]
-        z_act = self.extra_encoders["action"](act)  # (B, T, action_dim)
+        n_patches = embedding.shape[3]
+        B, N = act.shape[:2]
+        act_flat = rearrange(act, "b n ... -> (b n) ...")
+        z_act = self.extra_encoders["action"](act_flat)  # (B, T, action_dim)
         action_dim = z_act.shape[-1]
-        act_tiled = repeat(z_act.unsqueeze(2), "b t 1 a -> b t p a", p=n_patches)
-        # z (B, T, P, d) with d = dim + extra_dims
+        act_tiled = repeat(z_act.unsqueeze(2), "(b n) t 1 a -> b n t p a", b=B, n=N, p=n_patches)
+        # z (B, N, T, P, d) with d = dim + extra_dims
         # determine where action starts in the embedding
         extra_dim = sum(encoder.emb_dim for encoder in self.extra_encoders.values())
         pixel_dim = embedding.shape[-1] - extra_dim
@@ -141,9 +143,15 @@ class PYRO(torch.nn.Module):
             if key == "action":
                 break
             start += encoder.emb_dim
-        embedding[..., start : start + action_dim] = act_tiled
 
-        return embedding
+        prefix = embedding[..., :start]
+        suffix = embedding[..., start + action_dim :]
+
+        new_embedding = torch.cat([prefix, act_tiled, suffix], dim=-1)
+
+        # embedding[..., start : start + action_dim] = act_tiled
+        # return embedding
+        return new_embedding
 
     def rollout(self, info, action_sequence):
         """Rollout the world model given an initial observation and a sequence of actions.
@@ -158,50 +166,97 @@ class PYRO(torch.nn.Module):
         """
 
         assert "pixels" in info, "pixels not in info_dict"
-        n_obs = info["pixels"].shape[1]
+        n_obs = info["pixels"].shape[2]
+        emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
 
         # == add action to info dict
-        act_0 = action_sequence[:, :n_obs]
+        act_0 = action_sequence[:, :, :n_obs]
         info["action"] = act_0
 
-        # proprio_key = "proprio" if "proprio" in info else None
-        info = self.encode(
-            info,
-            pixels_key="pixels",
-            target="embed",
-            # proprio_key=proprio_key,
-            # action_key="action",
-        )
+        # check if we have already computed the initial embedding for this state
+        if (
+            hasattr(self, "_init_cached_info")
+            and torch.equal(self._init_cached_info["id"], info["id"][:, 0])
+            and torch.equal(self._init_cached_info["step_idx"], info["step_idx"][:, 0])
+        ):
+            init_info_dict = {k: v.detach() if torch.is_tensor(v) else v for k, v in self._init_cached_info.items()}
+        else:
+            # prepare init_info_dict
+            init_info_dict = {}
+            for k, v in info.items():
+                if torch.is_tensor(v):
+                    # goal is the same across samples so we will only embed it once
+                    init_info_dict[k] = info[k][:, 0]  # (B, 1, ...)
+
+            init_info_dict = self.encode(
+                init_info_dict,
+                pixels_key="pixels",
+                target="embed",
+            )
+            # repeat copy for each action candidate
+            init_info_dict["embed"] = (
+                init_info_dict["embed"]
+                .unsqueeze(1)
+                .expand(-1, action_sequence.shape[1], *([-1] * (init_info_dict["embed"].ndim - 1)))
+                .clone()
+            )
+            init_info_dict["pixels_embed"] = (
+                init_info_dict["pixels_embed"]
+                .unsqueeze(1)
+                .expand(-1, action_sequence.shape[1], *([-1] * (init_info_dict["pixels_embed"].ndim - 1)))
+            )
+
+            for key in emb_keys:
+                init_info_dict[f"{key}_embed"] = (
+                    init_info_dict[f"{key}_embed"]
+                    .unsqueeze(1)
+                    .expand(-1, action_sequence.shape[1], *([-1] * (init_info_dict[f"{key}_embed"].ndim - 1)))
+                )
+
+            init_info_dict = {k: v.detach().clone() if torch.is_tensor(v) else v for k, v in init_info_dict.items()}
+            self._init_cached_info = init_info_dict
+
+        info["embed"] = init_info_dict["embed"]
+        info["pixels_embed"] = init_info_dict["pixels_embed"]
+
+        for key in emb_keys:
+            info[f"{key}_embed"] = init_info_dict[f"{key}_embed"]
+
+        # actually compute the embedding of action for each candidate
+        info["embed"] = self.replace_action_in_embedding(info["embed"], action_sequence[:, :, :n_obs])
+        # action_dim = init_info_dict["action_embed"].shape[-1]
+        info["action_embed"] = action_sequence[:, :, :n_obs]  # info["embed"][:, :, :n_obs, 0, -action_dim:]
 
         # number of step to predict
-        act_pred = action_sequence[:, n_obs:]
-        n_steps = act_pred.shape[1]
+        act_pred = action_sequence[:, :, n_obs:]
+        n_steps = act_pred.shape[2]
 
         # == initial embedding
         z = info["embed"]
+        B, N = z.shape[:2]
+
+        # we flatten B and N to process all candidates in a single batch in the predictor
+        z_flat = rearrange(z, "b n ... -> (b n) ...").clone()
+        act_pred_flat = rearrange(act_pred, "b n ... -> (b n) ...")
 
         for t in range(n_steps):
             # predict the next state
-            pred_embed = self.predict(z[:, -self.history_size :])  # (B, hist_size, P, D)
-            new_embed = pred_embed[:, -1:, ...]  # (B, 1, P, D)
+            pred_embed = self.predict(z_flat[:, -self.history_size :])[:, -1:]  # (B*N, 1, P, D)
 
             # add corresponding action to new embedding
-            new_action = act_pred[:, t : t + 1, :]  # (B, action_dim)
-            new_embed = self.replace_action_in_embedding(new_embed, new_action)
+            new_action = act_pred_flat[None, :, t : t + 1, :]  # (1, B*N, 1, action_dim)
+            new_embed = self.replace_action_in_embedding(pred_embed.unsqueeze(0), new_action)[0]
 
             # append new embedding to the sequence
-            z = torch.cat([z, new_embed], dim=1)  # (B, n+t, P, D)
+            z_flat = torch.cat([z_flat, new_embed], dim=1)
 
         # predict the last state (n+t+1)
-        pred_embed = self.predict(z[:, -self.history_size :])  # (B, hist_size, P, D)
-        new_embed = pred_embed[:, -1:, ...]
-        z = torch.cat([z, new_embed], dim=1)  # (B, n+t+1, P, D)
+        pred_embed = self.predict(z_flat[:, -self.history_size :])[:, -1:]  # (B, 1, P, D)
+        z_flat = torch.cat([z_flat, pred_embed], dim=1)
+        z = rearrange(pred_embed, "(b n) ... -> b n ...", b=B, n=N)
 
         # == update info dict with predicted embeddings
         info["predicted_embedding"] = z
-        # get the dimension of each part of the embedding
-        # action_dim = 0 if "action_embed" not in info else info["action_embed"].shape[-1]
-        # proprio_dim = 0 if "proprio_embed" not in info else info["proprio_embed"].shape[-1]
 
         extra_dims = []
         for key in self.extra_encoders:
@@ -225,14 +280,59 @@ class PYRO(torch.nn.Module):
 
         # == non action embeddings keys
         emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
+
         # == get the goal embedding
-        info_dict = self.encode(
-            info_dict,
-            target="goal_embed",
-            pixels_key="goal",
-            prefix="goal_",
-            emb_keys=emb_keys,
-        )
+
+        # check if we have already computed the goal embedding for this goal
+        if (
+            hasattr(self, "_goal_cached_info")
+            and torch.equal(self._goal_cached_info["id"], info_dict["id"][:, 0])
+            and torch.equal(self._goal_cached_info["step_idx"], info_dict["step_idx"][:, 0])
+        ):
+            goal_info_dict = {k: v.detach() if torch.is_tensor(v) else v for k, v in self._goal_cached_info.items()}
+
+        else:
+            # prepare goal_info_dict
+            goal_info_dict = {}
+            for k, v in info_dict.items():
+                if torch.is_tensor(v):
+                    # goal is the same across samples so we will only embed it once
+                    goal_info_dict[k] = info_dict[k][:, 0]  # (B, ...)
+            goal_info_dict = self.encode(
+                goal_info_dict,
+                target="goal_embed",
+                pixels_key="goal",
+                prefix="goal_",
+                emb_keys=emb_keys,
+            )
+
+            goal_info_dict["goal_embed"] = (
+                goal_info_dict["goal_embed"]
+                .unsqueeze(1)
+                .expand(-1, action_candidates.shape[1], *([-1] * (goal_info_dict["goal_embed"].ndim - 1)))
+            )
+
+            goal_info_dict["pixels_goal_embed"] = (
+                goal_info_dict["pixels_goal_embed"]
+                .unsqueeze(1)
+                .expand(-1, action_candidates.shape[1], *([-1] * (goal_info_dict["pixels_goal_embed"].ndim - 1)))
+            )
+
+            for key in emb_keys:
+                goal_info_dict[f"{key}_goal_embed"] = (
+                    goal_info_dict[f"{key}_goal_embed"]
+                    .unsqueeze(1)
+                    .expand(-1, action_candidates.shape[1], *([-1] * (goal_info_dict[f"{key}_goal_embed"].ndim - 1)))
+                )
+
+            goal_info_dict = {k: v.detach() if torch.is_tensor(v) else v for k, v in goal_info_dict.items()}
+            self._goal_cached_info = goal_info_dict
+
+        info_dict["goal_embed"] = goal_info_dict["goal_embed"]
+        info_dict["pixels_goal_embed"] = goal_info_dict["pixels_goal_embed"]
+
+        for key in emb_keys:
+            info_dict[f"{key}_goal_embed"] = goal_info_dict[f"{key}_goal_embed"]
 
         # == run world model
         info_dict = self.rollout(info_dict, action_candidates)
@@ -242,7 +342,9 @@ class PYRO(torch.nn.Module):
         for key in emb_keys + ["pixels"]:
             preds = info_dict[f"predicted_{key}_embed"]
             goal = info_dict[f"{key}_goal_embed"]
-            cost = cost + F.mse_loss(preds[:, -1:], goal, reduction="none").mean(dim=tuple(range(1, preds.ndim)))
+            cost = cost + F.mse_loss(preds[:, :, -1:], goal, reduction="none").mean(dim=tuple(range(2, preds.ndim)))
+
+        # TODO try with the same loss computation as the training
 
         return cost
 
