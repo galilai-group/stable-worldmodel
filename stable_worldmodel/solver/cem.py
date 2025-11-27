@@ -14,8 +14,19 @@ class CEMSolver:
     adapted from https://github.com/gaoyuezhou/dino_wm/blob/main/planning/cem.py
     """
 
-    def __init__(self, model: Costable, num_samples, var_scale, n_steps, topk, device="cpu", seed: int = 1234):
+    def __init__(
+        self,
+        model: Costable,
+        batch_size: int = 1,
+        num_samples: int = 300,
+        var_scale: float = 1,
+        n_steps: int = 30,
+        topk: int = 30,
+        device="cpu",
+        seed: int = 1234,
+    ):
         self.model = model
+        self.batch_size = batch_size
         self.var_scale = var_scale
         self.num_samples = num_samples
         self.n_steps = n_steps
@@ -68,75 +79,105 @@ class CEMSolver:
         return mean, var
 
     @torch.inference_mode()
-    def solve(self, info_dict, init_action=None):
+    def solve(self, info_dict, init_action=None) -> dict:
         start_time = time.time()
         outputs = {
             "costs": [],
-            "mean": [],
-            "var": [],
+            "mean": [],  # History of means
+            "var": [],  # History of vars
         }
 
-        # -- initialize the action distribution
+        # -- initialize the action distribution globally
         mean, var = self.init_action_distrib(init_action)
         mean = mean.to(self.device)
         var = var.to(self.device)
 
-        n_envs = mean.shape[0]
+        total_envs = self.n_envs
 
-        for traj in range(n_envs):
-            costs_per_traj = []
+        # --- Iterate over batches ---
+        for start_idx in range(0, total_envs, self.batch_size):
+            end_idx = min(start_idx + self.batch_size, total_envs)
+            current_bs = end_idx - start_idx
 
-            # expand info for this trajectory once
+            # Slice Distribution Parameters for current batch
+            batch_mean = mean[start_idx:end_idx]
+            batch_var = var[start_idx:end_idx]
+
+            # Expand Info Dict for current batch
             expanded_infos = {}
             for k, v in info_dict.items():
-                v_traj = v[traj]
+                # v is shape (n_envs, ...)
+                # Slice batch
+                v_batch = v[start_idx:end_idx]
                 if torch.is_tensor(v):
-                    v_traj = v_traj.unsqueeze(0)  # add sample dim
-                    v_traj = v_traj.expand(self.num_samples, *v_traj.shape[1:])
-                    v_traj = v_traj.unsqueeze(0)  # add traj dim
+                    # Add sample dim: (batch, 1, ...)
+                    v_batch = v_batch.unsqueeze(1)
+                    # Expand: (batch, num_samples, ...)
+                    v_batch = v_batch.expand(current_bs, self.num_samples, *v_batch.shape[2:])
                 elif isinstance(v, np.ndarray):
-                    v_traj = np.repeat(v_traj[None, None, ...], self.num_samples, axis=1)
-                expanded_infos[k] = v_traj
+                    v_batch = np.repeat(v_batch[:, None, ...], self.num_samples, axis=1)
+                expanded_infos[k] = v_batch
 
-            # -- optimization loop for this trajectory
+            # Optimization Loop
+            final_batch_cost = None
+
             for step in range(self.n_steps):
-                # sample action sequences candidation from normal distrib
+                # Sample action sequences: (Batch, Num_Samples, Horizon, Dim)
                 candidates = torch.randn(
-                    self.num_samples, self.horizon, self.action_dim, generator=self.torch_gen, device=self.device
+                    current_bs,
+                    self.num_samples,
+                    self.horizon,
+                    self.action_dim,
+                    generator=self.torch_gen,
+                    device=self.device,
                 )
-                # scale and shift
-                candidates = candidates * var[traj] + mean[traj]
-                # make the first action seq being mean
-                candidates[0] = mean[traj]
-                candidates = candidates.unsqueeze(0)  # add traj dim
+
+                # Scale and shift: (Batch, N, H, D) * (Batch, 1, H, D) + (Batch, 1, H, D)
+                candidates = candidates * batch_var.unsqueeze(1) + batch_mean.unsqueeze(1)
+
+                # Force the first sample to be the current mean
+                candidates[:, 0] = batch_mean
 
                 current_info = expanded_infos.copy()
 
-                # evaluate the candidates
-                cost = self.model.get_cost(current_info, candidates)[0]
-                assert isinstance(cost, torch.Tensor), f"Expected cost to be a torch.Tensor, got {type(cost)}"
-                assert cost.ndim == 1 and cost.shape[0] == self.num_samples, (
-                    f"Expected cost to be of shape (num_samples), got {cost.shape}"
+                # Evaluate candidates
+                costs = self.model.get_cost(current_info, candidates)
+
+                assert isinstance(costs, torch.Tensor), f"Expected cost to be a torch.Tensor, got {type(costs)}"
+                assert costs.ndim == 2 and costs.shape[0] == current_bs and costs.shape[1] == self.num_samples, (
+                    f"Expected cost to be of shape ({current_bs}, {self.num_samples}), got {costs.shape}"
                 )
 
-                # select topk
-                topk_idx = torch.argsort(cost)[: self.topk]
-                topk_candidates = candidates[0, topk_idx]
-                best_cost = cost[topk_idx[0]].item()
-                costs_per_traj.append(best_cost)
+                # Select Top-K
+                # topk_vals: (Batch, K), topk_inds: (Batch, K)
+                topk_vals, topk_inds = torch.topk(costs, k=self.topk, dim=1, largest=False)
 
-                # update mean and variance
-                mean[traj] = topk_candidates.mean(dim=0)
-                var[traj] = topk_candidates.std(dim=0)
+                # Gather Top-K Candidates
+                # We need to select the specific candidates corresponding to topk_inds
+                batch_indices = torch.arange(current_bs, device=self.device).unsqueeze(1).expand(-1, self.topk)
 
-                print(f"  Traj {traj} | Step {step + 1}/{self.n_steps} | cost: {best_cost:.4f}")
+                # Indexing: candidates[batch_idx, sample_idx]
+                # Result shape: (Batch, K, Horizon, Dim)
+                topk_candidates = candidates[batch_indices, topk_inds]
 
-            # store trajectory results
-            outputs["costs"].append(np.mean(costs_per_traj))
-            outputs["mean"].append(mean[traj].detach().cpu().clone())
-            outputs["var"].append(var[traj].detach().cpu().clone())
+                # Update Mean and Variance based on Top-K
+                batch_mean = topk_candidates.mean(dim=1)
+                batch_var = topk_candidates.std(dim=1)
+
+                # Update final cost for logging
+                # We average the cost of the top elites
+                final_batch_cost = topk_vals.mean(dim=1).cpu().tolist()
+
+            # Write results back to global storage
+            mean[start_idx:end_idx] = batch_mean
+            var[start_idx:end_idx] = batch_var
+
+            # Store history/metadata
+            outputs["costs"].extend(final_batch_cost)
 
         outputs["actions"] = mean.detach().cpu()
-        outputs["solve_time"] = time.time() - start_time
-        print(f"CEM solve time: {outputs['solve_time']:.4f} seconds")
+        outputs["mean"] = [mean.detach().cpu()]
+        outputs["var"] = [var.detach().cpu()]
+
+        print(f"CEM solve time: {time.time() - start_time:.4f} seconds")
         return outputs
