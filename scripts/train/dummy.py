@@ -31,8 +31,8 @@ def get_data(dataset_name):
     )
 
     # -- load dataset
-    data_dir = swm.data.get_cache_dir()
-    dataset = swm.data.StepsDataset(
+    data_dir = swm.data.utils.get_cache_dir()
+    dataset = swm.data.FrameDataset(
         "parquet",
         data_files=str(Path(data_dir, dataset_name, "*.parquet")),
         split="train",
@@ -105,7 +105,7 @@ def run(cfg):
     data, action_dim = get_data(cfg.dataset_name)
     world_model = get_world_model(action_dim)
 
-    cache_dir = swm.data.get_cache_dir()
+    cache_dir = swm.data.utils.get_cache_dir()
     checkpoint_callback = ModelCheckpoint(
         dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights"
     )  # , save_last=True)
