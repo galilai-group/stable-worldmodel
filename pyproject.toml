@@ -32,6 +32,7 @@ dependencies = [
     "pymunk",
     "shapely",
     "ogbench",
+    "torchcodec",
 ]
 
 dynamic = ["version"]
