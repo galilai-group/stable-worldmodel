@@ -33,6 +33,7 @@ dependencies = [
     "shapely",
     "ogbench",
     "torchcodec",
+    "minigrid"
 ]
 
 dynamic = ["version"]
