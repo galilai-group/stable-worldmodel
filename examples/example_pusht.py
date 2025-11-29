@@ -176,26 +176,43 @@ if __name__ == "__main__":
 
     print(ckpt.keys())
 
+    torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
+
+    class DinoV2Encoder(torch.nn.Module):
+        def __init__(self, name, feature_key):
+            super().__init__()
+            self.name = name
+            self.base_model = torch.hub.load("facebookresearch/dinov2", name)
+            self.feature_key = feature_key
+            self.emb_dim = self.base_model.num_features
+            if feature_key == "x_norm_patchtokens":
+                self.latent_ndim = 2
+            elif feature_key == "x_norm_clstoken":
+                self.latent_ndim = 1
+            else:
+                raise ValueError(f"Invalid feature key: {feature_key}")
+
+            self.patch_size = self.base_model.patch_size
+
+        def forward(self, x):
+            emb = self.base_model.forward_features(x)[self.feature_key]
+            if self.latent_ndim == 1:
+                emb = emb.unsqueeze(1)  # dummy patch dim
+            return emb
+
+    model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
+    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
+
+    model.predictor.load_state_dict(ckpt["predictor"], strict=False)
+    model.action_encoder.load_state_dict(ckpt["action_encoder"])
+    model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
+
+    model = model.to("cuda")
+    model = model.eval()
+
+    print(ckpt.keys())
+
     world.set_policy(policy)
-    # sample 50 episodes idx
-
-    # fix random seed
-    np.random.seed(42)
-    episode_idx = np.random.choice(10000, size=10, replace=False).tolist()
-    start_steps = np.random.randint(0, 60, size=10).tolist()
-
-    print("Evaluating episodes: ", episode_idx)
-    print("Starting steps: ", start_steps)
-
-    dataset = swm.data.FrameDataset("pusht_expert_train")
-    results = world.evaluate_from_dataset(
-        dataset,
-        start_steps=start_steps,
-        episodes_idx=episode_idx,
-        goal_offset_steps=25,
-        eval_budget=25,
-        callables={"_set_state": "state", "_set_goal_state": "goal_state"},
-    )
     # sample 50 episodes idx
 
     # fix random seed
