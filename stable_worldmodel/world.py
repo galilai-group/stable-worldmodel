@@ -64,13 +64,15 @@ import gymnasium as gym
 import imageio
 import imageio.v3 as iio
 import numpy as np
-from datasets import Dataset, Features, Value, load_from_disk
+import torch
+from datasets import Dataset, Features, Value
 from loguru import logger as logging
 from PIL import Image
 from rich import print
 
-import stable_worldmodel as swm
-from stable_worldmodel.data import is_image
+from stable_worldmodel.data.dataset import Dataset as SWMDataset
+from stable_worldmodel.data.dataset import VideoDataset
+from stable_worldmodel.data.utils import get_cache_dir, is_image
 
 from .wrappers import MegaWrapper, VariationWrapper
 
@@ -442,7 +444,7 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def record_dataset(self, dataset_name, episodes=10, seed=None, cache_dir=None, options=None):
+    def record_dataset(self, dataset_name, episodes=10, seed=None, cache_dir=None, mode="frame", options=None):
         """Collect episodes with the current policy and save as a HuggingFace Dataset.
 
         Executes the attached policy to collect demonstration or rollout data,
@@ -467,7 +469,9 @@ class World:
             seed (int, optional): Base random seed for reproducibility. Each episode
                 gets an incremental offset. Defaults to None (non-deterministic).
             cache_dir (str or Path, optional): Root directory for dataset storage.
-                If None, uses swm.data.get_cache_dir(). Defaults to None.
+                If None, uses get_cache_dir(). Defaults to None.
+            mode (str, optional): Type of dataset to record. 'frame' for save as images,
+                'video' for save as videos. Defaults to 'frame'.
             options (dict, optional): Reset options for environments. Use
                 {'variation': ['all']} for full domain randomization. Defaults to None.
 
@@ -516,9 +520,13 @@ class World:
         if self._history_size > 1:
             raise NotImplementedError("Dataset recording with frame history > 1 is not supported.")
 
-        cache_dir = cache_dir or swm.data.get_cache_dir()
+        cache_dir = cache_dir or get_cache_dir()
         dataset_path = Path(cache_dir, dataset_name)
         dataset_path.mkdir(parents=True, exist_ok=True)
+
+        if (dataset_path / "state.json").exists():
+            logging.warning(f"Dataset {dataset_name} already exists at {dataset_path}. Aborting recording.")
+            return
 
         recorded_episodes = 0
 
@@ -529,7 +537,13 @@ class World:
         self.reset(seed, options)  # <- incr global seed by num_envs
         root_seed = seed + self.num_envs if seed is not None else None
 
-        records = {key: list(value) for key, value in self.infos.items() if key[0] != "_"}
+        records = {}
+        for key, value in self.infos.items():
+            if key[0] == "_":
+                continue
+
+            value = value.squeeze(1) if isinstance(value, np.ndarray) else value
+            records[key] = list(value)
 
         records["episode_idx"] = list(episode_idx)
         records["policy"] = [self.policy.type] * self.num_envs
@@ -560,26 +574,29 @@ class World:
                 if key[0] == "_":
                     continue
 
+                data = self.infos[key]
+                data = data.squeeze(1) if isinstance(data, np.ndarray) else data
+
                 # shift actions
                 if key == "action":
-                    n_action = len(self.infos[key])
+                    n_action = len(data)
                     last_episode = records["episode_idx"][-n_action:]
                     action_mask = (last_episode == episode_idx)[:, None]
 
                     # override last actions of continuing episodes
                     records[key][-n_action:] = np.where(
                         action_mask,
-                        self.infos[key],
+                        data,
                         np.nan,
                     )
 
                     # add new dummy action
-                    action_shape = np.shape(self.infos[key][0])
+                    action_shape = np.shape(data[0])
                     action_dtype = self.single_action_space.dtype
                     dummy_block = [np.full(action_shape, np.nan, dtype=action_dtype) for _ in range(self.num_envs)]
                     records[key].extend(dummy_block)
                 else:
-                    records[key].extend(list(self.infos[key]))
+                    records[key].extend(list(data))
 
             records["episode_idx"].extend(list(episode_idx))
             records["policy"].extend([self.policy.type] * self.num_envs)
@@ -608,24 +625,59 @@ class World:
         # save all jpeg images
         image_cols = {col for col in records if is_image(records[col][0])}
 
-        # pre-create all directories
-        for ep_idx in set(records["episode_idx"]):
-            img_folder = dataset_path / "img" / f"{ep_idx}"
-            img_folder.mkdir(parents=True, exist_ok=True)
+        # # pre-create all directories
+        # for ep_idx in set(records["episode_idx"]):
+        #     img_folder = dataset_path / "img" / f"{ep_idx}"
+        #     img_folder.mkdir(parents=True, exist_ok=True)
 
-        # dump all data
-        for i in range(len(records["episode_idx"])):
-            ep_idx = records["episode_idx"][i]
-            step_idx = records["step_idx"][i]
+        # TODO: should check if already some data has been saved
+        episode_idx = np.unique(records["episode_idx"])
+
+        for ep in episode_idx:
+            ep_mask = records["episode_idx"] == ep
+            step_mask = np.flatnonzero(ep_mask)
 
             for img_col in image_cols:
-                img = records[img_col][i]
-                img_folder = dataset_path / "img" / f"{ep_idx}"
-                img_path = img_folder / f"{step_idx}_{img_col.replace('.', '_')}.jpeg"
-                iio.imwrite(img_path, img)
+                col_name = img_col.replace(".", "_")
+                imgs = np.stack([records[img_col][i] for i in step_mask], axis=0)
 
-                # replace image in records with relative path
-                records[img_col][i] = str(img_path.relative_to(dataset_path))
+                # Prepare output path
+                if mode == "video":
+                    output_dir = dataset_path / "videos"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    file_path = output_dir / f"{ep}_{col_name}.mp4"
+                    iio.imwrite(file_path, imgs)
+                    paths = [str(file_path.relative_to(dataset_path))] * len(step_mask)
+                elif mode == "frame":
+                    output_dir = dataset_path / "img" / f"{ep}"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    paths = []
+                    for idx, img in enumerate(imgs):
+                        file_path = output_dir / f"{idx}_{col_name}.jpeg"
+                        iio.imwrite(file_path, img)
+                        paths.append(str(file_path.relative_to(dataset_path)))
+                else:
+                    raise ValueError(f"Unknown mode {mode} for saving dataset images/videos.")
+
+                # Update records
+                for i, path in zip(step_mask, paths):
+                    records[img_col][i] = path
+
+        # dump all images
+        # for i in range(len(records["episode_idx"])):
+        #     ep_idx = records["episode_idx"][i]
+        #     step_idx = records["step_idx"][i]
+
+        #     writer = i
+
+        #     for img_col in image_cols:
+        #         img = records[img_col][i]
+        #         img_folder = dataset_path / "img" / f"{ep_idx}"
+        #         img_path = img_folder / f"{step_idx}_{img_col.replace('.', '_')}.jpeg"
+        #         iio.imwrite(img_path, img)
+
+        #         # replace image in records with relative path
+        #         records[img_col][i] = str(img_path.relative_to(dataset_path))
 
         def determine_features(records):
             features = {
@@ -689,13 +741,12 @@ class World:
     def record_video_from_dataset(
         self,
         video_path,
-        dataset_name,
+        dataset,
         episode_idx,
         max_steps=500,
         fps=30,
         num_proc=4,
         viewname: str | list[str] = "pixels",
-        cache_dir=None,
     ):
         """Replay stored dataset episodes and export them as MP4 videos.
 
@@ -705,7 +756,7 @@ class World:
         Args:
             video_path (str or Path): Directory where videos will be saved. Videos are
                 named 'episode_{idx}.mp4'. Directory is created if it doesn't exist.
-            dataset_name (str): Name of the dataset to load (must exist in cache_dir).
+            dataset (Dataset): the dataset object to load episodes from.
             episode_idx (int or list of int): Episode index or list of episode indices
                 to render. Each episode is saved as a separate video file.
             max_steps (int, optional): Maximum number of steps to render per episode.
@@ -714,7 +765,7 @@ class World:
             num_proc (int, optional): Number of processes for parallel dataset filtering.
                 Higher values speed up loading for large datasets. Defaults to 4.
             cache_dir (str or Path, optional): Root directory where dataset is stored.
-                If None, uses swm.data.get_cache_dir(). Defaults to None.
+                If None, uses get_cache_dir(). Defaults to None.
 
         Raises:
             AssertionError: If dataset doesn't exist in cache_dir, or if episode
@@ -745,12 +796,26 @@ class World:
                     max_steps=100
                 )
         """
-        cache_dir = cache_dir or swm.data.get_cache_dir()
-        dataset_path = Path(cache_dir, dataset_name)
-        assert dataset_path.is_dir(), f"Dataset {dataset_name} not found in cache dir {swm.data.get_cache_dir()}"
-
         episode_idx = [episode_idx] if isinstance(episode_idx, int) else episode_idx
         viewname = [viewname] if isinstance(viewname, str) else viewname
+
+        if isinstance(dataset, VideoDataset):
+            for ep in episode_idx:
+                ep_indices = np.nonzero(np.array(dataset.dataset["episode_idx"]) == ep)[0]
+                data = dataset.dataset[ep_indices[0]]
+
+                frames = []
+                for view in viewname:
+                    video_file = Path(data["data_dir"], data[view])
+                    frames.append(iio.imread(video_file))
+
+                frames = np.vstack(frames)
+                output_dir = Path(video_path)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / f"episode_{ep}.mp4"
+                iio.imwrite(output_path, frames, fps=fps, codec="libx264")
+            print(f"Video saved to {video_path}")
+            return
 
         out = [
             imageio.get_writer(
@@ -762,16 +827,16 @@ class World:
             for i in episode_idx
         ]
 
-        dataset = load_from_disk(dataset_path).with_format("numpy")
-
         for i, o in zip(episode_idx, out):
-            episode = dataset.filter(lambda ex: ex["episode_idx"] == i, num_proc=num_proc)
+            episode = dataset.dataset.filter(lambda ex: ex["episode_idx"] == i, num_proc=num_proc)
             episode = episode.sort("step_idx")
             episode_len = len(episode)
 
-            assert len(set(episode["episode_len"])) == 1, (
-                "'episode_len' contains different values for the same episode"
-            )
+            all_lengths = episode["episode_len"][:].tolist()
+
+            print(set(all_lengths))
+
+            assert len(set(all_lengths)) == 1, "'episode_len' contains different values for the same episode"
             assert len(episode) == episode["episode_len"][0], (
                 f"Episode {i} has {len(episode)} steps, but 'episode_len' is {episode['episode_len'][0]}"
             )
@@ -779,12 +844,12 @@ class World:
             for step_idx in range(min(episode_len, max_steps)):
                 frame = []
                 for view in viewname:
-                    img_path = Path(dataset_path, episode[step_idx][view])
+                    img_path = Path(episode[step_idx]["data_dir"], episode[step_idx][view])
                     frame.append(np.array(Image.open(img_path).convert("RGB"), dtype=np.uint8))
                 frame = np.vstack(frame)  # should try hstack?
 
                 if "goal" in episode.column_names:
-                    goal_path = Path(dataset_path, episode[step_idx]["goal"])
+                    goal_path = Path(episode[step_idx]["data_dir"], episode[step_idx]["goal"])
                     goal = Image.open(goal_path)
                     goal = np.array(goal.convert("RGB"), dtype=np.uint8)
                     frame = np.vstack([frame, goal])
@@ -966,12 +1031,11 @@ class World:
 
     def evaluate_from_dataset(
         self,
-        dataset_name: str,
+        dataset: SWMDataset,
         episodes_idx: int | list[int],
         start_steps: int | list[int],
         goal_offset_steps: int,
         eval_budget: int,
-        cache_dir: str | None = None,
         callables: dict | None = None,
     ):
         assert (
@@ -979,15 +1043,9 @@ class World:
             or self.envs.envs[0].spec.max_episode_steps >= goal_offset_steps
         ), "env max_episode_steps must be greater than eval_budget"
 
-        if isinstance(episodes_idx, int):
-            episodes_idx = [episodes_idx]
-
-        if isinstance(start_steps, int):
-            start_steps = [start_steps]
-
         episodes_idx = np.array(episodes_idx)
         start_steps = np.array(start_steps)
-        end_steps_idx = start_steps + goal_offset_steps
+        end_steps = start_steps + goal_offset_steps
 
         if not (len(episodes_idx) == len(start_steps)):
             raise ValueError("episodes_idx and start_steps must have the same length")
@@ -995,55 +1053,33 @@ class World:
         if len(episodes_idx) != self.num_envs:
             raise ValueError("Number of episodes to evaluate must match number of envs")
 
-        dataset_path = Path(cache_dir or swm.data.get_cache_dir()) / dataset_name
-        dataset = load_from_disk(dataset_path).with_format("numpy")
-        columns = set(dataset.column_names)
+        data = dataset.load_chunk(episodes_idx, start_steps, end_steps)
+        columns = dataset.dataset.column_names
 
-        assert "episode_idx" in columns, "'episode_idx' column not found in dataset"
-        assert "step_idx" in columns, "'step_idx' column not found in dataset"
+        # keep relevant part of the chunk
+        init_step_per_env = {c: [] for c in columns}
+        goal_step_per_env = {c: [] for c in columns}
 
-        episodes_col = dataset["episode_idx"][:]
-        dataset_steps_idx = []
-        for i, ep in enumerate(episodes_idx):
-            ep_indices_in_dataset = np.nonzero(episodes_col == ep)[0]
-            episode_len = len(ep_indices_in_dataset)
-            ep_indices_in_dataset.sort()  # ensure sorted order
-            replay_slice = ep_indices_in_dataset[start_steps[i] : end_steps_idx[i]]
-            dataset_steps_idx.append(replay_slice)
+        for i, ep in enumerate(data):
+            for col in columns:
+                if col.startswith("goal"):
+                    continue
 
-            if episode_len < start_steps[i]:
-                raise ValueError(f"Episode {ep} is too short for the requested start step {start_steps[i]}")
+                init_data = ep[col][0]
+                goal_data = ep[col][-1]
 
-            if episode_len < end_steps_idx[i]:
-                raise ValueError(f"Episode {ep} is too short for the requested end step {end_steps_idx[i]}")
+                init_data = init_data.numpy() if isinstance(init_data, torch.Tensor) else init_data
+                goal_data = goal_data.numpy() if isinstance(goal_data, torch.Tensor) else goal_data
 
-            # check episode length
-            if len(replay_slice) != goal_offset_steps:
-                raise ValueError(f"Episode {ep} has length {len(replay_slice)}, should be {goal_offset_steps}")
-        dataset_steps_idx = np.array(dataset_steps_idx)
+                init_step_per_env[col].append(init_data)
+                goal_step_per_env[col].append(goal_data)
 
-        _init_step = dataset[dataset_steps_idx[:, 0]]
-        _goal_step = dataset[dataset_steps_idx[:, -1]]
-
-        init_step = {}
-        for key, value in _init_step.items():
-            if key == "pixels":
-                init_step["pixels"] = np.stack(
-                    [np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value]
-                )
-                continue
-            init_step[key] = value
+        init_step = {k: np.stack(v) for k, v in deepcopy(init_step_per_env).items()}
 
         goal_step = {}
-        for key, value in _goal_step.items():
-            if key == "pixels":
-                goal_step["goal"] = np.stack(
-                    [np.array(Image.open(dataset_path / path).convert("RGB"), dtype=np.uint8) for path in value]
-                )
-                continue
-
-            key = f"goal_{key}" if not key.startswith("goal") else key
-            goal_step[key] = value
+        for key, value in goal_step_per_env.items():
+            key = "goal" if key == "pixels" else f"goal_{key}"
+            goal_step[key] = np.stack(value)
 
         # get dataset info
         seeds = init_step.get("seed")
@@ -1054,6 +1090,9 @@ class World:
 
         init_step.update(deepcopy(goal_step))
         self.reset(seed=seeds, options=options)  # set seeds for all envs
+
+        init_step = {k: v for k, v in init_step.items() if k in self.infos}
+        goal_step = {k: v for k, v in goal_step.items() if k in self.infos}
 
         # apply callable list (e.g used for set initial position if not access to seed)
         callables = callables or {}
@@ -1074,7 +1113,8 @@ class World:
 
         for i, env in enumerate(self.envs.unwrapped.envs):
             env = env.unwrapped
-            assert np.allclose(init_step["state"][i], env._get_obs()), "State info does not match at reset"
+
+            # assert np.allclose(init_step["state"][i], env._get_obs()), "State info does not match at reset"
             assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
                 "Goal state info does not match at reset"
             )

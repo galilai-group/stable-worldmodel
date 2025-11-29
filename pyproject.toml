@@ -34,6 +34,8 @@ dependencies = [
     "shapely",
     "ogbench",
     "wandb",
+    "torchcodec",
+    "minigrid"
 ]
 
 dynamic = ["version"]
