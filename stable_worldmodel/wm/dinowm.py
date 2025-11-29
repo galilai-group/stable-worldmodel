@@ -52,8 +52,8 @@ class DINOWM(torch.nn.Module):
         B = pixels.shape[0]
         pixels = rearrange(pixels, "b t ... -> (b t) ...")
         pixels = self.encoder_transform(pixels)
-        pixels_embed = self.backbone(pixels).last_hidden_state.detach()
-        pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
+        pixels_embed = self.backbone(pixels)  # .last_hidden_state.detach()
+        # pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
         pixels_embed = rearrange(pixels_embed, "(b t) p d -> b t p d", b=B)
 
         # == improve the embedding
