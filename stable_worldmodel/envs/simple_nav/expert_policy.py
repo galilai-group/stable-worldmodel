@@ -28,8 +28,8 @@ class ExpertPolicy(BasePolicy):
 
         for i, env in enumerate(self.env.unwrapped.envs):
             if len(self._action_buffer[i]) == 0:
-                agent_pos = info_dict["pos_agent"].squeeze()[i]
-                goal_pos = info_dict["pos_goal"].squeeze()[i]
+                agent_pos = info_dict["pos_agent"].squeeze(axis=1)[i]
+                goal_pos = info_dict["pos_goal"].squeeze(axis=1)[i]
                 agent_dir = info_dict["dir_agent"][i]
 
                 path = self._shortest_path(agent_pos, goal_pos, env.unwrapped.grid)

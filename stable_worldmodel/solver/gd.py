@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from gymnasium.spaces import Box
@@ -14,16 +16,29 @@ class GDSolver(torch.nn.Module):
         model: Costable,
         n_steps: int,
         batch_size: int | None = None,
-        action_noise: float = 0.0,
+        var_scale: float = 1,
         num_samples: int = 1,
+        action_noise: float = 0.0,
         device="cpu",
         seed: int = 1234,
     ):
+        """Gradient Descent Method Solver.
+        Args:
+            model (Costable): The world model used to compute costs.
+            n_steps (int): Number of gradient descent steps.
+            batch_size (int | None): Batch size for processing environments. If None, process all envs at once.
+            var_scale (float): Scale of the initial action variance in the samples.
+            num_samples (int): Number of initial action samples to optimize.
+            action_noise (float): Standard deviation of noise added to actions during optimization.
+            device (str): Device to run the solver on.
+            seed (int): Random seed for reproducibility.
+        """
         super().__init__()
         self.model = model
         self.n_steps = n_steps
         self.batch_size = batch_size
         self.num_samples = num_samples
+        self.var_scale = var_scale
         self.action_noise = action_noise
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
@@ -65,18 +80,18 @@ class GDSolver(torch.nn.Module):
         set self.init - initial action sequences (n_envs, horizon, action_dim)
         """
         if actions is None:
-            actions = torch.zeros((self._n_envs, 0, self.action_dim), device=self.device)
+            actions = torch.zeros((self._n_envs, 0, self.action_dim))
 
         # fill remaining action
         remaining = self.horizon - actions.shape[1]
 
         if remaining > 0:
-            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim, device=self.device)
-            actions = torch.cat([actions, new_actions], dim=1)
+            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
+            actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
         actions = actions.unsqueeze(1).repeat_interleave(self.num_samples, dim=1)  # add sample dim
         actions[:, 1:] += (
-            torch.randn(actions[:, 1:].shape, generator=self.torch_gen, device=self.device) * self.action_noise
+            torch.randn(actions[:, 1:].shape, generator=self.torch_gen, device=self.device) * self.var_scale
         )  # add small noise to all samples except the first one
 
         # reset actions
@@ -87,6 +102,7 @@ class GDSolver(torch.nn.Module):
 
     def solve(self, info_dict, init_action=None) -> dict:
         """Solve the planning optimization problem using gradient descent with batch processing."""
+        start_time = time.time()
         outputs = {
             "cost": [],  # Will store list of cost histories per batch
             "actions": None,
@@ -168,5 +184,7 @@ class GDSolver(torch.nn.Module):
 
         # Concatenate all batch results
         outputs["actions"] = torch.cat(batch_top_actions_list, dim=0)
+        end_time = time.time()
+        print(f"GDSolver.solve completed in {end_time - start_time:.4f} seconds.")
 
         return outputs
