@@ -78,7 +78,9 @@ class Dataset:
 
         assert "episode_idx" in self.dataset.column_names, "Dataset must have 'episode_idx' column"
         assert "step_idx" in self.dataset.column_names, "Dataset must have 'step_idx' column"
-        assert "action" in self.dataset.column_names, "Dataset must have 'action' column"
+        assert "data_dir" in self.dataset.column_names, (
+            "Dataset must have 'data_dir' column (relative path to img/video)"
+        )
 
         episode_col = self.dataset["episode_idx"][:]
 
@@ -153,8 +155,9 @@ class Dataset:
                 steps[col] = torch.stack(steps[col])
 
             # reshape action
-            act_shape = en - s
-            steps["action"] = steps["action"].reshape(act_shape, -1)
+            if "action" in steps:
+                act_shape = en - s
+                steps["action"] = steps["action"].reshape(act_shape, -1)
 
             chunks.append(steps)
 
@@ -201,8 +204,9 @@ class FrameDataset(Dataset):
             steps[col] = torch.stack(steps[col])
 
         # reshape action
-        act_shape = self.num_steps if not self.complete_traj else len(self.episode_indices[episode])
-        steps["action"] = steps["action"].reshape(act_shape, -1)
+        if "action" in steps:
+            act_shape = self.num_steps if not self.complete_traj else len(self.episode_indices[episode])
+            steps["action"] = steps["action"].reshape(act_shape, -1)
 
         return steps
 
@@ -254,8 +258,9 @@ class VideoDataset(Dataset):
             steps[col] = torch.stack(steps[col])
 
         # reshape action
-        act_shape = self.num_steps if not self.complete_traj else len(self.episode_indices[episode])
-        steps["action"] = steps["action"].reshape(act_shape, -1)
+        if "action" in steps:
+            act_shape = self.num_steps if not self.complete_traj else len(self.episode_indices[episode])
+            steps["action"] = steps["action"].reshape(act_shape, -1)
 
         return steps
 
