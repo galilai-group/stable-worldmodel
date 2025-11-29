@@ -11,6 +11,10 @@ def register(id, entry_point):
     WORLDS.add(id)
 
 
+##############
+# CONTINUOUS #
+##############
+
 # register(
 #     id="swm/ImagePositioning-v1",
 #     entry_point="stable_worldmodel.envs.image_positioning:ImagePositioning",
@@ -28,7 +32,12 @@ register(
 
 register(
     id="swm/TwoRoom-v0",
-    entry_point="stable_worldmodel.envs.two_room:TwoRoomEnv",
+    entry_point="stable_worldmodel.envs.two_room.env:TwoRoomEnv",
+)
+
+register(
+    id="swm/OGBCube-v0",
+    entry_point="stable_worldmodel.envs.ogbench_cube:CubeEnv",
 )
 
 # register(
@@ -36,11 +45,12 @@ register(
 #     entry_point="stable_worldmodel.envs.voidrun:VoidRunEnv",
 # )
 
-register(
-    id="swm/OGBCube-v0",
-    entry_point="stable_worldmodel.envs.ogbench_cube:CubeEnv",
-)
+
+############
+# DISCRETE #
+############
 
 register(
-    id="swm/SimpleNavigation-v0", entry_point="stable_worldmodel.envs.simple_nav.simple_navigation:SimpleNavigationEnv"
+    id="swm/SimpleNavigation-v0",
+    entry_point="stable_worldmodel.envs.simple_nav.env:SimpleNavigationEnv",
 )

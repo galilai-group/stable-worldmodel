@@ -7,11 +7,12 @@ import numpy as np
 import pygame
 import pymunk
 from gymnasium import spaces
+from pymunk import pygame_util as pm_util
 from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
 
-from .utils import DrawOptions, light_color, pymunk_to_shapely, to_pygame
+from ..utils import DrawOptions, light_color, pymunk_to_shapely, to_pygame
 
 
 DEFAULT_VARIATIONS = ("agent.position", "goal.position")
@@ -496,8 +497,7 @@ class TwoRoomEnv(gym.Env):
         # draw doors
         for door in self.doors:
             door_points = [
-                pymunk.pygame_util.to_pygame(door.body.local_to_world(v), draw_options.surface)
-                for v in door.get_vertices()
+                pm_util.to_pygame(door.body.local_to_world(v), draw_options.surface) for v in door.get_vertices()
             ]
             door_points.append(door_points[0])  # close shape
             pygame.draw.polygon(canvas, door.color, door_points)
