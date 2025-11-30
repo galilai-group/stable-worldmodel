@@ -53,12 +53,6 @@ class Dataset:
         obs_type="img",
         cache_dir=None,
     ):
-        # 1. detect is there are shard folders
-        # 2. for each shard folder, load dataset
-        # 3. concatenate datasets + re-index episodes
-        # 4. when loading video or images should add all the intermediate path from data_dir to the videos/img folder
-        # to go 4 just keep a mapping from episode_idx to "data_dir" + the shard folder
-
         # load dataset from disk (handle shards if any)
         data_dir = Path(cache_dir or get_cache_dir(), name)
         self.shard_dirs = find_shard_dirs(data_dir, target_dir=obs_type)
@@ -268,3 +262,54 @@ class VideoDataset(Dataset):
         # TODO: support other video formats
         video_columns = {k for k in sample.keys() if isinstance(sample[k], str) and sample[k].endswith(".mp4")}
         return video_columns
+
+
+class InjectedDataset:
+    def __init__(
+        self,
+        original_dataset,
+        external_datasets: list[Dataset],
+        proportions: list[float] | None = None,
+        seed: int | None = None,
+    ):
+        self.datasets = [original_dataset] + external_datasets
+        self.proportions = proportions or [1.0 / len(self.datasets)] * len(self.datasets)
+
+        if sum(self.proportions) != 1.0:
+            raise ValueError("Proportions must sum to 1.0")
+
+        if len(self.proportions) != (len(self.datasets)):
+            raise ValueError("Proportions length must match number of datasets (original + external)")
+
+        self.check_consistency()
+
+        # determine length of injected dataset
+        target_ds_len = len(original_dataset)
+        per_dataset_samples = [int(target_ds_len * p) for p in self.proportions]
+        self.length = sum(per_dataset_samples)
+
+        # draw random indices for each dataset
+        gen = np.random.default_rng(seed)
+        self.mapping = []
+        for ds, n in zip(self.datasets, per_dataset_samples):
+            self.mapping.extend(gen.choice(len(ds), size=n, replace=True).tolist())
+
+        self.cumulative_sizes = np.cumsum([0] + per_dataset_samples)
+        self.idx_to_ds = np.searchsorted(self.cumulative_sizes, np.arange(len(self)), side="right") - 1
+        return
+
+    def check_consistency(self):
+        fs = self.datasets[0].frameskip
+        ns = self.datasets[0].num_steps
+        for ds in self.datasets[1:]:
+            if ds.frameskip != fs or ds.num_steps != ns:
+                raise ValueError("All datasets must have the same frameskip and num_steps")
+        return
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        dataset_idx = self.idx_to_ds[index]
+        sample_idx = self.mapping[index]
+        return self.datasets[dataset_idx][sample_idx]
