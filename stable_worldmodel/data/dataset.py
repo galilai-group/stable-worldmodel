@@ -141,7 +141,8 @@ class Dataset:
                 steps[col] = data
 
                 if col in self.decode_columns:
-                    steps[col] = self.decode(steps["data_dir"], steps[col], start=s, end=en)
+                    frames = self.decode(steps["data_dir"], steps[col], start=s, end=en)
+                    steps[col] = [f.permute(1, 2, 0) for f in frames]
 
             if self.transform:
                 steps = self.transform(steps)
@@ -168,7 +169,7 @@ class FrameDataset(Dataset):
 
     def decode(self, data_dirs, col_data, start=0, end=-1):
         pairs = zip(data_dirs, col_data)
-        return [decode_image(os.path.join(dir, img_path)).permute(1, 2, 0) for dir, img_path in pairs]
+        return [decode_image(os.path.join(dir, img_path)) for dir, img_path in pairs]  # .permute(1, 2, 0)
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]

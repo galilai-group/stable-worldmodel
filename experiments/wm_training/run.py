@@ -183,7 +183,7 @@ def get_data(cfg):
         std = data.std(0).unsqueeze(0)
         return lambda x: (x - mean) / std
 
-    dataset = swm.data.StepsDataset(
+    dataset = swm.data.FrameDataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,
@@ -313,7 +313,7 @@ def get_world_model(cfg):
 
     print(">>>> DIM PREDICTOR:", embedding_dim)
 
-    predictor = swm.wm.dinowm.CausalPredictor(
+    predictor = swm.wm.pyro.CausalPredictor(
         num_patches=num_patches,
         num_frames=cfg.pyro.history_size,
         dim=embedding_dim,
@@ -411,7 +411,7 @@ def run(cfg):
     data = get_data(cfg)
     world_model = get_world_model(cfg)
 
-    cache_dir = swm.data.get_cache_dir()
+    cache_dir = swm.data.utils.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
         filename=cfg.backbone.output_model_name,

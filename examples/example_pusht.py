@@ -223,7 +223,7 @@ if __name__ == "__main__":
     print("Evaluating episodes: ", episode_idx)
     print("Starting steps: ", start_steps)
 
-    dataset = swm.data.FrameDataset("pusht_expert_train")
+    dataset = swm.data.VideoDataset("pusht_expert_train_video")
     results = world.evaluate_from_dataset(
         dataset,
         start_steps=start_steps,

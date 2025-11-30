@@ -61,8 +61,16 @@ Notes:
 git checkout experiments
 ```
 
+## all backbones
+
 Run the training script from the repository root. Below are several example commands for different backbones. Adjust `backbone` and `output_model_name` as needed.
 
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun "backbone=glob(*)" launcher=your_name
+```
+
+## dinov2 encoder scaling
+
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small,dinov2_base,dinov2_large,dinov2_giant launcher=your_name
 ```
