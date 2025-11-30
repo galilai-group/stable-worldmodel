@@ -54,7 +54,7 @@ def run(cfg: DictConfig):
         "goal": img_transform(),
     }
 
-    dataset_path = Path(cfg.cache_dir or swm.data.get_cache_dir(), cfg.eval.dataset_name)
+    dataset_path = Path(cfg.cache_dir or swm.data.utils.get_cache_dir(), cfg.eval.dataset_name)
     dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
     ep_indices, _ = np.unique(dataset["episode_idx"][:], return_index=True)
 
@@ -107,7 +107,7 @@ def run(cfg: DictConfig):
                     emb = emb.unsqueeze(1)  # dummy patch dim
                 return emb
 
-        ckpt = torch.load(swm.data.get_cache_dir() / "dinowm_pusht_weights.ckpt")
+        ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
         model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
         model.predictor.load_state_dict(ckpt["predictor"], strict=False)
         model.action_encoder.load_state_dict(ckpt["action_encoder"])
@@ -140,13 +140,14 @@ def run(cfg: DictConfig):
 
     world.set_policy(policy)
 
+    dataset = swm.data.FrameDataset(cfg.eval.dataset_name)
+
     metrics = world.evaluate_from_dataset(
-        cfg.eval.dataset_name,
+        dataset,
         start_steps=eval_start_idx.tolist(),
         goal_offset_steps=cfg.eval.goal_offset_steps,
         eval_budget=cfg.eval.eval_budget,
         episodes_idx=eval_episodes.tolist(),
-        cache_dir=cfg.get("cache_dir", None),
         callables={
             "_set_state": "state",
             "_set_goal_state": "goal_state",
