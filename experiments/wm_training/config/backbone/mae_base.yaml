@@ -1,2 +1,2 @@
 name: facebook/vit-mae-base
-output_model_name: vit_mae_base
+type: vit_mae_base

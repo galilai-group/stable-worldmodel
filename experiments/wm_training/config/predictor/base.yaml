@@ -1,0 +1,7 @@
+size: "base"
+depth: 8
+heads: 24
+dim_head: 64        # d_model = 1536
+mlp_dim: 3072       # 2 * 1536
+dropout: 0.1
+emb_dropout: 0.0

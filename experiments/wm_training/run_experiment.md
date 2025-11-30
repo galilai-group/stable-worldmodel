@@ -74,3 +74,9 @@ python experiments/wm_training/run.py --config-name=pusht.yaml --multirun "backb
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small,dinov2_base,dinov2_large,dinov2_giant launcher=your_name
 ```
+
+## predictor scaling
+
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun predictor=tiny,small,base,large launcher=your_name
+```

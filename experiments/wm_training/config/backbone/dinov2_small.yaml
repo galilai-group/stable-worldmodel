@@ -1,2 +1,2 @@
 name: facebook/dinov2-small
-output_model_name: dinov2_small
+type: dinov2_small

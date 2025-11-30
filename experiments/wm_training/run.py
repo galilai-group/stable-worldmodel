@@ -414,7 +414,7 @@ def run(cfg):
     cache_dir = swm.data.utils.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
-        filename=cfg.backbone.output_model_name,
+        filename=cfg.output_model_name,
         epoch_interval=10,
     )
 
@@ -430,7 +430,7 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data,
-        ckpt_path=f"{cache_dir}/{cfg.backbone.output_model_name}_weights.ckpt",
+        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
     )
     manager()
 

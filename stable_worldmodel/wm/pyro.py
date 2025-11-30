@@ -387,6 +387,7 @@ class CausalPredictor(nn.Module):
         dim_head=64,
         dropout=0.0,
         emb_dropout=0.0,
+        **kwargs,
     ):
         super().__init__()
         assert pool in {"cls", "mean"}, "pool type must be either cls (cls token) or mean (mean pooling)"
