@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import datasets
@@ -142,6 +143,7 @@ def run(cfg: DictConfig):
 
     dataset = swm.data.FrameDataset(cfg.eval.dataset_name)
 
+    start_time = time.time()
     metrics = world.evaluate_from_dataset(
         dataset,
         start_steps=eval_start_idx.tolist(),
@@ -153,6 +155,7 @@ def run(cfg: DictConfig):
             "_set_goal_state": "goal_state",
         },
     )
+    end_time = time.time()
 
     if cfg.wandb.use_wandb:
         # Log metrics to wandb
@@ -174,6 +177,7 @@ def run(cfg: DictConfig):
         f.write(f"receding_horizon: {cfg.plan_config.receding_horizon}\n")
         f.write(f"seed: {cfg.seed}\n")
         f.write(f"metrics: {metrics}\n")
+        f.write(f"evaluation_time: {end_time - start_time} seconds\n")
 
 
 if __name__ == "__main__":
