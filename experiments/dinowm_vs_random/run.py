@@ -182,6 +182,7 @@ def run(cfg: DictConfig):
         f.write(f"receding_horizon: {cfg.plan_config.receding_horizon}\n")
         f.write(f"seed: {cfg.seed}\n")
         f.write(f"metrics: {metrics}\n")
+        f.write(f"number of samples: {cfg.sollver.num_samples}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")
         f.write(f"gpu: {gpu_name}\n")
 
