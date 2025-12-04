@@ -167,6 +167,11 @@ def run(cfg: DictConfig):
     print(metrics)
     # ---- dump results to a txt file ----
     results_path = Path(__file__).parent / cfg.output.filename
+    if torch.cuda.is_available():
+        gpu_index = torch.cuda.current_device()
+        gpu_name = torch.cuda.get_device_name(gpu_index)
+    else:
+        gpu_name = "No GPU available"
     with results_path.open("a") as f:
         f.write("\n")  # separate from previous runs
         f.write(f"policy: {cfg.policy}\n")
@@ -178,6 +183,7 @@ def run(cfg: DictConfig):
         f.write(f"seed: {cfg.seed}\n")
         f.write(f"metrics: {metrics}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")
+        f.write(f"gpu: {gpu_name}\n")
 
 
 if __name__ == "__main__":
