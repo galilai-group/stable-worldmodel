@@ -6,9 +6,10 @@ from stable_worldmodel.policy import BasePolicy
 class ExpertPolicy(BasePolicy):
     """Expert Policy for Two Room Environment."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, action_noise=1.3, **kwargs):
         super().__init__(**kwargs)
         self.type = "expert"
+        self.action_noise = action_noise
 
     def set_env(self, env):
         self.env = env
@@ -114,5 +115,5 @@ class ExpertPolicy(BasePolicy):
 
             actions[i] = direction.astype(np.float32)
 
-        # VecEnv expects (n_envs, action_dim)
+        actions += np.random.normal(0, self.action_noise, size=actions.shape)
         return actions
