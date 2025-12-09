@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     import numpy as np
 
-    dataset_path = swm.data.get_cache_dir() / "pusht_expert_train"
+    dataset_path = swm.data.utils.get_cache_dir() / "pusht_expert_train"
     dataset = datasets.load_from_disk(dataset_path).with_format("numpy")
 
     action_process = preprocessing.StandardScaler()
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoCostModel("pyro_test_epoch_20").to("cuda")
+    model = swm.policy.AutoCostModel("siglip2_base16_224_epoch_10").to("cuda")
     model = model.eval()
     model.requires_grad_(False)
 
@@ -82,8 +82,9 @@ if __name__ == "__main__":
     print("Evaluating episodes: ", episode_idx)
     print("Starting steps: ", start_steps)
 
+    dataset = swm.data.VideoDataset("pusht_expert_train_video")
     results = world.evaluate_from_dataset(
-        "pusht_expert_train",
+        dataset,
         start_steps=start_steps,
         episodes_idx=episode_idx,
         goal_offset_steps=25,
