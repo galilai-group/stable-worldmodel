@@ -453,7 +453,7 @@ class PushT(gym.Env):
         self.block.position = pos_block
 
         # Run physics to take effect
-        # self.space.step(self.dt)
+        self.space.step(self.dt)
 
     def _set_goal_state(self, goal_state):
         self.goal_state = goal_state
