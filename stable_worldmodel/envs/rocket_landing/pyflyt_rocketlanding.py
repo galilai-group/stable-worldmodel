@@ -140,6 +140,46 @@ class RocketLandingEnv(RocketBaseEnv):
                         ),
                     }
                 ),
+                "pad_motion": swm.spaces.Dict(
+                    {
+                        "enabled": swm.spaces.Discrete(n=2, init_value=0),  # 0=disabled, 1=enabled
+                        "theta_xy": swm.spaces.Box(
+                            low=0.3,
+                            high=2.0,
+                            init_value=1.0,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                        "sigma_xy": swm.spaces.Box(
+                            low=0.1,
+                            high=1.0,
+                            init_value=0.5,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                        "theta_z": swm.spaces.Box(
+                            low=1.0,
+                            high=3.0,
+                            init_value=2.0,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                        "sigma_z": swm.spaces.Box(
+                            low=0.2,
+                            high=1.5,
+                            init_value=0.8,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                        "max_radius": swm.spaces.Box(
+                            low=1.0,
+                            high=5.0,
+                            init_value=3.0,
+                            shape=(),
+                            dtype=np.float32,
+                        ),
+                    }
+                ),
             },
             sampling_order=["environment", "rocket", "pad"],
         )
@@ -153,6 +193,12 @@ class RocketLandingEnv(RocketBaseEnv):
         self.modified_pad_urdf = None
         self._spawn_offset_limit = 2.0  # meters
         self._entry_speed_limit = -30.0  # m/s (downwards)
+
+        # Pad motion state (Ornstein-Uhlenbeck process)
+        self.pad_position = np.array([0.0, 0.0, 0.1], dtype=np.float64)  # x, y, z
+        self.pad_velocity = np.array([0.0, 0.0, 0.0], dtype=np.float64)  # dx, dy, dz
+        self.pad_base_height = 0.1  # base z-position
+        self._ou_state = np.array([0.0, 0.0, 0.0], dtype=np.float64)  # O-U process state (offset from origin)
 
     def _modify_rocket_urdf(self) -> str:
         """Modify rocket URDF with current variation colors.
@@ -233,6 +279,73 @@ class RocketLandingEnv(RocketBaseEnv):
         temp_file.close()
 
         return temp_file.name
+
+    def _update_pad_motion(self, dt: float) -> None:
+        """Update landing pad position using Ornstein-Uhlenbeck process.
+
+        Args:
+            dt: Time step in seconds
+        """
+        # Check if pad motion is enabled (0=disabled, 1=enabled)
+        if self.variation_space["pad_motion"]["enabled"].value == 0:
+            return
+
+        # Get O-U parameters from variation space
+        theta_xy = float(self.variation_space["pad_motion"]["theta_xy"].value)
+        sigma_xy = float(self.variation_space["pad_motion"]["sigma_xy"].value)
+        theta_z = float(self.variation_space["pad_motion"]["theta_z"].value)
+        sigma_z = float(self.variation_space["pad_motion"]["sigma_z"].value)
+        max_radius = float(self.variation_space["pad_motion"]["max_radius"].value)
+
+        # Store previous position for velocity calculation
+        prev_position = self.pad_position.copy()
+
+        # Ornstein-Uhlenbeck process: dx = -θ(x - x₀)dt + σ√dt × N(0,1)
+        # Separate dynamics for horizontal (xy) and vertical (z)
+        sqrt_dt = np.sqrt(dt)
+
+        # Horizontal motion (x, y)
+        drift_xy = -theta_xy * self._ou_state[:2] * dt
+        diffusion_xy = sigma_xy * sqrt_dt * self.np_random.standard_normal(2)
+        self._ou_state[:2] += drift_xy + diffusion_xy
+
+        # Vertical motion (z)
+        drift_z = -theta_z * self._ou_state[2] * dt
+        diffusion_z = sigma_z * sqrt_dt * self.np_random.standard_normal()
+        self._ou_state[2] += drift_z + diffusion_z
+
+        # Apply optional hard constraint (spherical limit)
+        horizontal_distance = np.linalg.norm(self._ou_state[:2])
+        if horizontal_distance > max_radius:
+            # Clip to max radius
+            self._ou_state[:2] = max_radius * self._ou_state[:2] / horizontal_distance
+
+        # Vertical constraint: keep pad above ground
+        # Allow some vertical motion but keep it reasonable
+        self._ou_state[2] = np.clip(self._ou_state[2], -0.5, 2.0)
+
+        # Update pad position (base height + O-U offset)
+        self.pad_position[:2] = self._ou_state[:2]
+        self.pad_position[2] = self.pad_base_height + self._ou_state[2]
+
+        # Update pad velocity
+        self.pad_velocity = (self.pad_position - prev_position) / dt
+
+        # Update pad in PyBullet simulation
+        if hasattr(self, "landing_pad_id"):
+            p.resetBasePositionAndOrientation(
+                self.landing_pad_id,
+                self.pad_position.tolist(),
+                [0, 0, 0, 1],  # No rotation for now
+                physicsClientId=self.env._client,
+            )
+            # Set velocity for proper physics interaction
+            p.resetBaseVelocity(
+                self.landing_pad_id,
+                linearVelocity=self.pad_velocity.tolist(),
+                angularVelocity=[0, 0, 0],
+                physicsClientId=self.env._client,
+            )
 
     def reset(self, *, seed: None | int = None, options: None | dict[str, Any] = None) -> tuple[np.ndarray, dict]:
         """Resets the environment.
@@ -325,6 +438,11 @@ class RocketLandingEnv(RocketBaseEnv):
 
         self.compute_state()
 
+        # Initialize pad motion state
+        self._ou_state = np.zeros(3, dtype=np.float64)
+        self.pad_position = np.array([0.0, 0.0, self.pad_base_height], dtype=np.float64)
+        self.pad_velocity = np.zeros(3, dtype=np.float64)
+
         # Apply color variations to rocket and pad
         if variation_options and (
             "all" in variation_options
@@ -406,6 +524,10 @@ class RocketLandingEnv(RocketBaseEnv):
         # Add goal to info dict
         self.info["goal"] = self.current_goal
 
+        # Add pad motion info to observations
+        self.info["pad_position"] = self.pad_position.copy()
+        self.info["pad_velocity"] = self.pad_velocity.copy()
+
         state = self.state.copy()
         info = dict(self.info)
         return state, info
@@ -419,8 +541,17 @@ class RocketLandingEnv(RocketBaseEnv):
         Returns:
             state, reward, terminated, truncated, info
         """
+        # Update pad motion before physics step
+        dt = 1.0 / self.agent_hz
+        self._update_pad_motion(dt)
+
         state, reward, terminated, truncated, info = super().step(action)
         info["goal"] = self.current_goal
+
+        # Add pad motion info to observations
+        info["pad_position"] = self.pad_position.copy()
+        info["pad_velocity"] = self.pad_velocity.copy()
+
         return state, reward, terminated, truncated, dict(info)
 
     def render(self, mode: str = "rgb_array"):

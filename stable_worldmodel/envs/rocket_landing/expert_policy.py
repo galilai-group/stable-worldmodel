@@ -400,8 +400,14 @@ class RocketLandingGNC:
         }
 
 
-def parse_observation(observation: np.ndarray, angle_rep: str = "quaternion"):
-    """Parse PyFlyt rocket observation into structured fields."""
+def parse_observation(observation: np.ndarray, angle_rep: str = "quaternion", pad_position=None):
+    """Parse PyFlyt rocket observation into structured fields.
+
+    Args:
+        observation: The observation vector from the environment
+        angle_rep: Angle representation ("quaternion" or "euler")
+        pad_position: Position of the landing pad (if moving), otherwise assumes [0, 0, 0]
+    """
 
     obs = np.asarray(observation, dtype=float).flatten()
     if obs.size < 30:
@@ -429,7 +435,12 @@ def parse_observation(observation: np.ndarray, angle_rep: str = "quaternion"):
     aux = obs[idx + 13 : idx + 22]  # skip previous action (7 values)
 
     fuel_obs = float(np.clip(aux[5], 0.0, 1.0))
-    target_rel = -pos
+
+    # Compute relative target position
+    if pad_position is not None:
+        target_rel = pad_position - pos
+    else:
+        target_rel = -pos  # Assume pad at origin
 
     return {
         "position": pos,
@@ -472,11 +483,14 @@ class ExpertPolicy(BasePolicy):
         batched = obs.ndim > 1
         obs_batch = obs if batched else obs[None, :]
 
+        # Extract pad position if available (for moving pad support)
+        pad_position = info_dict.get("pad_position", None)
+
         self._ensure_controller_count(obs_batch.shape[0])
 
         actions = []
         for idx, single_obs in enumerate(obs_batch):
-            state_dict = parse_observation(single_obs, "quaternion")
+            state_dict = parse_observation(single_obs, "quaternion", pad_position=pad_position)
             controller = self.controllers[idx]
             action = controller.compute_control(state_dict)
             controller.post_step_update()
