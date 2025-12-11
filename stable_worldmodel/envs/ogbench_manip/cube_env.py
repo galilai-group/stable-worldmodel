@@ -37,8 +37,7 @@ from ogbench.manipspace import lie
 from ogbench.manipspace.envs.manipspace_env import ManipSpaceEnv
 
 import stable_worldmodel as swm
-
-from .utils import perturb_camera_angle
+from stable_worldmodel.envs.utils import perturb_camera_angle
 
 
 class CubeEnv(ManipSpaceEnv):
@@ -192,7 +191,7 @@ class CubeEnv(ManipSpaceEnv):
                         ),
                         "size": swm.spaces.Box(
                             low=0.01,
-                            high=0.04,
+                            high=0.03,
                             shape=(self._num_cubes,),
                             dtype=np.float64,
                             init_value=0.02 * np.ones((self._num_cubes,), dtype=np.float32),
@@ -957,6 +956,9 @@ class CubeEnv(ManipSpaceEnv):
 
             # Set a new target.
             self.set_new_target(return_info=False)
+
+            # NOTE: Goal observation is not used in data collection mode.
+            self._cur_goal_ob = np.zeros_like(self.compute_observation())
         else:
             # Set object positions and orientations based on the current task.
 
@@ -1174,8 +1176,7 @@ class CubeEnv(ManipSpaceEnv):
             Called after initialize_episode() to provide initial state information.
         """
         reset_info = self.compute_ob_info()
-        if self._mode == "task":
-            reset_info["goal"] = self._cur_goal_ob
+        reset_info["goal"] = self._cur_goal_ob
         reset_info["success"] = self._success
         return reset_info
 
@@ -1195,8 +1196,7 @@ class CubeEnv(ManipSpaceEnv):
             Called after each step to provide feedback about current state and progress.
         """
         ob_info = self.compute_ob_info()
-        if self._mode == "task":
-            ob_info["goal"] = self._cur_goal_ob
+        ob_info["goal"] = self._cur_goal_ob
         ob_info["success"] = self._success
         return ob_info
 
