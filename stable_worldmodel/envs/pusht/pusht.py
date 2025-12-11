@@ -12,7 +12,7 @@ from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
 
-from .utils import DrawOptions
+from ..utils import DrawOptions
 
 
 DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
