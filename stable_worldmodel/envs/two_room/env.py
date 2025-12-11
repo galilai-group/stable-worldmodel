@@ -15,7 +15,7 @@ import stable_worldmodel as swm
 from ..utils import DrawOptions, light_color, pymunk_to_shapely, to_pygame
 
 
-DEFAULT_VARIATIONS = ("agent.position", "goal.position")
+DEFAULT_VARIATIONS = ("agent.position", "goal.position", "door.number", "door.size", "door.position")
 
 
 class TwoRoomEnv(gym.Env):
