@@ -3,7 +3,7 @@ import numpy as np
 from stable_worldmodel.policy import BasePolicy
 
 
-class PushTCollectionPolicy(BasePolicy):
+class WeakPolicy(BasePolicy):
     """Collection policy for PushT environment."""
 
     def __init__(

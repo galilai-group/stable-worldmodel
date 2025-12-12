@@ -1233,7 +1233,6 @@ class CubeEnv(ManipSpaceEnv):
         if self._mode == "data_collection":
             # Target cube info.
             ob_info["privileged/target_task"] = self._target_task
-
             target_mocap_id = self._cube_target_mocap_ids[self._target_block]
             ob_info["privileged/target_block"] = self._target_block
             ob_info["privileged/target_block_pos"] = self._data.mocap_pos[target_mocap_id].copy()

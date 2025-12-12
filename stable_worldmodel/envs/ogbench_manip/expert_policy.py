@@ -11,7 +11,7 @@ from ogbench.manipspace.oracles.plan.window_plan import WindowPlanOracle
 from stable_worldmodel.policy import BasePolicy
 
 
-class OGBCollectionPolicy(BasePolicy):
+class ExpertPolicy(BasePolicy):
     """Collection Policy for OGBench Manipulation Environments."""
 
     def __init__(

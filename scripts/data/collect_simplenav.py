@@ -3,14 +3,14 @@ import numpy as np
 from loguru import logger as logging
 
 import stable_worldmodel as swm
-from stable_worldmodel.envs.two_room import ExpertPolicy
+from stable_worldmodel.envs.simple_nav import ExpertPolicy
 
 
 @hydra.main(version_base=None, config_path="./", config_name="config")
 def run(cfg):
     """Run data collection script"""
 
-    world = swm.World("swm/TwoRoom-v0", **cfg.world, render_mode="rgb_array")
+    world = swm.World("swm/SimpleNavigation-v0", **cfg.world, size=9, render_mode="rgb_array")
     world.set_policy(ExpertPolicy())
 
     options = cfg.get("options")
@@ -20,7 +20,7 @@ def run(cfg):
 
     for i in range(cfg.num_shards):
         world.record_dataset(
-            f"tworoom_noisy/shard_{i}",
+            f"simple_nav/shard_{i}",
             episodes=traj_per_shard,
             seed=rng.integers(0, 1_000_000).item(),
             cache_dir=cfg.cache_dir,
@@ -28,7 +28,7 @@ def run(cfg):
             options=options,
         )
 
-    logging.success(" 🎉🎉🎉 Completed data collection for tworoom_noisy 🎉🎉🎉")
+    logging.success(" 🎉🎉🎉 Completed data collection for simple_nav 🎉🎉🎉")
 
 
 if __name__ == "__main__":

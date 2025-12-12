@@ -479,7 +479,10 @@ class World:
                 if k[0] == "_":
                     continue
 
-                v = v.squeeze(1) if isinstance(v, np.ndarray) else v
+                if isinstance(v, np.ndarray):
+                    v = v.squeeze(1) if len(v.shape) > 1 and v.shape[1] == 1 else v
+                    v = v if v.dtype.type != np.object_ else np.concatenate(v).tolist()
+
                 for i in env_idx:
                     buffer = episode_buffers[i]
                     buffer[k].append(deepcopy(v[i]))
@@ -530,7 +533,7 @@ class World:
                     _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 
                     for k, v in infos.items():
-                        self.infos[k][i] = np.asarray(v)
+                        self.infos[k][i] = v
 
                     dump_to_buffer(env_idx=i)
 
@@ -553,7 +556,7 @@ class World:
         # Save dataset to disk #
         ########################
 
-        assert "pixels" in records, "pixels key is required in records"
+        assert any(key.startswith("pixels") for key in records), "pixels key is required in records"
         assert "episode_idx" in records, "episode_idx key is required in records"
         assert "step_idx" in records, "step_idx key is required in records"
         assert "episode_len" in records, "episode_len key is required in records"

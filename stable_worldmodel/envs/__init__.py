@@ -22,7 +22,7 @@ def register(id, entry_point):
 
 register(
     id="swm/PushT-v1",
-    entry_point="stable_worldmodel.envs.pusht.pusht:PushT",
+    entry_point="stable_worldmodel.envs.pusht.env:PushT",
 )
 
 register(
