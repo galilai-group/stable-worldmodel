@@ -122,7 +122,6 @@ class World:
         env_name: str,
         num_envs: int,
         image_shape: tuple,
-        goal_shape: tuple | None = None,
         goal_transform: Callable | None = None,
         image_transform: Callable | None = None,
         seed: int = 2349867,
@@ -146,9 +145,6 @@ class World:
                 Higher values increase data collection throughput but require more memory.
             image_shape (tuple): Target shape for image observations as (height, width)
                 or (height, width, channels). Images are resized to this shape.
-            goal_shape (tuple, optional): Target shape for goal image observations.
-                If None, goals are processed with the same shape as observations.
-                Defaults to None.
             goal_transform (Callable, optional): Function to transform goal observations.
                 Should accept and return numpy arrays. Applied after resizing.
                 Defaults to None.
@@ -180,7 +176,6 @@ class World:
                     env_name="PushT-v1",
                     num_envs=8,
                     image_shape=(96, 96),
-                    goal_shape=(64, 64),
                     max_episode_steps=150,
                     seed=42
                 )
@@ -195,7 +190,6 @@ class World:
                     x,
                     image_shape,
                     image_transform,
-                    goal_shape,
                     goal_transform,
                     history_size=history_size,
                     frame_skip=frame_skip,
