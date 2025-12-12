@@ -970,6 +970,9 @@ class World:
             for col in columns:
                 if col.startswith("goal"):
                     continue
+                if col.startswith("pixels"):
+                    # permute channel to be last
+                    ep[col] = ep[col].permute(0, 2, 3, 1)
 
                 init_data = ep[col][0]
                 goal_data = ep[col][-1]

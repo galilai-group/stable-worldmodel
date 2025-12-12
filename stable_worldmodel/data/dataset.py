@@ -165,7 +165,7 @@ class FrameDataset(Dataset):
 
     def decode(self, data_dirs, col_data, start=0, end=-1):
         pairs = zip(data_dirs, col_data)
-        return [decode_image(os.path.join(dir, img_path)).permute(1, 2, 0) for dir, img_path in pairs]
+        return [decode_image(os.path.join(dir, img_path)) for dir, img_path in pairs]
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
