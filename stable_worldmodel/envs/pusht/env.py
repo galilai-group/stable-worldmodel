@@ -234,14 +234,17 @@ class PushT(gym.Env):
             self.space.damping = self.damping
 
         ### get the state
-        goal_state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
-                self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
-                [self.variation_space["block"]["angle"].sample(set_value=False)],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        if options is not None and "goal_state" in options:
+            goal_state = options["goal_state"]
+        else:
+            goal_state = np.concatenate(
+                [
+                    self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
+                    self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
+                    [self.variation_space["block"]["angle"].sample(set_value=False)],
+                    self.variation_space["agent"]["velocity"].value.tolist(),
+                ]
+            )
 
         ### generate goal
         self._set_state(goal_state)
@@ -249,14 +252,17 @@ class PushT(gym.Env):
         self._goal = self.render()
 
         # restore original pos
-        state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].value.tolist(),
-                self.variation_space["block"]["start_position"].value.tolist(),
-                [self.variation_space["block"]["angle"].value],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        if options is not None and "state" in options:
+            state = options["state"]
+        else:
+            state = np.concatenate(
+                [
+                    self.variation_space["agent"]["start_position"].value.tolist(),
+                    self.variation_space["block"]["start_position"].value.tolist(),
+                    [self.variation_space["block"]["angle"].value],
+                    self.variation_space["agent"]["velocity"].value.tolist(),
+                ]
+            )
 
         self._set_state(state)
 

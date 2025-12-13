@@ -200,14 +200,21 @@ class TwoRoomEnv(gym.Env):
         self._setup()
 
         # generate goal
-        goal_state = self.variation_space["goal"]["position"].value
+        if options is not None and "goal_state" in options:
+            goal_state = options["goal_state"]
+        else:
+            goal_state = self.variation_space["goal"]["position"].value
         self._set_state(np.concatenate([goal_state, goal_state]))
         self._goal = self.render()
 
         # restore original state
-        agent_pos = self.variation_space["agent"]["position"].value
-        goal_pos = self.variation_space["goal"]["position"].value
-        self._set_state(np.concatenate([agent_pos, goal_pos]))
+        if options is not None and "state" in options:
+            state = options["state"]
+        else:
+            agent_pos = self.variation_space["agent"]["position"].value
+            goal_pos = self.variation_space["goal"]["position"].value
+            state = np.concatenate([agent_pos, goal_pos])
+        self._set_state(state)
 
         # generate observation
         state = self._get_obs()
