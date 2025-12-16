@@ -6,7 +6,7 @@ python experiments/eval_backbone/run.py policy=pyro_test_epoch_20 world.max_epis
 
 ## Backbone eval
 ```
-python experiments/eval_backbone/run.py policy=resnet50_epoch_10,vit_mae_base_epoch_10,vit_base_epoch_10,siglip2_base16_224_epoch_10,dinov2_small_epoch_10,dino_vits16_epoch_10,dinov3_vits16_epoch_10 world.max_episode_steps=200
+python experiments/eval_backbone/run.py policy=epoch_20/resnet50_epoch_20,epoch_20/vit_mae_base_epoch_20,epoch_20/vit_base_epoch_20,epoch_20/siglip2_base16_224_epoch_20,epoch_20/dinov2_small_epoch_20,epoch_20/dino_vits16_epoch_20,epoch_20/dinov3_vits16_epoch_20
 ```
 
 ## Encoder scaling
