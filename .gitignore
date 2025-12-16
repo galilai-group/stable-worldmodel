@@ -213,6 +213,7 @@ multirun/
 checkpoints/
 dino_wm_ckpt/
 pusht_noise/
+results/
 wandb/
 videos/
 dataset/
