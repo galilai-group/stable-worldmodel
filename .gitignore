@@ -220,3 +220,4 @@ dataset/
 *.mp4
 lightning_logs/
 old_tests/
+results/
