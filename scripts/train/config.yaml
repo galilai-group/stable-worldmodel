@@ -29,7 +29,7 @@ hydra:
     dir: .
 
 wandb:
-  enable: true
+  enable: false
   project: xenoworlds
   entity: simon-lacoste-julien
 

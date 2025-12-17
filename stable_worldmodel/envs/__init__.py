@@ -59,3 +59,13 @@ register(
     id="swm/SimpleNavigation-v0",
     entry_point="stable_worldmodel.envs.simple_nav.env:SimpleNavigationEnv",
 )
+
+register(
+    id="swm/OGBScene-v0",
+    entry_point="stable_worldmodel.envs.ogbench_scene:SceneEnv",
+)
+
+register(
+    id="swm/PFRocketLanding-v0",
+    entry_point="stable_worldmodel.envs.rocket_landing.pyflyt_rocketlanding:RocketLandingEnv",
+)

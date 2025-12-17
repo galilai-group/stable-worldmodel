@@ -49,6 +49,13 @@ packages = ["stable_worldmodel"]
 version = {attr = "stable_worldmodel.__version__"}
 
 [project.optional-dependencies]
+
+
+env = [
+    "ogbench",
+    "pyflyt",
+]
+
 # Development tools
 dev = [
     "pytest",
