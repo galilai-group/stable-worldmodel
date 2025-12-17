@@ -7,14 +7,15 @@ import numpy as np
 import pygame
 import pymunk
 from gymnasium import spaces
+from pymunk import pygame_util as pm_util
 from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
 
-from .utils import DrawOptions, light_color, pymunk_to_shapely, to_pygame
+from ..utils import DrawOptions, light_color, pymunk_to_shapely, to_pygame
 
 
-DEFAULT_VARIATIONS = ("agent.position", "goal.position")
+DEFAULT_VARIATIONS = ("agent.position", "goal.position", "door.number", "door.size", "door.position")
 
 
 class TwoRoomEnv(gym.Env):
@@ -29,6 +30,7 @@ class TwoRoomEnv(gym.Env):
         self,
         render_size=224,
         render_mode="rgb_array",
+        init_value=None,
     ):
         # gym
         assert render_mode in self.metadata["render_modes"]
@@ -171,6 +173,9 @@ class TwoRoomEnv(gym.Env):
             sampling_order=["background", "wall", "agent", "door", "goal"],
         )
 
+        if init_value is not None:
+            self.variation_space.set_init_value(init_value)
+
         self.window = None
         self.clock = None
         self.screen = None
@@ -194,19 +199,29 @@ class TwoRoomEnv(gym.Env):
 
         self.variation_space.update(variations)
 
+        if options is not None and "variation_values" in options:
+            self.variation_space.set_value(options["variation_values"])
+
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
         self._setup()
 
         # generate goal
-        goal_state = self.variation_space["goal"]["position"].value
+        if options is not None and "goal_state" in options:
+            goal_state = options["goal_state"]
+        else:
+            goal_state = self.variation_space["goal"]["position"].value
         self._set_state(np.concatenate([goal_state, goal_state]))
         self._goal = self.render()
 
         # restore original state
-        agent_pos = self.variation_space["agent"]["position"].value
-        goal_pos = self.variation_space["goal"]["position"].value
-        self._set_state(np.concatenate([agent_pos, goal_pos]))
+        if options is not None and "state" in options:
+            state = options["state"]
+        else:
+            agent_pos = self.variation_space["agent"]["position"].value
+            goal_pos = self.variation_space["goal"]["position"].value
+            state = np.concatenate([agent_pos, goal_pos])
+        self._set_state(state)
 
         # generate observation
         state = self._get_obs()
@@ -496,8 +511,7 @@ class TwoRoomEnv(gym.Env):
         # draw doors
         for door in self.doors:
             door_points = [
-                pymunk.pygame_util.to_pygame(door.body.local_to_world(v), draw_options.surface)
-                for v in door.get_vertices()
+                pm_util.to_pygame(door.body.local_to_world(v), draw_options.surface) for v in door.get_vertices()
             ]
             door_points.append(door_points[0])  # close shape
             pygame.draw.polygon(canvas, door.color, door_points)

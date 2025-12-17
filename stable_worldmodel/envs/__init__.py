@@ -11,6 +11,10 @@ def register(id, entry_point):
     WORLDS.add(id)
 
 
+##############
+# CONTINUOUS #
+##############
+
 # register(
 #     id="swm/ImagePositioning-v1",
 #     entry_point="stable_worldmodel.envs.image_positioning:ImagePositioning",
@@ -18,7 +22,7 @@ def register(id, entry_point):
 
 register(
     id="swm/PushT-v1",
-    entry_point="stable_worldmodel.envs.pusht:PushT",
+    entry_point="stable_worldmodel.envs.pusht.env:PushT",
 )
 
 register(
@@ -28,7 +32,17 @@ register(
 
 register(
     id="swm/TwoRoom-v0",
-    entry_point="stable_worldmodel.envs.two_room:TwoRoomEnv",
+    entry_point="stable_worldmodel.envs.two_room.env:TwoRoomEnv",
+)
+
+register(
+    id="swm/OGBCube-v0",
+    entry_point="stable_worldmodel.envs.ogbench_manip.cube_env:CubeEnv",
+)
+
+register(
+    id="swm/OGBScene-v0",
+    entry_point="stable_worldmodel.envs.ogbench_manip.scene_env:SceneEnv",
 )
 
 # register(
@@ -36,11 +50,22 @@ register(
 #     entry_point="stable_worldmodel.envs.voidrun:VoidRunEnv",
 # )
 
+
+############
+# DISCRETE #
+############
+
 register(
-    id="swm/OGBCube-v0",
-    entry_point="stable_worldmodel.envs.ogbench_cube:CubeEnv",
+    id="swm/SimpleNavigation-v0",
+    entry_point="stable_worldmodel.envs.simple_nav.env:SimpleNavigationEnv",
 )
 
 register(
-    id="swm/SimpleNavigation-v0", entry_point="stable_worldmodel.envs.simple_nav.simple_navigation:SimpleNavigationEnv"
+    id="swm/OGBScene-v0",
+    entry_point="stable_worldmodel.envs.ogbench_scene:SceneEnv",
+)
+
+register(
+    id="swm/PFRocketLanding-v0",
+    entry_point="stable_worldmodel.envs.rocket_landing.pyflyt_rocketlanding:RocketLandingEnv",
 )

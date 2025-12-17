@@ -5,6 +5,7 @@ from typing import Protocol
 
 import numpy as np
 import torch
+from torchvision import tv_tensors
 
 import stable_worldmodel as swm
 from stable_worldmodel.solver import Solver
@@ -143,8 +144,13 @@ class WorldModelPolicy(BasePolicy):
                     if v.ndim > 2:
                         shape = v.shape
                         v = v.reshape(-1, *shape[2:])
-
-                v = torch.stack([self.transform[k](x) for x in v])
+                if k.startswith("pixels") or k.startswith("goal"):
+                    # permute channel first for transform
+                    if is_numpy:
+                        v = np.transpose(v, (0, 3, 1, 2))
+                    else:
+                        v = v.permute(0, 3, 1, 2)
+                v = torch.stack([self.transform[k](tv_tensors.Image(x)) for x in v])
                 is_numpy = isinstance(v, (np.ndarray | np.generic))
 
                 if shape is not None:

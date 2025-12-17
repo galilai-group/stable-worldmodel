@@ -11,7 +11,7 @@ from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
 
-from .utils import DrawOptions
+from ..utils import DrawOptions
 
 
 DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
@@ -34,6 +34,7 @@ class PushT(gym.Env):
         with_target=True,
         render_mode="rgb_array",
         relative=True,
+        init_value=None,
     ):
         self._seed = None
         self.window_size = ws = 512  # The size of the PyGame window
@@ -173,6 +174,8 @@ class PushT(gym.Env):
             },
             sampling_order=["background", "goal", "block", "agent"],
         )
+        if init_value is not None:
+            self.variation_space.set_init_value(init_value)
 
         # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
 
@@ -218,6 +221,9 @@ class PushT(gym.Env):
 
         self.variation_space.update(variations)
 
+        if options is not None and "variation_values" in options:
+            self.variation_space.set_value(options["variation_values"])
+
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
         ### setup pymunk space
@@ -229,14 +235,17 @@ class PushT(gym.Env):
             self.space.damping = self.damping
 
         ### get the state
-        goal_state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
-                self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
-                [self.variation_space["block"]["angle"].sample(set_value=False)],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        if options is not None and "goal_state" in options:
+            goal_state = options["goal_state"]
+        else:
+            goal_state = np.concatenate(
+                [
+                    self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
+                    self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
+                    [self.variation_space["block"]["angle"].sample(set_value=False)],
+                    self.variation_space["agent"]["velocity"].value.tolist(),
+                ]
+            )
 
         ### generate goal
         self._set_state(goal_state)
@@ -244,14 +253,17 @@ class PushT(gym.Env):
         self._goal = self.render()
 
         # restore original pos
-        state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].value.tolist(),
-                self.variation_space["block"]["start_position"].value.tolist(),
-                [self.variation_space["block"]["angle"].value],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        if options is not None and "state" in options:
+            state = options["state"]
+        else:
+            state = np.concatenate(
+                [
+                    self.variation_space["agent"]["start_position"].value.tolist(),
+                    self.variation_space["block"]["start_position"].value.tolist(),
+                    [self.variation_space["block"]["angle"].value],
+                    self.variation_space["agent"]["velocity"].value.tolist(),
+                ]
+            )
 
         self._set_state(state)
 
@@ -448,7 +460,7 @@ class PushT(gym.Env):
         self.block.position = pos_block
 
         # Run physics to take effect
-        # self.space.step(self.dt)
+        self.space.step(self.dt)
 
     def _set_goal_state(self, goal_state):
         self.goal_state = goal_state
