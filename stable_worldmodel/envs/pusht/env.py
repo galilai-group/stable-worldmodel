@@ -36,6 +36,7 @@ class PushT(gym.Env):
         render_mode="rgb_array",
         fix_action_sample=True,
         relative=True,
+        init_value=None,
     ):
         self._seed = None
         self.window_size = ws = 512  # The size of the PyGame window
@@ -175,6 +176,8 @@ class PushT(gym.Env):
             },
             sampling_order=["background", "goal", "block", "agent"],
         )
+        if init_value is not None:
+            self.variation_space.set_init_value(init_value)
 
         # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
 
@@ -222,6 +225,9 @@ class PushT(gym.Env):
             raise ValueError("variation option must be a Sequence containing variations names to sample")
 
         self.variation_space.update(variations)
+
+        if options is not None and "variation_values" in options:
+            self.variation_space.set_value(options["variation_values"])
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 

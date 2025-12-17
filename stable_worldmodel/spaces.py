@@ -128,6 +128,32 @@ class Discrete(spaces.Discrete):
                 logging.warning("rejection sampling: rejection sampling is taking a while...")
         raise RuntimeError(f"rejection sampling: predicate not satisfied after {max_tries} draws")
 
+    def set_init_value(self, value):
+        """Set the initial value of the Discrete space.
+
+        Args:
+            value (int): The value to set as the initial value.
+
+        Raises:
+            ValueError: If the provided value is not contained in the space.
+        """
+        if not self.contains(value):
+            raise ValueError(f"Value {value} is not contained in the Discrete space")
+        self._init_value = value
+
+    def set_value(self, value):
+        """Set the current value of the Discrete space.
+
+        Args:
+            value (int): The value to set as the current value.
+
+        Raises:
+            ValueError: If the provided value is not contained in the space.
+        """
+        if not self.contains(value):
+            raise ValueError(f"Value {value} is not contained in the Discrete space")
+        self._value = value
+
 
 class MultiDiscrete(spaces.MultiDiscrete):
     """Extended multi-discrete space with state tracking and constraint support.
@@ -255,6 +281,33 @@ class MultiDiscrete(spaces.MultiDiscrete):
             if warn_after_s is not None and (time.time() - start) > warn_after_s:
                 logging.warning("rejection sampling: rejection sampling is taking a while...")
         raise RuntimeError(f"rejection sampling: predicate not satisfied after {max_tries} draws")
+
+    def set_init_value(self, value):
+        """Set the initial values of the MultiDiscrete space.
+
+        Args:
+            value (np.ndarray): The array to set as the initial values.
+                Must match the shape defined by nvec.
+
+        Raises:
+            ValueError: If the provided values are not contained in the space.
+        """
+        if not self.contains(value):
+            raise ValueError(f"Value {value} is not contained in the MultiDiscrete space")
+        self._init_value = value
+
+    def set_value(self, value):
+        """Set the current values of the MultiDiscrete space.
+
+        Args:
+            value (np.ndarray): The array to set as the current values.
+
+        Raises:
+            ValueError: If the provided values are not contained in the space.
+        """
+        if not self.contains(value):
+            raise ValueError(f"Value {value} is not contained in the MultiDiscrete space")
+        self._value = value
 
 
 class Box(spaces.Box):
@@ -387,6 +440,33 @@ class Box(spaces.Box):
             if warn_after_s is not None and (time.time() - start) > warn_after_s:
                 logging.warning("rejection sampling: rejection sampling is taking a while...")
         raise RuntimeError(f"rejection sampling: predicate not satisfied after {max_tries} draws")
+
+    def set_init_value(self, value):
+        """Set the initial value of the Box space.
+
+        Args:
+            value (np.ndarray): The value to set as the initial value.
+                Must match the shape and dtype of the box.
+
+        Raises:
+            ValueError: If the provided value is not contained in the space.
+        """
+        if not self.contains(value):
+            raise ValueError(f"Value {value} is not contained in the Box space")
+        self._init_value = value
+
+    def set_value(self, value):
+        """Set the current value of the Box space.
+
+        Args:
+            value (np.ndarray): The value to set as the current value.
+
+        Raises:
+            ValueError: If the provided value is not contained in the space.
+        """
+        if not self.contains(value):
+            raise ValueError(f"Value {value} is not contained in the Box space")
+        self._value = value
 
 
 class RGBBox(Box):
@@ -811,6 +891,52 @@ class Dict(spaces.Dict):
                     raise ValueError(f"Key {v} not found in Dict space")
 
         assert self.check(debug=True), "Values must be within space!"
+
+    def set_init_value(self, variations_values):
+        """Set initial values for specific keys in the Dict space.
+
+        Args:
+            variations_values (dict): A dictionary of key-value pairs to set as initial values.
+                Keys should use dot notation for nested spaces.
+
+        Raises:
+            ValueError: If a specified key is not found in the Dict space.
+            AssertionError: If the values violate the space constraints.
+        """
+
+        for k, v in variations_values.items():
+            try:
+                var_path = k.split(".")
+                assert swm.utils.get_in(self, var_path).contains(v), (
+                    f"Value {v} for key {k} is not contained in the space"
+                )
+                swm.utils.get_in(self, var_path).set_init_value(v)
+
+            except (KeyError, TypeError):
+                raise ValueError(f"Key {k} not found in Dict space")
+
+    def set_value(self, variations_values):
+        """Set current values for specific keys in the Dict space.
+
+        Args:
+            variations_values (dict): A dictionary of key-value pairs to set as current values.
+                Keys should use dot notation for nested spaces.
+
+        Raises:
+            ValueError: If a specified key is not found in the Dict space.
+            AssertionError: If the values violate the space constraints.
+        """
+
+        for k, v in variations_values.items():
+            try:
+                var_path = k.split(".")
+                assert swm.utils.get_in(self, var_path).contains(v), (
+                    f"Value {v} for key {k} is not contained in the space"
+                )
+                swm.utils.get_in(self, var_path).set_value(v)
+
+            except (KeyError, TypeError):
+                raise ValueError(f"Key {k} not found in Dict space")
 
     def to_str(self):
         def _tree(d, indent=0):
