@@ -129,88 +129,30 @@ if __name__ == "__main__":
             return emb
 
     model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
-    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
 
-    model.predictor.load_state_dict(ckpt["predictor"], strict=False)
-    model.action_encoder.load_state_dict(ckpt["action_encoder"])
-    model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
+    # Load PyTorch Lightning checkpoint and extract state dicts
+    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt", weights_only=False)
+    state_dict = ckpt["state_dict"]
 
-    model = model.to("cuda")
-    model = model.eval()
+    def extract_state_dict(state_dict, prefix):
+        """Extract and rename keys matching a prefix from the full state dict."""
+        extracted = {}
+        for key, value in state_dict.items():
+            if key.startswith(prefix):
+                new_key = key[len(prefix) :]
+                extracted[new_key] = value
+        return extracted
 
-    print(ckpt.keys())
+    predictor_state = extract_state_dict(state_dict, "model.predictor.")
+    action_encoder_state = extract_state_dict(state_dict, "model.extra_encoders.action.")
+    proprio_encoder_state = extract_state_dict(state_dict, "model.extra_encoders.proprio.")
 
-    torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-
-    class DinoV2Encoder(torch.nn.Module):
-        def __init__(self, name, feature_key):
-            super().__init__()
-            self.name = name
-            self.base_model = torch.hub.load("facebookresearch/dinov2", name)
-            self.feature_key = feature_key
-            self.emb_dim = self.base_model.num_features
-            if feature_key == "x_norm_patchtokens":
-                self.latent_ndim = 2
-            elif feature_key == "x_norm_clstoken":
-                self.latent_ndim = 1
-            else:
-                raise ValueError(f"Invalid feature key: {feature_key}")
-
-            self.patch_size = self.base_model.patch_size
-
-        def forward(self, x):
-            emb = self.base_model.forward_features(x)[self.feature_key]
-            if self.latent_ndim == 1:
-                emb = emb.unsqueeze(1)  # dummy patch dim
-            return emb
-
-    model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
-    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
-
-    model.predictor.load_state_dict(ckpt["predictor"], strict=False)
-    model.action_encoder.load_state_dict(ckpt["action_encoder"])
-    model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
+    model.predictor.load_state_dict(predictor_state, strict=False)
+    model.extra_encoders["action"].load_state_dict(action_encoder_state)
+    model.extra_encoders["proprio"].load_state_dict(proprio_encoder_state)
 
     model = model.to("cuda")
     model = model.eval()
-
-    print(ckpt.keys())
-
-    torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-
-    class DinoV2Encoder(torch.nn.Module):
-        def __init__(self, name, feature_key):
-            super().__init__()
-            self.name = name
-            self.base_model = torch.hub.load("facebookresearch/dinov2", name)
-            self.feature_key = feature_key
-            self.emb_dim = self.base_model.num_features
-            if feature_key == "x_norm_patchtokens":
-                self.latent_ndim = 2
-            elif feature_key == "x_norm_clstoken":
-                self.latent_ndim = 1
-            else:
-                raise ValueError(f"Invalid feature key: {feature_key}")
-
-            self.patch_size = self.base_model.patch_size
-
-        def forward(self, x):
-            emb = self.base_model.forward_features(x)[self.feature_key]
-            if self.latent_ndim == 1:
-                emb = emb.unsqueeze(1)  # dummy patch dim
-            return emb
-
-    model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
-    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
-
-    model.predictor.load_state_dict(ckpt["predictor"], strict=False)
-    model.action_encoder.load_state_dict(ckpt["action_encoder"])
-    model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
-
-    model = model.to("cuda")
-    model = model.eval()
-
-    print(ckpt.keys())
 
     world.set_policy(policy)
     # sample 50 episodes idx
@@ -223,7 +165,7 @@ if __name__ == "__main__":
     print("Evaluating episodes: ", episode_idx)
     print("Starting steps: ", start_steps)
 
-    dataset = swm.data.VideoDataset("pusht_expert_train_video")
+    dataset = swm.data.FrameDataset("pusht_expert_train")
     results = world.evaluate_from_dataset(
         dataset,
         start_steps=start_steps,

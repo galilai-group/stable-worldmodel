@@ -35,6 +35,12 @@ _World Models Research Made Simple_
 Using [uv](https://github.com/astral-sh/uv) (recommended):
 
 ```bash
+# Create conda environment with Python 3.10 and required build tools
+conda create -n stable-worldmodel python=3.10 swig bazel ffmpeg=7 -c conda-forge -y
+
+# Activate the environment
+conda activate stable-worldmodel
+
 # Install uv
 pip install uv
 
@@ -52,6 +58,66 @@ cd stable-worldmodel
 pip install -e .
 ```
 
+#### Optional: Robocasa install
+For robot manipulation environments (RoboCasa, RoboSuite), you need to manually install these dependencies from source, as they cannot be installed via pip alone.
+
+1. **Install RoboSuite** (use the `robocasa-dev` branch):
+   ```bash
+   git clone git@github.com:ARISE-Initiative/robosuite.git
+   cd robosuite
+   git checkout robocasa-dev
+   uv pip install -e .
+   cd ..
+   ```
+
+2. **Install RoboCasa**:
+   ```bash
+   git clone https://github.com/Basile-Terv/robocasa.git
+   cd robocasa
+   uv pip install -e .
+
+   # If you encounter issues with numba/numpy, run:
+   # conda install -c numba numba=0.56.4 -y
+   ```
+
+3. **Download RoboCasa assets and setup**:
+   ```bash
+   python robocasa/scripts/download_kitchen_assets.py   # Caution: Assets are around 5GB
+   python robocasa/scripts/setup_macros.py              # Set up system variables
+   ```
+
+4. **Download RoboCasa data**:
+   ```bash
+   # downloads all human datasets with images
+   python -m robocasa.scripts.download_datasets --ds_types human_im
+
+   # lite download: download human datasets without images
+   python -m robocasa.scripts.download_datasets --ds_types human_raw
+
+   # downloads all MimicGen datasets with images
+   python -m robocasa.scripts.download_datasets --ds_types mg_im
+
+   cd ..
+   ```
+
+5. **Convert RoboCasa data for stable-worldmodel**:
+
+   After downloading the raw HDF5 data, convert it to the format used by `VideoDataset`:
+
+   ```bash
+   # Convert specific tasks (raw data from ~/robocasa/datasets/, output to $STABLEWM_HOME/robocasa/)
+   python scripts/convert_robocasa_hdf5.py \
+       --task_names PnPCounterToCab PnPCounterToSink \
+       --mode video
+
+   # Convert a small subset for testing
+   python scripts/convert_robocasa_hdf5.py \
+       --task_names PnPCounterToCab \
+       --filter_first_episodes 5
+   ```
+
+   The converted dataset will be saved to `$STABLEWM_HOME/robocasa/` by default.
+
 #### Development Installation
 
 For contributors and researchers developing new features:
@@ -61,6 +127,13 @@ uv pip install -e ".[dev,docs]"
 ```
 
 This includes testing tools (`pytest`, `coverage`) and documentation generators (`sphinx`).
+
+#### Optional: Robocasa Installation
+
+follow the instructions of the public robocasa and download the assets at `STABLEWM_HOME`.
+
+
+
 
 ## Architecture
 

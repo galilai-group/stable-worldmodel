@@ -222,3 +222,4 @@ dataset/
 lightning_logs/
 old_tests/
 results/
+local_scripts/
