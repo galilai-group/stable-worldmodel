@@ -137,8 +137,7 @@ class Dataset:
                 steps[col] = data
 
                 if col in self.decode_columns:
-                    frames = self.decode(steps["data_dir"], steps[col], start=s, end=en)
-                    steps[col] = [f.permute(1, 2, 0) for f in frames]
+                    steps[col] = self.decode(steps["data_dir"], steps[col], start=s, end=en)
 
             if self.transform:
                 steps = self.transform(steps)
