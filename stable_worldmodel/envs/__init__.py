@@ -65,3 +65,8 @@ register(
     id="swm/SimpleNavigation-v0",
     entry_point="stable_worldmodel.envs.simple_nav.env:SimpleNavigationEnv",
 )
+
+register(
+    id="swm/PushT-Discrete-v1",
+    entry_point="stable_worldmodel.envs.pusht:PushTDiscrete",
+)

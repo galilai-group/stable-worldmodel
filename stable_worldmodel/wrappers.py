@@ -195,7 +195,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
         if type(info["action"]) is dict:
             raise NotImplementedError
         else:
-            info["action"] *= np.nan
+            info["action"] = np.full_like(info["action"], np.nan)
         return obs, info
 
     def step(self, action):
