@@ -130,6 +130,7 @@ class World:
         max_episode_steps: int = 100,
         verbose: int = 1,
         extra_wrappers: list | None = None,
+        goal_conditioned: bool = True,
         **kwargs,
     ):
         """Initialize the World with vectorized environments.
@@ -193,6 +194,7 @@ class World:
                     goal_transform,
                     history_size=history_size,
                     frame_skip=frame_skip,
+                    separate_goal=goal_conditioned,
                 )
             ]
             + (extra_wrappers or []),
@@ -1024,10 +1026,14 @@ class World:
             env = env.unwrapped
 
             # assert np.allclose(init_step["state"][i], env._get_obs()), "State info does not match at reset"
-            assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
-                "Goal state info does not match at reset"
-            )
+            # assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
+            #     "Goal state info does not match at reset"
+            # )
 
+            if "goal_state" in init_step and "goal_state" in goal_step:
+                assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
+                    "Goal state info does not match at reset"
+                )
         results = {
             "success_rate": 0,
             "episode_successes": np.zeros(len(episodes_idx)),
@@ -1050,7 +1056,9 @@ class World:
         self.infos.update(deepcopy(init_step))
         self.infos.update(deepcopy(goal_step))
 
-        assert np.allclose(self.infos["goal"], goal_step["goal"]), "Goal info does not match"
+        # assert np.allclose(self.infos["goal"], goal_step["goal"]), "Goal info does not match"
+        if "goal" in goal_step and "goal" in self.infos:
+            assert np.allclose(self.infos["goal"], goal_step["goal"]), "Goal info does not match"
 
         # TODO assert goal and start state are identical as in the rollout
         # run normal evaluation for eval_budget and TODO: record video

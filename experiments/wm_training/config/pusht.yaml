@@ -4,8 +4,12 @@ defaults:
   - backbone: dinov2_small
   - predictor: small
 
+hydra:
+  job:
+    chdir: true
+
 wandb:
-  enable: true
+  enable: false
   project: xenoworlds
   entity: simon-lacoste-julien
 
