@@ -178,7 +178,8 @@ class EverythingToInfoWrapper(gym.Wrapper):
         if "variation" in options:
             var_opt = options["variation"]
             assert isinstance(options["variation"], list | tuple), (
-                "variation option must be a list or tuple containing variation names to sample"
+                "variation option must be a list or tuple containing variation names to sample, found: "
+                f"{type(options['variation'])}"
             )
             if len(var_opt) == 1 and var_opt[0] == "all":
                 self._variations_watch = self.env.unwrapped.variation_space.names()
