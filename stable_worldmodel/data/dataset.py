@@ -84,7 +84,14 @@ class Dataset:
         self.clip_len = max(frameskip * num_steps, 1) if not self.complete_traj else 0
 
         if any(len(self.episode_indices[ep]) < self.clip_len for ep in self.episodes):
-            raise ValueError(f"All episodes must have at least {self.clip_len} steps")
+            if all(len(self.episode_indices[ep]) < self.clip_len for ep in self.episodes):
+                raise ValueError(f"At least one episode must have at least {self.clip_len} steps")
+            logging.warning(
+                f"Some episodes have fewer steps than the clip length {self.clip_len}. These episodes will be skipped."
+            )
+            # remove these episodes
+            self.episodes = [ep for ep in self.episodes if len(self.episode_indices[ep]) >= self.clip_len]
+            self.episode_indices = {ep: self.episode_indices[ep] for ep in self.episodes}
 
         episode_max_end = [max(0, len(ep) - self.clip_len + 1) for ep in self.episode_indices.values()]
         self.episode_starts = np.cumsum([0] + episode_max_end)
@@ -169,7 +176,8 @@ class FrameDataset(Dataset):
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
-        episode_indices = self.episode_indices[episode]
+        episode_id = self.episodes[episode]
+        episode_indices = self.episode_indices[episode_id]
         offset = index - self.episode_starts[episode]
 
         # determine clip bounds
@@ -223,7 +231,8 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
-        episode_indices = self.episode_indices[episode]
+        episode_id = self.episodes[episode]
+        episode_indices = self.episode_indices[episode_id]
         offset = index - self.episode_starts[episode]
 
         # determine clip bounds
