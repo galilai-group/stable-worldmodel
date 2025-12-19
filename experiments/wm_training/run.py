@@ -102,12 +102,16 @@ def get_data(cfg):
         std = data.std(0).unsqueeze(0)
         return lambda x: (x - mean) / std
 
+    ds_config = {
+        "num_steps": cfg.n_steps,
+        "frameskip": cfg.frameskip,
+        "transform": None,
+        "cache_dir": cfg.get("cache_dir", None),
+    }
+
     dataset = swm.data.FrameDataset(
         cfg.dataset_name,
-        num_steps=cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
-        cache_dir=cfg.get("cache_dir", None),
+        **ds_config,
     )
 
     all_norm_transforms = []
@@ -126,6 +130,33 @@ def get_data(cfg):
     )
 
     dataset.transform = transform
+
+    with open_dict(cfg) as cfg:
+        cfg.extra_dims = {}
+        for key in cfg.pyro.get("encoding", {}):
+            if key not in dataset.column_names:
+                raise ValueError(f"Encoding key '{key}' not found in dataset columns.")
+            inpt_dim = dataset.dataset[0][key].numel()
+            cfg.extra_dims[key] = inpt_dim if key != "action" else inpt_dim * cfg.frameskip
+
+    # add injected datasets if specified
+    if len(cfg.injected_dataset.names) > 0:
+        assert cfg.injected_dataset.proportions is not None
+        assert len(cfg.injected_dataset.proportions) == len(cfg.injected_dataset.names)
+
+        external_datasets = []
+        for name in cfg.injected_dataset.names:
+            ext_ds = swm.data.VideoDataset(name, **ds_config)
+            ext_ds.transform = transform
+            external_datasets.append(ext_ds)
+
+        dataset = swm.data.InjectedDataset(
+            original_dataset=dataset,
+            external_datasets=external_datasets,
+            proportions=cfg.injected_dataset.proportions,
+            seed=cfg.seed,
+        )
+
     rnd_gen = torch.Generator().manual_seed(cfg.seed)
     train_set, val_set = spt.data.random_split(
         dataset, lengths=[cfg.train_split, 1 - cfg.train_split], generator=rnd_gen
@@ -143,14 +174,6 @@ def get_data(cfg):
         generator=rnd_gen,
     )
     val = DataLoader(val_set, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True)
-
-    with open_dict(cfg) as cfg:
-        cfg.extra_dims = {}
-        for key in cfg.pyro.get("encoding", {}):
-            if key not in dataset.dataset.column_names:
-                raise ValueError(f"Encoding key '{key}' not found in dataset columns.")
-            inpt_dim = dataset.dataset[0][key].numel()
-            cfg.extra_dims[key] = inpt_dim if key != "action" else inpt_dim * cfg.frameskip
 
     return spt.data.DataModule(train=train, val=val)
 
