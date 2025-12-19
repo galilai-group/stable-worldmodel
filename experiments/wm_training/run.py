@@ -25,7 +25,9 @@ def get_encoder(cfg):
             "prefix": "microsoft/resnet-",
             "model_class": AutoModelForImageClassification,
             "embedding_attr": lambda model: model.config.hidden_sizes[-1],
-            "post_init": lambda model: setattr(model.classifier, "1", torch.nn.Identity()),
+            "post_init": lambda model: setattr(
+                model.classifier, "1", torch.nn.LayerNorm(model.config.hidden_sizes[-1])
+            ),
             "interpolate_pos_encoding": False,
         },
         "vit": {"prefix": "google/vit-"},
@@ -213,6 +215,9 @@ def get_world_model(cfg):
         )
 
         batch["loss"] = F.mse_loss(actionless_pred, actionless_target.detach())
+
+        if batch["loss"].isnan():
+            raise ValueError("Loss is NaN!")
 
         # Log all losses
         prefix = "train/" if self.training else "val/"
