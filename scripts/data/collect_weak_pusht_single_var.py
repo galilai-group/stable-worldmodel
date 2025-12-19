@@ -25,6 +25,9 @@ def run(cfg):
     default = ["agent.start_position", "block.start_position", "block.angle"]
 
     for var in variation_list:
+        if var in default:
+            continue
+
         world = swm.World("swm/PushT-v1", **cfg.world, render_mode="rgb_array")
         world.set_policy(WeakPolicy(dist_constraint=100))
         print(f"Collecting data for variable: {var}")
