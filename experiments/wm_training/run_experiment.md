@@ -101,5 +101,5 @@ python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbo
 ## quality interpolation
 
 ```bash
-python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[pusht_weak_100]" injected_dataset.proportions="[0.05],[0.1],[0.2],[0.5],[0.8]" launcher=your_name -m
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[pusht_weak_100]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
 ```
