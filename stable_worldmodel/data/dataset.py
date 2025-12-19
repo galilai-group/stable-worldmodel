@@ -84,13 +84,24 @@ class Dataset:
         self.clip_len = max(frameskip * num_steps, 1) if not self.complete_traj else 0
 
         if any(len(self.episode_indices[ep]) < self.clip_len for ep in self.episodes):
-            raise ValueError(f"All episodes must have at least {self.clip_len} steps")
+            if all(len(self.episode_indices[ep]) < self.clip_len for ep in self.episodes):
+                raise ValueError(f"At least one episode must have at least {self.clip_len} steps")
+            logging.warning(
+                f"Some episodes have fewer steps than the clip length {self.clip_len}. These episodes will be skipped."
+            )
+            # remove these episodes
+            self.episodes = [ep for ep in self.episodes if len(self.episode_indices[ep]) >= self.clip_len]
+            self.episode_indices = {ep: self.episode_indices[ep] for ep in self.episodes}
 
         episode_max_end = [max(0, len(ep) - self.clip_len + 1) for ep in self.episode_indices.values()]
         self.episode_starts = np.cumsum([0] + episode_max_end)
         self.idx_to_episode = np.searchsorted(self.episode_starts, np.arange(len(self)), side="right") - 1
 
         return
+
+    @property
+    def column_names(self):
+        return self.dataset.column_names
 
     def __len__(self):
         return int(self.episode_starts[-1]) if not self.complete_traj else len(self.episodes)
@@ -169,7 +180,8 @@ class FrameDataset(Dataset):
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
-        episode_indices = self.episode_indices[episode]
+        episode_id = self.episodes[episode]
+        episode_indices = self.episode_indices[episode_id]
         offset = index - self.episode_starts[episode]
 
         # determine clip bounds
@@ -223,7 +235,8 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
-        episode_indices = self.episode_indices[episode]
+        episode_id = self.episodes[episode]
+        episode_indices = self.episode_indices[episode_id]
         offset = index - self.episode_starts[episode]
 
         # determine clip bounds
@@ -275,6 +288,10 @@ class InjectedDataset:
         self.datasets = [original_dataset] + external_datasets
         self.proportions = proportions or [1.0 / len(self.datasets)] * len(self.datasets)
 
+        # infer original dataset proportion
+        og_prop = 1.0 - sum(self.proportions)
+        self.proportions = [og_prop] + self.proportions
+
         if sum(self.proportions) != 1.0:
             raise ValueError("Proportions must sum to 1.0")
 
@@ -298,12 +315,27 @@ class InjectedDataset:
         self.idx_to_ds = np.searchsorted(self.cumulative_sizes, np.arange(len(self)), side="right") - 1
         return
 
+    @property
+    def column_names(self):
+        return self.datasets[0].column_names
+
     def check_consistency(self):
         fs = self.datasets[0].frameskip
         ns = self.datasets[0].num_steps
         for ds in self.datasets[1:]:
             if ds.frameskip != fs or ds.num_steps != ns:
                 raise ValueError("All datasets must have the same frameskip and num_steps")
+
+        # keep only the intersection of column names
+        column_sets = [set(ds.column_names) for ds in self.datasets]
+        common_columns = set.intersection(*column_sets)
+
+        for i, ds in enumerate(self.datasets):
+            cols_to_remove = set(ds.column_names) - common_columns
+            if len(cols_to_remove) > 0:
+                print(f"InjectedDataset: Removing columns {cols_to_remove} from dataset {i} for consistency")
+                self.datasets[i].dataset = ds.dataset.remove_columns(list(cols_to_remove))
+
         return
 
     def __len__(self):

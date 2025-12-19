@@ -61,6 +61,8 @@ Notes:
 git checkout experiments
 ```
 
+# Architecture
+
 ## all backbones
 
 Run the training script from the repository root. Below are several example commands for different backbones. Adjust `backbone` and `output_model_name` as needed.
@@ -79,4 +81,25 @@ python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbo
 
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun predictor=tiny,small,base,large launcher=your_name
+```
+
+# Datasets
+
+## all variations
+
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_weak_100_variation_all launcher=your_name
+```
+
+## interaction quality interpolation
+
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_weak_100,pusht_weak_300 launcher=your_name
+```
+>>> need fix
+
+## quality interpolation
+
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[pusht_weak_100]" injected_dataset.proportions="[0.05],[0.1],[0.2],[0.5],[0.8]" launcher=your_name -m
 ```

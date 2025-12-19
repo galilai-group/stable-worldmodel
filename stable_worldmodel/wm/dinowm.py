@@ -246,7 +246,7 @@ class DINOWM(torch.nn.Module):
         # predict the last state (n+t+1)
         pred_embed = self.predict(z_flat[:, -self.history_size :])[:, -1:]  # (B, 1, P, D)
         z_flat = torch.cat([z_flat, pred_embed], dim=1)
-        z = rearrange(pred_embed, "(b n) ... -> b n ...", b=B, n=N)
+        z = rearrange(z_flat, "(b n) ... -> b n ...", b=B, n=N)
         # == update info dict with predicted embeddings
         info["predicted_embedding"] = z
         # get the dimension of each part of the embedding
