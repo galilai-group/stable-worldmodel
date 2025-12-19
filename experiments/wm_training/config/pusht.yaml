@@ -23,6 +23,7 @@ trainer:
   devices: auto
   accelerator: gpu
   precision: 16-mixed
+  gradient_clip_val: 1.0
 
 batch_size: 32
 num_workers: 16

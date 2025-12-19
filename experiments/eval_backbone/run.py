@@ -78,7 +78,8 @@ def run(cfg: DictConfig):
     model = model.to("cuda")
     model = model.eval()
     model.requires_grad_(False)
-    model.interpolate_pos_encoding = True
+
+    # model.interpolate_pos_encoding = True
 
     config = swm.PlanConfig(**cfg.plan_config)
     solver = hydra.utils.instantiate(cfg.solver, model=model)
