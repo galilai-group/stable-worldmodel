@@ -70,6 +70,7 @@ from datasets import Dataset, Features, Value
 from loguru import logger as logging
 from PIL import Image
 from rich import print
+from tqdm import tqdm
 
 from stable_worldmodel.data.dataset import Dataset as SWMDataset
 from stable_worldmodel.data.dataset import VideoDataset
@@ -180,7 +181,6 @@ class World:
                     seed=42
                 )
         """
-
         self.envs = gym.make_vec(
             env_name,
             num_envs=num_envs,
@@ -507,35 +507,39 @@ class World:
         # dump the original reset data
         dump_to_buffer()
 
-        while True:
-            # start new episode for done envs
-            for i in range(self.num_envs):
-                if self.terminateds[i] or self.truncateds[i]:
-                    flush_episode(i)
+        with tqdm(total=episodes, desc="Collecting Episodes", unit="ep") as pbar:
+            while True:
+                # start new episode for done envs
+                for i in range(self.num_envs):
+                    if self.terminateds[i] or self.truncateds[i]:
+                        flush_episode(i)
 
-                    # TODO open issue double nested insert with numpy arrays
+                        # TODO open issue double nested insert with numpy arrays
 
-                    # re-reset env with seed and options (no supported by auto-reset)
-                    new_seed = root_seed + recorded_episodes if seed is not None else None
+                        # re-reset env with seed and options (no supported by auto-reset)
+                        new_seed = root_seed + recorded_episodes if seed is not None else None
 
-                    # determine new episode idx
-                    next_ep_idx = episode_idx.max() + 1
-                    episode_idx[i] = next_ep_idx
-                    recorded_episodes += 1
+                        # determine new episode idx
+                        next_ep_idx = episode_idx.max() + 1
+                        episode_idx[i] = next_ep_idx
+                        recorded_episodes += 1
 
-                    self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
-                    _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
+                        # Update the progress bar by 1
+                        pbar.update(1)
 
-                    for k, v in infos.items():
-                        self.infos[k][i] = v
+                        self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
+                        _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
 
-                    dump_to_buffer(env_idx=i)
+                        for k, v in infos.items():
+                            self.infos[k][i] = v
 
-            if recorded_episodes >= episodes:
-                break
+                        dump_to_buffer(env_idx=i)
 
-            self.step()
-            dump_to_buffer()
+                if recorded_episodes >= episodes:
+                    break
+
+                self.step()
+                dump_to_buffer()
 
         # flatten time dimension
         for k, v in records.items():
@@ -564,7 +568,7 @@ class World:
         # TODO: should check if already some data has been saved
         episode_idx = np.unique(records["episode_idx"])
 
-        for ep in episode_idx:
+        for ep in tqdm(episode_idx, desc="Saving Media to Disk", unit="ep"):
             ep_mask = records["episode_idx"] == ep
             step_mask = np.flatnonzero(ep_mask)
 
