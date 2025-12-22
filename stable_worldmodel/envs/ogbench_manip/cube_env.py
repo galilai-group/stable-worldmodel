@@ -1317,7 +1317,7 @@ class CubeEnv(ManipSpaceEnv):
 
         return np.concatenate(ob)
 
-    def compute_reward(self, ob, action):
+    def compute_reward(self):
         """Compute the reward for the current step.
 
         Calculates reward based on task success. If a specific reward_task_id is set,
@@ -1340,9 +1340,10 @@ class CubeEnv(ManipSpaceEnv):
             to the base value of -num_cubes.
         """
         if self._reward_task_id is None:
-            return super().compute_reward(ob, action)
+            return super().compute_reward()
 
         # Compute the reward based on the task.
+
         successes = self._compute_successes()
         reward = float(sum(successes) - len(successes))
         return reward
