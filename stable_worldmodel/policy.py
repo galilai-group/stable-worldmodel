@@ -198,7 +198,10 @@ class WorldModelPolicy(BasePolicy):
 
 
 def AutoCostModel(run_name, cache_dir=None):
-    run_path = Path(cache_dir or swm.data.utils.get_cache_dir(), run_name)
+    if Path(run_name).exists():
+        run_path = Path(run_name)
+    else:
+        run_path = Path(cache_dir or swm.data.utils.get_cache_dir(), run_name)
 
     if run_path.is_dir():
         ckpt_files = list(run_path.glob("*_object.ckpt"))
