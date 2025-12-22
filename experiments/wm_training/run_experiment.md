@@ -61,45 +61,72 @@ Notes:
 git checkout experiments
 ```
 
-# Architecture
+---------------
 
-## all backbones
+# PushT
+Run the training script from the repository root. Below are several example commands for different backbones.
 
-Run the training script from the repository root. Below are several example commands for different backbones. Adjust `backbone` and `output_model_name` as needed.
-
+**all backbones**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun "backbone=glob(*)" launcher=your_name
 ```
 
-## dinov2 encoder scaling
-
+**dinov2 encoder scaling**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small,dinov2_base,dinov2_large,dinov2_giant launcher=your_name
 ```
 
-## predictor scaling
-
+**predictor scaling**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun predictor=tiny,small,base,large launcher=your_name
 ```
 
-# Datasets
-
-## all variations
-
+**data all variations**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_weak_100_variation_all launcher=your_name
 ```
 
-## interaction quality interpolation
-
+**interaction quality interpolation**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_weak_100,pusht_weak_300 launcher=your_name
 ```
->>> need fix
 
-## quality interpolation
-
+**quality interpolation**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[pusht_weak_100]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
+```
+
+--------------
+
+# TwoRoom
+Run the training script from the repository root. Below are several example commands for different backbones.
+
+**all backbones**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun "backbone=glob(*)" launcher=your_name
+```
+
+**dinov2 encoder scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small,dinov2_base,dinov2_large,dinov2_giant launcher=your_name
+```
+
+**predictor scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun predictor=tiny,small,base,large launcher=your_name
+```
+
+**data all variations**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_variation_all launcher=your_name
+```
+
+**interaction quality interpolation**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_weak,tworoom_random launcher=your_name
+```
+
+**quality interpolation**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[tworoom_random]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
 ```
