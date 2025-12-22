@@ -118,6 +118,11 @@ class Dataset:
         if not (self.frameskip == 1 and self.num_steps == 1):
             raise NotImplementedError("Dataset.load_chunk need only be have frameskip=1 and num_steps=1")
 
+        # check that the episode was not filtered out when loading the dataset in __init__
+        for ep in episode:
+            if ep not in self.episodes:
+                raise ValueError(f"Episode {ep} was filtered out due to insufficient length")
+
         chunks = []
 
         for ep, s, en in zip(episode, start, end):
