@@ -5,6 +5,7 @@ from typing import Protocol
 
 import numpy as np
 import torch
+from loguru import logger as logging
 from torchvision import tv_tensors
 
 import stable_worldmodel as swm
@@ -196,10 +197,17 @@ class WorldModelPolicy(BasePolicy):
         return action  # (num_envs, action_dim)
 
 
-def AutoCostModel(model_name, cache_dir=None):
-    cache_dir = Path(cache_dir or swm.data.utils.get_cache_dir())
-    path = cache_dir / f"{model_name}_object.ckpt"
-    assert path.exists(), f"World model named {model_name} not found. Should launch pretraining first."
+def AutoCostModel(run_name, cache_dir=None):
+    run_path = Path(cache_dir or swm.data.utils.get_cache_dir(), run_name)
+
+    if run_path.is_dir():
+        ckpt_files = list(run_path.glob("*_object.ckpt"))
+        ckpt_files.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+        path = ckpt_files[0]
+        logging.info(f"Loading model from checkpoint: {path}")
+    else:
+        path = Path(f"{run_path}_object.ckpt")
+        assert path.exists(), "Checkpoint path does not exist: {path}. Launch pretraining first."
 
     spt_module = torch.load(path, weights_only=False, map_location="cpu")
 

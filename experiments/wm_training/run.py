@@ -1,3 +1,5 @@
+import os
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 
@@ -111,9 +113,11 @@ def get_data(cfg):
 
     data_class = (
         swm.data.FrameDataset
-        if "expert" in cfg.dataset_name and "video" in cfg.dataset_name
+        if "expert" in cfg.dataset_name and "video" not in cfg.dataset_name
         else swm.data.VideoDataset
     )
+
+    print("Using dataset class:", data_class.__name__)
 
     dataset = data_class(
         cfg.dataset_name,
@@ -324,6 +328,12 @@ def setup_pl_logger(cfg):
     return wandb_logger
 
 
+def get_run_id(cfg, wandb_logger=None):
+    if wandb_logger is not None:
+        return wandb_logger.experiment.id
+    return str(uuid.uuid4())
+
+
 class ModelObjectCallBack(Callback):
     """Callback to pickle model after each epoch."""
 
@@ -361,10 +371,19 @@ def run(cfg):
     wandb_logger = setup_pl_logger(cfg)
     data = get_data(cfg)
     world_model = get_world_model(cfg)
-
     cache_dir = swm.data.utils.get_cache_dir()
+
+    run_id = get_run_id(cfg, wandb_logger)
+    run_dir = os.path.join(cache_dir, run_id)
+    logging.info(f"🫆🫆🫆 Run ID: {run_id} 🫆🫆🫆")
+
+    run_dir_path = Path(run_dir)
+    run_dir_path.mkdir(parents=True, exist_ok=True)
+    with open(run_dir_path / "config.yaml", "w") as f:
+        OmegaConf.save(cfg, f)
+
     dump_object_callback = ModelObjectCallBack(
-        dirpath=cache_dir,
+        dirpath=run_dir,
         filename=cfg.output_model_name,
         epoch_interval=10,
     )
@@ -381,7 +400,7 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data,
-        ckpt_path=f"{cache_dir}/{cfg.output_model_name}_weights.ckpt",
+        ckpt_path=f"{run_dir}/{cfg.output_model_name}_weights.ckpt",
     )
     manager()
 
