@@ -109,7 +109,13 @@ def get_data(cfg):
         "cache_dir": cfg.get("cache_dir", None),
     }
 
-    dataset = swm.data.FrameDataset(
+    data_class = (
+        swm.data.FrameDataset
+        if "expert" in cfg.dataset_name and "video" in cfg.dataset_name
+        else swm.data.VideoDataset
+    )
+
+    dataset = data_class(
         cfg.dataset_name,
         **ds_config,
     )
