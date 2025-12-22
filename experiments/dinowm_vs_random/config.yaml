@@ -11,7 +11,7 @@ world:
   frame_skip: 1
 
 seed: 42
-policy: random # ckpt name or random
+policy: pusht_dinov2_small_psmall_epoch_20 # ckpt name or random
 
 plan_config:
   horizon: 5

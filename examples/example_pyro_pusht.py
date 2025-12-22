@@ -61,7 +61,7 @@ if __name__ == "__main__":
     ##  Evaluate  ##
     ################
 
-    model = swm.policy.AutoCostModel("pyro_test_epoch_10").to("cuda")
+    model = swm.policy.AutoCostModel("pusht_dinov2_small_psmall_epoch_20").to("cuda")
     model = model.eval()
     model.requires_grad_(False)
 
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     print("Evaluating episodes: ", episode_idx)
     print("Starting steps: ", start_steps)
 
-    dataset = swm.data.VideoDataset("pusht_expert_train_video")
+    dataset = swm.data.FrameDataset("pusht_expert_train")
     results = world.evaluate_from_dataset(
         dataset,
         start_steps=start_steps,
