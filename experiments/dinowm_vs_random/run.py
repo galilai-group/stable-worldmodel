@@ -235,7 +235,12 @@ def run(cfg: DictConfig):
         f.write(f"receding_horizon: {cfg.plan_config.receding_horizon}\n")
         f.write(f"seed: {cfg.seed}\n")
         f.write(f"metrics: {metrics}\n")
-        f.write(f"number of samples: {cfg.sollver.num_samples}\n")
+        f.write(f"number of samples: {cfg.solver.num_samples}\n")
+        if cfg.solver.get("optimizer_cls", None) is not None:
+            f.write(f"optimizer_cls: {cfg.solver.optimizer_cls.path}\n")
+        if cfg.solver.get("optimizer_kwargs", None) is not None:
+            if "lr" in cfg.solver.optimizer_kwargs:
+                f.write(f"learning_rate: {cfg.solver.optimizer_kwargs.lr}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")
         f.write(f"gpu: {gpu_name}\n")
 
