@@ -46,7 +46,9 @@ class MPPISolver:
 
         # warning if action space is discrete
         if not isinstance(action_space, Box):
-            logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
+            logging.warning(
+                f"Action space is discrete, got {type(action_space)}. MPPISolver may not work as expected."
+            )
 
     @property
     def n_envs(self) -> int:

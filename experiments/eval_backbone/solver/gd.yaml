@@ -1,4 +1,4 @@
-_target_: stable_worldmodel.solver.GDSolver
+_target_: stable_worldmodel.solver.GradientSolver
 model: ???
 n_steps: 30
 batch_size: 1

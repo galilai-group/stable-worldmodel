@@ -1,10 +1,13 @@
 import time
+import types
 from pathlib import Path
 
 import datasets
 import hydra
 import numpy as np
+import stable_pretraining as spt
 import torch
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
@@ -16,11 +19,11 @@ import wandb
 def img_transform():
     transform = transforms.Compose(
         [
-            transforms.Resize(size=224),
-            transforms.CenterCrop(size=224),
             transforms.ToImage(),
             transforms.ToDtype(torch.float32, scale=True),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            transforms.Normalize(**spt.data.dataset_stats.ImageNet),
+            transforms.Resize(size=196),
+            transforms.CenterCrop(size=196),
         ]
     )
     return transform
@@ -84,37 +87,87 @@ def run(cfg: DictConfig):
     policy = swm.policy.RandomPolicy(cfg.seed)
     if cfg.policy != "random":
         model = swm.policy.AutoCostModel(cfg.policy).to("cuda")
-        torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-
-        class DinoV2Encoder(torch.nn.Module):
-            def __init__(self, name, feature_key):
-                super().__init__()
-                self.name = name
-                self.base_model = torch.hub.load("facebookresearch/dinov2", name)
-                self.feature_key = feature_key
-                self.emb_dim = self.base_model.num_features
-                if feature_key == "x_norm_patchtokens":
-                    self.latent_ndim = 2
-                elif feature_key == "x_norm_clstoken":
-                    self.latent_ndim = 1
-                else:
-                    raise ValueError(f"Invalid feature key: {feature_key}")
-
-                self.patch_size = self.base_model.patch_size
-
-            def forward(self, x):
-                emb = self.base_model.forward_features(x)[self.feature_key]
-                if self.latent_ndim == 1:
-                    emb = emb.unsqueeze(1)  # dummy patch dim
-                return emb
-
-        ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
-        model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
-        model.predictor.load_state_dict(ckpt["predictor"], strict=False)
-        model.action_encoder.load_state_dict(ckpt["action_encoder"])
-        model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
-        model = model.to("cuda")
         model = model.eval()
+
+        def criterion(self, info_dict: dict, action_candidates: torch.Tensor):
+            """
+            Compute cost. Supports variable dimensions (e.g. pixels vs proprio).
+            Assumed Input Shapes:
+            - Pixels:  (B, N, T, Patches, Features) -> 5D
+            - Proprio: (B, N, T, Features)          -> 4D
+            Time is always Dimension 2.
+            """
+            emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
+            cost = 0.0
+
+            # Retrieve config
+            criterion_type = cfg.criterion.type
+            loss_type = getattr(cfg.criterion, "loss_type", "mse")
+
+            for key in emb_keys + ["pixels"]:
+                preds = info_dict[f"predicted_{key}_embed"]
+                goal = info_dict[f"{key}_goal_embed"]
+
+                # --- Align Dimensions & Slice Time ---
+                # Goal expansion: (B,N,P,D) -> (B,N,1,P,D) or (B,N,D) -> (B,N,1,D)
+                # We insert the Time dimension at index 2 to match preds
+                if goal.ndim == preds.ndim - 1:
+                    goal_expanded = goal.unsqueeze(2)
+                else:
+                    goal_expanded = goal
+
+                if criterion_type == "final_distance":
+                    # Slice Time=Last. Keeps rank: (B, N, 1, ...)
+                    preds_target = preds[:, :, -1:]
+                    target_goal = goal_expanded
+                else:
+                    # Use full horizon: (B, N, T, ...)
+                    preds_target = preds
+                    target_goal = goal_expanded.expand_as(preds)
+
+                # --- Compute Raw Loss ---
+                if loss_type == "cosine":
+                    # Cosine reduces the last dimension (Features)
+                    # Output shape: (B, N, T) for proprio, (B, N, T, P) for pixels
+                    sim = F.cosine_similarity(preds_target, target_goal, dim=-1)
+                    raw_loss = 1.0 - sim
+                else:
+                    # MSE preserves all dimensions
+                    # Output shape: (B, N, T, D) for proprio, (B, N, T, P, D) for pixels
+                    raw_loss = F.mse_loss(preds_target, target_goal, reduction="none")
+
+                # We want to reduce all dimensions AFTER Time (Dim 2) to get a scalar per timestep.
+                reduction_dims = tuple(range(3, raw_loss.ndim))
+
+                if reduction_dims:
+                    step_loss = raw_loss.mean(dim=reduction_dims)  # Result: (B, N, T)
+                else:
+                    step_loss = raw_loss  # Already (B, N, T) (e.g. cosine on proprio)
+
+                # --- Time Aggregation ---
+                if criterion_type == "final_distance":
+                    # step_loss is (B, N, 1). Mean over dim 2 reduces it to (B, N)
+                    cost = cost + step_loss.mean(dim=2)
+
+                elif criterion_type == "current_distance":
+                    # step_loss is (B, N, T). Apply temporal discount.
+                    T = step_loss.shape[2]
+                    discounts = torch.tensor([cfg.criterion.discount**i for i in range(T)], device=preds.device).view(
+                        1, 1, -1
+                    )  # Shape (1, 1, T)
+
+                    # Weighted sum over time
+                    cost = cost + (step_loss * discounts).mean(dim=2)
+
+            # --- Action Regularization ---
+            if cfg.criterion.action_reg > 0:
+                # action_candidates: (B, N, T, A) -> Reduce dims 2 and 3
+                cost = cost + cfg.criterion.action_reg * (action_candidates**2).mean(dim=(2, 3))
+
+            return cost
+
+        # Assign to model
+        model.criterion = types.MethodType(criterion, model)
 
         config = swm.PlanConfig(**cfg.plan_config)
         solver = hydra.utils.instantiate(cfg.solver, model=model)

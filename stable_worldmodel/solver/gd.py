@@ -8,8 +8,8 @@ from loguru import logger as logging
 from .solver import Costable
 
 
-class GDSolver(torch.nn.Module):
-    """Gradient Descent Solver."""
+class GradientSolver(torch.nn.Module):
+    """Gradient-based Solver (SGD, Adam, etc.)."""
 
     def __init__(
         self,
@@ -21,6 +21,8 @@ class GDSolver(torch.nn.Module):
         action_noise: float = 0.0,
         device="cpu",
         seed: int = 1234,
+        optimizer_cls: type[torch.optim.Optimizer] = torch.optim.SGD,
+        optimizer_kwargs: dict | None = None,
     ):
         """Gradient Descent Method Solver.
         Args:
@@ -32,6 +34,8 @@ class GDSolver(torch.nn.Module):
             action_noise (float): Standard deviation of noise added to actions during optimization.
             device (str): Device to run the solver on.
             seed (int): Random seed for reproducibility.
+            optimizer_cls: The class of the optimizer to use (e.g., torch.optim.Adam).
+            optimizer_kwargs: Dictionary of arguments for the optimizer (e.g., {'lr': 1e-3}).
         """
         super().__init__()
         self.model = model
@@ -42,6 +46,9 @@ class GDSolver(torch.nn.Module):
         self.action_noise = action_noise
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
+
+        self.optimizer_cls = optimizer_cls
+        self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {"lr": 1.0}
 
         self._configured = False
         self._n_envs = None
@@ -57,7 +64,9 @@ class GDSolver(torch.nn.Module):
 
         # warning if action space is discrete
         if not isinstance(action_space, Box):
-            logging.warning(f"Action space is discrete, got {type(action_space)}. GDSolver may not work as expected.")
+            logging.warning(
+                f"Action space is discrete, got {type(action_space)}. GradientSolver may not work as expected."
+            )
 
     @property
     def n_envs(self) -> int:
@@ -126,7 +135,8 @@ class GDSolver(torch.nn.Module):
             batch_init = self.init[start_idx:end_idx].clone().detach()
             batch_init.requires_grad = True
 
-            optim = torch.optim.SGD([batch_init], lr=1.0)
+            # We initialize the optimizer class passed in __init__ with the kwargs
+            optim = self.optimizer_cls([batch_init], **self.optimizer_kwargs)
 
             # Prepare Batch Infos
             # Slice the input info_dict and then expand dimensions
@@ -185,6 +195,6 @@ class GDSolver(torch.nn.Module):
         # Concatenate all batch results
         outputs["actions"] = torch.cat(batch_top_actions_list, dim=0)
         end_time = time.time()
-        print(f"GDSolver.solve completed in {end_time - start_time:.4f} seconds.")
+        print(f"GradientSolver.solve completed in {end_time - start_time:.4f} seconds.")
 
         return outputs

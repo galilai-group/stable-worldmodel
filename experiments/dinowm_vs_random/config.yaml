@@ -11,12 +11,18 @@ world:
   frame_skip: 1
 
 seed: 42
-policy: random # ckpt name or random
+policy: pusht_dinov2_small_psmall_epoch_20 # ckpt name or random
 
 plan_config:
   horizon: 5
   receding_horizon: 5
   action_block: 5 # frameskip
+
+criterion:
+  type: final_distance
+  discount: 1.0
+  action_reg: 0
+  loss_type: mse
 
 # evaluation from dataset (replay expert trajectories)
 eval:
