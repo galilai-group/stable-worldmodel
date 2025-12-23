@@ -18,8 +18,22 @@ class Costable(Protocol):
         ...         return costs
     """
 
+    def criterion(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+        """
+        Criterion used by get_cost to compute the cost. This method can be overridden to easily define a custom cost function.
+        Args:
+            info_dict: Dictionary containing environment state information. Typically contains info such as the goal and the results of rollouts.
+            action_candidates: Tensor of shape (B, N, horizon, action_dim)
+                containing action sequences to evaluate. B is the number of trajectories,
+                N is the number of samples (action candidates).
+        Returns:
+            Tensor of shape (n_envs,) containing the cost of each environment action sequence.
+            Lower costs indicate better action sequences.
+        """
+
     def get_cost(info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:  # pragma: no cover
-        """Compute cost for given action candidates based on info dictionary.
+        """Compute cost for given action candidates based on info dictionary. Typically get_cost performs rollouts
+        using the world model and then computes costs using the criterion.
 
         Args:
             info_dict: Dictionary containing environment state information.
@@ -58,7 +72,7 @@ class Solver(Protocol):
         4. Return optimized action sequences for execution
 
     The protocol supports various optimization methods including:
-        - Gradient-based: GDSolver (gradient descent)
+        - Gradient-based: GradientSolver (gradient descent)
         - Sampling-based: CEMSolver (cross-entropy method), MPPISolver
         - Random: RandomSolver (baseline)
 
@@ -82,7 +96,7 @@ class Solver(Protocol):
         >>> plan_config = PlanConfig(horizon=10, receding_horizon=5, action_block=2)
         >>>
         >>> # Create and configure solver
-        >>> solver = GDSolver(world_model, n_steps=10, device="cuda")
+        >>> solver = GradientSolver(world_model, n_steps=10, device="cuda")
         >>> solver.configure(
         ...     action_space=env.action_space,
         ...     n_envs=4,
@@ -100,7 +114,7 @@ class Solver(Protocol):
     See Also:
         - Costable: Protocol defining the world model cost interface
         - PlanConfig: Configuration dataclass for planning parameters
-        - GDSolver, CEMSolver, MPPISolver: Concrete solver implementations
+        - GradientSolver, CEMSolver, MPPISolver: Concrete solver implementations
     """
 
     def configure(self, *, action_space: gym.Space, n_envs: int, config) -> None:

@@ -58,7 +58,7 @@ if __name__ == "__main__":
 
     model = swm.policy.AutoCostModel("dummy_test")  # auto-policy name is confusing
     config = swm.PlanConfig(horizon=10, receding_horizon=5, action_block=5)
-    solver = swm.solver.GDSolver(model, n_steps=10)
+    solver = swm.solver.GradientSolver(model, n_steps=10)
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
     world.set_policy(policy)
     results = world.evaluate(episodes=2, seed=2347)  # , options={...})
