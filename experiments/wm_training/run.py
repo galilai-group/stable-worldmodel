@@ -109,6 +109,7 @@ def get_data(cfg):
         "frameskip": cfg.frameskip,
         "transform": None,
         "cache_dir": cfg.get("cache_dir", None),
+        "subset_prop": cfg.subset_prop,
     }
 
     data_class = (

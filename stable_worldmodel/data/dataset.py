@@ -52,6 +52,7 @@ class Dataset:
         transform=None,
         obs_type="img",
         cache_dir=None,
+        subset_prop=1.0,
     ):
         # load dataset from disk (handle shards if any)
         data_dir = Path(cache_dir or get_cache_dir(), name)
@@ -78,7 +79,10 @@ class Dataset:
 
         episode_col = self.dataset["episode_idx"][:]
 
-        self.episodes = np.unique(episode_col)
+        unique_episodes = np.unique(episode_col)
+        max_episodes = int(len(unique_episodes) * subset_prop)
+
+        self.episodes = unique_episodes[:max_episodes]
         self.episode_indices = {ep: np.flatnonzero(episode_col == ep) for ep in self.episodes}
 
         self.clip_len = max(frameskip * num_steps, 1) if not self.complete_traj else 0
@@ -294,11 +298,10 @@ class InjectedDataset:
         self.proportions = proportions or [1.0 / len(self.datasets)] * len(self.datasets)
 
         # infer original dataset proportion
-        og_prop = 1.0 - sum(self.proportions)
-        self.proportions = [og_prop] + self.proportions
-
-        if sum(self.proportions) != 1.0:
-            raise ValueError("Proportions must sum to 1.0")
+        if len(self.proportions) == len(self.datasets) - 1:
+            assert sum(self.proportions) < 1.0, "Sum of external dataset proportions must be < 1.0"
+            og_prop = 1.0 - sum(self.proportions)
+            self.proportions = [og_prop] + self.proportions
 
         if len(self.proportions) != (len(self.datasets)):
             raise ValueError("Proportions length must match number of datasets (original + external)")

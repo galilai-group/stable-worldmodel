@@ -86,6 +86,11 @@ python experiments/wm_training/run.py --config-name=pusht.yaml --multirun predic
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_weak_100_variation_all launcher=your_name
 ```
 
+**data scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train,pusht_weak_100_variation_all subset_prop=0.1,0.5 launcher=your_name
+```
+
 **interaction quality interpolation**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_weak_100,pusht_weak_300 launcher=your_name
@@ -94,6 +99,11 @@ python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbo
 **quality interpolation**:
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[pusht_weak_100]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
+```
+
+**variation interpolation**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[pusht_weak_100_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
 ```
 
 --------------
@@ -121,6 +131,11 @@ python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun pred
 python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_variation_all launcher=your_name
 ```
 
+**data scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_weak,tworoom_noisy_variation_all subset_prop=0.1,0.5 launcher=your_name
+```
+
 **interaction quality interpolation**:
 ```bash
 python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_weak,tworoom_random launcher=your_name
@@ -128,5 +143,10 @@ python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun back
 
 **quality interpolation**:
 ```bash
-python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=pusht_expert_train injected_dataset.names="[tworoom_random]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_random]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
+```
+
+**variation interpolation**:
+```bash
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_noisy_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
 ```
