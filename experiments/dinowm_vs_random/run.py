@@ -91,79 +91,78 @@ def run(cfg: DictConfig):
 
         def criterion(self, info_dict: dict, action_candidates: torch.Tensor):
             """
-            Compute the cost for planning.
-            Supports: 'current_distance' vs 'final_distance'
-            Supports: 'mse' vs 'cosine'
-            Assumed Shape: (B, N, T, P, D) -> Batch, Samples, Time, Patches, Features
+            Compute cost. Supports variable dimensions (e.g. pixels vs proprio).
+            Assumed Input Shapes:
+            - Pixels:  (B, N, T, Patches, Features) -> 5D
+            - Proprio: (B, N, T, Features)          -> 4D
+            Time is always Dimension 2.
             """
             emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
             cost = 0.0
 
-            # Retrieve config settings
+            # Retrieve config
             criterion_type = cfg.criterion.type
-            loss_type = getattr(cfg.criterion, "loss_type", "mse")  # Default to mse if not set
+            loss_type = getattr(cfg.criterion, "loss_type", "mse")
 
             for key in emb_keys + ["pixels"]:
-                preds = info_dict[f"predicted_{key}_embed"]  # (B, N, T, P, D)
-                goal = info_dict[f"{key}_goal_embed"]  # (B, N, P, D)
+                preds = info_dict[f"predicted_{key}_embed"]
+                goal = info_dict[f"{key}_goal_embed"]
 
-                # Align Dimensions
-                # We need goal to be (B, N, 1, P, D) to broadcast against Time (Dim 2)
+                # --- Align Dimensions & Slice Time ---
+                # Goal expansion: (B,N,P,D) -> (B,N,1,P,D) or (B,N,D) -> (B,N,1,D)
+                # We insert the Time dimension at index 2 to match preds
                 if goal.ndim == preds.ndim - 1:
                     goal_expanded = goal.unsqueeze(2)
                 else:
                     goal_expanded = goal
 
-                # Select Targets based on Criterion Strategy
                 if criterion_type == "final_distance":
-                    # Select only the last time step
-                    # preds slice: (B, N, 1, P, D)
+                    # Slice Time=Last. Keeps rank: (B, N, 1, ...)
                     preds_target = preds[:, :, -1:]
-                    # goal stays (B, N, 1, P, D) via broadcasting
                     target_goal = goal_expanded
                 else:
-                    # Use full horizon
+                    # Use full horizon: (B, N, T, ...)
                     preds_target = preds
                     target_goal = goal_expanded.expand_as(preds)
 
-                # Compute Loss (Result should be (B, N, T) per sample/time)
+                # --- Compute Raw Loss ---
                 if loss_type == "cosine":
-                    # Cosine Sim reduces the last dim (Features) automatically
-                    # Input: (B, N, T, P, D) -> Sim: (B, N, T, P)
+                    # Cosine reduces the last dimension (Features)
+                    # Output shape: (B, N, T) for proprio, (B, N, T, P) for pixels
                     sim = F.cosine_similarity(preds_target, target_goal, dim=-1)
                     raw_loss = 1.0 - sim
-
-                    # Average over Patches (Dim 3) -> Result (B, N, T)
-                    step_loss = raw_loss.mean(dim=3)
-
-                else:  # mse
-                    # MSE keeps all dims: (B, N, T, P, D)
+                else:
+                    # MSE preserves all dimensions
+                    # Output shape: (B, N, T, D) for proprio, (B, N, T, P, D) for pixels
                     raw_loss = F.mse_loss(preds_target, target_goal, reduction="none")
 
-                    # Average over Patches(3) and Features(4) -> Result (B, N, T)
-                    step_loss = raw_loss.mean(dim=(3, 4))
+                # We want to reduce all dimensions AFTER Time (Dim 2) to get a scalar per timestep.
+                reduction_dims = tuple(range(3, raw_loss.ndim))
 
-                # Aggregate Costs
+                if reduction_dims:
+                    step_loss = raw_loss.mean(dim=reduction_dims)  # Result: (B, N, T)
+                else:
+                    step_loss = raw_loss  # Already (B, N, T) (e.g. cosine on proprio)
+
+                # --- Time Aggregation ---
                 if criterion_type == "final_distance":
-                    cost += step_loss.mean(dim=2)
+                    # step_loss is (B, N, 1). Mean over dim 2 reduces it to (B, N)
+                    cost = cost + step_loss.mean(dim=2)
 
                 elif criterion_type == "current_distance":
-                    # step_loss is (B, N, T)
-                    T = preds.shape[2]
-
-                    # Create discounts (1, 1, T) to broadcast against (B, N, T)
+                    # step_loss is (B, N, T). Apply temporal discount.
+                    T = step_loss.shape[2]
                     discounts = torch.tensor([cfg.criterion.discount**i for i in range(T)], device=preds.device).view(
                         1, 1, -1
-                    )
+                    )  # Shape (1, 1, T)
 
                     # Weighted sum over time
-                    cost += (step_loss * discounts).mean(dim=2)
+                    cost = cost + (step_loss * discounts).mean(dim=2)
 
-            # Action Regularization
+            # --- Action Regularization ---
             if cfg.criterion.action_reg > 0:
-                # action_candidates: (B, N, T, A)
-                # Mean over Time(2) and Actions(3)
-                cost += cfg.criterion.action_reg * (action_candidates**2).mean(dim=(2, 3))
+                # action_candidates: (B, N, T, A) -> Reduce dims 2 and 3
+                cost = cost + cfg.criterion.action_reg * (action_candidates**2).mean(dim=(2, 3))
 
             return cost
 
