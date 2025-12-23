@@ -133,7 +133,7 @@ python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun back
 
 **data scaling**:
 ```bash
-python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_weak,tworoom_noisy_variation_all subset_prop=0.1,0.5 launcher=your_name
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy_weak,tworoom_noisy_variation_all subset_prop=0.1,0.5 launcher=your_name
 ```
 
 **interaction quality interpolation**:
