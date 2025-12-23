@@ -265,6 +265,17 @@ class PYRO(torch.nn.Module):
 
         return info
 
+    def criterion(self, info_dict: dict, action_candidates: torch.Tensor):
+        """Compute the cost for planning. Should be overridden for custom costs."""
+        emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
+        cost = 0.0
+
+        for key in emb_keys + ["pixels"]:
+            preds = info_dict[f"predicted_{key}_embed"]
+            goal = info_dict[f"{key}_goal_embed"]
+            cost = cost + F.mse_loss(preds[:, :, -1:], goal, reduction="none").mean(dim=tuple(range(2, preds.ndim)))
+        return cost
+
     def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
         assert "action" in info_dict, "action key must be in info_dict"
         assert "pixels" in info_dict, "pixels key must be in info_dict"
@@ -333,16 +344,14 @@ class PYRO(torch.nn.Module):
         # == run world model
         info_dict = self.rollout(info_dict, action_candidates)
 
-        cost = 0.0
+        # cost = 0.0
 
-        for key in emb_keys + ["pixels"]:
-            preds = info_dict[f"predicted_{key}_embed"]
-            goal = info_dict[f"{key}_goal_embed"]
-            cost = cost + F.mse_loss(preds[:, :, -1:], goal, reduction="none").mean(dim=tuple(range(2, preds.ndim)))
+        # for key in emb_keys + ["pixels"]:
+        #     preds = info_dict[f"predicted_{key}_embed"]
+        #     goal = info_dict[f"{key}_goal_embed"]
+        #     cost = cost + F.mse_loss(preds[:, :, -1:], goal, reduction="none").mean(dim=tuple(range(2, preds.ndim)))
 
-        # TODO try with the same loss computation as the training
-
-        return cost
+        return self.criterion(info_dict, action_candidates)
 
 
 class Embedder(torch.nn.Module):

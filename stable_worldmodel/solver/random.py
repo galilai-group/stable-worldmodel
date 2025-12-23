@@ -131,7 +131,7 @@ class RandomSolver:
 
     See Also:
         - :class:`~stable_worldmodel.solver.CEMSolver`: Cross-Entropy Method optimizer
-        - :class:`~stable_worldmodel.solver.GDSolver`: Gradient descent optimizer
+        - :class:`~stable_worldmodel.solver.GradientSolver`: Gradient descent optimizer
         - :class:`~stable_worldmodel.solver.MPPISolver`: Model Predictive Path Integral optimizer
     """
 
