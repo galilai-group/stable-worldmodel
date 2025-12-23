@@ -18,6 +18,12 @@ plan_config:
   receding_horizon: 5
   action_block: 5 # frameskip
 
+criterion:
+  type: final_distance
+  discount: 1.0
+  action_reg: 0
+  loss_type: mse
+
 # evaluation from dataset (replay expert trajectories)
 eval:
   num_eval: 50

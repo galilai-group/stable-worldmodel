@@ -1,4 +1,5 @@
 import time
+import types
 from pathlib import Path
 
 import datasets
@@ -6,6 +7,7 @@ import hydra
 import numpy as np
 import stable_pretraining as spt
 import torch
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
@@ -86,6 +88,87 @@ def run(cfg: DictConfig):
     if cfg.policy != "random":
         model = swm.policy.AutoCostModel(cfg.policy).to("cuda")
         model = model.eval()
+
+        def criterion(self, info_dict: dict, action_candidates: torch.Tensor):
+            """
+            Compute the cost for planning.
+            Supports: 'current_distance' vs 'final_distance'
+            Supports: 'mse' vs 'cosine'
+            Assumed Shape: (B, N, T, P, D) -> Batch, Samples, Time, Patches, Features
+            """
+            emb_keys = [k for k in self.extra_encoders.keys() if k != "action"]
+            cost = 0.0
+
+            # Retrieve config settings
+            criterion_type = cfg.criterion.type
+            loss_type = getattr(cfg.criterion, "loss_type", "mse")  # Default to mse if not set
+
+            for key in emb_keys + ["pixels"]:
+                preds = info_dict[f"predicted_{key}_embed"]  # (B, N, T, P, D)
+                goal = info_dict[f"{key}_goal_embed"]  # (B, N, P, D)
+
+                # Align Dimensions
+                # We need goal to be (B, N, 1, P, D) to broadcast against Time (Dim 2)
+                if goal.ndim == preds.ndim - 1:
+                    goal_expanded = goal.unsqueeze(2)
+                else:
+                    goal_expanded = goal
+
+                # Select Targets based on Criterion Strategy
+                if criterion_type == "final_distance":
+                    # Select only the last time step
+                    # preds slice: (B, N, 1, P, D)
+                    preds_target = preds[:, :, -1:]
+                    # goal stays (B, N, 1, P, D) via broadcasting
+                    target_goal = goal_expanded
+                else:
+                    # Use full horizon
+                    preds_target = preds
+                    target_goal = goal_expanded.expand_as(preds)
+
+                # Compute Loss (Result should be (B, N, T) per sample/time)
+                if loss_type == "cosine":
+                    # Cosine Sim reduces the last dim (Features) automatically
+                    # Input: (B, N, T, P, D) -> Sim: (B, N, T, P)
+                    sim = F.cosine_similarity(preds_target, target_goal, dim=-1)
+                    raw_loss = 1.0 - sim
+
+                    # Average over Patches (Dim 3) -> Result (B, N, T)
+                    step_loss = raw_loss.mean(dim=3)
+
+                else:  # mse
+                    # MSE keeps all dims: (B, N, T, P, D)
+                    raw_loss = F.mse_loss(preds_target, target_goal, reduction="none")
+
+                    # Average over Patches(3) and Features(4) -> Result (B, N, T)
+                    step_loss = raw_loss.mean(dim=(3, 4))
+
+                # Aggregate Costs
+                if criterion_type == "final_distance":
+                    cost += step_loss.mean(dim=2)
+
+                elif criterion_type == "current_distance":
+                    # step_loss is (B, N, T)
+                    T = preds.shape[2]
+
+                    # Create discounts (1, 1, T) to broadcast against (B, N, T)
+                    discounts = torch.tensor([cfg.criterion.discount**i for i in range(T)], device=preds.device).view(
+                        1, 1, -1
+                    )
+
+                    # Weighted sum over time
+                    cost += (step_loss * discounts).mean(dim=2)
+
+            # Action Regularization
+            if cfg.criterion.action_reg > 0:
+                # action_candidates: (B, N, T, A)
+                # Mean over Time(2) and Actions(3)
+                cost += cfg.criterion.action_reg * (action_candidates**2).mean(dim=(2, 3))
+
+            return cost
+
+        # Assign to model
+        model.criterion = types.MethodType(criterion, model)
 
         config = swm.PlanConfig(**cfg.plan_config)
         solver = hydra.utils.instantiate(cfg.solver, model=model)
