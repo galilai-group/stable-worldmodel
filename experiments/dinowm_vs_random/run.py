@@ -4,6 +4,7 @@ from pathlib import Path
 import datasets
 import hydra
 import numpy as np
+import stable_pretraining as spt
 import torch
 from omegaconf import DictConfig
 from sklearn import preprocessing
@@ -16,11 +17,11 @@ import wandb
 def img_transform():
     transform = transforms.Compose(
         [
-            transforms.Resize(size=224),
-            transforms.CenterCrop(size=224),
             transforms.ToImage(),
             transforms.ToDtype(torch.float32, scale=True),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            transforms.Normalize(**spt.data.dataset_stats.ImageNet),
+            transforms.Resize(size=196),
+            transforms.CenterCrop(size=196),
         ]
     )
     return transform
