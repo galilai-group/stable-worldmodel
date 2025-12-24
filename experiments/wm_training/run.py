@@ -13,7 +13,7 @@ from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from transformers import AutoModel, AutoModelForImageClassification
+from transformers import AutoModel, AutoModelForImageClassification, AutoVideoProcessor
 
 import stable_worldmodel as swm
 
@@ -35,7 +35,7 @@ def get_encoder(cfg):
         "vit": {"prefix": "google/vit-"},
         "dino": {"prefix": "facebook/dino-"},
         "dinov2": {"prefix": "facebook/dinov2-"},
-        "dinov3": {"prefix": "facebook/dinov3-"},  # TODO handle resnet base in dinov3
+        "dinov3": {"prefix": "facebook/dinov3-"},
         "mae": {"prefix": "facebook/vit-mae-"},
         "ijepa": {"prefix": "facebook/ijepa"},
         "vjepa2": {"prefix": "facebook/vjepa2-vit"},
@@ -83,8 +83,29 @@ DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
 # ============================================================================
 # Data Setup
 # ============================================================================
+
+
+class VideoPipeline(spt.data.transforms.Transform):
+    def __init__(self, processor, source: str = "image", target: str = "image"):
+        super().__init__()
+        self.processor = processor
+        self.source = source
+        self.target = target
+
+    def __call__(self, x: dict):
+        frames = self.nested_get(x, self.source)
+        processed = self.processor(frames, return_tensors="pt")["pixel_values_videos"].squeeze(0)
+        self.nested_set(x, processed, self.target)
+        return x
+
+
 def get_data(cfg):
     """Setup dataset with image transforms and normalization."""
+
+    def get_video_pipeline(key, target):
+        """Backwards-compatible helper: returns a VideoPipeline transform."""
+        processor = AutoVideoProcessor.from_pretrained(cfg.backbone.name)
+        return VideoPipeline(processor, source=key, target=target)
 
     def get_img_pipeline(key, target, img_size=224):
         return spt.data.transforms.Compose(
@@ -131,14 +152,26 @@ def get_data(cfg):
         trans_fn = spt.data.transforms.WrapTorchTransform(trans_fn, source=key, target=key)
         all_norm_transforms.append(trans_fn)
 
-    # Image size must be multiple of DINO patch size (14)
-    img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
-
-    # Apply transforms to all steps
-    transform = spt.data.transforms.Compose(
-        *[get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size) for col in ["pixels"] for i in range(cfg.n_steps)],
-        *all_norm_transforms,
-    )
+    # vjepa2
+    if cfg.backbone.get("is_video_encoder", False):
+        img_size = cfg.image_size
+        transform = spt.data.transforms.Compose(
+            get_video_pipeline("pixels", "pixels"),
+            spt.data.transforms.Resize(img_size, source="pixels", target="pixels"),
+            *all_norm_transforms,
+        )
+    else:
+        # Image size must be multiple of DINO patch size (14)
+        img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
+        # Apply transforms to all steps
+        transform = spt.data.transforms.Compose(
+            *[
+                get_img_pipeline(f"{col}.{i}", f"{col}.{i}", img_size)
+                for col in ["pixels"]
+                for i in range(cfg.n_steps)
+            ],
+            *all_norm_transforms,
+        )
 
     dataset.transform = transform
 
@@ -205,7 +238,7 @@ def get_world_model(cfg):
             batch[key] = torch.nan_to_num(batch[key], 0.0)
 
         # Encode all timesteps into latent embeddings
-        batch = self.model.encode(batch, target="embed")
+        batch = self.model.encode(batch, target="embed", is_video=cfg.backbone.get("is_video_encoder", False))
 
         # Use history to predict next states
         embedding = batch["embed"][:, : cfg.pyro.history_size, :, :]  # (B, T-1, patches, dim)
@@ -262,6 +295,9 @@ def get_world_model(cfg):
 
     encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(cfg)
     embedding_dim += sum(emb_dim for emb_dim in cfg.pyro.get("encoding", {}).values())  # add all extra dims
+
+    if cfg.backbone.get("is_video_encoder", False):
+        num_patches += num_patches * (cfg.n_steps // 4)
 
     logging.info(f"Patches: {num_patches}, Embedding dim: {embedding_dim}")
 

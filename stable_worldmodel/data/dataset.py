@@ -216,7 +216,7 @@ class FrameDataset(Dataset):
         for col in self.decode_columns:
             if col not in steps:
                 continue
-            steps[col] = torch.stack(steps[col])
+            steps[col] = torch.stack(list(steps[col]))
 
         # reshape action
         if "action" in steps:
@@ -271,7 +271,7 @@ class VideoDataset(Dataset):
         for col in self.decode_columns:
             if col not in steps:
                 continue
-            steps[col] = torch.stack(steps[col])
+            steps[col] = torch.stack(list(steps[col]))
 
         # reshape action
         if "action" in steps:
