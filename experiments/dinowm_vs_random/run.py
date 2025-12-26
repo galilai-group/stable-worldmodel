@@ -238,6 +238,11 @@ def run(cfg: DictConfig):
         f.write(f"seed: {cfg.seed}\n")
         f.write(f"metrics: {metrics}\n")
         f.write(f"number of samples: {cfg.solver.num_samples}\n")
+        if cfg.get("criterion", None) is not None:
+            f.write(f"criterion type: {cfg.criterion.get('type', 'final_distance')}\n")
+            f.write(f"criterion loss_type: {cfg.criterion.get('loss_type', 'mse')}\n")
+            f.write(f"criterion action_reg: {cfg.criterion.get('action_reg', 0.0)}\n")
+            f.write(f"criterion discount: {cfg.criterion.get('discount', 1.0)}\n")
         if cfg.solver.get("optimizer_cls", None) is not None:
             f.write(f"optimizer_cls: {cfg.solver.optimizer_cls.path}\n")
         if cfg.solver.get("optimizer_kwargs", None) is not None:
