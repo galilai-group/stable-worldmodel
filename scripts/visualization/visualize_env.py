@@ -10,6 +10,7 @@ from einops import rearrange
 from loguru import logger as logging
 from omegaconf import open_dict
 from sklearn import preprocessing
+from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from torchvision.transforms import v2 as transforms
 from tqdm import tqdm
@@ -213,38 +214,9 @@ def get_world_model(cfg):
 
     if cfg.world_model.model_name is not None:
         model = swm.policy.AutoCostModel(cfg.world_model.model_name).to(cfg.get("device", "cpu"))
-        torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-
-        class DinoV2Encoder(torch.nn.Module):
-            def __init__(self, name, feature_key):
-                super().__init__()
-                self.name = name
-                self.base_model = torch.hub.load("facebookresearch/dinov2", name)
-                self.feature_key = feature_key
-                self.emb_dim = self.base_model.num_features
-                if feature_key == "x_norm_patchtokens":
-                    self.latent_ndim = 2
-                elif feature_key == "x_norm_clstoken":
-                    self.latent_ndim = 1
-                else:
-                    raise ValueError(f"Invalid feature key: {feature_key}")
-
-                self.patch_size = self.base_model.patch_size
-
-            def forward(self, x):
-                emb = self.base_model.forward_features(x)[self.feature_key]
-                if self.latent_ndim == 1:
-                    emb = emb.unsqueeze(1)  # dummy patch dim
-                return emb
-
-        ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
-        model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to(cfg.get("device", "cpu"))
-        model.predictor.load_state_dict(ckpt["predictor"], strict=False)
-        model.action_encoder.load_state_dict(ckpt["action_encoder"])
-        model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
         model = model.to(cfg.get("device", "cpu"))
         model = model.eval()
-    else:
+    else:  # no checkpoint found, build model from scratch
         encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(cfg)
         embedding_dim += sum(emb_dim for emb_dim in cfg.world_model.get("encoding", {}).values())  # add all extra dims
 
@@ -339,6 +311,10 @@ def get_state_grid(env, grid_size: int = 10):
         # Extract low/high limits for the specified dims
         min_val = [env.variation_space["agent"]["position"].low[d] for d in dim]
         max_val = [env.variation_space["agent"]["position"].high[d] for d in dim]
+        # decrease range a bit to avoid unreachable states
+        range_val = [max_v - min_v for min_v, max_v in zip(min_val, max_val)]
+        min_val = [min_v + 0.1 * r for min_v, r in zip(min_val, range_val)]
+        max_val = [max_v - 0.1 * r for max_v, r in zip(max_val, range_val)]
     else:
         raise NotImplementedError(f"State grid generation not implemented for env type: {type(env)}")
 
@@ -400,11 +376,11 @@ def collect_embeddings(world_model, env, process, transform, cfg):
 # ============================================================================
 
 
-def compute_tsne(embeddings, cfg):
+def compute_dimensionality_reduction(embeddings, cfg):
     """
     Computes t-SNE projection on the collected embeddings.
     """
-    logging.info("Computing t-SNE...")
+    logging.info(f"Computing dimensionality reduction with {cfg.dimensionality_reduction}")
     # Flatten if embeddings are spatial (e.g. from patch tokens)
     # Shape: (N_samples, Embedding_Dim)
     embeddings = rearrange(embeddings, "b ... -> b (...)")
@@ -415,8 +391,12 @@ def compute_tsne(embeddings, cfg):
     perplexity = min(30, n_samples - 1) if n_samples > 1 else 1
 
     # Initialize and fit t-SNE
-    tsne = TSNE(n_components=2, perplexity=perplexity, random_state=cfg.get("seed", 42))
-    embeddings_2d = tsne.fit_transform(embeddings)
+    if cfg.dimensionality_reduction == "tsne":
+        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=cfg.get("seed", 42))
+        embeddings_2d = tsne.fit_transform(embeddings)
+    elif cfg.dimensionality_reduction == "pca":
+        pca = PCA(n_components=2, random_state=cfg.seed)
+        embeddings_2d = pca.fit_transform(embeddings)
 
     return embeddings_2d
 
@@ -614,17 +594,17 @@ def run(cfg):
     logging.info(
         f"Computing global t-SNE for {num_variations} variations ({all_embeddings_global.shape[0]} total samples)..."
     )
-    representations_2d_global = compute_tsne(all_embeddings_global, cfg)
+    representations_2d_global = compute_dimensionality_reduction(all_embeddings_global, cfg)
 
-    # Plot Combined t-SNE
-    tsne_save_path = f"{model_name}_{env_name}_tsne.pdf"
+    # Plot Combined Dimensionality Reduction
+    dr_save_path = f"{model_name}_{env_name}_{cfg.dimensionality_reduction}.pdf"
     plot_representations(
         grid,
         representations_2d_global,
         variations_cfg=cfg.env.variations,
         samples_per_variation=samples_per_variation,
         title_suffix="Latent Space",
-        save_path=tsne_save_path,
+        save_path=dr_save_path,
     )
 
     # Process Distance Maps (Per Variation)

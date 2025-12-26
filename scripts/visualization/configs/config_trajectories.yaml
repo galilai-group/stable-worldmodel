@@ -1,0 +1,34 @@
+defaults:
+  # - world_model@datasets.pusht_train.world_model: pyro
+  - world_model@datasets.pusht_val.world_model: pyro
+  - _self_ # Overrides from this file apply LAST
+
+# Global Settings (Must be consistent across datasets for TSNE dimensions to match)
+device: cuda
+seed: 42
+image_size: 224
+patch_size: 16
+frameskip: 5
+cache_dir: null
+dimensionality_reduction: pca
+
+# Define multiple dataset-model pairs to visualize
+datasets:
+  # pusht_train:
+  #   dataset:
+  #     dataset_name: pusht_expert_train
+  #     batch_size: 32
+  #     num_workers: 16
+  #     n_trajectories: 1
+  #     n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+  #   world_model:
+  #     model_name: dinowm_pusht_fixed
+  pusht_val:
+    dataset:
+      dataset_name: pusht_expert_val
+      batch_size: 32
+      num_workers: 16
+      n_trajectories: 2
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: pusht_dinov2_small_psmall_epoch_20

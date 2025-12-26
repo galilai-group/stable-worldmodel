@@ -23,7 +23,7 @@ world:
   max_episode_steps: 200
   image_shape: [224, 224]
 
-num_workers: 16
+num_workers: 4
 seed: 3072
 
 ds_type: video # frame
