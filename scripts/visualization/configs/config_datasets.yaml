@@ -1,6 +1,13 @@
 defaults:
   - world_model@datasets.pusht_train.world_model: pyro
   - world_model@datasets.pusht_val.world_model: pyro
+  - world_model@datasets.pusht_background_color_variation.world_model: pyro
+  - world_model@datasets.pusht_block_color_variation.world_model: pyro
+  - world_model@datasets.pusht_agent_color_variation.world_model: pyro
+  - world_model@datasets.pusht_block_shape_variation.world_model: pyro
+  - world_model@datasets.pusht_agent_shape_variation.world_model: pyro
+  - world_model@datasets.tworoom.world_model: pyro
+  - world_model@datasets.tworoom_agent_color_variation.world_model: pyro
   - _self_ # Overrides from this file apply LAST
 
 # Global Settings (Must be consistent across datasets for TSNE dimensions to match)
@@ -11,6 +18,8 @@ patch_size: 16
 frameskip: 5
 cache_dir: null
 
+dimensionality_reduction: tsne
+
 # Define multiple dataset-model pairs to visualize
 datasets:
   pusht_train:
@@ -19,17 +28,87 @@ datasets:
       batch_size: 32
       num_workers: 16
       visual_split: 0.002
+      data_format: frame
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
-      ckpt_path: null
   pusht_val:
     dataset:
       dataset_name: pusht_expert_val
       batch_size: 32
       num_workers: 16
       visual_split: 1.0
+      data_format: frame
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
-      ckpt_path: null
+  pusht_background_color_variation:
+    dataset:
+      dataset_name: pusht_single_var_weak_100/background/color
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+  pusht_block_color_variation:
+    dataset:
+      dataset_name: pusht_single_var_weak_100/block/color
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+  pusht_agent_color_variation:
+    dataset:
+      dataset_name: pusht_single_var_weak_100/agent/color
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+  pusht_block_shape_variation:
+    dataset:
+      dataset_name: pusht_single_var_weak_100/block/shape
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+  pusht_agent_shape_variation:
+    dataset:
+      dataset_name: pusht_single_var_weak_100/agent/shape
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+  tworoom:
+    dataset:
+      dataset_name: tworoom_noisy
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+  tworoom_agent_color_variation:
+    dataset:
+      dataset_name: tworoom_noisy_single_var/agent/color
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.0005
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
