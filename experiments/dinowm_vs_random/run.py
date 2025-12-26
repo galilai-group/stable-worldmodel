@@ -248,6 +248,7 @@ def run(cfg: DictConfig):
         if cfg.solver.get("optimizer_kwargs", None) is not None:
             if "lr" in cfg.solver.optimizer_kwargs:
                 f.write(f"learning_rate: {cfg.solver.optimizer_kwargs.lr}\n")
+        f.write(f"number of optimization steps: {cfg.solver.n_steps}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")
         f.write(f"gpu: {gpu_name}\n")
 
