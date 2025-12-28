@@ -22,12 +22,11 @@ def run(cfg):
 
     rng = np.random.default_rng(cfg.seed)
 
-    default = ["agent.start_position", "block.start_position", "block.angle"]
+    default = ["agent.position", "goal.position", "door.number", "door.size", "door.position"]
 
     for var in variation_list:
         if var in default:
             continue
-
         world = swm.World("swm/TwoRoom-v0", **cfg.world, render_mode="rgb_array")
         world.set_policy(ExpertPolicy())
         print(f"Collecting data for variable: {var}")
