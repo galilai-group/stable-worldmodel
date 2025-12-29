@@ -23,6 +23,7 @@ criterion:
   discount: 1.0
   action_reg: 0
   loss_type: mse
+  last_step_weight: 0.0
 
 # evaluation from dataset (replay expert trajectories)
 eval:

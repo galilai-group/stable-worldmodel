@@ -157,6 +157,7 @@ def run(cfg: DictConfig):
                     discounts = torch.tensor([cfg.criterion.discount**i for i in range(T)], device=preds.device).view(
                         1, 1, -1
                     )  # Shape (1, 1, T)
+                    discounts[:, :, -1] = discounts[:, :, -1] + cfg.criterion.last_step_weight
 
                     # Weighted sum over time
                     cost = cost + (step_loss * discounts).mean(dim=2)
