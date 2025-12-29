@@ -5,15 +5,22 @@ defaults:
 
 n_gpus: 4
 cpus_per_task: 8
-cache_dir: /network/scratch/l/lucas.maes/datasets/datasets/
+cache_dir: /network/scratch/l/lucas.maes/datasets/xenoworlds/
 
 wandb_entity: simon-lacoste-julien
 wandb_project: xenoworlds
+
+subdir: ${hydra:job.id}
+
+wandb:
+  entity: ${wandb_entity}
+  project: ${wandb_project}
 
 hydra:
   mode: MULTIRUN
 
   launcher:
+    max_num_timeout: 999
     timeout_min: 10080 # 1 week
     cpus_per_task: ${cpus_per_task}
     mem_gb: 64

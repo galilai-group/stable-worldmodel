@@ -1,5 +1,4 @@
 import os
-import uuid
 from collections import OrderedDict
 from pathlib import Path
 
@@ -351,7 +350,7 @@ def setup_pl_logger(cfg):
     if not cfg.wandb.enable:
         return None
 
-    wandb_run_id = cfg.wandb.get("run_id", None)
+    wandb_run_id = cfg.get("subdir")
     wandb_logger = WandbLogger(
         name="dino_wm",
         project=cfg.wandb.project,
@@ -365,18 +364,12 @@ def setup_pl_logger(cfg):
     return wandb_logger
 
 
-def get_run_id(cfg, wandb_logger=None):
-    if wandb_logger is not None:
-        return wandb_logger.experiment.id
-    return str(uuid.uuid4())
-
-
 class ModelObjectCallBack(Callback):
     """Callback to pickle model after each epoch."""
 
     def __init__(self, dirpath, filename="model_object", epoch_interval: int = 1):
         super().__init__()
-        self.dirpath = dirpath
+        self.dirpath = Path(dirpath)
         self.filename = filename
         self.epoch_interval = epoch_interval
 
@@ -385,16 +378,13 @@ class ModelObjectCallBack(Callback):
 
         if trainer.is_global_zero:
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
-                output_path = Path(
-                    self.dirpath,
-                    f"{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt",
-                )
-                torch.save(pl_module, output_path)
+                output_path = self.dirpath / f"{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt"
+                torch.save(pl_module.model, output_path)
                 logging.info(f"Saved world model object to {output_path}")
             # Additionally, save at final epoch
             if (trainer.current_epoch + 1) == trainer.max_epochs:
                 final_path = self.dirpath / f"{self.filename}_object.ckpt"
-                torch.save(pl_module, final_path)
+                torch.save(pl_module.model, final_path)
                 logging.info(f"Saved final world model object to {final_path}")
 
 
@@ -405,13 +395,11 @@ class ModelObjectCallBack(Callback):
 def run(cfg):
     """Run training of predictor"""
 
+    run_id = cfg.get("subdir") or ""
     wandb_logger = setup_pl_logger(cfg)
     data = get_data(cfg)
     world_model = get_world_model(cfg)
-    cache_dir = swm.data.utils.get_cache_dir()
-
-    run_id = get_run_id(cfg, wandb_logger)
-    run_dir = os.path.join(cache_dir, run_id)
+    run_dir = os.path.join(swm.data.utils.get_cache_dir(), run_id)
     logging.info(f"🫆🫆🫆 Run ID: {run_id} 🫆🫆🫆")
 
     run_dir_path = Path(run_dir)
@@ -422,7 +410,7 @@ def run(cfg):
     dump_object_callback = ModelObjectCallBack(
         dirpath=run_dir,
         filename=cfg.output_model_name,
-        epoch_interval=20,
+        epoch_interval=1,
     )
 
     trainer = pl.Trainer(
@@ -437,7 +425,7 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data,
-        ckpt_path=f"{run_dir}/{cfg.output_model_name}_weights.ckpt",
+        ckpt_path=run_dir_path / f"{cfg.output_model_name}_weights.ckpt",
     )
     manager()
 

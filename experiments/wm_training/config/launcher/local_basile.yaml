@@ -11,6 +11,7 @@ wandb_entity: basileterv
 wandb_project: stable-wm
 
 wandb:
+  enable: true
   entity: ${wandb_entity}
   project: ${wandb_project}
 

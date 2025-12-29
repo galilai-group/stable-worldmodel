@@ -15,6 +15,7 @@ wandb:
 
 dataset_name: tworoom_noisy
 cache_dir: null
+subdir: null
 
 injected_dataset:
   names: []
