@@ -410,7 +410,7 @@ def run(cfg):
     dump_object_callback = ModelObjectCallBack(
         dirpath=run_dir,
         filename=cfg.output_model_name,
-        epoch_interval=1,
+        epoch_interval=20,
     )
 
     trainer = pl.Trainer(
