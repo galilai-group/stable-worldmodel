@@ -8,6 +8,13 @@ defaults:
   - world_model@datasets.pusht_agent_shape_variation.world_model: pyro
   - world_model@datasets.tworoom.world_model: pyro
   - world_model@datasets.tworoom_agent_color_variation.world_model: pyro
+  - world_model@datasets.tworoom_agent_radius_variation.world_model: pyro
+  - world_model@datasets.tworoom_wall_color_variation.world_model: pyro
+  - world_model@datasets.tworoom_background_color_variation.world_model: pyro
+  - world_model@datasets.ogbench_cube.world_model: pyro_action_only
+  - world_model@datasets.ogbench_cube_variation_all.world_model: pyro_action_only
+  - world_model@datasets.ogbench_scene.world_model: pyro_action_only
+  - world_model@datasets.ogbench_scene_variation_all.world_model: pyro_action_only
   - _self_ # Overrides from this file apply LAST
 
 # Global Settings (Must be consistent across datasets for TSNE dimensions to match)
@@ -19,6 +26,8 @@ frameskip: 5
 cache_dir: null
 
 dimensionality_reduction: tsne
+
+dataset_groups_balancing: true
 
 # Define multiple dataset-model pairs to visualize
 datasets:
@@ -32,6 +41,7 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   pusht_val:
     dataset:
       dataset_name: pusht_expert_val
@@ -42,6 +52,7 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   pusht_background_color_variation:
     dataset:
       dataset_name: pusht_single_var_weak_100/background/color
@@ -52,6 +63,7 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   pusht_block_color_variation:
     dataset:
       dataset_name: pusht_single_var_weak_100/block/color
@@ -62,6 +74,7 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   pusht_agent_color_variation:
     dataset:
       dataset_name: pusht_single_var_weak_100/agent/color
@@ -72,6 +85,7 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   pusht_block_shape_variation:
     dataset:
       dataset_name: pusht_single_var_weak_100/block/shape
@@ -82,6 +96,7 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   pusht_agent_shape_variation:
     dataset:
       dataset_name: pusht_single_var_weak_100/agent/shape
@@ -92,23 +107,103 @@ datasets:
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: pusht
   tworoom:
     dataset:
       dataset_name: tworoom_noisy
       batch_size: 1
       num_workers: 1
-      visual_split: 0.0005
+      visual_split: 0.0009
       data_format: video
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: tworoom
   tworoom_agent_color_variation:
     dataset:
       dataset_name: tworoom_noisy_single_var/agent/color
       batch_size: 1
       num_workers: 1
-      visual_split: 0.0005
+      visual_split: 0.014
       data_format: video
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
       model_name: null
+    dataset_group: tworoom
+  tworoom_background_color_variation:
+    dataset:
+      dataset_name: tworoom_noisy_single_var/background/color
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.014
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: tworoom
+  tworoom_wall_color_variation:
+    dataset:
+      dataset_name: tworoom_noisy_single_var/wall/color
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.014
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: tworoom
+  tworoom_agent_radius_variation:
+    dataset:
+      dataset_name: tworoom_noisy_single_var/agent/radius
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.014
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: tworoom
+  ogbench_cube:
+    dataset:
+      dataset_name: ogb_cube_oracle
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.00003
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: ogbench
+  ogbench_cube_variation_all:
+    dataset:
+      dataset_name: ogb_cube_oracle_variation_all
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.00003
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: ogbench
+  ogbench_scene:
+    dataset:
+      dataset_name: ogb_scene_oracle
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.00003
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: ogbench
+  ogbench_scene_variation_all:
+    dataset:
+      dataset_name: ogb_scene_oracle_variation_all
+      batch_size: 1
+      num_workers: 1
+      visual_split: 0.00003
+      data_format: video
+      n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+    world_model:
+      model_name: null
+    dataset_group: ogbench
