@@ -11,7 +11,7 @@ cache_dir: null # Use stable-worldmodel default cache
 wandb_entity: basileterv
 wandb_project: stable-wm
 
-subdir: ${hydra.job.id}
+subdir: ${hydra:job.id}
 
 wandb:
   enable: true
