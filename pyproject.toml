@@ -36,7 +36,7 @@ dependencies = [
     "shapely",
     "ogbench",
     "wandb",
-    "torchcodec<=0.5",  # compatible with torch<=2.7, Requires FFmpeg 7 (conda package)
+    "decord",
     "minigrid",
 ]
 

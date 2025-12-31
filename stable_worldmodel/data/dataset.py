@@ -3,10 +3,11 @@ import numbers
 import os
 from pathlib import Path
 
+import decord
 import numpy as np
 import torch
 from datasets import concatenate_datasets, load_from_disk
-from torchcodec.decoders import VideoDecoder
+from decord import VideoReader, cpu
 from torchvision.io import decode_image
 
 from stable_worldmodel.data.utils import get_cache_dir
@@ -239,11 +240,14 @@ class VideoDataset(Dataset):
         super().__init__(name, *args, obs_type="videos", **kwargs)
         self.device = device
         self.decode_columns = self.decode_columns or self.determine_video_columns(self.dataset[0])
+        decord.bridge.set_bridge("torch")
 
     def decode(self, data_dirs, col_data, start=0, end=-1):
         path = os.path.join(data_dirs[0], col_data[0])
-        video = VideoDecoder(path, device=self.device)
-        return list(video[start : end : self.frameskip])
+        vr = VideoReader(path, ctx=cpu(0))
+        idxs = list(range(start, end, self.frameskip))
+        frames = vr.get_batch(idxs).transpose(1, -1)
+        return list(frames)
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
