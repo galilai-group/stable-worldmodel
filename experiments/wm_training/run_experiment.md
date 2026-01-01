@@ -61,6 +61,12 @@ Notes:
 git checkout experiments
 ```
 
+You might to set the below variables to avoid bugs with stable-pretraining
+```bash
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+export NCCL_ASYNC_ERROR_HANDLING=1
+```
+
 ---------------
 
 # PushT
