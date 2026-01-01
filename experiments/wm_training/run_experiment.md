@@ -156,3 +156,70 @@ python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun back
 ```bash
 python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_noisy_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
 ```
+
+
+# Cube
+Run the training script from the repository root. Below are several example commands for different backbones.
+
+**all backbones**:
+```bash
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun "backbone=glob(*)" launcher=your_name
+```
+
+**dinov2 encoder scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbone=dinov2_small,dinov2_base,dinov2_large,dinov2_giant launcher=your_name
+```
+
+**predictor scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun predictor=tiny,small,base,large launcher=your_name
+```
+
+**data all variations**:
+```bash
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbone=dinov2_small dataset_name=ogb_cube_oracle_variation_all launcher=your_name
+```
+
+**data scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbone=dinov2_small dataset_name=ogb_cube_oracle,ogb_cube_oracle_variation_all subset_prop=0.1,0.5 launcher=your_name
+```
+
+**variation interpolation**:
+```bash
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbone=dinov2_small dataset_name=ogb_cube_oracle injected_dataset.names="[ogb_cube_oracle_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
+```
+
+# Scene
+Run the training script from the repository root. Below are several example commands for different backbones.
+
+**all backbones**:
+```bash
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun "backbone=glob(*)" launcher=your_name
+```
+
+**dinov2 encoder scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbone=dinov2_small,dinov2_base,dinov2_large,dinov2_giant launcher=your_name
+```
+
+**predictor scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun predictor=tiny,small,base,large launcher=your_name
+```
+
+**data all variations**:
+```bash
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbone=dinov2_small dataset_name=ogb_scene_oracle_variation_all launcher=your_name
+```
+
+**data scaling**:
+```bash
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbone=dinov2_small dataset_name=ogb_scene_oracle,ogb_scene_oracle_variation_all subset_prop=0.1,0.5 launcher=your_name
+```
+
+**variation interpolation**:
+```bash
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbone=dinov2_small dataset_name=ogb_scene_oracle injected_dataset.names="[ogb_scene_oracle_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
+```

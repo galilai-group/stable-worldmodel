@@ -12,6 +12,8 @@ wandb:
   entity: simon-lacoste-julien
 num_workers: 8
 
+subdir: ${hydra:job.id}
+
 hydra:
   mode: MULTIRUN
   launcher:
@@ -22,4 +24,3 @@ hydra:
     account: rrg-bengioy-ad
     additional_parameters:
       gpus: h100:1
-
