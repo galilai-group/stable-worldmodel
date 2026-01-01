@@ -86,6 +86,7 @@ python experiments/wm_training/run.py --config-name=pusht.yaml --multirun backbo
 ```bash
 python experiments/wm_training/run.py --config-name=pusht.yaml --multirun predictor=tiny,small,base,large launcher=your_name
 ```
+>>>>>>>>>>>>>.
 
 **data all variations**:
 ```bash
