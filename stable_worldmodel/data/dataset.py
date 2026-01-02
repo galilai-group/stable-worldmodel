@@ -246,7 +246,7 @@ class VideoDataset(Dataset):
         path = os.path.join(data_dirs[0], col_data[0])
         vr = VideoReader(path, ctx=cpu(0))
         idxs = list(range(start, end, self.frameskip))
-        frames = vr.get_batch(idxs).transpose(1, -1)
+        frames = vr.get_batch(idxs).permute(0, 3, 1, 2)  # TCHW
         return list(frames)
 
     def __getitem__(self, index):
