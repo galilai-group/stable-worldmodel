@@ -122,6 +122,7 @@ def get_data(cfg):
         data = dataset[col][:]
         mean = data.mean(0).unsqueeze(0)
         std = data.std(0).unsqueeze(0)
+        std = std.clamp(min=1e-6)  # Prevent division by near-zero std
         return lambda x: (x - mean) / std
 
     ds_config = {

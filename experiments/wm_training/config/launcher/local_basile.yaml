@@ -9,6 +9,9 @@ cache_dir: null # Use stable-worldmodel default cache
 wandb_entity: basileterv
 wandb_project: stable-wm
 
+# Generate unique subdir for local runs to avoid checkpoint conflicts
+subdir: local_${now:%Y-%m-%d_%H-%M-%S}
+
 wandb:
   enable: true
   entity: ${wandb_entity}
@@ -16,4 +19,4 @@ wandb:
 
 # Override trainer to use 2 GPUs explicitly
 trainer:
-  devices: 2  # Use exactly 2 GPUs
+  devices: 1  # Use exactly 2 GPUs
