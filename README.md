@@ -172,6 +172,48 @@ pytest
 pytest --cov=stable_worldmodel --cov-report=term-missing
 ```
 
+## Simple Install
+
+### Setup
+```bash
+mkdir -p ~/scratch/datasets/
+cd ~/scratch/
+git clone https://github.com/rbalestr-lab/stable-worldmodel
+cd stable-worldmodel
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+uv venv --python=3.10.4
+source .venv/bin/activate
+git fetch --all
+git pull
+git checkout experiments
+uv pip install -e .
+uv pip install gdown wandb hydra-submitit-launcher datasets==4.1.1
+echo 'alias swm="cd ~/scratch/stable-worldmodel && source .venv/bin/activate"' >> ~/.bashrc
+echo 'export HF_HOME=~/scratch/datasets/hf/' >> ~/.bashrc
+echo 'export STABLEWM_HOME=~/scratch/datasets/' >> ~/.bashrc
+source ~/.bashrc
+```
+### OGBench - Scene
+```bash
+gdown --folder 1t4rlIxLL1mdZHDeqofInBI9tIghoyXnc && mv dataset/* . && rmdir dataset && ls *.tar.zst | xargs -n1 tar --zstd -xf && rm *.tar.zst
+```
+
+### OGBench - Cube
+```bash
+gdown --folder 1Yz1FtA0xQEPZ_zH8RaAPpmqAWHxZqKob && mv dataset/* . && rmdir dataset && ls *.tar.zst | xargs -n1 tar --zstd -xf && rm *.tar.zst
+```
+
+### TwoRoom
+```bash
+gdown --folder 1OaFonvWWVnzabL_RPICoblB3rylZL0pI && mv dataset/* . && rmdir dataset && ls *.tar.zst | xargs -n1 tar --zstd -xf && rm *.tar.zst
+```
+
+### PushT
+```bash
+gdown --folder 1M7PfMRzoSujcUkqZxEfwjzGBIpRMdl88 && mv dataset/* . && rmdir dataset && ls *.tar.zst | xargs -n1 tar --zstd -xf && rm *.tar.zst
+```
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
