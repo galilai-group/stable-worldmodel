@@ -30,4 +30,4 @@ hydra:
     nodes: 1
     partition: learn
     account: fair_amaia_cw_video
-    qos: lowest
+    qos: explore

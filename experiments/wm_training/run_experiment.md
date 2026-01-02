@@ -150,12 +150,12 @@ python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun back
 
 **quality interpolation**:
 ```bash
-python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_random]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name -m
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_random]" injected_dataset.proportions="[0.95],[0.9],[0.8],[0.5],[0.2]" launcher=your_name
 ```
 
 **variation interpolation**:
 ```bash
-python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_noisy_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
+python experiments/wm_training/run.py --config-name=tworoom.yaml --multirun backbone=dinov2_small dataset_name=tworoom_noisy injected_dataset.names="[tworoom_noisy_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name
 ```
 
 

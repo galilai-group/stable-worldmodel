@@ -1,5 +1,4 @@
 # @package _global_
-# Local launcher configuration (no SLURM)
 
 defaults:
   - override /hydra/launcher: basic
