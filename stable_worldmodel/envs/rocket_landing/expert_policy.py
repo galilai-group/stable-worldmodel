@@ -490,7 +490,9 @@ class ExpertPolicy(BasePolicy):
 
         actions = []
         for idx, single_obs in enumerate(obs_batch):
-            state_dict = parse_observation(single_obs, "quaternion", pad_position=pad_position)
+            # Extract pad position for this specific environment
+            pad_pos_for_env = pad_position[idx] if pad_position is not None else None
+            state_dict = parse_observation(single_obs, "quaternion", pad_position=pad_pos_for_env)
             controller = self.controllers[idx]
             action = controller.compute_control(state_dict)
             controller.post_step_update()

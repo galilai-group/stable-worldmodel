@@ -68,6 +68,9 @@ class RocketLandingEnv(RocketBaseEnv):
             render_resolution=render_resolution,
         )
 
+        # Store agent_hz for timestep calculations
+        self.agent_hz = agent_hz
+
         """GYMNASIUM STUFF"""
         # the space is the standard space + pad touch indicator
         self.observation_space = Box(
