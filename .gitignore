@@ -220,3 +220,7 @@ dataset/
 *.mp4
 lightning_logs/
 old_tests/
+
+# Hydra configuration outputs
+.hydra/
+hydra/
