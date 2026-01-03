@@ -227,3 +227,7 @@ hydra/
 
 # Assets
 assets/stable-worldmodel-logo.png
+
+# Local testing examples
+examples/example_rocketlanding.py
+examples/example_rocketlanding_moving_pad.py
