@@ -224,3 +224,6 @@ old_tests/
 # Hydra configuration outputs
 .hydra/
 hydra/
+
+# Assets
+assets/stable-worldmodel-logo.png
