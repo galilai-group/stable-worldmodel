@@ -189,7 +189,7 @@ python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbon
 
 **variation interpolation**:
 ```bash
-python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbone=dinov2_small dataset_name=ogb_cube_oracle injected_dataset.names="[ogb_cube_oracle_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
+python experiments/wm_training/run.py --config-name=cube.yaml --multirun backbone=dinov2_small dataset_name=ogb_cube_oracle injected_dataset.names="[ogb_cube_oracle_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name
 ```
 
 # Scene
@@ -222,5 +222,5 @@ python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbo
 
 **variation interpolation**:
 ```bash
-python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbone=dinov2_small dataset_name=ogb_scene_oracle injected_dataset.names="[ogb_scene_oracle_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name -m
+python experiments/wm_training/run.py --config-name=scene.yaml --multirun backbone=dinov2_small dataset_name=ogb_scene_oracle injected_dataset.names="[ogb_scene_oracle_variation_all]" injected_dataset.proportions="[0.5],[0.1],[0.01]" launcher=your_name
 ```
