@@ -35,6 +35,7 @@ def get_encoder(cfg):
         "dino": {"prefix": "facebook/dino-"},
         "dinov2": {"prefix": "facebook/dinov2-"},
         "dinov3": {"prefix": "facebook/dinov3-"},
+        "webssl": {"prefix": "facebook/webssl-"},
         "mae": {"prefix": "facebook/vit-mae-"},
         "ijepa": {"prefix": "facebook/ijepa"},
         "vjepa2": {"prefix": "facebook/vjepa2-vit"},
