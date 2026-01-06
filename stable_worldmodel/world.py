@@ -969,8 +969,8 @@ class World:
         columns = dataset.dataset.column_names
 
         # keep relevant part of the chunk
-        init_step_per_env = {c: [] for c in columns}
-        goal_step_per_env = {c: [] for c in columns}
+        init_step_per_env = defaultdict(list)
+        goal_step_per_env = defaultdict(list)
 
         for i, ep in enumerate(data):
             for col in columns:
@@ -979,6 +979,9 @@ class World:
                 if col.startswith("pixels"):
                     # permute channel to be last
                     ep[col] = ep[col].permute(0, 2, 3, 1)
+
+                if not isinstance(ep[col], (torch.Tensor | np.ndarray)):
+                    continue
 
                 init_data = ep[col][0]
                 goal_data = ep[col][-1]
@@ -1006,55 +1009,61 @@ class World:
         init_step.update(deepcopy(goal_step))
         self.reset(seed=seeds, options=options)  # set seeds for all envs
 
-        init_step = {k: v for k, v in init_step.items() if k in self.infos}
-        goal_step = {k: v for k, v in goal_step.items() if k in self.infos}
+        # init_step = {k: v for k, v in init_step.items() if k in self.infos}
+        # goal_step = {k: v for k, v in goal_step.items() if k in self.infos}
 
         # apply callable list (e.g used for set initial position if not access to seed)
         callables = callables or {}
         for i, env in enumerate(self.envs.unwrapped.envs):
             env = env.unwrapped
-            for method_name, col_name in callables.items():
+
+            for spec in callables:
+                method_name = spec["method"]
                 if not hasattr(env, method_name):
                     logging.warning(f"Env {env} has no method {method_name}, skipping callable")
                     continue
 
-                if col_name not in init_step:
-                    logging.warning(f"Column {col_name} not found in dataset, skipping callable for env {env}")
-                    continue
-
                 method = getattr(env, method_name)
-                data = deepcopy(init_step[col_name][i])
-                method(data)
+                args = spec.get("args", spec)
+
+                # prepare args
+                prepared_args = {}
+                for args_name, args_data in args.items():
+                    value = args_data.get("value", None)
+                    is_in_datset = args_data.get("in_dataset", True)
+
+                    if is_in_datset:
+                        if value not in init_step:
+                            logging.warning(f"Col {value} not found in dataset, skipping callable for env {env}")
+                            continue
+                        prepared_args[args_name] = deepcopy(init_step[value][i])
+                    else:
+                        prepared_args[args_name] = args_data.get("value")
+
+                # call method with prepared args
+                method(**prepared_args)
 
         for i, env in enumerate(self.envs.unwrapped.envs):
             env = env.unwrapped
 
-            # assert np.allclose(init_step["state"][i], env._get_obs()), "State info does not match at reset"
-            # assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
-            #     "Goal state info does not match at reset"
-            # )
-
+            # TODO remove this
             if "goal_state" in init_step and "goal_state" in goal_step:
                 assert np.array_equal(init_step["goal_state"][i], goal_step["goal_state"][i]), (
                     "Goal state info does not match at reset"
                 )
+
         results = {
             "success_rate": 0,
             "episode_successes": np.zeros(len(episodes_idx)),
             "seeds": seeds,
         }
 
-        # broadcast info dict from dataset to match envs infos shape
-        goal_step = {
-            k: (np.broadcast_to(v[:, None, ...], self.infos[k].shape) if k in self.infos else v)
-            for k, v in goal_step.items()
-        }
+        # expend all data to the right shape (x, y, (original_shape))
+        shape_prefix = next(iter(self.infos.values())).shape[:2]
 
         # TODO get the data from the previous step in the dataset for history
-        init_step = {
-            k: (np.broadcast_to(v[:, None, ...], self.infos[k].shape) if k in self.infos else v)
-            for k, v in init_step.items()
-        }
+        init_step = {k: np.broadcast_to(v[:, None, ...], shape_prefix + v.shape[1:]) for k, v in init_step.items()}
+        goal_step = {k: np.broadcast_to(v[:, None, ...], shape_prefix + v.shape[1:]) for k, v in goal_step.items()}
 
         # update the reset with our new init and goal infos
         self.infos.update(deepcopy(init_step))

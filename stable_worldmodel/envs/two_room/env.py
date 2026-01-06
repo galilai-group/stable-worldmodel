@@ -204,20 +204,19 @@ class TwoRoomEnv(gym.Env):
 
         # generate goal
         if options is not None and "goal_state" in options:
-            goal_state = options["goal_state"]
+            goal_pos = options["goal_state"]  # TODO replace this with goal_pos
         else:
-            goal_state = self.variation_space["goal"]["position"].value
-        self._set_state(np.concatenate([goal_state, goal_state]))
+            goal_pos = self.variation_space["goal"]["position"].value
+        self._set_position(goal_pos, goal_pos)
         self._goal = self.render()
 
         # restore original state
         if options is not None and "state" in options:
-            state = options["state"]
+            state = options["state"]  # TODO replace this with agent_pos and goal_pos
         else:
             agent_pos = self.variation_space["agent"]["position"].value
             goal_pos = self.variation_space["goal"]["position"].value
-            state = np.concatenate([agent_pos, goal_pos])
-        self._set_state(state)
+        self._set_position(agent_pos, goal_pos)
 
         # generate observation
         state = self._get_obs()
@@ -453,15 +452,12 @@ class TwoRoomEnv(gym.Env):
         self.space.on_collision(0, 0, post_solve=self._handle_collision)
         self.n_contact_points = 0
 
-    def _set_state(self, state):
-        if isinstance(state, np.ndarray):
-            state = state.tolist()
+    def _set_position(self, agent_position, goal_position):
+        agent_pos = agent_position.tolist() if isinstance(agent_position, np.ndarray) else agent_position
+        goal_pos = goal_position.tolist() if isinstance(goal_position, np.ndarray) else goal_position
 
-        pos_agent = state[:2]
-        pos_goal = state[2:4]
-
-        self.agent.position = pos_agent
-        self.goal.position = pos_goal
+        self.agent.position = agent_pos
+        self.goal.position = goal_pos
 
         self.space.step(self.dt)
 
@@ -482,6 +478,7 @@ class TwoRoomEnv(gym.Env):
             "energy": self.energy,
             "max_energy": self.variation_space["agent"]["max_energy"].value,
         }
+
         return info
 
     def _set_body_color(self, body, color):

@@ -135,7 +135,12 @@ class SceneEnv(ManipSpaceEnv):
             }
         )
 
-    def set_state(self, qpos, qvel, button_states):
+    def set_state(self, qpos, qvel, **kwargs):
+        button_data = {
+            int(key.split("_")[-1]): value for key, value in kwargs.items() if key.startswith("button_state_")
+        }
+        button_states = [button_data[i] for i in range(self._num_buttons)]
+
         self._cur_button_states = button_states.copy()
         self._apply_button_states()
         super().set_state(qpos, qvel)
@@ -667,6 +672,30 @@ class SceneEnv(ManipSpaceEnv):
         window_success = np.abs(self._data.joint("window_slide").qpos[0] - self._target_window_pos) <= 0.04
 
         return cube_successes, button_successes, drawer_success, window_success
+
+    def set_cube_target_pos(self, cube_id, target_pos, target_quat=None):
+        """Set the target position and optional orientation for a specific cube."""
+        num_target_pos = len(self._cube_target_mocap_ids)
+        if cube_id < 0 or cube_id >= num_target_pos:
+            raise ValueError(f"cude_id out of range (maximum {num_target_pos - 1})")
+        mocap_id = self._cube_target_mocap_ids[cube_id]
+        self._data.mocap_pos[mocap_id] = np.asarray(target_pos, dtype=np.float64)
+        if target_quat is not None:
+            self._data.mocap_quat[mocap_id] = target_quat
+
+    def set_target_button_state(self, button_id, target_state):
+        """Set the target state for a specific button."""
+        if button_id < 0 or button_id >= self._num_buttons:
+            raise ValueError(f"button_id out of range (maximum {self._num_buttons - 1})")
+        self._target_button_states[button_id] = target_state
+
+    def set_target_drawer_pos(self, target_pos):
+        """Set the target position for the drawer."""
+        self._target_drawer_pos = target_pos
+
+    def set_target_window_pos(self, target_pos):
+        """Set the target position for the window."""
+        self._target_window_pos = target_pos
 
     def post_step(self):
         # Check numerical stability.

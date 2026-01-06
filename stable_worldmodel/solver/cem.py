@@ -168,8 +168,6 @@ class CEMSolver:
                 # We average the cost of the top elites
                 final_batch_cost = topk_vals.mean(dim=1).cpu().tolist()
 
-                # print(f"Batch {start_idx}-{end_idx}, Step {step + 1}/{self.n_steps}, Cost: {final_batch_cost}")
-
             # Write results back to global storage
             mean[start_idx:end_idx] = batch_mean
             var[start_idx:end_idx] = batch_var
