@@ -23,7 +23,7 @@ eval:
   num_eval: 50
   goal_offset_steps: 25
   eval_budget: 50
-  dataset_name: pusht_expert_train
+  dataset_name: pusht_expert_train_video
   callables:
     # -- set state
     - method: _set_state

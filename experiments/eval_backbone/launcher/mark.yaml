@@ -3,7 +3,7 @@
 defaults:
   - override /hydra/launcher: submitit_slurm
 
-n_gpus: 8
+n_gpus: 1
 cpus_per_gpu: 12
 cpus_per_task: ${n_gpus} * ${cpus_per_gpu}
 mem_per_gpu_gb: 64
