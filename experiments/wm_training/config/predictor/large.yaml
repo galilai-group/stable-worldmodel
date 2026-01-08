@@ -1,7 +1,0 @@
-size: "large"
-depth: 12
-heads: 32
-dim_head: 64        # d_model = 2048
-mlp_dim: 4096       # 2 * 2048
-dropout: 0.1
-emb_dropout: 0.0
