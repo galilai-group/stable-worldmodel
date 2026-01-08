@@ -15,7 +15,7 @@ world:
   width: 224
   height: 224
   visualize_info: False
-  terminate_at_goal: False
+  terminate_at_goal: True
 
 seed: 42
 policy: random # ckpt name or random
