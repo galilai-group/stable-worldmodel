@@ -1,0 +1,22 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+n_gpus: 4
+cpus_per_task: 4
+cache_dir: /network/scratch/l/lucas.maes/datasets/datasets/
+
+wandb_entity: simon-lacoste-julien
+wandb_project: stable-wm
+
+hydra:
+  mode: MULTIRUN
+
+  launcher:
+    timeout_min: 10080 # 1 week
+    cpus_per_task: ${cpus_per_task}
+    mem_gb: 256
+    gpus_per_node: ${n_gpus}
+    tasks_per_node: ${n_gpus}
+    partition: long

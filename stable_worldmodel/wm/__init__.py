@@ -1,4 +1,4 @@
-from . import dinowm
+from . import dinowm, pyro
 from .dinowm import DINOWM
 from .dummy import DummyWorldModel  # noqa: F401
 from .pyro import PYRO

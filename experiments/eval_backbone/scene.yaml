@@ -1,0 +1,90 @@
+defaults:
+  - launcher: local
+  - solver: cem
+  - _self_
+
+world:
+  env_name: swm/OGBScene-v0
+  num_envs: ${eval.num_eval}
+  max_episode_steps: ??? # make sure it's >= eval_budget
+  history_size: 1
+  frame_skip: 1
+  env_type: single
+  ob_type: pixels
+  multiview: False
+  width: 224
+  height: 224
+  visualize_info: False
+  terminate_at_goal: True
+
+seed: 42
+policy: random # ckpt name or random
+
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5 # frameskip
+
+# evaluation from dataset (replay expert trajectories)
+eval:
+  num_eval: 50
+  goal_offset_steps: 25
+  eval_budget: 50
+  dataset_name: ogb_scene_oracle
+
+  callables:
+    # -- set start state
+    - method: set_state
+      args:
+        qpos:
+          value: qpos
+        qvel:
+          value: qvel
+        button_state_0:
+          value: privileged/button_0_state
+        button_state_1:
+          value: privileged/button_1_state
+
+    # -- set goal cube pos
+    - method: set_cube_target_pos
+      args:
+        cube_id:
+          value: 0
+          in_dataset: False
+        target_pos:
+          value: goal_privileged/block_0_pos
+        target_quat:
+          value: goal_privileged/block_0_quat
+
+    # -- set goal button state (button 0)
+    - method: set_target_button_state
+      args:
+        button_id:
+          value: 0
+          in_dataset: False
+        target_state:
+          value: goal_privileged/button_0_state
+
+    # -- set goal button state (button 1)
+    - method: set_target_button_state
+      args:
+        button_id:
+          value: 1
+          in_dataset: False
+        target_state:
+          value: goal_privileged/button_1_state
+
+    # -- set goal drawer pos
+    - method: set_target_drawer_pos
+      args:
+        target_pos:
+          value: goal_privileged/drawer_pos
+
+    # -- set goal window pos
+    - method: set_target_window_pos
+      args:
+        target_pos:
+          value: goal_privileged/window_pos
+
+output:
+  filename: ogb_scene_results.txt

@@ -1,0 +1,7 @@
+size: "tiny"
+depth: 4
+heads: 8
+dim_head: 64        # d_model = 512
+mlp_dim: 1024       # 2 * 512
+dropout: 0.1
+emb_dropout: 0.0

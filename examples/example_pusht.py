@@ -129,16 +129,30 @@ if __name__ == "__main__":
             return emb
 
     model.backbone = DinoV2Encoder("dinov2_vits14", feature_key="x_norm_patchtokens").to("cuda")
-    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt")
 
-    model.predictor.load_state_dict(ckpt["predictor"], strict=False)
-    model.action_encoder.load_state_dict(ckpt["action_encoder"])
-    model.proprio_encoder.load_state_dict(ckpt["proprio_encoder"])
+    # Load PyTorch Lightning checkpoint and extract state dicts
+    ckpt = torch.load(swm.data.utils.get_cache_dir() / "dinowm_pusht_weights.ckpt", weights_only=False)
+    state_dict = ckpt["state_dict"]
+
+    def extract_state_dict(state_dict, prefix):
+        """Extract and rename keys matching a prefix from the full state dict."""
+        extracted = {}
+        for key, value in state_dict.items():
+            if key.startswith(prefix):
+                new_key = key[len(prefix) :]
+                extracted[new_key] = value
+        return extracted
+
+    predictor_state = extract_state_dict(state_dict, "model.predictor.")
+    action_encoder_state = extract_state_dict(state_dict, "model.extra_encoders.action.")
+    proprio_encoder_state = extract_state_dict(state_dict, "model.extra_encoders.proprio.")
+
+    model.predictor.load_state_dict(predictor_state, strict=False)
+    model.extra_encoders["action"].load_state_dict(action_encoder_state)
+    model.extra_encoders["proprio"].load_state_dict(proprio_encoder_state)
 
     model = model.to("cuda")
     model = model.eval()
-
-    print(ckpt.keys())
 
     world.set_policy(policy)
     # sample 50 episodes idx

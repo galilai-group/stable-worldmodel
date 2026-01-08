@@ -29,7 +29,7 @@ class SimpleNavigationEnv(MiniGridEnv):
     The agent can move in the maze by moving forward, turning left, or turning right.
     """
 
-    def __init__(self, size=8, render_mode="rgb_array", *args, **kwargs):
+    def __init__(self, size=9, render_mode="rgb_array", *args, **kwargs):
         """Initialize the Simple Navigation Environment
 
         Args:
@@ -125,11 +125,8 @@ class SimpleNavigationEnv(MiniGridEnv):
         )
 
     def reset(self, seed=None, options=None):
-        if seed is not None:
-            self._maze_seed = seed
-
+        self._maze_seed = seed
         super().reset(seed=seed, options=options)
-
         if hasattr(self, "variation_space"):
             self.variation_space.seed(seed)
 
@@ -281,7 +278,7 @@ class SimpleNavigationEnv(MiniGridEnv):
         return not (int(agent_pos[0]) == x and int(agent_pos[1]) == y)
 
 
-def ellers_maze(width, height, seed, p_horizontal=0.5, p_vertical=0.5):
+def ellers_maze(width, height, seed=None, p_horizontal=0.5, p_vertical=0.5):
     """Generate a maze using the Eller's algorithm.
 
     Args:

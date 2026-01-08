@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+n_gpus: 1
+cpus_per_task: 6
+cache_dir: /network/scratch/l/lucas.maes/datasets/xenoworlds/
+
+wandb:
+  use_wandb: false
+  entity: stable-wm
+  project: stable-wm
+
+hydra:
+  mode: MULTIRUN
+
+  launcher:
+    timeout_min: 2880 # 2 days
+    cpus_per_task: ${cpus_per_task}
+    mem_gb: 32
+    gpus_per_node: ${n_gpus}
+    tasks_per_node: ${n_gpus}
+    partition: long

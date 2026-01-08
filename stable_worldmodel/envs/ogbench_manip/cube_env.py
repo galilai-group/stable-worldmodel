@@ -1121,12 +1121,24 @@ class CubeEnv(ManipSpaceEnv):
         for i in range(self._num_cubes):
             obj_pos = self._data.joint(f"object_joint_{i}").qpos[:3]
             tar_pos = self._data.mocap_pos[self._cube_target_mocap_ids[i]]
+
             if np.linalg.norm(obj_pos - tar_pos) <= 0.04:
                 cube_successes.append(True)
             else:
                 cube_successes.append(False)
 
         return cube_successes
+
+    def set_target_pos(self, cube_id, target_pos, target_quat=None):
+        """Set the target position and optional orientation for a specific cube."""
+        num_target_pos = len(self._cube_target_mocap_ids)
+        if cube_id < 0 or cube_id >= num_target_pos:
+            raise ValueError(f"cube_id out of range (maximum {num_target_pos - 1})")
+        mocap_id = self._cube_target_mocap_ids[cube_id]
+        self._data.mocap_pos[mocap_id] = np.asarray(target_pos, dtype=np.float64)
+        if target_quat is not None:
+            self._data.mocap_quat[mocap_id] = target_quat
+        # mujoco.mj_forward(self._model, self._data)
 
     def post_step(self):
         """Update environment state after each simulation step.

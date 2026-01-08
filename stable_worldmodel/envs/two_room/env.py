@@ -138,10 +138,6 @@ class TwoRoomEnv(gym.Env):
                         "thickness": swm.spaces.Discrete(25, start=9, init_value=19),
                         # 0: horizontal, 1: vertical
                         "axis": swm.spaces.Discrete(2, init_value=1),
-                        # "position": swm.spaces.Discrete(
-                        #     self.size,
-                        #     init_value=self.size // 2,
-                        # ),
                         "border_color": swm.spaces.RGBBox(init_value=np.array([180, 189, 204], dtype=np.uint8)),
                     },
                     sampling_order=["color", "border_color", "thickness", "axis"],
@@ -208,20 +204,19 @@ class TwoRoomEnv(gym.Env):
 
         # generate goal
         if options is not None and "goal_state" in options:
-            goal_state = options["goal_state"]
+            goal_pos = options["goal_state"]  # TODO replace this with goal_pos
         else:
-            goal_state = self.variation_space["goal"]["position"].value
-        self._set_state(np.concatenate([goal_state, goal_state]))
+            goal_pos = self.variation_space["goal"]["position"].value
+        self._set_position(goal_pos, goal_pos)
         self._goal = self.render()
 
         # restore original state
         if options is not None and "state" in options:
-            state = options["state"]
+            state = options["state"]  # TODO replace this with agent_pos and goal_pos
         else:
             agent_pos = self.variation_space["agent"]["position"].value
             goal_pos = self.variation_space["goal"]["position"].value
-            state = np.concatenate([agent_pos, goal_pos])
-        self._set_state(state)
+        self._set_position(agent_pos, goal_pos)
 
         # generate observation
         state = self._get_obs()
@@ -240,11 +235,9 @@ class TwoRoomEnv(gym.Env):
 
         action_norm = np.linalg.norm(action)
         if action_norm > self.max_step_norm:
-            # action is a numPy array
             action = (action / action_norm) * self.max_step_norm
 
         velocity = action / control_period
-
         speed = self.variation_space["agent"]["speed"].value.item()
 
         self.latest_action = action
@@ -264,8 +257,6 @@ class TwoRoomEnv(gym.Env):
 
         info = self._get_info()
 
-        ### check termination condition
-
         goal_geom = pymunk_to_shapely(self.goal, self.goal.shapes)
         agent_geom = pymunk_to_shapely(self.agent, self.agent.shapes)
 
@@ -279,29 +270,11 @@ class TwoRoomEnv(gym.Env):
         info["fraction_of_goal"] = fraction_of_goal
         info["fraction_of_agent"] = fraction_of_agent
 
-        terminated = (
-            fraction_of_goal >= 0.5  # at least 50% of goal covered
-            or fraction_of_agent >= 0.5  # at least 50% of agent inside
-        )
-
+        terminated = (fraction_of_goal >= 0.5) or (fraction_of_agent >= 0.5)
         truncated = self.energy <= 0
         reward = 1.0 if terminated else -0.01
 
         return observation, reward, terminated, truncated, info
-
-    # def add_circle(
-    #     self,
-    #     position,
-    #     radius,
-    #     color,
-    # ):
-    #     body = pymunk.Body(body_type=pymunk.Body.DYNAMIC)
-    #     body.position = position
-    #     body.friction = 1
-    #     shape = pymunk.Circle(body, radius)
-    #     shape.color = pygame.Color(color)
-    #     self.space.add(body, shape)
-    #     return body
 
     def add_circle(self, position, radius, color, *, is_goal=False):
         if not is_goal:
@@ -326,10 +299,20 @@ class TwoRoomEnv(gym.Env):
         return body
 
     def _add_segment(self, a, b, size, color, collision=True):
+        """
+        Creates a thick wall as a convex polygon. This assumes that a and b are distinct points.
+        Degenerate spans should be filtered out before calling this.
+        """
         a, b = Vec2d(*a), Vec2d(*b)
+
+        # Guard against degenerate inputs (defensive)
+        if (b - a).length < 1e-6:
+            return None
+
         ab = (b - a).normalized()
         perp = ab.perpendicular() * (size / 2)
         points = [a + perp, b + perp, b - perp, a - perp]
+
         shape = pymunk.Poly(self.space.static_body, points)
         shape.color = pygame.Color(color)
         shape.sensor = not collision
@@ -344,65 +327,94 @@ class TwoRoomEnv(gym.Env):
 
         # -- wall and doors
         wall_color = self.variation_space["wall"]["color"].value.tolist()
-        wall_thickness = self.variation_space["wall"]["thickness"].value
-        wall_axis = self.variation_space["wall"]["axis"].value
+        wall_thickness = float(self.variation_space["wall"]["thickness"].value)
+        wall_axis = int(self.variation_space["wall"]["axis"].value)
 
-        door_number = self.variation_space["door"]["number"].value
-        door_positions = self.variation_space["door"]["position"].value[:door_number]
-        door_sizes = self.variation_space["door"]["size"].value[:door_number]
+        door_number = int(self.variation_space["door"]["number"].value)
+        door_positions = list(self.variation_space["door"]["position"].value[:door_number])
+        door_sizes = list(self.variation_space["door"]["size"].value[:door_number])
         door_color = self.variation_space["door"]["color"].value.tolist()
 
-        door_positions, door_sizes = zip(*sorted(zip(door_positions, door_sizes), key=lambda x: x[0]))
+        # Sort doors by position
+        if door_number > 0:
+            door_positions, door_sizes = zip(*sorted(zip(door_positions, door_sizes), key=lambda x: x[0]))
+            door_positions, door_sizes = list(door_positions), list(door_sizes)
+        else:
+            door_positions, door_sizes = [], []
 
-        # if door overlaps, merge them
+        # Merge overlapping doors (FIX: actually use merged results)
         merged_positions = []
         merged_sizes = []
-        current_pos = door_positions[0]
-        current_size = door_sizes[0]
-        for pos, size in zip(door_positions[1:], door_sizes[1:]):
-            if pos <= current_pos + current_size:
-                # overlap
-                new_end = max(current_pos + current_size, pos + size)
-                current_size = new_end - current_pos
-            else:
-                merged_positions.append(current_pos)
-                merged_sizes.append(current_size)
-                current_pos = pos
-                current_size = size
+        if len(door_positions) > 0:
+            current_pos = int(door_positions[0])
+            current_size = int(door_sizes[0])
+            for pos, size in zip(door_positions[1:], door_sizes[1:]):
+                pos = int(pos)
+                size = int(size)
+                if pos <= current_pos + current_size:
+                    new_end = max(current_pos + current_size, pos + size)
+                    current_size = new_end - current_pos
+                else:
+                    merged_positions.append(current_pos)
+                    merged_sizes.append(current_size)
+                    current_pos = pos
+                    current_size = size
+            merged_positions.append(current_pos)
+            merged_sizes.append(current_size)
+
+            door_positions, door_sizes = merged_positions, merged_sizes
 
         def pt(t):
+            # wall_axis == 1 -> vertical wall at x=wall_pos; t moves along y
             return (self.wall_pos, self.border_size + t) if wall_axis == 1 else (self.border_size + t, self.wall_pos)
+
+        def clamp_int(x, lo, hi):
+            return int(max(lo, min(hi, int(x))))
+
+        def clamp_span(lo, hi):
+            lo = clamp_int(lo, 0, self.size)
+            hi = clamp_int(hi, 0, self.size)
+            return lo, hi
 
         wall_segments = []
         door_segments = []
         current = 0
 
         for pos, size in zip(door_positions, door_sizes):
-            wall_span = (current, pos - 1)
-            door_span = (
-                pos,
-                pos + size,
-            )
+            # Clamp door span into bounds
+            d0, d1 = clamp_span(pos, pos + size)
 
-            door = self._add_segment(
-                pt(door_span[0]),
-                pt(door_span[1]),
-                wall_thickness,
-                door_color,
-                collision=False,
-            )
-            wall = self._add_segment(pt(wall_span[0]), pt(wall_span[1]), wall_thickness, wall_color)
+            # Wall span before door (inclusive endpoints)
+            w0, w1 = clamp_span(current, d0 - 1)
 
-            door_segments.append(door)
-            wall_segments.append(wall)
-            current = door_span[1] + 1
+            # Add wall only if it has length >= 1
+            if (w1 - w0) >= 1:
+                wall = self._add_segment(pt(w0), pt(w1), wall_thickness, wall_color, collision=True)
+                if wall is not None:
+                    wall_segments.append(wall)
 
-        # add last wall segment
-        last_wall = self._add_segment(pt(current), pt(self.size), wall_thickness, wall_color)
-        wall_segments.append(last_wall)
+            # Add door only if it has length >= 1 (non-colliding)
+            if (d1 - d0) >= 1:
+                door = self._add_segment(pt(d0), pt(d1), wall_thickness, door_color, collision=False)
+                if door is not None:
+                    door_segments.append(door)
+
+            current = d1 + 1
+
+        # Add last wall segment
+        w0, w1 = clamp_span(current, self.size)
+        if (w1 - w0) >= 1:
+            last_wall = self._add_segment(pt(w0), pt(w1), wall_thickness, wall_color, collision=True)
+            if last_wall is not None:
+                wall_segments.append(last_wall)
 
         self.doors = door_segments
-        self.space.add(*wall_segments)
+
+        # Add all segments to space (FIX: add door segments too; they're sensors)
+        if wall_segments:
+            self.space.add(*[s for s in wall_segments if s is not None])
+        if door_segments:
+            self.space.add(*[s for s in door_segments if s is not None])
 
         # -- border
         border_dict = {
@@ -413,27 +425,24 @@ class TwoRoomEnv(gym.Env):
         }
 
         border_color = self.variation_space["wall"]["border_color"].value.tolist()
-        border = [self._add_segment(a, b, self.border_size, border_color) for (a, b) in border_dict.values()]
-        self.space.add(*border)
-
-        # TODO add wall and doors
-
-        # consider the whole wall and split it into segments to create the doors?
-        # assert the total size is width of the wall
-        # to make door traversable, remove friction (shape.sensor = True)
+        border = []
+        for a, b in border_dict.values():
+            seg = self._add_segment(a, b, self.border_size, border_color, collision=True)
+            if seg is not None:
+                border.append(seg)
+        if border:
+            self.space.add(*border)
 
         # -- agent
         agent_pos = self.variation_space["agent"]["position"].value.tolist()
         agent_radius = self.variation_space["agent"]["radius"].value.item()
         agent_color = self.variation_space["agent"]["color"].value.tolist()
-
         self.agent = self.add_circle(agent_pos, agent_radius, agent_color)
 
         # -- goal
         goal_pos = self.variation_space["goal"]["position"].value.tolist()
         goal_radius = self.variation_space["goal"]["radius"].value.item()
         goal_color = self.variation_space["goal"]["color"].value.tolist()
-
         self.goal = self.add_circle(goal_pos, goal_radius, goal_color, is_goal=True)
 
         # -- energy
@@ -443,16 +452,12 @@ class TwoRoomEnv(gym.Env):
         self.space.on_collision(0, 0, post_solve=self._handle_collision)
         self.n_contact_points = 0
 
-    def _set_state(self, state):
-        if isinstance(state, np.ndarray):
-            state = state.tolist()
+    def _set_position(self, agent_position, goal_position):
+        agent_pos = agent_position.tolist() if isinstance(agent_position, np.ndarray) else agent_position
+        goal_pos = goal_position.tolist() if isinstance(goal_position, np.ndarray) else goal_position
 
-        pos_agent = state[:2]
-        pos_goal = state[2:4]
-        # energy = state[-1]
-
-        self.agent.position = pos_agent
-        self.goal.position = pos_goal
+        self.agent.position = agent_pos
+        self.goal.position = goal_pos
 
         self.space.step(self.dt)
 
@@ -473,6 +478,7 @@ class TwoRoomEnv(gym.Env):
             "energy": self.energy,
             "max_energy": self.variation_space["agent"]["max_energy"].value,
         }
+
         return info
 
     def _set_body_color(self, body, color):
@@ -482,14 +488,6 @@ class TwoRoomEnv(gym.Env):
 
     def render(self):
         return self._render_frame(self.render_mode)
-
-    def _get_pose_body(self, pose):
-        mass = 1
-        inertia = pymunk.moment_for_box(mass, (50, 100))
-        body = pymunk.Body(mass, inertia)
-        body.position = pose[:2].tolist()
-        body.angle = pose[2]
-        return body
 
     def _render_frame(self, mode):
         if self.window is None and mode == "human":
@@ -508,13 +506,16 @@ class TwoRoomEnv(gym.Env):
 
         self._set_body_color(self.goal, self.variation_space["goal"]["color"].value.tolist())
 
-        # draw doors
+        # draw doors (render-time draw; also present in debug_draw as sensor polys)
         for door in self.doors:
-            door_points = [
-                pm_util.to_pygame(door.body.local_to_world(v), draw_options.surface) for v in door.get_vertices()
-            ]
-            door_points.append(door_points[0])  # close shape
-            pygame.draw.polygon(canvas, door.color, door_points)
+            if door is None:
+                continue
+            verts = door.get_vertices()
+            if len(verts) < 3:
+                continue
+            door_points = [pm_util.to_pygame(door.body.local_to_world(v), draw_options.surface) for v in verts]
+            if len(door_points) >= 3:
+                pygame.draw.polygon(canvas, door.color, door_points)
 
         # draw goal
         for shape in self.goal.shapes:
@@ -530,6 +531,7 @@ class TwoRoomEnv(gym.Env):
 
         self._set_body_color(self.agent, self.variation_space["agent"]["color"].value.tolist())
 
+        # Debug draw everything in the space
         self.space.debug_draw(draw_options)
 
         img = np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
@@ -593,18 +595,8 @@ class TwoRoomEnv(gym.Env):
         if wall_axis == 0:
             if abs(cy - wall_pos) <= (wall_thickness / 2 + r):
                 return True
-
         else:
             if abs(cx - wall_pos) <= (wall_thickness / 2 + r):
                 return True
 
         return False
-
-
-# if __name__ == "__main__":
-#     env = TwoRoomEnv()
-#     obs = env.reset(options={"variation": ["all"]})
-#     img = env.render()
-#     plt.imshow(img)
-#     plt.axis("off")
-#     plt.savefig("test.png")

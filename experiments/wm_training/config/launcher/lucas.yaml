@@ -1,0 +1,31 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+n_gpus: 4
+cpus_per_task: 8
+cache_dir: /network/scratch/l/lucas.maes/datasets/xenoworlds/
+
+wandb_entity: simon-lacoste-julien
+wandb_project: xenoworlds
+
+subdir: ${hydra:job.id}
+
+wandb:
+  entity: ${wandb_entity}
+  project: ${wandb_project}
+
+hydra:
+  mode: MULTIRUN
+
+  launcher:
+    max_num_timeout: 999
+    timeout_min: 10080 # 1 week
+    cpus_per_task: ${cpus_per_task}
+    mem_gb: 64
+    gpus_per_node: ${n_gpus}
+    tasks_per_node: ${n_gpus}
+    partition: long
+    signal_delay_s: 120
+    constraint: lovelace

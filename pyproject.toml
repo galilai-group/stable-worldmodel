@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm"]
+requires = ["setuptools", "setuptools-scm", "swig"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -14,12 +14,15 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 readme = {file = "README.md", content-type = "text/markdown"}
 dependencies = [
-    "torch",
-    "torchvision",
-    "transformers",
+    # NOTE: Before running 'uv sync', install conda dependencies:
+    #   conda install -c conda-forge "ffmpeg=7" "swig" -y
+    "torch<=2.7",
+    "torchvision<=0.22",
+    "transformers>=4.50.0",
     "torchmetrics",
     "lightning",
     "hydra-core",
+    "hydra-submitit-launcher",
     "loguru",
     "tabulate",
     "gymnasium[all]",
@@ -32,8 +35,9 @@ dependencies = [
     "pymunk",
     "shapely",
     "ogbench",
-    "torchcodec",
-    "minigrid"
+    "wandb",
+    "decord",
+    "minigrid",
 ]
 
 dynamic = ["version"]

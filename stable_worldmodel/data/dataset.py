@@ -3,10 +3,11 @@ import numbers
 import os
 from pathlib import Path
 
+import decord
 import numpy as np
 import torch
 from datasets import concatenate_datasets, load_from_disk
-from torchcodec.decoders import VideoDecoder
+from decord import VideoReader, cpu
 from torchvision.io import decode_image
 
 from stable_worldmodel.data.utils import get_cache_dir
@@ -53,6 +54,7 @@ class Dataset:
         transform=None,
         obs_type="img",
         cache_dir=None,
+        subset_prop=1.0,
     ):
         # load dataset from disk (handle shards if any)
         data_dir = Path(cache_dir or get_cache_dir(), name)
@@ -79,7 +81,10 @@ class Dataset:
 
         episode_col = self.dataset["episode_idx"][:]
 
-        self.episodes = np.unique(episode_col)
+        unique_episodes = np.unique(episode_col)
+        max_episodes = int(len(unique_episodes) * subset_prop)
+
+        self.episodes = unique_episodes[:max_episodes]
         self.episode_indices = {ep: np.flatnonzero(episode_col == ep) for ep in self.episodes}
 
         self.clip_len = max(frameskip * num_steps, 1) if not self.complete_traj else 0
@@ -99,6 +104,10 @@ class Dataset:
         self.idx_to_episode = np.searchsorted(self.episode_starts, np.arange(len(self)), side="right") - 1
 
         return
+
+    @property
+    def column_names(self):
+        return self.dataset.column_names
 
     def __len__(self):
         return int(self.episode_starts[-1]) if not self.complete_traj else len(self.episodes)
@@ -211,7 +220,7 @@ class FrameDataset(Dataset):
         for col in self.decode_columns:
             if col not in steps:
                 continue
-            steps[col] = torch.stack(steps[col])
+            steps[col] = torch.stack(list(steps[col]))
 
         # reshape action
         if "action" in steps:
@@ -231,11 +240,14 @@ class VideoDataset(Dataset):
         super().__init__(name, *args, obs_type="videos", **kwargs)
         self.device = device
         self.decode_columns = self.decode_columns or self.determine_video_columns(self.dataset[0])
+        decord.bridge.set_bridge("torch")
 
     def decode(self, data_dirs, col_data, start=0, end=-1):
         path = os.path.join(data_dirs[0], col_data[0])
-        video = VideoDecoder(path, device=self.device)
-        return list(video[start : end : self.frameskip])
+        vr = VideoReader(path, ctx=cpu(0))
+        idxs = list(range(start, end, self.frameskip))
+        frames = vr.get_batch(idxs).permute(0, 3, 1, 2)  # TCHW
+        return list(frames)
 
     def __getitem__(self, index):
         episode = self.idx_to_episode[index]
@@ -266,7 +278,7 @@ class VideoDataset(Dataset):
         for col in self.decode_columns:
             if col not in steps:
                 continue
-            steps[col] = torch.stack(steps[col])
+            steps[col] = torch.stack(list(steps[col]))
 
         # reshape action
         if "action" in steps:
@@ -292,8 +304,11 @@ class InjectedDataset:
         self.datasets = [original_dataset] + external_datasets
         self.proportions = proportions or [1.0 / len(self.datasets)] * len(self.datasets)
 
-        if sum(self.proportions) != 1.0:
-            raise ValueError("Proportions must sum to 1.0")
+        # infer original dataset proportion
+        if len(self.proportions) == len(self.datasets) - 1:
+            assert sum(self.proportions) < 1.0, "Sum of external dataset proportions must be < 1.0"
+            og_prop = 1.0 - sum(self.proportions)
+            self.proportions = [og_prop] + self.proportions
 
         if len(self.proportions) != (len(self.datasets)):
             raise ValueError("Proportions length must match number of datasets (original + external)")
@@ -315,12 +330,27 @@ class InjectedDataset:
         self.idx_to_ds = np.searchsorted(self.cumulative_sizes, np.arange(len(self)), side="right") - 1
         return
 
+    @property
+    def column_names(self):
+        return self.datasets[0].column_names
+
     def check_consistency(self):
         fs = self.datasets[0].frameskip
         ns = self.datasets[0].num_steps
         for ds in self.datasets[1:]:
             if ds.frameskip != fs or ds.num_steps != ns:
                 raise ValueError("All datasets must have the same frameskip and num_steps")
+
+        # keep only the intersection of column names
+        column_sets = [set(ds.column_names) for ds in self.datasets]
+        common_columns = set.intersection(*column_sets)
+
+        for i, ds in enumerate(self.datasets):
+            cols_to_remove = set(ds.column_names) - common_columns
+            if len(cols_to_remove) > 0:
+                print(f"InjectedDataset: Removing columns {cols_to_remove} from dataset {i} for consistency")
+                self.datasets[i].dataset = ds.dataset.remove_columns(list(cols_to_remove))
+
         return
 
     def __len__(self):

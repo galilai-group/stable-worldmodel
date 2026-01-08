@@ -68,8 +68,7 @@ if __name__ == "__main__":
     model.interpolate_pos_encoding = True
 
     config = swm.PlanConfig(horizon=5, receding_horizon=5, action_block=5)
-    # solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
-    solver = swm.solver.MPPISolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
+    solver = swm.solver.CEMSolver(model, num_samples=300, var_scale=1.0, n_steps=30, topk=30, device="cuda")
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config, process=process, transform=transform)
 
     world.set_policy(policy)

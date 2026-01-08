@@ -1,0 +1,55 @@
+defaults:
+  - _self_
+  - launcher: local
+  - backbone: dinov2_small
+  - predictor: small
+
+hydra:
+  job:
+    chdir: true
+
+wandb:
+  enable: false
+  project: xenoworlds
+  entity: simon-lacoste-julien
+
+dataset_name: rocket_landing
+cache_dir: null
+subdir: null
+
+injected_dataset:
+  names: []
+  proportions: []
+
+trainer:
+  max_epochs: 100
+  strategy: ddp
+  devices: auto
+  accelerator: gpu
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+
+batch_size: 32
+num_workers: 16
+train_split: 0.9
+subset_prop: 1.0
+seed: 42
+
+image_size: 224
+patch_size: 16
+
+n_steps: ${eval:'${pyro.num_preds} + ${pyro.history_size}'}
+frameskip: 5
+
+pyro:
+  history_size: 3
+  num_preds: 1
+  encoding: # key: target dim
+    observation: 10
+    action: 10
+
+predictor_lr: 5e-4
+encoding_lr: 5e-4
+
+dump_object: True
+output_model_name: tworoom_${backbone.type}_p${predictor.size}

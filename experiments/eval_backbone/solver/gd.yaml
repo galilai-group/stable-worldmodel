@@ -1,0 +1,8 @@
+_target_: stable_worldmodel.solver.GradientSolver
+model: ???
+n_steps: 30
+batch_size: 1
+num_samples: 100
+action_noise: 0
+device: "cuda"
+seed: ${seed}

@@ -1,0 +1,22 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: basic
+
+n_gpus: 2
+cpus_per_task: 16
+cache_dir: null # Use stable-worldmodel default cache
+wandb_entity: basileterv
+wandb_project: stable-wm
+
+# Generate unique subdir for local runs to avoid checkpoint conflicts
+subdir: local_${now:%Y-%m-%d_%H-%M-%S}
+
+wandb:
+  enable: true
+  entity: ${wandb_entity}
+  project: ${wandb_project}
+
+# Override trainer to use 2 GPUs explicitly
+trainer:
+  devices: 1  # Use exactly 2 GPUs

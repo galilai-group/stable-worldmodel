@@ -28,6 +28,6 @@ seed: 3072
 
 ds_type: video # frame
 num_traj: 20000
-num_shards: 50
+num_shards: 10
 
 options: null

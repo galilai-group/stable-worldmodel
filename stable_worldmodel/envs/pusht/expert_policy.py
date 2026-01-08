@@ -19,10 +19,12 @@ class WeakPolicy(BasePolicy):
         super().__init__(**kwargs)
 
         self.dist_constraint = dist_constraint
+        self.discrete = False
         assert self.dist_constraint > 0, "dist_constraint must be positive."
 
     def set_env(self, env):
         self.env = env
+        self.discrete = "Discrete" in self.env.spec.id
         assert "swm/PushT" in self.env.spec.id, "PushTCollectionPolicy can only be used with the PushT environment."
 
     def get_action(self, info_dict, **kwargs):
@@ -49,7 +51,11 @@ class WeakPolicy(BasePolicy):
             action = np.clip(action, block_pos - self.dist_constraint, block_pos + self.dist_constraint)
             # rescale action back to action space
             action = (action - env.agent.position) / env.action_scale
-            action = np.clip(action, env.action_space.low, env.action_space.high)
+            action = np.clip(action, -1, 1)
+
+            if self.discrete:
+                action = env.quantizer.quantize(action)
+
             # set action for this env
             actions[i] = action
 

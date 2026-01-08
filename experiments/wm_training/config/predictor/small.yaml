@@ -1,0 +1,7 @@
+size: "small"
+depth: 6
+heads: 16
+mlp_dim: 2048
+dim_head: 64
+dropout: 0.1
+emb_dropout: 0.0
