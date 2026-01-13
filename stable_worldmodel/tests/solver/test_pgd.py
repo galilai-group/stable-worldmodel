@@ -199,7 +199,7 @@ def test_pgd_solver_with_init_action():
 
     # Provide first 3 steps
     init_action = torch.randn(2, 3, 5)
-    solver.init_action(init_action)
+    solver.init_action(init_action, from_scalar=False)
     actions = solver.init.squeeze(1)
 
     assert torch.allclose(actions[:, :3, :], init_action)
@@ -215,7 +215,7 @@ def test_pgd_solver_warm_start_full_horizon():
 
     # Provide all 5 steps
     init_action = torch.randn(2, 5, 5)
-    solver.init_action(init_action)
+    solver.init_action(init_action, from_scalar=False)
     actions = solver.init.squeeze(1)
 
     assert torch.allclose(actions, init_action)
@@ -229,7 +229,7 @@ def test_pgd_solver_warm_start_with_action_block():
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
     init_action = torch.randn(2, 6, 15)
-    solver.init_action(init_action)
+    solver.init_action(init_action, from_scalar=False)
 
     actions = solver.init.squeeze(1)
     assert torch.allclose(actions, init_action)
@@ -242,7 +242,7 @@ def test_pgd_solver_warm_start_with_var_scale():
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
     init_action = torch.randn(2, 6, 15)
-    solver.init_action(init_action)
+    solver.init_action(init_action, from_scalar=False)
     actions = solver.init[:, 0, :, :]
     actions_noised = solver.init[:, 1, :, :]
 

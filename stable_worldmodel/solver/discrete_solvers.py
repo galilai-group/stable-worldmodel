@@ -80,7 +80,7 @@ class PGDSolver(torch.nn.Module):
     def __call__(self, *args, **kwargs) -> torch.Tensor:
         return self.solve(*args, **kwargs)
 
-    def init_action(self, actions=None, from_scalar=False):
+    def init_action(self, actions=None, from_scalar=True):
         """Initialize the action tensor for the solver.
 
         Set self.init to initial action sequences (n_envs, horizon, action_simplex_dim)
