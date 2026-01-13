@@ -393,8 +393,8 @@ def test_version_short_flag():
     assert "stable-worldmodel version:" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_list_datasets(mock_cache_dir, mock_list_datasets):
     """Test listing datasets."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -407,8 +407,8 @@ def test_list_datasets(mock_cache_dir, mock_list_datasets):
     assert "dataset3" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_models")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.list_models", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_list_models(mock_cache_dir, mock_list_models):
     """Test listing models."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -420,8 +420,8 @@ def test_list_models(mock_cache_dir, mock_list_models):
     assert "model2" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_worlds")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.list_worlds", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_list_worlds(mock_cache_dir, mock_list_worlds):
     """Test listing worlds."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -433,7 +433,7 @@ def test_list_worlds(mock_cache_dir, mock_list_worlds):
     assert "World2" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_list_invalid_kind(mock_cache_dir):
     """Test listing with invalid kind."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -443,8 +443,8 @@ def test_list_invalid_kind(mock_cache_dir):
     assert "Invalid type" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_list_empty_datasets(mock_cache_dir, mock_list_datasets):
     """Test listing when no datasets exist."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -455,9 +455,9 @@ def test_list_empty_datasets(mock_cache_dir, mock_list_datasets):
     assert "No cached" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.dataset_info")
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.dataset_info", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 @patch("stable_worldmodel.cli.display_dataset_info")
 def test_show_dataset(mock_display, mock_cache_dir, mock_list, mock_info):
     """Test showing a specific dataset."""
@@ -479,9 +479,9 @@ def test_show_dataset(mock_display, mock_cache_dir, mock_list, mock_info):
     mock_display.assert_called_once()
 
 
-@patch("stable_worldmodel.cli.data.world_info")
-@patch("stable_worldmodel.cli.data.list_worlds")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.world_info", create=True)
+@patch("stable_worldmodel.cli.data.list_worlds", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 @patch("stable_worldmodel.cli.display_world_info")
 def test_show_world(mock_display, mock_cache_dir, mock_list, mock_info):
     """Test showing a specific world."""
@@ -499,9 +499,9 @@ def test_show_world(mock_display, mock_cache_dir, mock_list, mock_info):
     mock_display.assert_called_once()
 
 
-@patch("stable_worldmodel.cli.data.dataset_info")
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.dataset_info", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 @patch("stable_worldmodel.cli.display_dataset_info")
 def test_show_multiple_datasets(mock_display, mock_cache_dir, mock_list, mock_info):
     """Test showing multiple datasets."""
@@ -523,9 +523,9 @@ def test_show_multiple_datasets(mock_display, mock_cache_dir, mock_list, mock_in
     assert mock_display.call_count == 2
 
 
-@patch("stable_worldmodel.cli.data.dataset_info")
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.dataset_info", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 @patch("stable_worldmodel.cli.display_dataset_info")
 def test_show_all_datasets(mock_display, mock_cache_dir, mock_list, mock_info):
     """Test showing all datasets with --all flag."""
@@ -547,7 +547,7 @@ def test_show_all_datasets(mock_display, mock_cache_dir, mock_list, mock_info):
     assert mock_display.call_count == 3
 
 
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_show_invalid_kind(mock_cache_dir):
     """Test show with invalid kind."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -557,9 +557,10 @@ def test_show_invalid_kind(mock_cache_dir):
     assert "Invalid type" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
-def test_show_no_names_no_all_flag(mock_cache_dir, mock_list):
+@patch("stable_worldmodel.cli.data.dataset_info", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
+def test_show_no_names_no_all_flag(mock_cache_dir, mock_list, mock_info):
     """Test show without names and without --all flag."""
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = []
@@ -569,9 +570,10 @@ def test_show_no_names_no_all_flag(mock_cache_dir, mock_list):
     assert "Nothing to show" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
-def test_show_non_existent_dataset(mock_cache_dir, mock_list):
+@patch("stable_worldmodel.cli.data.dataset_info", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
+def test_show_non_existent_dataset(mock_cache_dir, mock_list, mock_info):
     """Test showing a dataset that doesn't exist."""
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = ["existing-dataset"]
@@ -581,9 +583,10 @@ def test_show_non_existent_dataset(mock_cache_dir, mock_list):
     assert "can't be found" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_worlds")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
-def test_show_multiple_non_existent_worlds(mock_cache_dir, mock_list):
+@patch("stable_worldmodel.cli.data.world_info", create=True)
+@patch("stable_worldmodel.cli.data.list_worlds", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
+def test_show_multiple_non_existent_worlds(mock_cache_dir, mock_list, mock_info):
     """Test showing multiple worlds that don't exist."""
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = ["swm/World1-v0"]
@@ -593,9 +596,9 @@ def test_show_multiple_non_existent_worlds(mock_cache_dir, mock_list):
     assert "can't be found" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.delete_dataset")
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.delete_dataset", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_delete_dataset(mock_cache_dir, mock_list, mock_delete):
     """Test deleting a dataset with confirmation."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -607,9 +610,9 @@ def test_delete_dataset(mock_cache_dir, mock_list, mock_delete):
     assert "Deleting" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.delete_model")
-@patch("stable_worldmodel.cli.data.list_models")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.delete_model", create=True)
+@patch("stable_worldmodel.cli.data.list_models", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_delete_model(mock_cache_dir, mock_list, mock_delete):
     """Test deleting a model with confirmation."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -620,9 +623,9 @@ def test_delete_model(mock_cache_dir, mock_list, mock_delete):
     mock_delete.assert_called_once_with("test-model")
 
 
-@patch("stable_worldmodel.cli.data.delete_dataset")
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.delete_dataset", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_delete_multiple_datasets(mock_cache_dir, mock_list, mock_delete):
     """Test deleting multiple datasets."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -633,8 +636,8 @@ def test_delete_multiple_datasets(mock_cache_dir, mock_list, mock_delete):
     assert mock_delete.call_count == 2
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_delete_cancel_confirmation(mock_cache_dir, mock_list):
     """Test canceling delete operation."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -647,7 +650,7 @@ def test_delete_cancel_confirmation(mock_cache_dir, mock_list):
     assert "Are you sure" in result.stdout or result.exit_code == 1
 
 
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_delete_invalid_kind(mock_cache_dir):
     """Test delete with invalid kind."""
     mock_cache_dir.return_value = "/fake/cache"
@@ -657,9 +660,10 @@ def test_delete_invalid_kind(mock_cache_dir):
     assert "Invalid type" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
-def test_delete_non_existent_dataset(mock_cache_dir, mock_list):
+@patch("stable_worldmodel.cli.data.delete_dataset", create=True)
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
+def test_delete_non_existent_dataset(mock_cache_dir, mock_list, mock_delete):
     """Test deleting a dataset that doesn't exist."""
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = ["existing-dataset"]
@@ -669,9 +673,10 @@ def test_delete_non_existent_dataset(mock_cache_dir, mock_list):
     assert "can't be found" in result.stdout
 
 
-@patch("stable_worldmodel.cli.data.list_models")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
-def test_delete_multiple_some_non_existent(mock_cache_dir, mock_list):
+@patch("stable_worldmodel.cli.data.delete_model", create=True)
+@patch("stable_worldmodel.cli.data.list_models", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
+def test_delete_multiple_some_non_existent(mock_cache_dir, mock_list, mock_delete):
     """Test deleting multiple items where some don't exist."""
     mock_cache_dir.return_value = "/fake/cache"
     mock_list.return_value = ["model1", "model2"]
@@ -747,9 +752,9 @@ def test_display_world_info_complex_spaces(mock_console):
     mock_console.print.assert_called_once()
 
 
-@patch("stable_worldmodel.cli.data.world_info")
-@patch("stable_worldmodel.cli.data.list_worlds")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.world_info", create=True)
+@patch("stable_worldmodel.cli.data.list_worlds", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 @patch("stable_worldmodel.cli.display_world_info")
 def test_show_world_short_flag(mock_display, mock_cache_dir, mock_list, mock_info):
     """Test showing all worlds with -a flag."""
@@ -774,8 +779,8 @@ def test_common_callback_without_version():
     runner.invoke(app, ["list", "dataset"])
 
 
-@patch("stable_worldmodel.cli.data.list_datasets")
-@patch("stable_worldmodel.cli.data.get_cache_dir")
+@patch("stable_worldmodel.cli.data.list_datasets", create=True)
+@patch("stable_worldmodel.cli.data.get_cache_dir", create=True)
 def test_list_datasets_sorted(mock_cache_dir, mock_list_datasets):
     """Test that list command sorts output."""
     mock_cache_dir.return_value = "/fake/cache"

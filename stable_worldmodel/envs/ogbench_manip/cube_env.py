@@ -37,8 +37,7 @@ from ogbench.manipspace import lie
 from ogbench.manipspace.envs.manipspace_env import ManipSpaceEnv
 
 import stable_worldmodel as swm
-
-from .utils import perturb_camera_angle
+from stable_worldmodel.envs.utils import perturb_camera_angle
 
 
 class CubeEnv(ManipSpaceEnv):
@@ -192,7 +191,7 @@ class CubeEnv(ManipSpaceEnv):
                         ),
                         "size": swm.spaces.Box(
                             low=0.01,
-                            high=0.04,
+                            high=0.03,
                             shape=(self._num_cubes,),
                             dtype=np.float64,
                             init_value=0.02 * np.ones((self._num_cubes,), dtype=np.float32),
@@ -957,6 +956,9 @@ class CubeEnv(ManipSpaceEnv):
 
             # Set a new target.
             self.set_new_target(return_info=False)
+
+            # NOTE: Goal observation is not used in data collection mode.
+            self._cur_goal_ob = np.zeros_like(self.compute_observation())
         else:
             # Set object positions and orientations based on the current task.
 
@@ -1119,12 +1121,24 @@ class CubeEnv(ManipSpaceEnv):
         for i in range(self._num_cubes):
             obj_pos = self._data.joint(f"object_joint_{i}").qpos[:3]
             tar_pos = self._data.mocap_pos[self._cube_target_mocap_ids[i]]
+
             if np.linalg.norm(obj_pos - tar_pos) <= 0.04:
                 cube_successes.append(True)
             else:
                 cube_successes.append(False)
 
         return cube_successes
+
+    def set_target_pos(self, cube_id, target_pos, target_quat=None):
+        """Set the target position and optional orientation for a specific cube."""
+        num_target_pos = len(self._cube_target_mocap_ids)
+        if cube_id < 0 or cube_id >= num_target_pos:
+            raise ValueError(f"cube_id out of range (maximum {num_target_pos - 1})")
+        mocap_id = self._cube_target_mocap_ids[cube_id]
+        self._data.mocap_pos[mocap_id] = np.asarray(target_pos, dtype=np.float64)
+        if target_quat is not None:
+            self._data.mocap_quat[mocap_id] = target_quat
+        # mujoco.mj_forward(self._model, self._data)
 
     def post_step(self):
         """Update environment state after each simulation step.
@@ -1174,8 +1188,7 @@ class CubeEnv(ManipSpaceEnv):
             Called after initialize_episode() to provide initial state information.
         """
         reset_info = self.compute_ob_info()
-        if self._mode == "task":
-            reset_info["goal"] = self._cur_goal_ob
+        reset_info["goal"] = self._cur_goal_ob
         reset_info["success"] = self._success
         return reset_info
 
@@ -1195,8 +1208,7 @@ class CubeEnv(ManipSpaceEnv):
             Called after each step to provide feedback about current state and progress.
         """
         ob_info = self.compute_ob_info()
-        if self._mode == "task":
-            ob_info["goal"] = self._cur_goal_ob
+        ob_info["goal"] = self._cur_goal_ob
         ob_info["success"] = self._success
         return ob_info
 
@@ -1233,7 +1245,6 @@ class CubeEnv(ManipSpaceEnv):
         if self._mode == "data_collection":
             # Target cube info.
             ob_info["privileged/target_task"] = self._target_task
-
             target_mocap_id = self._cube_target_mocap_ids[self._target_block]
             ob_info["privileged/target_block"] = self._target_block
             ob_info["privileged/target_block_pos"] = self._data.mocap_pos[target_mocap_id].copy()
@@ -1318,7 +1329,7 @@ class CubeEnv(ManipSpaceEnv):
 
         return np.concatenate(ob)
 
-    def compute_reward(self, ob, action):
+    def compute_reward(self):
         """Compute the reward for the current step.
 
         Calculates reward based on task success. If a specific reward_task_id is set,
@@ -1341,9 +1352,10 @@ class CubeEnv(ManipSpaceEnv):
             to the base value of -num_cubes.
         """
         if self._reward_task_id is None:
-            return super().compute_reward(ob, action)
+            return super().compute_reward()
 
         # Compute the reward based on the task.
+
         successes = self._compute_successes()
         reward = float(sum(successes) - len(successes))
         return reward

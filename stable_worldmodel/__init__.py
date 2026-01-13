@@ -1,4 +1,4 @@
-__version__ = "0.0.1a0"
+__version__ = "0.0.1b1"
 
 
 from stable_worldmodel import (

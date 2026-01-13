@@ -7,9 +7,10 @@ if __name__ == "__main__":
 
     world = swm.World(
         "swm/SimplePointMaze-v0",
-        num_envs=7,
+        num_envs=5,
         image_shape=(224, 224),
         render_mode="rgb_array",
+        extra_wrappers=[lambda env: swm.wrappers.StackedWrapper(env, "pixels", n_stacks=3)],
     )
 
     print("Available variations: ", world.single_variation_space.names())
@@ -39,9 +40,9 @@ if __name__ == "__main__":
         options={"variation": ("walls.number", "walls.shape", "walls.positions")},
     )
 
-    ################
-    ##  Pretrain  ##
-    ################
+    # ################
+    # ##  Pretrain  ##
+    # ################
 
     # pre-train world model
     swm.pretraining(
@@ -51,15 +52,13 @@ if __name__ == "__main__":
         dump_object=True,
     )
 
-    ################
-    ##  Evaluate  ##
-    ################
+    # ################
+    # ##  Evaluate  ##
+    # ################
 
     model = swm.policy.AutoCostModel("dummy_test")  # auto-policy name is confusing
     config = swm.PlanConfig(horizon=10, receding_horizon=5, action_block=5)
-    solver = swm.solver.GDSolver(model, n_steps=10)
+    solver = swm.solver.GradientSolver(model, n_steps=10)
     policy = swm.policy.WorldModelPolicy(solver=solver, config=config)
     world.set_policy(policy)
     results = world.evaluate(episodes=2, seed=2347)  # , options={...})
-
-    print(results)

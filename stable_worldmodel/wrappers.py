@@ -1,9 +1,11 @@
 import re
 import time
+from collections import deque
 from collections.abc import Callable, Iterable
 
 import gymnasium as gym
 import numpy as np
+import torch
 from gymnasium.spaces.utils import is_space_dtype_shape_equiv
 from gymnasium.vector import VectorWrapper
 from gymnasium.vector.utils import (
@@ -166,6 +168,9 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = self.env.action_space.sample()
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
+        assert "id" not in info
+        self._id = self.env.unwrapped.np_random.integers(0, np.iinfo(np.int64).max)
+        info["id"] = self._id
 
         # add all variations to info if needed
         options = kwargs.get("options") or {}
@@ -173,7 +178,8 @@ class EverythingToInfoWrapper(gym.Wrapper):
         if "variation" in options:
             var_opt = options["variation"]
             assert isinstance(options["variation"], list | tuple), (
-                "variation option must be a list or tuple containing variation names to sample"
+                "variation option must be a list or tuple containing variation names to sample, found: "
+                f"{type(options['variation'])}"
             )
             if len(var_opt) == 1 and var_opt[0] == "all":
                 self._variations_watch = self.env.unwrapped.variation_space.names()
@@ -189,8 +195,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
         if type(info["action"]) is dict:
             raise NotImplementedError
         else:
-            info["action"] *= np.nan
-
+            info["action"] = np.full_like(info["action"], np.nan)
         return obs, info
 
     def step(self, action):
@@ -213,6 +218,8 @@ class EverythingToInfoWrapper(gym.Wrapper):
         info["action"] = action
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
+        assert "id" not in info
+        info["id"] = self._id
 
         for key in self._variations_watch:
             var_key = f"variation.{key}"
@@ -347,14 +354,98 @@ class ResizeGoalWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
+class StackedWrapper(gym.Wrapper):
+    """Stacks specified key(s) in the info dict over the last k steps.
+
+    The initial reset will fill the stack(s) with the initial value(s).
+
+    Note:
+        Stacked values are combined into a tensor/array along a new first
+        dimension if the data type is a torch.Tensor or np.ndarray.
+
+    Args:
+        env: The Gymnasium environment to wrap.
+        key: The key or list of keys in the info dict to stack.
+        frameskip: Number of frames to skip between stacked entries.
+        history_size: Number of past entries to stack.
+    """
+
+    def __init__(
+        self,
+        env: gym.Env,
+        key: str | list[str],
+        history_size: int = 1,
+        frameskip: int = 1,
+    ):
+        super().__init__(env)
+        self.keys = [key] if isinstance(key, str) else key
+        self.history_size = history_size
+        self.frameskip = frameskip
+        self.buffers: dict[str, deque] = {k: deque([], maxlen=self.capacity) for k in self.keys}
+
+    @property
+    def capacity(self):
+        return self.history_size * self.frameskip
+
+    def get_buffer_data(self, key: str):
+        buffer = self.buffers[key]
+        if not buffer:
+            return []
+
+        new_info = list(buffer)[:: -self.frameskip][::-1]
+        assert len(new_info) == self.history_size, f"Buffer for key {key} has incorrect length."
+
+        return self._stack_elements(new_info)
+
+    def _stack_elements(self, elements: list):
+        """Stack elements based on their type."""
+        if not elements:
+            return elements
+
+        first_elem = elements[0]
+
+        if torch.is_tensor(first_elem):
+            return torch.stack(elements)
+        elif isinstance(first_elem, np.ndarray):
+            return np.stack(elements)
+        elif type(first_elem) in [int, float, bool] or issubclass(type(first_elem), np.number):
+            return np.array(elements)
+        else:
+            return elements
+
+    def init_buffer(self, info: dict):
+        for k in self.keys:
+            assert k in info, f"Key {k} not found in info dict during buffer initialization."
+            data = info[k]
+            buffer = self.buffers[k]
+            buffer.clear()
+            buffer.extend([data] * self.capacity)
+            info[k] = self.get_buffer_data(k)
+        return info
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        info = self.init_buffer(info)
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        for k in self.keys:
+            assert k in info, f"Key {k} not found in info dict during step."
+            self.buffers[k].append(info[k])
+            info[k] = self.get_buffer_data(k)
+        return obs, reward, terminated, truncated, info
+
+
 class MegaWrapper(gym.Wrapper):
     """Combines multiple wrappers for comprehensive environment preprocessing.
 
-    Applies in sequence: AddPixelsWrapper → EverythingToInfoWrapper →
-    EnsureInfoKeysWrapper → EnsureGoalInfoWrapper → ResizeGoalWrapper.
+    Applies in sequence:
+        AddPixelsWrapper → EverythingToInfoWrapper → EnsureInfoKeysWrapper →
+        EnsureGoalInfoWrapper → ResizeGoalWrapper → StackedWrapper
 
     This provides a complete preprocessing pipeline with rendered pixels, unified
-    info dict, key validation, goal checking, and goal resizing.
+    info dict, key validation, goal checking, goal resizing, and temporal stacking.
 
     Args:
         env: The Gymnasium environment to wrap.
@@ -364,6 +455,7 @@ class MegaWrapper(gym.Wrapper):
         required_keys: Additional regex patterns for keys that must be in info.
             Pattern ``^pixels(?:\\..*)?$`` is always added.
         separate_goal: If True, validates 'goal' is present in info. Defaults to True.
+        n_stacks: Number of steps to stack (passed to StackedWrapper).
     """
 
     def __init__(
@@ -373,12 +465,17 @@ class MegaWrapper(gym.Wrapper):
         pixels_transform: Callable | None = None,
         goal_transform: Callable | None = None,
         required_keys: Iterable | None = None,
-        separate_goal: Iterable | None = True,
+        separate_goal: Iterable = True,
+        history_size: int = 1,
+        frame_skip: int = 1,
     ):
         super().__init__(env)
+
         if required_keys is None:
             required_keys = []
         required_keys.append(r"^pixels(?:\..*)?$")
+
+        # Build pipeline
         # this adds `pixels` key to info with optional transform
         env = AddPixelsWrapper(env, image_shape, pixels_transform)
         # this removes the info output, everything is in observation!
@@ -387,12 +484,33 @@ class MegaWrapper(gym.Wrapper):
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
         env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
-        self.env = ResizeGoalWrapper(env, image_shape, goal_transform)
+        env = ResizeGoalWrapper(env, image_shape, goal_transform)
+
+        # We will wrap with StackedWrapper dynamically after we know the keys
+        self.env = env
+        self._history_size = history_size
+        self._frameskip = frame_skip
+        self._stack_initialized = False
+
+    def _init_stack(self, info):
+        """Attach a StackedWrapper around self.env dynamically."""
+        keys = list(info.keys())
+        self.env = StackedWrapper(self.env, keys, self._history_size, self._frameskip)
+        self._stack_initialized = True
+        self.env.init_buffer(info)
+        return
 
     def reset(self, *args, **kwargs):
-        return self.env.reset(*args, **kwargs)
+        obs, info = self.env.reset(*args, **kwargs)
+
+        if not self._stack_initialized:
+            self._init_stack(info)
+
+        return obs, info
 
     def step(self, action):
+        if not self._stack_initialized:
+            raise RuntimeError("StackedWrapper not yet initialized — call reset() first.")
         return self.env.step(action)
 
 

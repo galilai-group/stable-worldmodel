@@ -5,6 +5,8 @@ from typing import Protocol
 
 import numpy as np
 import torch
+from loguru import logger as logging
+from torchvision import tv_tensors
 
 import stable_worldmodel as swm
 from stable_worldmodel.solver import Solver
@@ -117,16 +119,57 @@ class WorldModelPolicy(BasePolicy):
 
         assert isinstance(self.solver, Solver), "Solver must implement the Solver protocol"
 
+    def _prepare_info(self, info_dict):
+        # pre-process and transform observations
+        for k, v in info_dict.items():
+            is_numpy = isinstance(v, (np.ndarray | np.generic))
+
+            if k in self.process:
+                if not is_numpy:
+                    raise ValueError(f"Expected numpy array for key '{k}' in process, got {type(v)}")
+
+                # flatten extra dimensions if needed
+                shape = v.shape
+                if len(shape) > 2:
+                    v = v.reshape(-1, *shape[2:])
+
+                # process and reshape back
+                v = self.process[k].transform(v)
+                v = v.reshape(shape)
+
+            # collapse env and time dimensions for transform (e, t, ...) -> (e * t, ...)
+            # then restore after transform
+            if k in self.transform:
+                shape = None
+                if is_numpy or torch.is_tensor(v):
+                    if v.ndim > 2:
+                        shape = v.shape
+                        v = v.reshape(-1, *shape[2:])
+                if k.startswith("pixels") or k.startswith("goal"):
+                    # permute channel first for transform
+                    if is_numpy:
+                        v = np.transpose(v, (0, 3, 1, 2))
+                    else:
+                        v = v.permute(0, 3, 1, 2)
+                v = torch.stack([self.transform[k](tv_tensors.Image(x)) for x in v])
+                is_numpy = isinstance(v, (np.ndarray | np.generic))
+
+                if shape is not None:
+                    v = v.reshape(*shape[:2], *v.shape[1:])
+
+            if is_numpy and v.dtype.kind not in "USO":
+                v = torch.from_numpy(v)
+
+            info_dict[k] = v
+
+        return info_dict
+
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"
         assert "pixels" in info_dict, "'pixels' must be provided in info_dict"
         assert "goal" in info_dict, "'goal' must be provided in info_dict"
 
-        # pre-process and transform observations
-        for k, v in info_dict.items():
-            v = self.process[k].transform(v) if k in self.process else v
-            v = torch.stack([self.transform[k](x) for x in v]) if k in self.transform else v
-            info_dict[k] = torch.from_numpy(v) if isinstance(v, (np.ndarray | np.generic)) else v
+        info_dict = self._prepare_info(info_dict)
 
         # need to replan if action buffer is empty
         if len(self._action_buffer) == 0:
@@ -154,16 +197,27 @@ class WorldModelPolicy(BasePolicy):
         return action  # (num_envs, action_dim)
 
 
-def AutoCostModel(model_name, cache_dir=None):
-    cache_dir = Path(cache_dir or swm.data.get_cache_dir())
-    path = cache_dir / f"{model_name}_object.ckpt"
-    assert path.exists(), f"World model named {model_name} not found. Should launch pretraining first."
+def AutoCostModel(run_name, cache_dir=None):
+    if Path(run_name).exists():
+        run_path = Path(run_name)
+    else:
+        run_path = Path(cache_dir or swm.data.utils.get_cache_dir(), run_name)
 
-    print(path)
-    spt_module = torch.load(path, weights_only=False)
+    if run_path.is_dir():
+        ckpt_files = list(run_path.glob("*_object.ckpt"))
+        ckpt_files.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+        path = ckpt_files[0]
+        logging.info(f"Loading model from checkpoint: {path}")
+    else:
+        path = Path(f"{run_path}_object.ckpt")
+        assert path.exists(), "Checkpoint path does not exist: {path}. Launch pretraining first."
+
+    spt_module = torch.load(path, weights_only=False, map_location="cpu")
 
     def scan_module(module):
         if hasattr(module, "get_cost"):
+            if isinstance(module, torch.nn.Module):
+                module = module.eval()
             return module
         for child in module.children():
             result = scan_module(child)

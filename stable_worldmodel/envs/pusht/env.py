@@ -7,12 +7,11 @@ import pygame
 import pymunk
 import pymunk.pygame_util
 from gymnasium import spaces
-from loguru import logger as logging
 from pymunk.vec2d import Vec2d
 
 import stable_worldmodel as swm
 
-from .utils import DrawOptions
+from ..utils import DrawOptions
 
 
 DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
@@ -34,8 +33,8 @@ class PushT(gym.Env):
         resolution=224,
         with_target=True,
         render_mode="rgb_array",
-        fix_action_sample=True,
         relative=True,
+        init_value=None,
     ):
         self._seed = None
         self.window_size = ws = 512  # The size of the PyGame window
@@ -47,6 +46,8 @@ class PushT(gym.Env):
         self.control_hz = self.metadata["render_fps"]
         self.k_p, self.k_v = 100, 20
         self.dt = 0.01
+
+        self.goal_state = None
 
         self.shapes = ["o", "L", "T", "Z", "square", "I", "small_tee", "+"]
 
@@ -173,6 +174,8 @@ class PushT(gym.Env):
             },
             sampling_order=["background", "goal", "block", "agent"],
         )
+        if init_value is not None:
+            self.variation_space.set_init_value(init_value)
 
         # TODO ADD CONSTRAINT TO NOT SAMPLE OVERLAPPING START POSITIONS (block and agent)
 
@@ -180,9 +183,6 @@ class PushT(gym.Env):
         self.damping = damping
         self.render_action = render_action
         self.render_mode = render_mode
-
-        if fix_action_sample:
-            self.fix_action_sample()
 
         """
         If human-rendering is used, `self.window` will be a reference
@@ -221,6 +221,9 @@ class PushT(gym.Env):
 
         self.variation_space.update(variations)
 
+        if options is not None and "variation_values" in options:
+            self.variation_space.set_value(options["variation_values"])
+
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
         ### setup pymunk space
@@ -232,29 +235,35 @@ class PushT(gym.Env):
             self.space.damping = self.damping
 
         ### get the state
-        goal_state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
-                self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
-                [self.variation_space["block"]["angle"].sample(set_value=False)],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        if options is not None and "goal_state" in options:
+            goal_state = options["goal_state"]
+        else:
+            goal_state = np.concatenate(
+                [
+                    self.variation_space["agent"]["start_position"].sample(set_value=False).tolist(),
+                    self.variation_space["block"]["start_position"].sample(set_value=False).tolist(),
+                    [self.variation_space["block"]["angle"].sample(set_value=False)],
+                    self.variation_space["agent"]["velocity"].value.tolist(),
+                ]
+            )
 
         ### generate goal
-        self.goal_state = goal_state
         self._set_state(goal_state)
+        self._set_goal_state(goal_state)
         self._goal = self.render()
 
         # restore original pos
-        state = np.concatenate(
-            [
-                self.variation_space["agent"]["start_position"].value.tolist(),
-                self.variation_space["block"]["start_position"].value.tolist(),
-                [self.variation_space["block"]["angle"].value],
-                self.variation_space["agent"]["velocity"].value.tolist(),
-            ]
-        )
+        if options is not None and "state" in options:
+            state = options["state"]
+        else:
+            state = np.concatenate(
+                [
+                    self.variation_space["agent"]["start_position"].value.tolist(),
+                    self.variation_space["block"]["start_position"].value.tolist(),
+                    [self.variation_space["block"]["angle"].value],
+                    self.variation_space["agent"]["velocity"].value.tolist(),
+                ]
+            )
 
         self._set_state(state)
 
@@ -275,7 +284,7 @@ class PushT(gym.Env):
 
         if self.relative:
             action = self.agent.position + action * self.action_scale
-            action = np.clip(action, 0, self.window_size)
+            # action = np.clip(action, 0, self.window_size)
 
         for _ in range(n_steps):
             # Step PD control.
@@ -287,9 +296,6 @@ class PushT(gym.Env):
 
         # make the observation
         state = self._get_obs()
-
-        # print(state)
-
         proprio = np.concatenate((state[:2], state[-2:]))
         observation = {"proprio": proprio, "state": state}
 
@@ -310,6 +316,7 @@ class PushT(gym.Env):
         angle_diff = np.minimum(angle_diff, 2 * np.pi - angle_diff)
         success = pos_diff < 20 and angle_diff < np.pi / 9
         state_dist = np.linalg.norm(goal_state - cur_state)
+
         return success, state_dist
 
     def render(self):
@@ -446,7 +453,7 @@ class PushT(gym.Env):
         pos_agent = state[:2]
         pos_block = state[2:4]
         rot_block = state[4]
-        vel_block = tuple(state[-2:])
+        vel_block = tuple(state[-2:]) if len(state) == 7 else (0.0, 0.0)
         self.agent.velocity = vel_block
         self.agent.position = pos_agent
         self.block.angle = rot_block
@@ -454,6 +461,9 @@ class PushT(gym.Env):
 
         # Run physics to take effect
         self.space.step(self.dt)
+
+    def _set_goal_state(self, goal_state):
+        self.goal_state = goal_state
 
     def _setup(self):
         ## create the space with physics
@@ -815,24 +825,3 @@ class PushT(gym.Env):
             return self.add_plus(*args, **kwargs)
         else:
             raise ValueError(f"Unknown shape type: {shape}")
-
-    def fix_action_sample(self):
-        logging.warning(
-            "The action space sample method is being overridden to improve sampling. "
-            "This is a temporary fix and will be removed in future versions."
-        )
-
-        # Save original sample method
-        self.original_sample = self.action_space.sample
-
-        def better_sample():
-            # sample in a 100x100 box around the block
-            block_pos = np.array((self.block.position.x, self.block.position.y))
-            action = self.rng.uniform(block_pos - 50, block_pos + 50) - self.agent.position
-
-            # Clip to action space bounds
-            action = np.clip(action, 0, self.window_size)
-            return action
-
-        # Override with new method
-        self.action_space.sample = better_sample

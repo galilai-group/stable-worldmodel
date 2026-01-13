@@ -5,8 +5,7 @@ from ogbench.manipspace import lie
 from ogbench.manipspace.envs.manipspace_env import ManipSpaceEnv
 
 import stable_worldmodel as swm
-
-from .utils import perturb_camera_angle
+from stable_worldmodel.envs.utils import perturb_camera_angle
 
 
 class SceneEnv(ManipSpaceEnv):
@@ -20,7 +19,7 @@ class SceneEnv(ManipSpaceEnv):
         `_cur_button_states`.
     """
 
-    def __init__(self, env_type, ob_type="pixels", permute_blocks=True, multiview=False, *args, **kwargs):
+    def __init__(self, env_type="scene", ob_type="pixels", permute_blocks=True, multiview=False, *args, **kwargs):
         """Initialize the Scene environment.
 
         Args:
@@ -74,7 +73,7 @@ class SceneEnv(ManipSpaceEnv):
                         ),
                         "size": swm.spaces.Box(
                             low=0.01,
-                            high=0.04,
+                            high=0.03,
                             shape=(self._num_cubes,),
                             dtype=np.float64,
                             init_value=0.02 * np.ones((self._num_cubes,), dtype=np.float32),
@@ -136,7 +135,12 @@ class SceneEnv(ManipSpaceEnv):
             }
         )
 
-    def set_state(self, qpos, qvel, button_states):
+    def set_state(self, qpos, qvel, **kwargs):
+        button_data = {
+            int(key.split("_")[-1]): value for key, value in kwargs.items() if key.startswith("button_state_")
+        }
+        button_states = [button_data[i] for i in range(self._num_buttons)]
+
         self._cur_button_states = button_states.copy()
         self._apply_button_states()
         super().set_state(qpos, qvel)
@@ -436,6 +440,9 @@ class SceneEnv(ManipSpaceEnv):
 
             # Set a new target.
             self.set_new_target(return_info=False)
+
+            # NOTE: Goal observation is not used in data collection mode.
+            self._cur_goal_ob = np.zeros_like(self.compute_observation())
         else:
             # Set object positions and orientations based on the current task.
 
@@ -666,6 +673,30 @@ class SceneEnv(ManipSpaceEnv):
 
         return cube_successes, button_successes, drawer_success, window_success
 
+    def set_cube_target_pos(self, cube_id, target_pos, target_quat=None):
+        """Set the target position and optional orientation for a specific cube."""
+        num_target_pos = len(self._cube_target_mocap_ids)
+        if cube_id < 0 or cube_id >= num_target_pos:
+            raise ValueError(f"cude_id out of range (maximum {num_target_pos - 1})")
+        mocap_id = self._cube_target_mocap_ids[cube_id]
+        self._data.mocap_pos[mocap_id] = np.asarray(target_pos, dtype=np.float64)
+        if target_quat is not None:
+            self._data.mocap_quat[mocap_id] = target_quat
+
+    def set_target_button_state(self, button_id, target_state):
+        """Set the target state for a specific button."""
+        if button_id < 0 or button_id >= self._num_buttons:
+            raise ValueError(f"button_id out of range (maximum {self._num_buttons - 1})")
+        self._target_button_states[button_id] = target_state
+
+    def set_target_drawer_pos(self, target_pos):
+        """Set the target position for the drawer."""
+        self._target_drawer_pos = target_pos
+
+    def set_target_window_pos(self, target_pos):
+        """Set the target position for the window."""
+        self._target_window_pos = target_pos
+
     def post_step(self):
         # Check numerical stability.
         if self._mode == "task":
@@ -735,15 +766,13 @@ class SceneEnv(ManipSpaceEnv):
 
     def get_reset_info(self):
         reset_info = self.compute_ob_info()
-        if self._mode == "task":
-            reset_info["goal"] = self._cur_goal_ob
+        reset_info["goal"] = self._cur_goal_ob
         reset_info["success"] = self._success
         return reset_info
 
     def get_step_info(self):
         ob_info = self.compute_ob_info()
-        if self._mode == "task":
-            ob_info["goal"] = self._cur_goal_ob
+        ob_info["goal"] = self._cur_goal_ob
         ob_info["success"] = self._success
         return ob_info
 
@@ -878,9 +907,9 @@ class SceneEnv(ManipSpaceEnv):
 
         return np.concatenate(ob)
 
-    def compute_reward(self, ob, action):
+    def compute_reward(self):
         if self._reward_task_id is None:
-            return super().compute_reward(ob, action)
+            return super().compute_reward()
 
         # Compute the reward based on the task.
         cube_successes, button_successes, drawer_success, window_success = self._compute_successes()
@@ -894,13 +923,63 @@ class SceneEnv(ManipSpaceEnv):
         *args,
         **kwargs,
     ):
-        camera = "front_pixels" if not self._multiview else ["front_pixels", "side_pixels"]
-        if isinstance(camera, list | tuple):
-            imgs = []
-            for cam in camera:
-                img = super().render(camera=cam, *args, **kwargs)
-                imgs.append(img)
-            stacked_views = np.stack(imgs, axis=0)
-            return stacked_views
-        else:
-            return super().render(camera=camera, *args, **kwargs)
+        """Render the current scene from a specified camera view.
+
+        Generates an RGB image of the current environment state from a single
+        camera viewpoint. This method renders from one camera at a time.
+
+        Args:
+            camera (str, optional): Camera name to render from. Defaults to
+                'front_pixels'. Supports any camera defined in self.cameras
+                (e.g., 'front_pixels', 'side_pixels').
+            *args: Additional positional arguments passed to parent render method.
+            **kwargs: Additional keyword arguments passed to parent render method.
+
+        Returns:
+            ndarray: Rendered image with shape (H, W, C) where H is height,
+                W is width, and C is the number of color channels (typically 3 for RGB).
+
+        Note:
+            For rendering from multiple cameras simultaneously, use the
+            `render_multiview()` method instead.
+        """
+        return super().render(camera=camera, *args, **kwargs)
+
+    def render_multiview(
+        self,
+        camera="front_pixels",
+        *args,
+        **kwargs,
+    ):
+        """Render the current scene from multiple camera views or a fallback single view.
+
+        When multiview mode is enabled (`_multiview=True`), renders the scene from
+        both 'front_pixels' and 'side_pixels' cameras and returns them as a
+        dictionary. When multiview is disabled, falls back to rendering from a
+        single camera.
+
+        Args:
+            camera (str, optional): Camera name to use for fallback rendering when
+                multiview is disabled. Defaults to 'front_pixels'. Ignored when
+                multiview is enabled.
+            *args: Additional positional arguments passed to the render method.
+            **kwargs: Additional keyword arguments passed to the render method.
+
+        Returns:
+            dict or ndarray: If multiview is enabled, returns a dictionary with camera
+                names as keys ('front_pixels', 'side_pixels') and rendered images as
+                values, where each image has shape (H, W, C). If multiview is disabled,
+                returns a single rendered image array with shape (H, W, C).
+
+        Note:
+            The multiview dictionary format is useful for policies that process
+            multiple viewpoints separately. The 'front_pixels' camera provides an
+            oblique view while 'side_pixels' shows a perpendicular side view.
+        """
+
+        if not self._multiview:
+            return self.render(camera=camera, *args, **kwargs)
+
+        cam_names = ["front_pixels", "side_pixels"]
+        multi_view = {cam: self.render(camera=cam, *args, **kwargs) for cam in cam_names}
+        return multi_view

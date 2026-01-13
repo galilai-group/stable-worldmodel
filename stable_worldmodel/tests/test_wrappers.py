@@ -1286,7 +1286,6 @@ def test_mega_wrapper_reset_basic(minimal_env):
     minimal_env.unwrapped = minimal_env
     minimal_env.action_space = MagicMock()
     minimal_env.action_space.sample = MagicMock(return_value=0.5)
-
     wrapped_env = wrappers.MegaWrapper(minimal_env, image_shape=(64, 64))
     result_obs, result_info = wrapped_env.reset()
 
@@ -1296,7 +1295,7 @@ def test_mega_wrapper_reset_basic(minimal_env):
     assert "observation" in result_info
     # Check that goal is resized (from ResizeGoalWrapper)
     assert "goal" in result_info
-    assert result_info["goal"].shape == (64, 64, 3)
+    assert result_info["goal"].shape == (1, 64, 64, 3)
     # Check metadata from EverythingToInfoWrapper
     assert "reward" in result_info
     assert "terminated" in result_info
@@ -1336,7 +1335,7 @@ def test_mega_wrapper_step_basic(minimal_env):
     # Check that observation is in info
     assert "observation" in result_info
     # Check that goal is resized
-    assert result_info["goal"].shape == (64, 64, 3)
+    assert result_info["goal"].shape == (1, 64, 64, 3)
     # Check metadata
     assert result_info["reward"] == reward
     assert result_info["action"] == 0.7
@@ -1455,8 +1454,8 @@ def test_mega_wrapper_multiview_pixels(minimal_env):
     assert "pixels.front" in result_info
     assert "pixels.side" in result_info
     # Regex pattern should match both
-    assert result_info["pixels.front"].shape == (64, 64, 3)
-    assert result_info["pixels.side"].shape == (64, 64, 3)
+    assert result_info["pixels.front"].shape == (1, 64, 64, 3)
+    assert result_info["pixels.side"].shape == (1, 64, 64, 3)
 
 
 def test_mega_wrapper_with_transforms(minimal_env):
@@ -1485,8 +1484,8 @@ def test_mega_wrapper_with_transforms(minimal_env):
     assert pixels_transform.called
     assert goal_transform.called
     # Results should be from transforms
-    assert np.array_equal(result_info["pixels"], np.ones((64, 64, 3)))
-    assert np.array_equal(result_info["goal"], np.zeros((64, 64, 3)))
+    assert np.array_equal(result_info["pixels"], np.ones((1, 64, 64, 3)))
+    assert np.array_equal(result_info["goal"], np.zeros((1, 64, 64, 3)))
 
 
 def test_mega_wrapper_custom_image_shape(minimal_env):
@@ -1507,8 +1506,8 @@ def test_mega_wrapper_custom_image_shape(minimal_env):
     result_obs, result_info = wrapped_env.reset()
 
     # Both pixels and goal should be resized to custom shape
-    assert result_info["pixels"].shape == (128, 256, 3)
-    assert result_info["goal"].shape == (128, 256, 3)
+    assert result_info["pixels"].shape == (1, 128, 256, 3)
+    assert result_info["goal"].shape == (1, 128, 256, 3)
 
 
 ###########################
@@ -1623,3 +1622,194 @@ def test_variation_wrapper_with_different_variation_spaces(mock_vector_env):
 
     # Should succeed with different mode
     assert wrapped_env.variation_space is not None
+
+
+###########################
+## test StackedWrapper ##
+###########################
+
+
+def test_stacked_wrapper_reset_numpy_k3_and_step(minimal_env):
+    """Test that StackedWrapper stacks numpy arrays over reset() and step()."""
+    import numpy as np
+
+    obs = {"observation": "test_obs"}
+    # initial array shape (2,)
+    init = np.array([1, 2])
+    minimal_env.reset.return_value = (obs, {"stack_key": init})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="stack_key", history_size=3)
+    _, info = wrapped.reset()
+
+    # After reset the key should be stacked history_size times -> shape (3, 2)
+    assert "stack_key" in info
+    assert info["stack_key"].shape == (3, 2)
+    # All entries should equal the initial value
+    assert np.array_equal(info["stack_key"][0], init)
+    assert np.array_equal(info["stack_key"][1], init)
+    assert np.array_equal(info["stack_key"][2], init)
+
+    # Now step with a new value
+    new = np.array([3, 4])
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"stack_key": new})
+    _, _, _, _, info2 = wrapped.step(0.5)
+
+    # Buffer should now contain [init, init, new]
+    assert info2["stack_key"].shape == (3, 2)
+    assert np.array_equal(info2["stack_key"][0], init)
+    assert np.array_equal(info2["stack_key"][1], init)
+    assert np.array_equal(info2["stack_key"][2], new)
+
+
+def test_stacked_wrapper_torch_k2(minimal_env):
+    """Test that StackedWrapper handles torch.Tensor stacking correctly."""
+    import torch
+
+    obs = {"observation": "o"}
+    t0 = torch.tensor([1.0, 2.0])
+    minimal_env.reset.return_value = (obs, {"t": t0})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="t", history_size=2)
+    _, info = wrapped.reset()
+
+    # After reset should be a torch.Tensor stacked along dim 0 with shape (2, 2)
+    assert "t" in info
+    assert isinstance(info["t"], torch.Tensor)
+    assert info["t"].shape == (2, 2)
+    assert torch.allclose(info["t"][0], t0)
+    assert torch.allclose(info["t"][1], t0)
+
+    # Step with a new tensor
+    t1 = torch.tensor([3.0, 4.0])
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"t": t1})
+    _, _, _, _, info2 = wrapped.step(0.1)
+
+    assert isinstance(info2["t"], torch.Tensor)
+    assert info2["t"].shape == (2, 2)
+    # Buffer should be [t0, t1]
+    assert torch.allclose(info2["t"][0], t0)
+    assert torch.allclose(info2["t"][1], t1)
+
+
+def test_stacked_wrapper_k1_returns_raw(minimal_env):
+    """k=1 should return the raw element (no extra stacking dimension)."""
+    import numpy as np
+
+    obs = {"observation": "o"}
+    arr = np.array([9, 9, 9])
+    minimal_env.reset.return_value = (obs, {"a": arr})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="a", history_size=1)
+    _, info = wrapped.reset()
+
+    # For history_size==1, the wrapper should set the key to the raw element (not stacked)
+    assert "a" in info
+    assert isinstance(info["a"], np.ndarray)
+    assert info["a"].shape == (1, 3)
+    assert np.array_equal(info["a"].squeeze(), arr)
+
+
+def test_stacked_wrapper_empty_buffer(minimal_env):
+    """Test that get_buffer_data returns empty list when buffer is empty."""
+    wrapped = wrappers.StackedWrapper(minimal_env, key="test_key", history_size=3)
+
+    # Before reset, buffer should be empty
+    result = wrapped.get_buffer_data("test_key")
+    assert result == []
+
+
+def test_stacked_wrapper_frameskip_and_history(minimal_env):
+    """Test frameskip>1 combined with history_size selection behavior."""
+    import numpy as np
+
+    obs = {"observation": "o"}
+    # initial value
+    v0 = np.array([0])
+    minimal_env.reset.return_value = (obs, {"k": v0})
+
+    # history_size=2, frameskip=2 => capacity=4
+    wrapped = wrappers.StackedWrapper(minimal_env, key="k", history_size=2, frameskip=2)
+    _, info = wrapped.reset()
+
+    # After reset stacked output should have shape (2, 1)
+    assert "k" in info
+    assert info["k"].shape == (2, 1)
+
+    # step with a new value v1
+    v1 = np.array([1])
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"k": v1})
+    _, _, _, _, info2 = wrapped.step(0.1)
+
+    # The stacked result should be [v0, v1]
+    assert np.array_equal(info2["k"][0], v0)
+    assert np.array_equal(info2["k"][1], v1)
+
+
+def test_stacked_wrapper_primitive_numbers(minimal_env):
+    """Test stacking for primitive numeric types (int/float) returns numpy array."""
+    import numpy as np
+
+    obs = {"observation": "o"}
+    minimal_env.reset.return_value = (obs, {"n": 7})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="n", history_size=3)
+    _, info = wrapped.reset()
+
+    # Should be numpy array of shape (3,)
+    assert isinstance(info["n"], np.ndarray)
+    assert info["n"].shape == (3,)
+    assert (info["n"] == 7).all()
+
+    # Step with new number
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"n": 9})
+    _, _, _, _, info2 = wrapped.step(0.2)
+    assert isinstance(info2["n"], np.ndarray)
+    assert info2["n"].shape == (3,)
+    # Expect [7,7,9]
+    assert list(info2["n"]) == [7, 7, 9]
+
+
+def test_stacked_wrapper_list_elements_fallback(minimal_env):
+    """Test that non-array/listable elements fall back to returning Python list of elements."""
+    obs = {"observation": "o"}
+    minimal_env.reset.return_value = (obs, {"L": [1, 2]})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key="L", history_size=2)
+    _, info = wrapped.reset()
+
+    # For list elements, the wrapper should return a list of elements (length history_size)
+    assert isinstance(info["L"], list)
+    assert len(info["L"]) == 2
+    assert info["L"][0] == [1, 2]
+
+    # Step with new list
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"L": [3, 4]})
+    _, _, _, _, info2 = wrapped.step(0.3)
+    assert isinstance(info2["L"], list)
+    assert info2["L"][0] == [1, 2]
+    assert info2["L"][1] == [3, 4]
+
+
+def test_stacked_wrapper_multiple_keys(minimal_env):
+    """Test that StackedWrapper can track and return stacked data for multiple keys independently."""
+    import numpy as np
+
+    obs = {"observation": "o"}
+    minimal_env.reset.return_value = (obs, {"a": np.array([1]), "b": 10})
+
+    wrapped = wrappers.StackedWrapper(minimal_env, key=["a", "b"], history_size=2)
+    _, info = wrapped.reset()
+
+    # a should be stacked into shape (2,1), b into shape (2,)
+    assert "a" in info and "b" in info
+    assert info["a"].shape == (2, 1)
+    assert info["b"].shape == (2,)
+
+    # Step with new values
+    minimal_env.step.return_value = (obs, 0.0, False, False, {"a": np.array([2]), "b": 20})
+    _, _, _, _, info2 = wrapped.step(0.4)
+
+    assert info2["a"].shape == (2, 1)
+    assert info2["b"].shape == (2,)
+    assert (info2["a"][0] == np.array([1])).all()
+    assert info2["b"].tolist() == [10, 20]

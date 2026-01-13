@@ -1,0 +1,23 @@
+defaults:
+  - _self_
+  - backbone: dinov3_small
+
+
+model_name: null
+history_size: 3
+num_preds: 1
+proprio_dim: 4
+action_dim: 2
+backbone_only: true # whether to use the full model or just the vision backbone for encoding
+encoding: # key: target dim
+  proprio: 10
+  action: 10
+
+predictor:
+  size: "small"
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
