@@ -71,7 +71,6 @@ class RocketLandingEnv(RocketBaseEnv):
         # Store agent_hz for timestep calculations
         self.agent_hz = agent_hz
 
-
         """GYMNASIUM STUFF"""
         # the space is the standard space + pad touch indicator
         self.observation_space = Box(
@@ -203,7 +202,6 @@ class RocketLandingEnv(RocketBaseEnv):
         self.pad_velocity = np.array([0.0, 0.0, 0.0], dtype=np.float64)  # dx, dy, dz
         self.pad_base_height = 0.1  # base z-position
         self._ou_state = np.array([0.0, 0.0, 0.0], dtype=np.float64)  # O-U process state (offset from origin)
-
 
     def _modify_rocket_urdf(self) -> str:
         """Modify rocket URDF with current variation colors.
@@ -352,7 +350,6 @@ class RocketLandingEnv(RocketBaseEnv):
                 physicsClientId=self.env._client,
             )
 
-
     def reset(self, *, seed: None | int = None, options: None | dict[str, Any] = None) -> tuple[np.ndarray, dict]:
         """Resets the environment.
 
@@ -449,7 +446,6 @@ class RocketLandingEnv(RocketBaseEnv):
         self.pad_position = np.array([0.0, 0.0, self.pad_base_height], dtype=np.float64)
         self.pad_velocity = np.zeros(3, dtype=np.float64)
 
-
         # Apply color variations to rocket and pad
         if variation_options and (
             "all" in variation_options
@@ -535,7 +531,6 @@ class RocketLandingEnv(RocketBaseEnv):
         self.info["pad_position"] = self.pad_position.copy()
         self.info["pad_velocity"] = self.pad_velocity.copy()
 
-
         state = self.state.copy()
         info = dict(self.info)
         return state, info
@@ -559,7 +554,6 @@ class RocketLandingEnv(RocketBaseEnv):
         # Add pad motion info to observations
         info["pad_position"] = self.pad_position.copy()
         info["pad_velocity"] = self.pad_velocity.copy()
-
 
         return state, reward, terminated, truncated, dict(info)
 

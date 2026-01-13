@@ -486,7 +486,6 @@ class ExpertPolicy(BasePolicy):
         # Extract pad position if available (for moving pad support)
         pad_position = info_dict.get("pad_position", None)
 
-
         self._ensure_controller_count(obs_batch.shape[0])
 
         actions = []

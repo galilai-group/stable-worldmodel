@@ -371,7 +371,7 @@ class RoboCasa(gym.Env):
                 - EEF euler angles (3,)
                 - Gripper state (1,)
         """
-        if isinstance(goal_state, (list, tuple)):
+        if isinstance(goal_state, list | tuple):
             goal_state = np.array(goal_state, dtype=np.float32)
         self.goal_state = goal_state
 
