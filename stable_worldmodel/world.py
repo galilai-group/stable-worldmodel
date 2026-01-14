@@ -60,13 +60,13 @@ from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 
-import datasets
 import gymnasium as gym
+import h5py
+import hdf5plugin
 import imageio
 import imageio.v3 as iio
 import numpy as np
 import torch
-from datasets import Dataset, Features, Value
 from loguru import logger as logging
 from PIL import Image
 from rich import print
@@ -74,7 +74,7 @@ from tqdm import tqdm
 
 from stable_worldmodel.data.dataset import Dataset as SWMDataset
 from stable_worldmodel.data.dataset import VideoDataset
-from stable_worldmodel.data.utils import get_cache_dir, is_image
+from stable_worldmodel.data.utils import get_cache_dir
 
 from .wrappers import MegaWrapper, VariationWrapper
 
@@ -441,216 +441,190 @@ class World:
         [o.close() for o in out]
         print(f"Video saved to {video_path}")
 
-    def record_dataset(self, dataset_name, episodes=10, seed=None, cache_dir=None, mode="frame", options=None):
+    def record_dataset(
+        self,
+        dataset_name: str,
+        episodes: int = 10,
+        seed: int | None = None,
+        cache_dir: os.PathLike | None = None,
+        options: dict | None = None,
+    ):
+        """Records episodes from the environment into an HDF5 dataset."""
         if self._history_size > 1:
-            raise NotImplementedError("Dataset recording with frame history > 1 is not supported.")
+            raise NotImplementedError("Frame history > 1 not supported for dataset recording.")
 
-        cache_dir = cache_dir or get_cache_dir()
-        dataset_path = Path(cache_dir, dataset_name)
-        dataset_path.mkdir(parents=True, exist_ok=True)
+        path = Path(cache_dir or get_cache_dir()) / f"{dataset_name}.h5"
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        if (dataset_path / "state.json").exists():
-            logging.warning(f"Dataset {dataset_name} already exists at {dataset_path}. Aborting recording.")
-            return
+        self.terminateds = np.zeros(self.num_envs, dtype=bool)
+        self.truncateds = np.zeros(self.num_envs, dtype=bool)
 
-        recorded_episodes = 0
-        episode_idx = np.arange(self.num_envs)
-
-        self.terminateds = np.zeros(self.num_envs)
-        self.truncateds = np.zeros(self.num_envs)
-
-        self.reset(seed, options)  # <- incr global seed by num_envs
-        root_seed = seed + self.num_envs if seed is not None else None
-
-        records = {k: [] for k in ["episode_len", "episode_idx", "policy"]}
         episode_buffers = [defaultdict(list) for _ in range(self.num_envs)]
 
-        def dump_to_buffer(env_idx=None):
-            if not isinstance(env_idx, int) and env_idx is not None:
-                raise ValueError("env_idx must be an integer or None.")
+        h5_kwargs = {
+            "name": str(path),
+            "mode": "a" if path.exists() else "w",
+            "libver": "latest",
+        }
 
-            env_idx = [env_idx] if env_idx is not None else list(range(self.num_envs))
+        if not path.exists():  # creation only args
+            h5_kwargs.update({"fs_strategy": "page", "fs_page_size": 4 * 1024 * 1024})
 
-            for k, v in self.infos.items():
-                if k[0] == "_":
-                    continue
+        with h5py.File(**h5_kwargs) as f:
+            f.swmr_mode = True  # avoid issue when killed
 
-                if isinstance(v, np.ndarray):
-                    v = v.squeeze(1) if len(v.shape) > 1 and v.shape[1] == 1 else v
-                    v = v if v.dtype.type != np.object_ else np.concatenate(v).tolist()
+            if "ep_len" in f:
+                n_ep_recorded = f["ep_len"].shape[0]
+                global_step_ptr = f["ep_offset"][-1] + f["ep_len"][-1] if n_ep_recorded > 0 else 0
+                initialized = True
+                seed = None if seed is None else (seed + n_ep_recorded)
+                logging.info(f"Resuming: {n_ep_recorded} episodes already on disk.")
+            else:
+                n_ep_recorded = 0
+                global_step_ptr = 0
+                initialized = False
 
-                for i in env_idx:
-                    buffer = episode_buffers[i]
-                    buffer[k].append(deepcopy(v[i]))
+            self.reset(seed)
+            seed = None if seed is None else (seed + self.num_envs)
+            self._dump_step_data(episode_buffers)  # record initial state
 
-        def flush_episode(env_idx):
-            buffer = episode_buffers[env_idx]
-            episode_len = len(buffer["step_idx"])
-            for k, v in buffer.items():
-                if k not in records:
-                    records[k] = []
+            with tqdm(total=episodes, initial=n_ep_recorded, desc="Recording") as pbar:
+                while n_ep_recorded < episodes:
+                    self.step()
+                    self._dump_step_data(episode_buffers)
 
-                # rotate actions to align with observations
-                if k == "action":
-                    nan = v.pop(0).astype(v[0].dtype)
-                    v.append(nan)
+                    for i in range(self.num_envs):
+                        if self.terminateds[i] or self.truncateds[i]:
+                            finished_ep = self._handle_done_ep(episode_buffers, i, n_ep_recorded)
 
-                records[k].extend(v)
+                            # lazy dataset initialization
+                            if not initialized:
+                                self._init_h5_datasets(f, finished_ep)
+                                initialized = True
 
-            records["episode_len"].extend([episode_len for _ in range(episode_len)])
-            records["episode_idx"].extend([recorded_episodes for _ in range(episode_len)])
-            records["policy"].extend([self.policy.type for _ in range(episode_len)])
+                            # contiguous writing
+                            steps_written = self._write_episode(f, finished_ep, global_step_ptr)
+                            global_step_ptr += steps_written
+                            n_ep_recorded += 1
+                            pbar.update(1)
 
-            episode_buffers[env_idx] = defaultdict(list)
+                            f.flush()  # flush metadata to avoid corruption
 
-            self.terminateds[env_idx] = False
-            self.truncateds[env_idx] = False
+                            if n_ep_recorded >= episodes:
+                                break
 
-        # dump the original reset data
-        dump_to_buffer()
+                            # reset terminated env and record initial state
+                            self._reset_single_env(i, seed + n_ep_recorded, options)
+                            self._dump_step_data(episode_buffers, env_idx=i)
 
-        with tqdm(total=episodes, desc="Collecting Episodes", unit="ep") as pbar:
-            while True:
-                # start new episode for done envs
-                for i in range(self.num_envs):
-                    if self.terminateds[i] or self.truncateds[i]:
-                        flush_episode(i)
+        logging.info(f"Recording complete. Total frames: {global_step_ptr}")
 
-                        # TODO open issue double nested insert with numpy arrays
+    def _init_h5_datasets(self, f, sample_episode):
+        """Initializes resizable datasets based on the first recorded episode."""
+        for key, data_list in sample_episode.items():
+            if key in ["ep_len", "ep_idx", "policy"]:
+                continue
 
-                        # re-reset env with seed and options (no supported by auto-reset)
-                        new_seed = root_seed + recorded_episodes if seed is not None else None
+            # determine array shape and dtype from sample data
+            sample_data = np.array(data_list[0])
+            shape = (0,) + sample_data.shape
+            maxshape = (None,) + sample_data.shape
 
-                        # determine new episode idx
-                        next_ep_idx = episode_idx.max() + 1
-                        episode_idx[i] = next_ep_idx
-                        recorded_episodes += 1
+            # determine chunk size and compression
+            if sample_data.ndim >= 2:
+                chunks = (100,) + sample_data.shape
+                compression = hdf5plugin.Blosc(cname="lz4", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE)
 
-                        # Update the progress bar by 1
-                        pbar.update(1)
+            else:
+                chunks = (1000,) + sample_data.shape
+                compression = None
 
-                        self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
-                        _, infos = self.envs.envs[i].reset(seed=new_seed, options=options)
+            f.create_dataset(
+                key,
+                shape=shape,
+                maxshape=maxshape,
+                dtype=sample_data.dtype,
+                chunks=chunks,
+                compression=compression,
+            )
 
-                        for k, v in infos.items():
-                            self.infos[k][i] = v
+        # index metadata
+        f.create_dataset("ep_offset", shape=(0,), maxshape=(None,), dtype=np.int64)
+        f.create_dataset("ep_len", shape=(0,), maxshape=(None,), dtype=np.int32)
 
-                        dump_to_buffer(env_idx=i)
+    def _reset_single_env(self, env_idx, seed=None, options=None):
+        """Resets a single environment and updates infos dict."""
+        self.envs.unwrapped._autoreset_envs = np.zeros(self.num_envs)
+        _, infos = self.envs.envs[env_idx].reset(seed=seed, options=options)
 
-                if recorded_episodes >= episodes:
-                    break
+        for k, v in infos.items():
+            self.infos[k][env_idx] = v
 
-                self.step()
-                dump_to_buffer()
+    def _handle_done_ep(self, tmp_buffer, env_idx, n_ep_recorded):
+        """Prepares the episode buffer for writing (alignment and casting)."""
+        ep_buffer = tmp_buffer[env_idx]
 
-        # flatten time dimension
-        for k, v in records.items():
-            if isinstance(v[0], np.ndarray):
-                records[k] = [item.squeeze() for item in v]
+        # left-shift actions to align with observations i.e. (o_t, a_t)
+        if "action" in ep_buffer:
+            actions = ep_buffer["action"]
+            nan = actions.pop(0)
+            actions.append(nan)
+        # out = {}
+        # for k, v in ep_buffer.items():
+        #     is_img = isinstance(v[0], np.ndarray) and v[0].ndim == 3 and v[0].shape[-1] in [1, 3, 4]
+        #     if is_img:
+        #         v = [img.transpose(2, 0, 1) for img in v]
+        #     out[k] = list(v)
 
-        # add the episode length
-        # counts = np.bincount(np.array(records["episode_idx"]), minlength=max(records["episode_idx"]) + 1)
-        # records["episode_len"] = [int(counts[ep]) for ep in records["episode_idx"]]
+        # Extract a copy and clear the temporary buffer
+        out = {k: list(v) for k, v in ep_buffer.items()}
+        ep_buffer.clear()
+        self.terminateds[env_idx] = False
+        self.truncateds[env_idx] = False
+        return out
 
-        ########################
-        # Save dataset to disk #
-        ########################
+    def _write_episode(self, f, ep_data, global_ptr):
+        """Writes a single contiguous episode to the HDF5 file."""
+        ep_len = len(ep_data["step_idx"])
 
-        assert any(key.startswith("pixels") for key in records), "pixels key is required in records"
-        assert "episode_idx" in records, "episode_idx key is required in records"
-        assert "step_idx" in records, "step_idx key is required in records"
-        assert "episode_len" in records, "episode_len key is required in records"
+        # append data to each dataset
+        for key in f.keys():
+            if key in ["ep_offset", "ep_len"]:
+                continue
 
-        # Create the dataset directory structure
-        dataset_path.mkdir(parents=True, exist_ok=True)
+            ds = f[key]
+            curr_size = ds.shape[0]
+            ds.resize(curr_size + ep_len, axis=0)
+            ds[curr_size:] = np.array(ep_data[key])
 
-        # save all jpeg images
-        image_cols = {col for col in records if is_image(records[col][0])}
+        # update metadata
+        meta_idx = f["ep_offset"].shape[0]
+        f["ep_offset"].resize(meta_idx + 1, axis=0)
+        f["ep_len"].resize(meta_idx + 1, axis=0)
 
-        # TODO: should check if already some data has been saved
-        episode_idx = np.unique(records["episode_idx"])
+        f["ep_offset"][meta_idx] = global_ptr
+        f["ep_len"][meta_idx] = ep_len
 
-        for ep in tqdm(episode_idx, desc="Saving Media to Disk", unit="ep"):
-            ep_mask = records["episode_idx"] == ep
-            step_mask = np.flatnonzero(ep_mask)
+        return ep_len
 
-            for img_col in image_cols:
-                col_name = img_col.replace(".", "_")
-                imgs = np.stack([records[img_col][i] for i in step_mask], axis=0)
+    def _dump_step_data(self, tmp_buffer, env_idx=None):
+        """Append currefnt step data to tmp episode buffers."""
+        env_indices = range(self.num_envs) if env_idx is None else [env_idx]
 
-                # Prepare output path
-                if mode == "video":
-                    output_dir = dataset_path / "videos"
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    file_path = output_dir / f"{ep}_{col_name}.mp4"
-                    iio.imwrite(file_path, imgs)
-                    paths = [str(file_path.relative_to(dataset_path))] * len(step_mask)
-                elif mode == "frame":
-                    output_dir = dataset_path / "img" / f"{ep}"
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    paths = []
-                    for idx, img in enumerate(imgs):
-                        file_path = output_dir / f"{idx}_{col_name}.jpeg"
-                        iio.imwrite(file_path, img)
-                        paths.append(str(file_path.relative_to(dataset_path)))
-                else:
-                    raise ValueError(f"Unknown mode {mode} for saving dataset images/videos.")
+        for col, data in self.infos.items():
+            if col.startswith("_"):
+                continue
 
-                # Update records
-                for i, path in zip(step_mask, paths):
-                    records[img_col][i] = path
+            # normalize data shape and type
+            if isinstance(data, np.ndarray):
+                data = np.squeeze(data, axis=1) if data.ndim > 1 and data.shape[1] == 1 else data
+                if data.dtype == object:
+                    data = np.concatenate(data).tolist()
 
-        def determine_features(records):
-            features = {
-                "episode_idx": Value("int32"),
-                "step_idx": Value("int32"),
-                "episode_len": Value("int32"),
-            }
-
-            for col_name in records:
-                if col_name in features:
-                    continue
-
-                first_elem = records[col_name][0]
-
-                if type(first_elem) is str:
-                    features[col_name] = Value("string")
-
-                elif isinstance(first_elem, np.ndarray):
-                    if first_elem.ndim == 1:
-                        state_feature = datasets.Sequence(
-                            feature=Value(dtype=first_elem.dtype.name),
-                            length=len(first_elem),
-                        )
-                    elif 2 <= first_elem.ndim <= 6:
-                        feature_cls = getattr(datasets, f"Array{first_elem.ndim}D")
-                        state_feature = feature_cls(shape=first_elem.shape, dtype=first_elem.dtype.name)
-                    else:
-                        state_feature = Value(first_elem.dtype.name)
-                    features[col_name] = state_feature
-
-                elif isinstance(first_elem, (np.generic)):
-                    features[col_name] = Value(first_elem.dtype.name)
-                else:
-                    features[col_name] = Value(type(first_elem).__name__)
-
-            return Features(features)
-
-        records_feat = determine_features(records)
-        records_ds = Dataset.from_dict(records, features=records_feat)
-
-        # flush all extra episodes saved (keep only first N episodes)
-        episodes_to_keep = np.unique(records_ds["episode_idx"])[:episodes]
-        keep_mask = np.isin(records_ds["episode_idx"], episodes_to_keep)
-        records_ds = records_ds.select(np.nonzero(keep_mask)[0])
-
-        # save dataset
-        records_path = dataset_path
-        num_chunks = episodes // 50
-        records_path.mkdir(parents=True, exist_ok=True)
-        records_ds.save_to_disk(records_path, num_shards=num_chunks or 1)
-
-        print(f"Dataset saved to {dataset_path} with {episodes} episodes!")
+            # append to buffers
+            for i in env_indices:
+                env_data = data[i].copy() if isinstance(data[i], np.ndarray) else data[i]
+                tmp_buffer[i][col].append(env_data)
 
     def record_video_from_dataset(
         self,
@@ -949,6 +923,8 @@ class World:
         goal_offset_steps: int,
         eval_budget: int,
         callables: dict | None = None,
+        save_video: bool = True,
+        video_path="./",
     ):
         assert (
             self.envs.envs[0].spec.max_episode_steps is None
@@ -985,6 +961,13 @@ class World:
 
                 init_data = ep[col][0]
                 goal_data = ep[col][-1]
+
+                # TODO handle that better
+                if not isinstance(init_data, (np.ndarray | torch.Tensor)):
+                    logging.warning(
+                        f"Data type {type(init_data)} for column {col} not supported, yet skipping conversion"
+                    )
+                    continue
 
                 init_data = init_data.numpy() if isinstance(init_data, torch.Tensor) else init_data
                 goal_data = goal_data.numpy() if isinstance(goal_data, torch.Tensor) else goal_data
@@ -1073,19 +1056,40 @@ class World:
         if "goal" in goal_step and "goal" in self.infos:
             assert np.allclose(self.infos["goal"], goal_step["goal"]), "Goal info does not match"
 
+        target_frames = torch.stack([ep["pixels"] for ep in data]).numpy()
+        video_frames = np.empty((self.num_envs, eval_budget, *self.infos["pixels"].shape[-3:]), dtype=np.uint8)
+
         # TODO assert goal and start state are identical as in the rollout
         # run normal evaluation for eval_budget and TODO: record video
-        for _ in range(eval_budget):
+        for i in range(eval_budget):
+            video_frames[:, i] = self.infos["pixels"].squeeze(1)
             self.infos.update(deepcopy(goal_step))
             self.step()
             results["episode_successes"] = np.logical_or(results["episode_successes"], self.terminateds)
             # for auto-reset
             self.envs.unwrapped._autoreset_envs = np.zeros((self.num_envs,))
 
+        video_frames[:, -1] = self.infos["pixels"].squeeze(1)
+
         n_episodes = len(episodes_idx)
 
         # compute success rate
         results["success_rate"] = float(np.sum(results["episode_successes"])) / n_episodes * 100.0
+
+        # save video if required
+        if save_video:
+            target_len = target_frames.shape[1]
+            video_path = Path(video_path)
+            video_path.mkdir(parents=True, exist_ok=True)
+            for i in range(self.num_envs):
+                out = imageio.get_writer(video_path / f"rollout_{i}.mp4", "output.mp4", fps=15, codec="libx264")
+                goals = np.vstack([target_frames[i, -1], target_frames[i, -1]])
+                for t in range(eval_budget):
+                    stacked_frame = np.vstack([video_frames[i, t], target_frames[i, t % target_len]])
+                    frame = np.hstack([stacked_frame, goals])
+                    out.append_data(frame)
+                out.close()
+            print(f"Video saved to {video_path}")
 
         if results["seeds"] is not None:
             assert np.unique(results["seeds"]).shape[0] == n_episodes, "Some episode seeds are identical!"

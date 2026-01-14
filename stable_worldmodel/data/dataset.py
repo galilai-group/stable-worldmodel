@@ -1,9 +1,11 @@
 import logging
 import numbers
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import decord
+import h5py
 import numpy as np
 import torch
 from datasets import concatenate_datasets, load_from_disk
@@ -360,3 +362,82 @@ class InjectedDataset:
         dataset_idx = self.idx_to_ds[index]
         sample_idx = self.mapping[index]
         return self.datasets[dataset_idx][sample_idx]
+
+
+class HDF5Dataset:
+    def __init__(
+        self,
+        name: str,
+        frameskip: int = 1,
+        num_steps: int = 1,
+        transform: Callable | None = None,
+        keys_to_load: list[str] | None = None,
+        cache_dir: str | None = None,
+    ):
+        self.h5_path = Path(cache_dir or get_cache_dir(), f"{name}.h5")
+        self.h5_file = None
+
+        self.keys_to_load = keys_to_load
+
+        with h5py.File(self.h5_path, "r") as f:
+            self.offsets = f["ep_offset"][:]
+            self.lengths = f["ep_len"][:]
+
+            if self.keys_to_load is None:
+                self.keys_to_load = list(f.keys())
+
+        self.transform = transform
+        self.frameskip = frameskip
+        self.num_steps = num_steps
+        self.span = num_steps * frameskip
+
+        # valid episode indices
+        self.clip_indices = []
+        for ep_idx, length in enumerate(self.lengths):
+            if length >= self.span:
+                for start_f in np.linspace(0, length - self.span, dtype=int):
+                    self.clip_indices.append((ep_idx, start_f))
+        return
+
+    @property
+    def column_names(self):
+        return self.keys_to_load
+
+    def __len__(self):
+        return len(self.clip_indices)
+
+    def __getitem__(self, idx: int):
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.h5_path, "r", swmr=True)
+
+        ep_idx, local_start = self.clip_indices[idx]
+        start = self.offsets[ep_idx] + local_start
+
+        steps = {}
+        for col in self.keys_to_load:
+            data = self.h5_file[col][start : start + self.span]
+
+            # apply frameskip if not action
+            if col != "action":
+                data = data[:: self.frameskip]
+
+            steps[col] = torch.from_numpy(data)
+
+            # channel first for images
+            is_img = len(data.shape) == 4 and data.shape[-1] in [1, 3]
+            if is_img:
+                steps[col] = steps[col].permute(0, 3, 1, 2)  # TCHW
+
+        if self.transform:
+            steps = self.transform(steps)
+
+        if "action" in steps:
+            act_shape = self.num_steps
+            steps["action"] = steps["action"].reshape(act_shape, -1)
+
+        return steps
+
+    def get_col_data(self, col: str):
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.h5_path, "r", swmr=True)
+        return self.h5_file[col][:]

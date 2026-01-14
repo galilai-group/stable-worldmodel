@@ -38,6 +38,8 @@ dependencies = [
     "wandb",
     "decord",
     "minigrid",
+    "h5py",
+    "hdf5plugin",
 ]
 
 dynamic = ["version"]
