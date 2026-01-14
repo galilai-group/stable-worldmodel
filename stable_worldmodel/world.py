@@ -569,12 +569,6 @@ class World:
             actions = ep_buffer["action"]
             nan = actions.pop(0)
             actions.append(nan)
-        # out = {}
-        # for k, v in ep_buffer.items():
-        #     is_img = isinstance(v[0], np.ndarray) and v[0].ndim == 3 and v[0].shape[-1] in [1, 3, 4]
-        #     if is_img:
-        #         v = [img.transpose(2, 0, 1) for img in v]
-        #     out[k] = list(v)
 
         # Extract a copy and clear the temporary buffer
         out = {k: list(v) for k, v in ep_buffer.items()}

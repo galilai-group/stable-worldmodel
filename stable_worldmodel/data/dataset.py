@@ -6,6 +6,7 @@ from pathlib import Path
 
 import decord
 import h5py
+import hdf5plugin  # noqa: F401
 import numpy as np
 import torch
 from datasets import concatenate_datasets, load_from_disk
