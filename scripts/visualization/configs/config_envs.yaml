@@ -1,27 +1,59 @@
 defaults:
   - _self_
-  - world_model: pyro
+  - world_model@datasets.two_room.world_model: pyro
+  - world_model@datasets.pusht.world_model: pyro
+  - world_model@datasets.ogbench_cube.world_model: pyro_action_only
 
 cache_dir: null
-
 device: cuda
 seed: 42
 
 image_size: 224
 patch_size: 16
-
 dimensionality_reduction: tsne
 
-# Define environment to visualize (and potential variations)
-env:
-  env_name: swm/TwoRoom-v0
-  history_size: 1
-  frame_skip: 1
-  grid_size: 20  # number of states per dimension for visualization
-  variations:
-    - variation:
-        fields: null # default environment
-        values: null
-    - variation:
-        fields: ["background.color"] # vary background color
-        values: [[0.1, 0.2, 0.3]]
+# ===============================
+# Dataset / Environment definitions
+# ===============================
+datasets:
+  two_room:
+    env:
+      env_name: swm/TwoRoom-v0
+      history_size: 1
+      frame_skip: 1
+      grid_size: 20
+      default_variation: ["agent.position"]
+      variations:
+        - variation:
+            fields: null
+            values: null
+        - variation:
+            fields: ["background.color"]
+            values: [[0.1, 0.2, 0.3]]
+
+  pusht:
+    env:
+      env_name: swm/PushT-v1
+      history_size: 1
+      frame_skip: 1
+      grid_size: 20
+      default_variation: ["agent.start_position"]
+      variations:
+        - variation:
+            fields: null
+            values: null
+
+  ogbench_cube:
+    env:
+      env_name: swm/OGBCube-v0
+      history_size: 1
+      frame_skip: 1
+      grid_size: 20
+      default_variation: ["cube.start_position"]
+      variations:
+        - variation:
+            fields: ["cube.goal_position", "cube.goal_yaw"]
+            values: [[[0.4, 0.0]], [0.0]]
+        - variation:
+            fields: ["floor.color", "cube.goal_position", "cube.goal_yaw"]
+            values: [[[0.0, 1.0, 0.], [0.0, 0.0, 1.0]], [[0.4, 0.0]], [0.0]]

@@ -126,8 +126,8 @@ class TwoRoomEnv(gym.Env):
                             shape=(2,),
                             dtype=np.float32,
                             init_value=np.array([450.0, 450.0], dtype=np.float32),
-                            constrain_fn=lambda x: not self.check_collide(x, entity="goal")
-                            and self.check_other_room(x),
+                            constrain_fn=lambda x: not self.check_collide(x, entity="goal"),
+                            # and self.check_other_room(x),
                         ),
                     },
                     sampling_order=["color", "radius", "position"],
@@ -212,10 +212,14 @@ class TwoRoomEnv(gym.Env):
 
         # restore original state
         if options is not None and "state" in options:
-            state = options["state"]  # TODO replace this with agent_pos and goal_pos
+            agent_pos = options["state"]
         else:
             agent_pos = self.variation_space["agent"]["position"].value
+        if options is not None and "goal_state" in options:
+            goal_pos = options["goal_state"]
+        else:
             goal_pos = self.variation_space["goal"]["position"].value
+
         self._set_position(agent_pos, goal_pos)
 
         # generate observation

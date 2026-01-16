@@ -30,6 +30,8 @@ Example:
    https://github.com/seohongpark/ogbench/
 """
 
+from collections.abc import Sequence
+
 import mujoco
 import numpy as np
 from dm_control import mjcf
@@ -177,6 +179,8 @@ class CubeEnv(ManipSpaceEnv):
         # The target cube position is stored in the mocap object.
         self._target_block = 0
 
+        default_start_position = np.array([0.3, 0.0], dtype=np.float64)
+
         self.variation_space = swm.spaces.Dict(
             {
                 "cube": swm.spaces.Dict(
@@ -196,6 +200,34 @@ class CubeEnv(ManipSpaceEnv):
                             dtype=np.float64,
                             init_value=0.02 * np.ones((self._num_cubes,), dtype=np.float32),
                         ),
+                        "start_position": swm.spaces.Box(  # x, y positions
+                            low=np.tile(self._object_sampling_bounds[0], (self._num_cubes, 1)),
+                            high=np.tile(self._object_sampling_bounds[1], (self._num_cubes, 1)),
+                            shape=(self._num_cubes, 2),
+                            dtype=np.float64,
+                            init_value=np.tile(default_start_position, (self._num_cubes, 1)),
+                        ),
+                        "start_yaw": swm.spaces.Box(  # yaw angles
+                            low=0.0,
+                            high=2 * np.pi,
+                            shape=(self._num_cubes,),
+                            dtype=np.float64,
+                            init_value=np.zeros((self._num_cubes,), dtype=np.float32),
+                        ),
+                        "goal_position": swm.spaces.Box(  # x, y positions
+                            low=np.tile(self._target_sampling_bounds[0], (self._num_cubes, 1)),
+                            high=np.tile(self._target_sampling_bounds[1], (self._num_cubes, 1)),
+                            shape=(self._num_cubes, 2),
+                            dtype=np.float64,
+                            init_value=np.tile(default_start_position, (self._num_cubes, 1)),
+                        ),
+                        "goal_yaw": swm.spaces.Box(  # yaw angles
+                            low=0.0,
+                            high=2 * np.pi,
+                            shape=(self._num_cubes,),
+                            dtype=np.float64,
+                            init_value=np.zeros((self._num_cubes,), dtype=np.float32),
+                        ),
                     }
                     # sampling_order=["num", "color", "size"]
                 ),
@@ -207,6 +239,13 @@ class CubeEnv(ManipSpaceEnv):
                             shape=(3,),
                             dtype=np.float64,
                             init_value=self._colors["purple"][:3],
+                        ),
+                        "ee_start_position": swm.spaces.Box(  # x, y, z positions
+                            low=self._arm_sampling_bounds[0],
+                            high=self._arm_sampling_bounds[1],
+                            shape=(3,),
+                            dtype=np.float64,
+                            init_value=np.mean(self._arm_sampling_bounds, axis=0),
                         ),
                     }
                 ),
@@ -239,7 +278,7 @@ class CubeEnv(ManipSpaceEnv):
                             high=1.0,
                             shape=(1,),
                             dtype=np.float64,
-                            init_value=[0.6],
+                            init_value=[0.7],
                         ),
                     }
                 ),
@@ -711,6 +750,10 @@ class CubeEnv(ManipSpaceEnv):
                 - 'variation': List/tuple of variation names to sample. Use ['all']
                   to sample all variations, or specify individual ones like
                   ['cube.color', 'light.intensity']. Defaults to None (no variation).
+                - 'variation_values': Optional dict of variation values to set
+                  directly (overrides sampled values when provided).
+                - 'state': Optional simulator state override. Accepts either a
+                  dict with 'qpos' and 'qvel' entries, or a (qpos, qvel) tuple.
             *args: Variable length argument list passed to parent reset.
             **kwargs: Arbitrary keyword arguments passed to parent reset.
 
@@ -738,24 +781,39 @@ class CubeEnv(ManipSpaceEnv):
 
         options = options or {}
 
-        self.variation_options = options.get("variation", {})
+        variations = options.get("variation", ["cube.start_position", "cube.start_yaw"])
+
+        if not isinstance(variations, Sequence):
+            raise ValueError("variation option must be a Sequence containing variations names to sample")
 
         self.variation_space.reset()
 
-        if "variation" in options:
-            assert isinstance(options["variation"], list | tuple), (
-                "variation option must be a list or tuple containing variation names to sample"
-            )
+        self.variation_space.update(variations)
 
-            if len(options["variation"]) == 1 and options["variation"][0] == "all":
-                self.variation_space.sample()
-
-            else:
-                self.variation_space.update(set(options["variation"]))
+        if options is not None and "variation_values" in options:
+            self.variation_space.set_value(options["variation_values"])
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
-        return super().reset(seed=seed, options=options, *args, **kwargs)
+        ob, info = super().reset(seed=seed, options=options, *args, **kwargs)
+
+        if "state" in options and options["state"] is not None:
+            state = options["state"]
+            # state should be a np.ndarray representing the concatenation of qpos and qvel
+            assert isinstance(state, np.ndarray), "State option must be a numpy ndarray!"
+            assert state.ndim == 1, "State option must be a 1D array!"
+            assert state.shape[0] == self._model.nq + self._model.nv, (
+                f"State option must have shape ({self._model.nq + self._model.nv},)!"
+            )
+            qpos = state[: self._model.nq]
+            qvel = state[self._model.nq :]
+            self.set_state(qpos, qvel)
+            self.pre_step()
+            self.post_step()
+            ob = self.compute_observation()
+            info = self.get_reset_info()
+
+        return ob, info
 
     def add_objects(self, arena_mjcf):
         """Add cube objects and cameras to the MuJoCo scene.
@@ -859,53 +917,69 @@ class CubeEnv(ManipSpaceEnv):
             - Some variations (size, light) call self.mark_dirty() to trigger recompilation
             - Camera angle perturbations use the perturb_camera_angle helper function
         """
-        if "all" in self.variation_options or "floor.color" in self.variation_options:
-            # Modify floor color
-            grid_texture = mjcf_model.find("texture", "grid")
-            grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
-            grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
+        # Modify floor color
+        grid_texture = mjcf_model.find("texture", "grid")
+        texture_changed = grid_texture.rgb1 is None or not np.allclose(
+            grid_texture.rgb1, self.variation_space["floor"]["color"].value[0]
+        )
+        texture_changed = texture_changed or (
+            grid_texture.rgb2 is None
+            or not np.allclose(grid_texture.rgb2, self.variation_space["floor"]["color"].value[1])
+        )
+        grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
+        grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
 
-        if "all" in self.variation_options or "agent.color" in self.variation_options:
-            # Modify arm color
-            mjcf_model.find("material", "ur5e/robotiq/black").rgba[:3] = self.variation_space["agent"]["color"].value
-            mjcf_model.find("material", "ur5e/robotiq/pad_gray").rgba[:3] = self.variation_space["agent"][
-                "color"
-            ].value
+        # Modify arm color
+        agent_color_changed = np.allclose(
+            mjcf_model.find("material", "ur5e/robotiq/black").rgba[:3], self.variation_space["agent"]["color"].value
+        )
+        agent_color_changed = agent_color_changed or np.allclose(
+            mjcf_model.find("material", "ur5e/robotiq/pad_gray").rgba[:3], self.variation_space["agent"]["color"].value
+        )
+        mjcf_model.find("material", "ur5e/robotiq/black").rgba[:3] = self.variation_space["agent"]["color"].value
+        mjcf_model.find("material", "ur5e/robotiq/pad_gray").rgba[:3] = self.variation_space["agent"]["color"].value
 
-        if "all" in self.variation_options or "cube.size" in self.variation_options:
-            # Modify cube size based on variation space
-            for i in range(self._num_cubes):
-                # Regular cubes
-                body = mjcf_model.find("body", f"object_{i}")
-                if body:
-                    for geom in body.find_all("geom"):
-                        geom.size = self.variation_space["cube"]["size"].value[i] * np.ones(
-                            (3), dtype=np.float32
-                        )  # half-extents (x, y, z)
+        size_changed = False
+        # Modify cube size based on variation space
+        for i in range(self._num_cubes):
+            # Regular cubes
+            body = mjcf_model.find("body", f"object_{i}")
+            if body:
+                for geom in body.find_all("geom"):
+                    desired_size = self.variation_space["cube"]["size"].value[i] * np.ones(
+                        (3), dtype=np.float32
+                    )  # half-extents (x, y, z)
+                    if geom.size is None or not np.allclose(geom.size, desired_size):
+                        size_changed = True
+                    geom.size = desired_size
 
-                # Target cubes (if any)
-                target_body = mjcf_model.find("body", f"object_target_{i}")
-                if target_body:
-                    for geom in target_body.find_all("geom"):
-                        geom.size = self.variation_space["cube"]["size"].value[i] * np.ones((3), dtype=np.float32)
+            # Target cubes (if any)
+            target_body = mjcf_model.find("body", f"object_target_{i}")
+            if target_body:
+                for geom in target_body.find_all("geom"):
+                    desired_size = self.variation_space["cube"]["size"].value[i] * np.ones((3), dtype=np.float32)
+                    if geom.size is None or not np.allclose(geom.size, desired_size):
+                        size_changed = True
+                    geom.size = desired_size
 
+        # Perturb camera angle
+        camera_angle_changed = False
+        cameras_to_vary = ["front_pixels", "side_pixels"] if self._multiview else ["front_pixels"]
+        for i, cam_name in enumerate(cameras_to_vary):
+            cam = mjcf_model.find("camera", cam_name)
+            cam.xyaxes = perturb_camera_angle(
+                self.cameras[cam_name]["xyaxes"], self.variation_space["camera"]["angle_delta"].value[i]
+            )
+            camera_angle_changed = camera_angle_changed or not np.allclose(
+                cam.xyaxes, self.cameras[cam_name]["xyaxes"]
+            )
+        # Modify light intensity
+        light = mjcf_model.find("light", "global")
+        desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
+        light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
+        light.diffuse = desired_diffuse
+        if size_changed or light_changed or texture_changed or camera_angle_changed or agent_color_changed:
             self.mark_dirty()
-
-        if "all" in self.variation_options or "camera.angle_delta" in self.variation_options:
-            # Perturb camera angle
-            cameras_to_vary = ["front_pixels", "side_pixels"] if self._multiview else ["front_pixels"]
-            for i, cam_name in enumerate(cameras_to_vary):
-                cam = mjcf_model.find("camera", cam_name)
-                cam.xyaxes = perturb_camera_angle(
-                    self.cameras[cam_name]["xyaxes"], self.variation_space["camera"]["angle_delta"].value[i]
-                )
-
-        if "all" in self.variation_options or "light.intensity" in self.variation_options:
-            # Modify light intensity
-            light = mjcf_model.find("light", "global")
-            light.diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
-            self.mark_dirty()
-
         return mjcf_model
 
     def initialize_episode(self):
@@ -947,9 +1021,9 @@ class CubeEnv(ManipSpaceEnv):
 
             # Randomize object positions and orientations.
             for i in range(self._num_cubes):
-                xy = self.np_random.uniform(*self._object_sampling_bounds)
+                xy = self.variation_space["cube"]["start_position"].value[i]
                 obj_pos = (*xy, 0.02)
-                yaw = self.np_random.uniform(0, 2 * np.pi)
+                yaw = self.variation_space["cube"]["start_yaw"].value[i]
                 obj_ori = lie.SO3.from_z_radians(yaw).wxyz.tolist()
                 self._data.joint(f"object_joint_{i}").qpos[:3] = obj_pos
                 self._data.joint(f"object_joint_{i}").qpos[3:] = obj_ori
@@ -1016,6 +1090,26 @@ class CubeEnv(ManipSpaceEnv):
 
         self._success = False
 
+    def initialize_arm(self):
+        # Sample initial effector position and orientation.
+        eff_pos = self.variation_space["agent"]["ee_start_position"].value
+        cur_ori = self._effector_down_rotation
+        yaw = self.np_random.uniform(-np.pi, np.pi)
+        rotz = lie.SO3.from_z_radians(yaw)
+        eff_ori = rotz @ cur_ori
+
+        # Solve for initial joint positions using IK.
+        T_wp = lie.SE3.from_rotation_and_translation(eff_ori, eff_pos)
+        T_wa = T_wp @ self._T_pa
+        qpos_init = self._ik.solve(
+            pos=T_wa.translation(),
+            quat=T_wa.rotation().wxyz,
+            curr_qpos=self._home_qpos,
+        )
+
+        self._data.qpos[self._arm_joint_ids] = qpos_init
+        mujoco.mj_forward(self._model, self._data)
+
     def set_new_target(self, return_info=True, p_stack=0.5):
         """Set a new random target for data collection mode.
 
@@ -1072,10 +1166,10 @@ class CubeEnv(ManipSpaceEnv):
             tar_pos = np.array([block_pos[0], block_pos[1], block_pos[2] + 0.04])
         else:
             # Randomize target position.
-            xy = self.np_random.uniform(*self._target_sampling_bounds)
+            xy = self.variation_space["cube"]["goal_position"].value[0]
             tar_pos = (*xy, 0.02)
         # Randomize target orientation.
-        yaw = self.np_random.uniform(0, 2 * np.pi)
+        yaw = self.variation_space["cube"]["goal_yaw"].value[0]
         tar_ori = lie.SO3.from_z_radians(yaw).wxyz.tolist()
 
         # Only show the target block.

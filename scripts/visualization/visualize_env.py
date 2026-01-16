@@ -8,7 +8,7 @@ import stable_pretraining as spt
 import torch
 from einops import rearrange
 from loguru import logger as logging
-from omegaconf import open_dict
+from omegaconf import OmegaConf, open_dict
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -17,6 +17,7 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoModelForImageClassification
 
 import stable_worldmodel as swm
+from stable_worldmodel.envs.ogbench_manip.cube_env import CubeEnv
 from stable_worldmodel.envs.pusht.env import PushT
 from stable_worldmodel.envs.two_room.env import TwoRoomEnv
 from stable_worldmodel.wrappers import MegaWrapper, VariationWrapper
@@ -79,28 +80,67 @@ def get_env(cfg):
     PROPRIO_MEAN = np.array([236.6155, 264.5674, -2.93032027, 2.54307914])
     PROPRIO_STD = np.array([101.1202, 87.0112, 74.84556075, 74.14009094])
 
-    action_process = preprocessing.StandardScaler()
-    action_process.mean_ = ACTION_MEAN
-    action_process.scale_ = ACTION_STD
+    obs_space = env.unwrapped.observation_space
+    action_space = env.unwrapped.action_space
 
-    proprio_process = preprocessing.StandardScaler()
-    proprio_process.mean_ = PROPRIO_MEAN
-    proprio_process.scale_ = PROPRIO_STD
+    def _space_dim(space):
+        if space is None or not hasattr(space, "shape") or not space.shape:
+            return None
+        return space.shape[-1]
 
-    process = {
-        "action": action_process,
-        "proprio": proprio_process,
-        "goal_proprio": proprio_process,
-    }
+    def _obs_dim(key):
+        if hasattr(obs_space, "spaces") and key in obs_space.spaces:
+            return _space_dim(obs_space.spaces[key])
+        return None
+
+    def _make_scaler(key, target_dim, mean, std):
+        if target_dim is None:
+            logging.warning(f"Missing target dim for '{key}', skipping standardization.")
+            return None
+
+        mean = np.asarray(mean) if mean is not None else None
+        std = np.asarray(std) if std is not None else None
+
+        if mean is None or std is None or mean.shape[0] != target_dim or std.shape[0] != target_dim:
+            logging.warning(f"Stats for '{key}' do not match dim {target_dim}; using identity standardization.")
+            mean = np.zeros(target_dim, dtype=np.float32)
+            std = np.ones(target_dim, dtype=np.float32)
+
+        scaler = preprocessing.StandardScaler()
+        scaler.mean_ = mean
+        scaler.scale_ = std
+        scaler.var_ = std**2
+        scaler.n_features_in_ = target_dim
+        return scaler
+
+    action_dim = _space_dim(action_space)
+    proprio_dim = _obs_dim("proprio")
+    goal_proprio_dim = _obs_dim("goal_proprio") or proprio_dim
+
+    action_process = _make_scaler("action", action_dim, ACTION_MEAN, ACTION_STD)
+    proprio_process = _make_scaler("proprio", proprio_dim, PROPRIO_MEAN, PROPRIO_STD)
+    goal_proprio_process = _make_scaler("goal_proprio", goal_proprio_dim, PROPRIO_MEAN, PROPRIO_STD)
+
+    process = {}
+    if action_process is not None:
+        process["action"] = action_process
+    if proprio_process is not None:
+        process["proprio"] = proprio_process
+    if goal_proprio_process is not None:
+        process["goal_proprio"] = goal_proprio_process
 
     with open_dict(cfg) as cfg:
-        cfg.extra_dims = {
-            "action": env.unwrapped.action_space.shape[1],
-            "proprio": env.unwrapped.observation_space.spaces["proprio"].shape[1],
-        }
+        cfg.extra_dims = {}
         for key in cfg.world_model.get("encoding", {}):
-            if key not in cfg.extra_dims:
-                raise ValueError(f"Encoding key '{key}' not found in env obs.")
+            if key == "action":
+                inpt_dim = env.unwrapped.action_space.shape[1]
+            elif hasattr(obs_space, "spaces") and key in obs_space.spaces:
+                inpt_dim = obs_space.spaces[key].shape[1]
+            elif hasattr(obs_space, "spaces") and key not in obs_space.spaces:
+                raise ValueError(f"Encoding key '{key}' not found in dataset columns.")
+            else:
+                inpt_dim = obs_space.shape[0]
+            cfg.extra_dims[key] = inpt_dim
 
     return env, process, transform
 
@@ -277,9 +317,11 @@ def get_state_from_grid(env, grid_element, dim: int | list = 0):
         # get the positions of the block and the agent closer
         reference_state[2:4] = reference_state[0:2] + 0.3 * (reference_state[2:4] - reference_state[0:2])
     elif isinstance(env, TwoRoomEnv):
-        reference_state = np.concatenate(
-            [env.variation_space["agent"]["position"].value, env.variation_space["goal"]["position"].value]
-        )
+        reference_state = env.variation_space["agent"]["position"].value
+    elif isinstance(env, CubeEnv):
+        qpos0 = env._model.qpos0.copy()
+        qvel0 = np.zeros(env._model.nv, dtype=qpos0.dtype)
+        reference_state = np.concatenate([qpos0, qvel0])
     # computing the state from a grid element
     grid_state = reference_state.copy()
     for i, d in enumerate(dim):
@@ -289,6 +331,9 @@ def get_state_from_grid(env, grid_element, dim: int | list = 0):
         # we set the position of the block accordingly
         grid_state[2:4] = grid_state[0:2] + (reference_state[2:4] - reference_state[0:2])
     elif isinstance(env, TwoRoomEnv):
+        # TODO should check position is feasible
+        grid_state
+    elif isinstance(env, CubeEnv):
         # TODO should check position is feasible
         grid_state
     return grid_state
@@ -315,6 +360,20 @@ def get_state_grid(env, grid_size: int = 10):
         range_val = [max_v - min_v for min_v, max_v in zip(min_val, max_val)]
         min_val = [min_v + 0.1 * r for min_v, r in zip(min_val, range_val)]
         max_val = [max_v - 0.1 * r for max_v, r in zip(max_val, range_val)]
+    elif isinstance(env, CubeEnv):
+        env._mode = "data_collection"
+        cube_pos_start = int(np.asarray(env._model.joint("object_joint_0").qposadr).reshape(-1)[0])
+        dim = [cube_pos_start, cube_pos_start + 1]
+        qpos0 = env._model.qpos0
+        cube_xy = qpos0[cube_pos_start : cube_pos_start + 2]
+        bounds = np.asarray(env._object_sampling_bounds, dtype=np.float64)
+        half_range = np.minimum(cube_xy - bounds[0], bounds[1] - cube_xy)
+        if np.any(half_range <= 0.0):
+            min_val = bounds[0].tolist()
+            max_val = bounds[1].tolist()
+        else:
+            min_val = (cube_xy - half_range).tolist()
+            max_val = (cube_xy + half_range).tolist()
     else:
         raise NotImplementedError(f"State grid generation not implemented for env type: {type(env)}")
 
@@ -343,6 +402,9 @@ def collect_embeddings(world_model, env, process, transform, cfg):
         variation_pixels = []
         for i, state in tqdm(enumerate(state_grid), desc="Collecting embeddings"):
             options = {"state": state}
+            default_variation = cfg.env.get("default_variation", None)
+            if default_variation is not None:
+                options["variation"] = list(default_variation)
             # for the first state of each variation, add variation options
             if variation_cfg.variation["fields"] is not None:
                 assert variation_cfg.variation["values"] is not None and len(variation_cfg.variation["fields"]) == len(
@@ -547,6 +609,20 @@ def plot_representations(
     plt.close(fig)
 
 
+def make_runtime_cfg(global_cfg, dataset_cfg):
+    return OmegaConf.merge(
+        {
+            "device": global_cfg.device,
+            "seed": global_cfg.seed,
+            "image_size": global_cfg.image_size,
+            "patch_size": global_cfg.patch_size,
+            "dimensionality_reduction": global_cfg.dimensionality_reduction,
+            "cache_dir": global_cfg.cache_dir,
+        },
+        dataset_cfg,
+    )
+
+
 # ===========================================================================
 # Main function
 # ===========================================================================
@@ -554,94 +630,88 @@ def plot_representations(
 
 @hydra.main(version_base=None, config_path="./configs", config_name="config_envs")
 def run(cfg):
-    """Run visualization script."""
+    """Run visualization script for all datasets/envs."""
     cache_dir = swm.data.utils.get_cache_dir()
     cfg.cache_dir = cache_dir
 
-    env, process, transform = get_env(cfg)
-    world_model = get_world_model(cfg)
+    for dataset_name, dataset_cfg in cfg.datasets.items():
+        logging.info("==============================")
+        logging.info(f"Processing dataset: {dataset_name}")
+        logging.info("==============================")
 
-    # --- Define naming components ---
-    env_name = type(env.unwrapped.envs[0].unwrapped).__name__
-    if cfg.world_model.model_name is not None:
-        model_name = cfg.world_model.model_name
-    elif cfg.world_model.backbone.name is not None:
-        model_name = cfg.world_model.backbone.type
-    else:
-        model_name = "custom_model"
+        local_cfg = make_runtime_cfg(cfg, dataset_cfg)
+        wm_cfg = local_cfg.world_model
+        env_cfg = local_cfg.env
 
-    logging.info("Computing embeddings from environment...")
-    grid, embeddings_variations, pixels_variations = collect_embeddings(world_model, env, process, transform, cfg)
+        # --- Setup env and model ---
+        env, process, transform = get_env(local_cfg)
+        world_model = get_world_model(local_cfg)
 
-    # Prepare Data for t-SNE
-    # We need to flatten the batch lists for each variation, and then stack variations.
-    all_embeddings_list = []
+        model_name = wm_cfg.model_name if wm_cfg.model_name is not None else wm_cfg.backbone.type
 
-    for var_list in embeddings_variations:
-        # Concatenate batches within one variation -> (N_grid, D)
-        var_emb = torch.cat(var_list, dim=0).cpu().numpy()
-        var_emb = rearrange(var_emb, "b ... -> b (...)")
-        all_embeddings_list.append(var_emb)
-
-    # Stack all variations -> (N_variations * N_grid, D)
-    all_embeddings_global = np.concatenate(all_embeddings_list, axis=0)
-
-    # Metadata for plotting
-    num_variations = len(all_embeddings_list)
-    samples_per_variation = all_embeddings_list[0].shape[0]
-
-    # Compute Global t-SNE
-    logging.info(
-        f"Computing global t-SNE for {num_variations} variations ({all_embeddings_global.shape[0]} total samples)..."
-    )
-    representations_2d_global = compute_dimensionality_reduction(all_embeddings_global, cfg)
-
-    # Plot Combined Dimensionality Reduction
-    dr_save_path = f"{model_name}_{env_name}_{cfg.dimensionality_reduction}.pdf"
-    plot_representations(
-        grid,
-        representations_2d_global,
-        variations_cfg=cfg.env.variations,
-        samples_per_variation=samples_per_variation,
-        title_suffix="Latent Space",
-        save_path=dr_save_path,
-    )
-
-    # Process Distance Maps (Per Variation)
-    # We still loop here because distance maps are best viewed individually per reference image
-    grid_size = cfg.env.grid_size
-
-    for var_idx, var_pixels_list in enumerate(pixels_variations):
-        logging.info(f"--- Processing Distance Maps for Variation {var_idx} ---")
-
-        # Re-extract the embeddings for this specific variation from our global list
-        # to ensure we use the exact data corresponding to the pixels
-        embeddings = all_embeddings_list[var_idx]  # (N_grid, D)
-
-        # Pixels Shape: (N_samples, C, H, W)
-        pixels = torch.cat(var_pixels_list, dim=0).cpu().numpy()
-
-        var_suffix = (
-            f"var_{cfg.env.variations[var_idx]['variation']['fields'][0]}"
-            if cfg.env.variations[var_idx]["variation"]["fields"] is not None
-            else "var_original"
-        )
-        distmap_save_path = f"{model_name}_{env_name}_{var_suffix}_distmap.pdf"
-
-        # Reshape to (Grid_H, Grid_W, ...)
-        grid_reshaped = grid.reshape(grid_size, grid_size, -1)
-        embeddings_reshaped = embeddings.reshape(grid_size, grid_size, -1)
-        pixels_reshaped = pixels.reshape(grid_size, grid_size, *pixels.shape[1:])
-
-        plot_distance_maps(
-            grid_reshaped,
-            embeddings_reshaped,
-            pixels_reshaped,
-            save_path=distmap_save_path,
+        # --- Collect embeddings ---
+        logging.info("Computing embeddings from environment...")
+        grid, embeddings_variations, pixels_variations = collect_embeddings(
+            world_model, env, process, transform, local_cfg
         )
 
-    logging.info("All variations processed.")
-    return
+        # --- Prepare embeddings for dimensionality reduction ---
+        all_embeddings_list = []
+        for var_list in embeddings_variations:
+            var_emb = torch.cat(var_list, dim=0).cpu().numpy()
+            var_emb = rearrange(var_emb, "b ... -> b (...)")
+            all_embeddings_list.append(var_emb)
+
+        all_embeddings_global = np.concatenate(all_embeddings_list, axis=0)
+
+        num_variations = len(all_embeddings_list)
+        samples_per_variation = all_embeddings_list[0].shape[0]
+
+        # --- Dimensionality reduction ---
+        logging.info(
+            f"Computing global {local_cfg.dimensionality_reduction} "
+            f"for {num_variations} variations "
+            f"({all_embeddings_global.shape[0]} samples)..."
+        )
+        representations_2d = compute_dimensionality_reduction(all_embeddings_global, local_cfg)
+
+        # --- Plot latent space ---
+        dr_save_path = f"{dataset_name}_{model_name}_{local_cfg.dimensionality_reduction}.pdf"
+
+        plot_representations(
+            grid,
+            representations_2d,
+            variations_cfg=env_cfg.variations,
+            samples_per_variation=samples_per_variation,
+            title_suffix=f"{dataset_name} Latent Space",
+            save_path=dr_save_path,
+        )
+
+        # --- Distance maps per variation ---
+        grid_size = env_cfg.grid_size
+
+        for var_idx, var_pixels_list in enumerate(pixels_variations):
+            embeddings = all_embeddings_list[var_idx]
+            pixels = torch.cat(var_pixels_list, dim=0).cpu().numpy()
+
+            var_suffix = (
+                f"var_{env_cfg.variations[var_idx]['variation']['fields'][0]}"
+                if env_cfg.variations[var_idx]["variation"]["fields"] is not None
+                else "var_original"
+            )
+
+            distmap_save_path = f"{dataset_name}_{model_name}_{var_suffix}_distmap.pdf"
+
+            plot_distance_maps(
+                grid.reshape(grid_size, grid_size, -1),
+                embeddings.reshape(grid_size, grid_size, -1),
+                pixels.reshape(grid_size, grid_size, *pixels.shape[1:]),
+                save_path=distmap_save_path,
+            )
+
+        logging.info(f"Finished dataset: {dataset_name}")
+
+    logging.info("All datasets processed.")
 
 
 if __name__ == "__main__":
