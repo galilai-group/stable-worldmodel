@@ -282,7 +282,25 @@ class SceneEnv(ManipSpaceEnv):
 
         assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
 
-        return super().reset(options, *args, **kwargs)
+        ob, info = super().reset(options, *args, **kwargs)
+
+        if "state" in options and options["state"] is not None:
+            state = options["state"]
+            # state should be a np.ndarray representing the concatenation of qpos and qvel
+            assert isinstance(state, np.ndarray), "State option must be a numpy ndarray!"
+            assert state.ndim == 1, "State option must be a 1D array!"
+            assert state.shape[0] == self._model.nq + self._model.nv, (
+                f"State option must have shape ({self._model.nq + self._model.nv},)!"
+            )
+            qpos = state[: self._model.nq]
+            qvel = state[self._model.nq :]
+            self.set_state(qpos, qvel)
+            self.pre_step()
+            self.post_step()
+            ob = self.compute_observation()
+            info = self.get_reset_info()
+
+        return ob, info
 
     def add_objects(self, arena_mjcf):
         # Add objects to scene.
