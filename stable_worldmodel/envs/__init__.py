@@ -70,3 +70,8 @@ register(
     id="swm/PushT-Discrete-v1",
     entry_point="stable_worldmodel.envs.pusht:PushTDiscrete",
 )
+
+register(
+    id="swm/PotionLab-v0",
+    entry_point="stable_worldmodel.envs.potion_lab:PotionLab",
+)

@@ -543,7 +543,6 @@ def show(
         display_fn(info_fn(item))
 
 
-@app.command()
 def delete(
     kind: Annotated[str, typer.Argument(help="Type to delete: 'model' or 'dataset'")],
     names: Annotated[list[str], typer.Argument(help="Names of models or datasets to delete")],

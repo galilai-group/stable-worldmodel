@@ -1,0 +1,851 @@
+{
+  "rounds": [
+    {
+      "time_limit": 3600,
+      "background_color": [232, 189, 137],
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "1: Raw Fire Essence"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "2: Two raw Fire Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "3: Raw Water Essence"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "4: Two raw Water Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "5: Raw Fire and Water Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "6: Raw Earth Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "7: Raw Fire, Water, and Earth Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "7: Raw Water and Air Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [4],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "9: Raw Air, Fire, and Earth Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "10: Raw Fire, Water, Earth, and Air Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "11: Enchanted Fire"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "12: Raw Fire and Enchanted Fire"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "13: Raw Fire and Water and Enchanted Fire"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "14: Enchanted Water"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "15: Enchanted Water and Raw Water"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [3],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "16: Enchanted Earth"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "17: Enchanted Water and Raw Fire and Enchanted Earth"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [4],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "18: Enchanted Air and Enchanted Fire"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "19: Raw Fire and Enchanted Water and Raw Earth and Enchanted Air"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "20: Enchanted Fire, Water, Earth and Air"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "21: Refined Fire Essence"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "22: Two Refined Fire Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "23: Refined Water Essence"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "24: Refined Fire and Water Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "25: Refined Earth and Air Essences"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "26: Refined Fire and Enchanted Fire"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "27: Refined and Enchanted Water"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "28: Refined+Enchanted Fire and Refined Earth"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [4],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "29: Refined+Enchanted Air and Enchanted Water"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": false
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": false
+        }
+      ],
+      "description": "30: Refined+Enchanted Fire, Refined+Enchanted Water, and Refined Earth"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 2],
+          "enchanted": [false, false],
+          "refined": [false, false],
+          "bottled": false
+        }
+      ],
+      "description": "31: Fire+Water Combination (Cauldron)"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 3],
+          "enchanted": [false, false],
+          "refined": [false, false],
+          "bottled": false
+        }
+      ],
+      "description": "32: Fire+Earth Combination"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2, 4],
+          "enchanted": [false, false],
+          "refined": [false, false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1, 2],
+          "enchanted": [false, false],
+          "refined": [false, false],
+          "bottled": false
+        }
+      ],
+      "description": "33: Water+Air and Fire+Water Combinations"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 2, 3],
+          "enchanted": [false, false, false],
+          "refined": [false, false, false],
+          "bottled": false
+        }
+      ],
+      "description": "34: Fire+Water+Earth Triple Combination"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 2, 4],
+          "enchanted": [false, false, false],
+          "refined": [false, false, false],
+          "bottled": false
+        }
+      ],
+      "description": "35: Fire+Water+Air Triple Combination"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 2],
+          "enchanted": [true, true],
+          "refined": [false, false],
+          "bottled": false
+        }
+      ],
+      "description": "36: Enchanted Fire+Water Combination (apply enchanter to combined essence)"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 3],
+          "enchanted": [false, false],
+          "refined": [true, true],
+          "bottled": false
+        }
+      ],
+      "description": "37: Refined Fire+Earth Combination (apply refiner to combined essence)"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [2, 4],
+          "enchanted": [true, true],
+          "refined": [true, true],
+          "bottled": false
+        }
+      ],
+      "description": "38: Refined+Enchanted Water+Air Combination (apply both tools to combined essence)"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 2, 3],
+          "enchanted": [true, false, true],
+          "refined": [false, true, false],
+          "bottled": false
+        }
+      ],
+      "description": "39: Mixed Modified Fire+Water+Earth Triple (apply tools to combined essence)"
+    },
+    {
+      "time_limit": 3600,
+      "required_items": [
+        {
+          "base_essences": [1, 2, 4],
+          "enchanted": [true, true, false],
+          "refined": [true, false, true],
+          "bottled": false
+        }
+      ],
+      "description": "40: Complex Modified Fire+Water+Air Triple (apply tools to combined essence)"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": true
+        }
+      ],
+      "description": "41: Bottled Raw Fire Essence"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [true],
+          "refined": [false],
+          "bottled": true
+        }
+      ],
+      "description": "42: Bottled Enchanted Water Essence"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": true
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": true
+        }
+      ],
+      "description": "43: Bottled Refined Earth and Bottled Refined+Enchanted Air"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [1, 2],
+          "enchanted": [false, false],
+          "refined": [false, false],
+          "bottled": true
+        }
+      ],
+      "description": "44: Bottled Fire+Water Combination"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [1, 2],
+          "enchanted": [true, true],
+          "refined": [false, false],
+          "bottled": true
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "45: Bottled Enchanted Fire+Water + Raw Earth (intermediate step)"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [1, 3, 4],
+          "enchanted": [false, true, false],
+          "refined": [true, false, true],
+          "bottled": true
+        }
+      ],
+      "description": "46: Bottled Complex Fire+Enchanted Earth+Refined Air Triple"
+    },
+    {
+      "time_limit": 3000,
+      "required_items": [
+        {
+          "base_essences": [2],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [1, 2],
+          "enchanted": [true, false],
+          "refined": [false, true],
+          "bottled": true
+        }
+      ],
+      "description": "47: Raw Water + Bottled Refined Water+Enchanted Fire (processing intermediate)"
+    },
+    {
+      "time_limit": 2800,
+      "required_items": [
+        {
+          "base_essences": [1],
+          "enchanted": [true],
+          "refined": [true],
+          "bottled": true
+        },
+        {
+          "base_essences": [2, 4],
+          "enchanted": [false, true],
+          "refined": [true, false],
+          "bottled": true
+        },
+        {
+          "base_essences": [3],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        }
+      ],
+      "description": "48: Bottled Refined+Enchanted Fire + Bottled Refined Water+Enchanted Air + Raw Earth"
+    },
+    {
+      "time_limit": 2800,
+      "required_items": [
+        {
+          "base_essences": [1, 2, 3],
+          "enchanted": [true, true, true],
+          "refined": [false, false, true],
+          "bottled": true
+        },
+        {
+          "base_essences": [4],
+          "enchanted": [false],
+          "refined": [true],
+          "bottled": true
+        }
+      ],
+      "description": "49: Bottled Triple with Mixed Processing + Bottled Refined Air"
+    },
+    {
+      "time_limit": 2500,
+      "required_items": [
+        {
+          "base_essences": [1, 2, 3, 4],
+          "enchanted": [true, false, true, false],
+          "refined": [true, true, false, true],
+          "bottled": true
+        },
+        {
+          "base_essences": [1],
+          "enchanted": [false],
+          "refined": [false],
+          "bottled": false
+        },
+        {
+          "base_essences": [2, 3],
+          "enchanted": [true, false],
+          "refined": [false, true],
+          "bottled": false
+        }
+      ],
+      "description": "50: Final level (for now) - Bottled Quadruple + Raw Fire + Enchanted Water+Refined Earth Intermediates"
+    }
+  ]
+}
