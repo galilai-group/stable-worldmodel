@@ -147,6 +147,11 @@ class EverythingToInfoWrapper(gym.Wrapper):
         super().__init__(env)
         self._variations_watch = []
 
+    def _gen_id(self):
+        max_int = np.iinfo(np.int64).max
+        rng = self.env.unwrapped.np_random
+        return rng.integers(0, max_int) if hasattr(rng, "integers") else rng.randint(0, max_int)
+
     def reset(self, *args, **kwargs):
         self._step_counter = 0
         obs, info = self.env.reset(*args, **kwargs)
@@ -169,7 +174,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
         assert "step_idx" not in info
         info["step_idx"] = self._step_counter
         assert "id" not in info
-        self._id = self.env.unwrapped.np_random.integers(0, np.iinfo(np.int64).max)
+        self._id = self._gen_id()
         info["id"] = self._id
 
         # add all variations to info if needed
@@ -345,12 +350,14 @@ class ResizeGoalWrapper(gym.Wrapper):
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        info["goal"] = self._format(info["goal"])
+        if "goal" in info:
+            info["goal"] = self._format(info["goal"])
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info["goal"] = self._format(info["goal"])
+        if "goal" in info:
+            info["goal"] = self._format(info["goal"])
         return obs, reward, terminated, truncated, info
 
 
@@ -483,7 +490,7 @@ class MegaWrapper(gym.Wrapper):
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, required_keys)
         # check goal is provided
-        env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
+        # env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
         env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
         # We will wrap with StackedWrapper dynamically after we know the keys

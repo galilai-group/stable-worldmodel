@@ -245,6 +245,7 @@ class TwoRoomEnv(gym.Env):
         speed = self.variation_space["agent"]["speed"].value.item()
 
         self.latest_action = action
+        self.space.iterations = 30  # try 30–60
         for _ in range(n_steps):
             self.agent.velocity = Vec2d(0, 0) + velocity * speed
             self.space.step(self.dt)
@@ -537,6 +538,18 @@ class TwoRoomEnv(gym.Env):
 
         # Debug draw everything in the space
         self.space.debug_draw(draw_options)
+
+        # Draw agent last (on top of everything)
+        for shape in self.agent.shapes:
+            p = to_pygame(self.agent.position, draw_options.surface)
+            pygame.draw.circle(canvas, shape.color, p, round(shape.radius), 0)
+            pygame.draw.circle(
+                canvas,
+                light_color(shape.color).as_int(),
+                p,
+                max(0, round(shape.radius - 4)),
+                0,
+            )
 
         img = np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
         img = cv2.resize(img, (self.render_size, self.render_size))

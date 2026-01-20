@@ -935,8 +935,8 @@ class World:
         if len(episodes_idx) != self.num_envs:
             raise ValueError("Number of episodes to evaluate must match number of envs")
 
-        data = dataset.load_chunk(episodes_idx, start_steps, end_steps)
-        columns = dataset.dataset.column_names
+        data = dataset.get_chunk_data(episodes_idx, start_steps, end_steps)
+        columns = dataset.column_names
 
         # keep relevant part of the chunk
         init_step_per_env = defaultdict(list)
@@ -1051,7 +1051,10 @@ class World:
             assert np.allclose(self.infos["goal"], goal_step["goal"]), "Goal info does not match"
 
         target_frames = torch.stack([ep["pixels"] for ep in data]).numpy()
-        video_frames = np.empty((self.num_envs, eval_budget, *self.infos["pixels"].shape[-3:]), dtype=np.uint8)
+        video_frames = np.empty(
+            (self.num_envs, eval_budget, *self.infos["pixels"].shape[-3:]),
+            dtype=np.uint8,
+        )
 
         # TODO assert goal and start state are identical as in the rollout
         # run normal evaluation for eval_budget and TODO: record video
@@ -1076,7 +1079,12 @@ class World:
             video_path = Path(video_path)
             video_path.mkdir(parents=True, exist_ok=True)
             for i in range(self.num_envs):
-                out = imageio.get_writer(video_path / f"rollout_{i}.mp4", "output.mp4", fps=15, codec="libx264")
+                out = imageio.get_writer(
+                    video_path / f"rollout_{i}.mp4",
+                    "output.mp4",
+                    fps=15,
+                    codec="libx264",
+                )
                 goals = np.vstack([target_frames[i, -1], target_frames[i, -1]])
                 for t in range(eval_budget):
                     stacked_frame = np.vstack([video_frames[i, t], target_frames[i, t % target_len]])

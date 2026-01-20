@@ -373,12 +373,16 @@ class HDF5Dataset:
         num_steps: int = 1,
         transform: Callable | None = None,
         keys_to_load: list[str] | None = None,
+        keys_to_cache: list[str] | None = None,
         cache_dir: str | None = None,
     ):
         self.h5_path = Path(cache_dir or get_cache_dir(), f"{name}.h5")
         self.h5_file = None
+        self._cache = {}
 
         self.keys_to_load = keys_to_load
+        self.metadata_keys = ["ep_len", "ep_offset"]
+        self.keys_to_cache = keys_to_cache or []
 
         with h5py.File(self.h5_path, "r") as f:
             self.offsets = f["ep_offset"][:]
@@ -386,6 +390,13 @@ class HDF5Dataset:
 
             if self.keys_to_load is None:
                 self.keys_to_load = list(f.keys())
+
+            for key in self.keys_to_cache:
+                if key in f:
+                    self._cache[key] = f[key][:]
+                    logging.info(f"Cached key '{key}' from HDF5 file '{self.h5_path}'")
+                else:
+                    raise KeyError(f"Key '{key}' not found in HDF5 file '{self.h5_path}'")
 
         self.transform = transform
         self.frameskip = frameskip
@@ -402,21 +413,26 @@ class HDF5Dataset:
 
     @property
     def column_names(self):
-        return self.keys_to_load
+        return [key for key in self.keys_to_load if key not in self.metadata_keys]
 
     def __len__(self):
         return len(self.clip_indices)
 
-    def __getitem__(self, idx: int):
+    def _init_h5(self):
         if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, "r", swmr=True)
+            self.h5_file = h5py.File(self.h5_path, "r", swmr=True, rdcc_nbytes=256 * 1024 * 1024)
+        return
 
-        ep_idx, local_start = self.clip_indices[idx]
-        start = self.offsets[ep_idx] + local_start
-
+    def load_slice(self, start_idx, end_idx):
         steps = {}
         for col in self.keys_to_load:
-            data = self.h5_file[col][start : start + self.span]
+            if col in self.metadata_keys:
+                continue
+
+            if col in self._cache:
+                data = self._cache[col][start_idx:end_idx]
+            else:
+                data = self.h5_file[col][start_idx:end_idx]
 
             # apply frameskip if not action
             if col != "action":
@@ -432,13 +448,49 @@ class HDF5Dataset:
         if self.transform:
             steps = self.transform(steps)
 
+        return steps
+
+    def __getitem__(self, idx: int):
+        ep_idx, local_start = self.clip_indices[idx]
+        start = self.offsets[ep_idx] + local_start
+        end = start + self.span
+
+        self._init_h5()
+        steps = self.load_slice(start, end)
+
         if "action" in steps:
             act_shape = self.num_steps
             steps["action"] = steps["action"].reshape(act_shape, -1)
 
         return steps
 
+    def get_chunk_data(self, episodes_idx, start, end):
+        self._init_h5()
+        global_start = self.offsets[episodes_idx] + start
+        end = global_start + (end - start)
+
+        chunk = []
+        for s_idx, e_idx in zip(global_start, end):
+            steps = self.load_slice(s_idx, e_idx)
+
+            # reshape action
+            if "action" in steps:
+                act_shape = (e_idx - s_idx) // self.frameskip
+                steps["action"] = steps["action"].reshape(act_shape, -1)
+            chunk.append(steps)
+
+        return chunk
+
     def get_col_data(self, col: str):
-        if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, "r", swmr=True)
+        self._init_h5()
         return self.h5_file[col][:]
+
+    def get_row_data(self, row_idx: int | list[int]):
+        self._init_h5()
+        sample = {}
+        for col in self.keys_to_load:
+            if col in self.metadata_keys:
+                continue
+            sample[col] = self.h5_file[col][row_idx]
+
+        return sample

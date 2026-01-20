@@ -20,7 +20,7 @@ dataset_name: debug_tworoom
 
 world:
   num_envs: 10
-  max_episode_steps: 200
+  max_episode_steps: 100
   image_shape: [224, 224]
 
 num_workers: 4
