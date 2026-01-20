@@ -56,6 +56,26 @@ register(
     entry_point="stable_worldmodel.envs.rocket_landing.pyflyt_rocketlanding:RocketLandingEnv",
 )
 
+register(
+    id="swm/HumanoidDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.humanoid:HumanoidDMControlWrapper",
+)
+
+register(
+    id="swm/CheetahDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.cheetah:CheetahDMControlWrapper",
+)
+
+register(
+    id="swm/HopperDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.hopper:HopperDMControlWrapper",
+)
+
+register(
+    id="swm/ReacherDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.reacher:ReacherDMControlWrapper",
+)
+
 
 ############
 # DISCRETE #

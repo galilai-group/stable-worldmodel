@@ -1,3 +1,8 @@
+import os
+
+
+os.environ["MUJOCO_GL"] = "egl"
+
 from collections import OrderedDict
 
 import gymnasium as gym
