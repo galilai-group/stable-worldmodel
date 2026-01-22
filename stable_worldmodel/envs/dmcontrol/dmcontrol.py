@@ -7,20 +7,6 @@ import mujoco
 import numpy as np
 
 
-# from envs.tasks import cartpole, cheetah, walker, hopper, ball_in_cup, pendulum, fish, giraffe, spinner, jumper
-# from dm_control import suite
-# from dm_control.suite import common
-# from dm_control import mjcf
-# suite._DOMAINS['giraffe'] = giraffe
-# suite._DOMAINS['spinner'] = spinner
-# suite._DOMAINS['jumper'] = jumper
-# suite.ALL_TASKS = suite.ALL_TASKS + suite._get_tasks('custom')
-# suite.TASKS_BY_DOMAIN = suite._get_tasks_by_domain(suite.ALL_TASKS)
-# from dm_control.suite.wrappers import action_scale
-
-# from envs.wrappers.pixels import Pixels
-
-
 def get_obs_shape(env):
     obs_shp = []
     for v in env.observation_spec().values():
@@ -66,6 +52,8 @@ class DMControlWrapper(gym.Env):
     def info(self):
         return {
             "success": float("nan"),
+            "qpos": np.copy(self.env.physics.data.qpos),
+            "qvel": np.copy(self.env.physics.data.qvel),
             "score": self._cumulative_reward / 1000,
         }
 
@@ -111,16 +99,18 @@ class DMControlWrapper(gym.Env):
             step = self.env.step(action)
             reward += step.reward
         self._cumulative_reward += reward
+
         return self._obs_to_array(step.observation), reward, False, False, self.info
 
     def set_state(self, qpos, qvel):
         """Reset the environment to a specific state."""
+
         assert qpos.shape == (self.env.physics.model.nq,) and qvel.shape == (self.env.physics.model.nv,)
         self.env.physics.data.qpos[:] = np.copy(qpos)
         self.env.physics.data.qvel[:] = np.copy(qvel)
         if self.env.physics.model.na == 0:
             self.env.physics.data.act[:] = None
-        mujoco.mj_forward(self.env.physics.model, self.env.physics.data)
+        self.env.physics.forward()
 
     def render(self, width=224, height=224, camera_id=None):
         return self.env.physics.render(height, width, camera_id or self.camera_id)
@@ -137,34 +127,3 @@ class DMControlWrapper(gym.Env):
     def mark_dirty(self):
         """Mark the environment as dirty, requiring recompilation of the model."""
         self._dirty = True
-
-
-# def make_env(cfg):
-# 	"""
-# 	Make DMControl environment.
-# 	Adapted from https://github.com/facebookresearch/drqv2
-# 	"""
-# 	domain, task = cfg.task.replace('-', '_').split('_', 1)
-# 	domain = dict(cup='ball_in_cup', pointmass='point_mass').get(domain, domain)
-# 	if (domain, task) not in suite.ALL_TASKS:
-# 		raise ValueError('Unknown task:', task)
-# 	assert cfg.obs in {'state', 'rgb'}, 'This task only supports state and rgb observations.'
-# 	env = suite.load(domain,
-# 					 task,
-# 					 task_kwargs={'random': cfg.seed},
-# 					 visualize_reward=False)
-# 	env = action_scale.Wrapper(env, minimum=-1., maximum=1.)
-# 	env = DMControlWrapper(env, domain)
-# 	# if cfg.obs == 'rgb':
-# 	# 	env = Pixels(env, cfg)
-# 	return env
-
-# if __name__ == '__main__':
-# 	# Quick smoke test: load humanoid walk and wrap it.
-# 	env = suite.load('humanoid', 'walk', task_kwargs={'random': 0}, visualize_reward=False)
-# 	env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
-# 	env = DMControlWrapper(env, 'humanoid')
-# 	obs, info = env.reset()
-# 	print('obs shape:', obs.shape)
-# 	print('info:', info)
-# 	env.close()

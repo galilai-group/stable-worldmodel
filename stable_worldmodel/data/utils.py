@@ -19,11 +19,52 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import gymnasium as gym
+import imageio.v3 as iio
 import numpy as np
 from datasets import load_from_disk
 from rich import print
 
 import stable_worldmodel as swm
+
+
+def record_video_from_dataset(
+    video_path,
+    dataset,
+    episode_idx,
+    max_steps=1000,
+    fps=30,
+    viewname: str | list[str] = "pixels",
+):
+    """Record videos from stored dataset episodes."""
+    episode_idx = [episode_idx] if isinstance(episode_idx, int) else episode_idx
+    viewname = [viewname] if isinstance(viewname, str) else viewname
+
+    video_path = Path(video_path)
+    video_path.mkdir(parents=True, exist_ok=True)
+
+    for ep in episode_idx:
+        ep_len = dataset.lengths[ep]
+        chunk = dataset.get_chunk_data(np.array([ep]), np.array([0]), np.array([min(ep_len, max_steps)]))[0]
+
+        frames_list = []
+        for view in viewname:
+            view_data = chunk[view]
+            if view_data.ndim == 4 and view_data.shape[1] in [1, 3]:  # TCHW -> THWC
+                view_data = view_data.permute(0, 2, 3, 1)
+            frames_list.append(view_data.numpy())
+
+        stacked = np.concatenate(frames_list, axis=1)
+
+        if "goal" in chunk:
+            goal_data = chunk["goal"]
+            if goal_data.ndim == 4 and goal_data.shape[1] in [1, 3]:
+                goal_data = goal_data.permute(0, 2, 3, 1)
+            stacked = np.concatenate([stacked, goal_data.numpy()], axis=1)
+
+        output_path = video_path / f"episode_{ep}.mp4"
+        iio.imwrite(output_path, stacked.astype(np.uint8), fps=fps, codec="libx264")
+
+    print(f"Video saved to {video_path}")
 
 
 #####################
