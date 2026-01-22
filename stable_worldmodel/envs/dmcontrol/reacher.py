@@ -202,14 +202,15 @@ class ReacherDMControlWrapper(DMControlWrapper):
 
         if shape_id == 0:
             desired_type = "box"
-            # desired_size = np.array([0.05, 0.05, 0.05], dtype=np.float32)
+            desired_size = np.array([_SMALL_TARGET, _SMALL_TARGET, _SMALL_TARGET], dtype=np.float32)
         else:
             desired_type = "sphere"
-            # desired_size = np.array([0.05], dtype=np.float32)
+            desired_size = np.array([_SMALL_TARGET], dtype=np.float32)
 
         if target_geom.type != desired_type:
             target_changed = True
         target_geom.type = desired_type
+        target_geom.size = desired_size
 
         # If any properties changed, mark the model as dirty.
         if light_changed or texture_changed or mass_changed or target_changed or agent_color_changed:

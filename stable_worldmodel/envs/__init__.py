@@ -76,6 +76,11 @@ register(
     entry_point="stable_worldmodel.envs.dmcontrol.reacher:ReacherDMControlWrapper",
 )
 
+register(
+    id="swm/WalkerDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.walker:WalkerDMControlWrapper",
+)
+
 
 ############
 # DISCRETE #
