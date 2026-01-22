@@ -96,6 +96,21 @@ register(
     entry_point="stable_worldmodel.envs.dmcontrol.cartpole:CartpoleDMControlWrapper",
 )
 
+register(
+    id="swm/BallInCupDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.ball_in_cup:BallInCupDMControlWrapper",
+)
+
+register(
+    id="swm/FingerDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.finger:FingerDMControlWrapper",
+)
+
+register(
+    id="swm/ManipulatorDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.manipulator:ManipulatorDMControlWrapper",
+)
+
 
 ############
 # DISCRETE #

@@ -4,28 +4,31 @@ import tempfile
 import numpy as np
 from dm_control import mjcf
 from dm_control.rl import control
-from dm_control.suite import cheetah
+from dm_control.suite import manipulator
 from dm_control.suite.wrappers import action_scale
 
 from stable_worldmodel import spaces as swm_space
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 
-_DEFAULT_TIME_LIMIT = 25
+_CONTROL_TIMESTEP = 0.01  # (Seconds)
+_TIME_LIMIT = 10  # (Seconds)
+
+_SMALL_TARGET = 0.015
 
 
-class CheetahDMControlWrapper(DMControlWrapper):
+class ManipulatorDMControlWrapper(DMControlWrapper):
     def __init__(self, seed=None, environment_kwargs=None):
-        xml, assets = cheetah.get_model_and_assets()
+        xml, assets = manipulator.make_model(use_peg=False, insert=False)
         xml = xml.replace(b'file="./common/', b'file="common/')
-        suite_dir = os.path.dirname(cheetah.__file__)  # .../dm_control/suite
+        suite_dir = os.path.dirname(manipulator.__file__)  # .../dm_control/suite
         self._mjcf_model = mjcf.from_xml_string(
             xml,
             model_dir=suite_dir,
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, "cheetah")
+        super().__init__(self.env, "manipulator")
         self.variation_space = swm_space.Dict(
             {
                 "agent": swm_space.Dict(
@@ -35,35 +38,34 @@ class CheetahDMControlWrapper(DMControlWrapper):
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.6, 0.3, 0.3], dtype=np.float64),
+                            init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
                         ),
-                        "torso_density": swm_space.Box(
+                        "upper_arm_density": swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        "back_foot_density": swm_space.Box(
+                        "hand_density": swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        # TODO lock back foot joint (by default it is unlocked 1)
-                        "back_foot_locked": swm_space.Discrete(2, init_value=1),
+                        # TODO should modify length of arm
+                        "upper_arm_length": swm_space.Box(
+                            low=500,
+                            high=1500,
+                            shape=(1,),
+                            dtype=np.float32,
+                            init_value=np.array([1000], dtype=np.float32),
+                        ),
                     }
                 ),
                 "floor": swm_space.Dict(
                     {
-                        "friction": swm_space.Box(
-                            low=0.0,
-                            high=1.0,
-                            shape=(1,),
-                            dtype=np.float32,
-                            init_value=np.array([1.0], dtype=np.float32),
-                        ),
                         "color": swm_space.Box(
                             low=0.0,
                             high=1.0,
@@ -71,6 +73,18 @@ class CheetahDMControlWrapper(DMControlWrapper):
                             dtype=np.float64,
                             init_value=np.array([[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]], dtype=np.float64),
                         ),
+                    }
+                ),
+                "target": swm_space.Dict(
+                    {
+                        "color": swm_space.Box(
+                            low=0.0,
+                            high=1.0,
+                            shape=(3,),
+                            dtype=np.float64,
+                            init_value=np.array([0.6, 0.3, 0.3], dtype=np.float64),
+                        ),
+                        "shape": swm_space.Discrete(2, init_value=1),  # 0: box, 1: sphere
                     }
                 ),
                 "light": swm_space.Dict(
@@ -94,13 +108,15 @@ class CheetahDMControlWrapper(DMControlWrapper):
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name="cheetah.xml",
+            out_file_name="manipulator.xml",
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, "cheetah.xml")
-        physics = cheetah.Physics.from_xml_path(xml_path)
-        task = cheetah.Cheetah(random=seed)
+        xml_path = os.path.join(self._mjcf_tempdir.name, "manipulator.xml")
+        physics = manipulator.Physics.from_xml_path(xml_path)
+        task = manipulator.Bring(use_peg=False, insert=False, fully_observable=True, random=seed)
         environment_kwargs = environment_kwargs or {}
-        env = control.Environment(physics, task, time_limit=_DEFAULT_TIME_LIMIT, **environment_kwargs)
+        env = control.Environment(
+            physics, task, time_limit=_TIME_LIMIT, control_timestep=_CONTROL_TIMESTEP, **environment_kwargs
+        )
         env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
         self.env = env
         # Mark the environment as clean.
@@ -134,7 +150,7 @@ class CheetahDMControlWrapper(DMControlWrapper):
         grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
         grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
 
-        # Modify agent (cheetah) color via material
+        # Modify agent (manipulator) color via material
         agent_color_changed = False
 
         desired_rgb = np.asarray(self.variation_space["agent"]["color"].value, dtype=np.float32).reshape(3)
@@ -149,39 +165,21 @@ class CheetahDMControlWrapper(DMControlWrapper):
 
         mass_changed = False
 
-        # Modify floor friction
-        floor_geom = mjcf_model.find("geom", "ground")
-        desired_friction = float(np.asarray(self.variation_space["floor"]["friction"].value).reshape(-1)[0])
-
-        # MJCF may store geom.friction as None if not specified in XML.
-        # MuJoCo default is: [1, 0.005, 0.0001]
-        if floor_geom.friction is None:
-            current_friction = np.array([1.0, 0.005, 0.0001], dtype=np.float32)
-        else:
-            current_friction = np.asarray(floor_geom.friction, dtype=np.float32).copy()
-
-        new_friction = current_friction.copy()
-        new_friction[0] = desired_friction
-
-        friction_changed = not np.allclose(current_friction, new_friction)
-        floor_geom.friction = new_friction
-
-        mass_changed = False
-        # Modify torso density
-        torso_geom = mjcf_model.find("geom", "torso")
-        base = torso_geom.density if torso_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["torso_density"].value).reshape(-1)[0])
+        # Modify arm density
+        arm_geom = mjcf_model.find("geom", "upper_arm")
+        base = arm_geom.density if arm_geom.density is not None else 1000.0
+        desired_density = float(np.asarray(self.variation_space["agent"]["upper_arm_density"].value).reshape(-1)[0])
         if not np.allclose(base, desired_density):
             mass_changed = True
-        torso_geom.density = desired_density
+        arm_geom.density = desired_density
 
-        # Modify back foot density
-        bfoot_geom = mjcf_model.find("geom", "bfoot")
-        base = bfoot_geom.density if bfoot_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["back_foot_density"].value).reshape(-1)[0])
+        # Modify hand density
+        hand_geom = mjcf_model.find("geom", "hand")
+        base = hand_geom.density if hand_geom.density is not None else 1000.0
+        desired_density = float(np.asarray(self.variation_space["agent"]["hand_density"].value).reshape(-1)[0])
         if not np.allclose(base, desired_density):
             mass_changed = True
-        bfoot_geom.density = desired_density
+        hand_geom.density = desired_density
 
         # Modify light intensity if a global light exists.
         light_changed = False
@@ -190,14 +188,47 @@ class CheetahDMControlWrapper(DMControlWrapper):
         light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
         light.diffuse = desired_diffuse
 
+        # Modify target appearance (color, shape)
+        target_changed = False
+
+        target_geom = mjcf_model.find("geom", "target_ball")
+        target_mat = mjcf_model.find("material", "target")
+
+        assert target_geom is not None, "Expected geom named 'target_ball'"
+        assert target_mat is not None, "Expected material named 'target'"
+
+        # ----- Color -----
+        desired_rgb = np.asarray(self.variation_space["target"]["color"].value, dtype=np.float32).reshape(3)
+        desired_rgba = np.concatenate([desired_rgb, [1.0]], axis=0)
+
+        if target_mat.rgba is None or not np.allclose(target_mat.rgba, desired_rgba):
+            target_changed = True
+        target_mat.rgba = desired_rgba
+
+        # ----- Shape -----
+        # 0 = box, 1 = sphere
+        shape_id = int(self.variation_space["target"]["shape"].value)
+
+        if shape_id == 0:
+            desired_type = "box"
+            desired_size = np.array([_SMALL_TARGET, _SMALL_TARGET, _SMALL_TARGET], dtype=np.float32)
+        else:
+            desired_type = "sphere"
+            desired_size = np.array([_SMALL_TARGET], dtype=np.float32)
+
+        if target_geom.type != desired_type:
+            target_changed = True
+        target_geom.type = desired_type
+        target_geom.size = desired_size
+
         # If any properties changed, mark the model as dirty.
-        if light_changed or texture_changed or friction_changed or mass_changed or agent_color_changed:
+        if light_changed or texture_changed or mass_changed or target_changed or agent_color_changed:
             self.mark_dirty()
         return mjcf_model
 
 
 if __name__ == "__main__":
-    env = CheetahDMControlWrapper(seed=0)
+    env = ManipulatorDMControlWrapper(seed=0)
     obs, info = env.reset()
     print("obs shape:", obs.shape)
     print("info:", info)
