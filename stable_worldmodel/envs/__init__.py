@@ -81,6 +81,21 @@ register(
     entry_point="stable_worldmodel.envs.dmcontrol.walker:WalkerDMControlWrapper",
 )
 
+register(
+    id="swm/AcrobotDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.acrobot:AcrobotDMControlWrapper",
+)
+
+register(
+    id="swm/PendulumDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.pendulum:PendulumDMControlWrapper",
+)
+
+register(
+    id="swm/CartpoleDMControl-v0",
+    entry_point="stable_worldmodel.envs.dmcontrol.cartpole:CartpoleDMControlWrapper",
+)
+
 
 ############
 # DISCRETE #

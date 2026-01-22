@@ -4,29 +4,30 @@ import tempfile
 import numpy as np
 from dm_control import mjcf
 from dm_control.rl import control
-from dm_control.suite import hopper
+from dm_control.suite import acrobot
 from dm_control.suite.wrappers import action_scale
 
 from stable_worldmodel import spaces as swm_space
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 
-_CONTROL_TIMESTEP = 0.02
-_DEFAULT_TIME_LIMIT = 20
+_DEFAULT_TIME_LIMIT = 10
+
+_SMALL_TARGET = 0.2
 
 
-class HopperDMControlWrapper(DMControlWrapper):
+class AcrobotDMControlWrapper(DMControlWrapper):
     def __init__(self, seed=None, environment_kwargs=None):
-        xml, assets = hopper.get_model_and_assets()
+        xml, assets = acrobot.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
-        suite_dir = os.path.dirname(hopper.__file__)  # .../dm_control/suite
+        suite_dir = os.path.dirname(acrobot.__file__)  # .../dm_control/suite
         self._mjcf_model = mjcf.from_xml_string(
             xml,
             model_dir=suite_dir,
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, "hopper")
+        super().__init__(self.env, "acrobot")
         self.variation_space = swm_space.Dict(
             {
                 "agent": swm_space.Dict(
@@ -38,33 +39,26 @@ class HopperDMControlWrapper(DMControlWrapper):
                             dtype=np.float64,
                             init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
                         ),
-                        "torso_density": swm_space.Box(
+                        "upper_arm_density": swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        "foot_density": swm_space.Box(
+                        "lower_arm_density": swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        # TODO lock foot joint (by default it is unlocked 1)
-                        "foot_locked": swm_space.Discrete(2, init_value=1),
+                        # TODO lock upper arm joint (by default it is unlocked 1)
+                        "upper_arm_locked": swm_space.Discrete(2, init_value=1),
                     }
                 ),
                 "floor": swm_space.Dict(
                     {
-                        "friction": swm_space.Box(
-                            low=0.0,
-                            high=1.0,
-                            shape=(1,),
-                            dtype=np.float32,
-                            init_value=np.array([1.0], dtype=np.float32),
-                        ),
                         "color": swm_space.Box(
                             low=0.0,
                             high=1.0,
@@ -72,6 +66,18 @@ class HopperDMControlWrapper(DMControlWrapper):
                             dtype=np.float64,
                             init_value=np.array([[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]], dtype=np.float64),
                         ),
+                    }
+                ),
+                "target": swm_space.Dict(
+                    {
+                        "color": swm_space.Box(
+                            low=0.0,
+                            high=1.0,
+                            shape=(3,),
+                            dtype=np.float64,
+                            init_value=np.array([0.6, 0.3, 0.3], dtype=np.float64),
+                        ),
+                        "shape": swm_space.Discrete(2, init_value=1),  # 0: box, 1: sphere
                     }
                 ),
                 "light": swm_space.Dict(
@@ -95,15 +101,13 @@ class HopperDMControlWrapper(DMControlWrapper):
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name="hopper.xml",
+            out_file_name="acrobot.xml",
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, "hopper.xml")
-        physics = hopper.Physics.from_xml_path(xml_path)
-        task = hopper.Hopper(hopping=True, random=seed)
+        xml_path = os.path.join(self._mjcf_tempdir.name, "acrobot.xml")
+        physics = acrobot.Physics.from_xml_path(xml_path)
+        task = acrobot.Balance(sparse=True, random=seed)
         environment_kwargs = environment_kwargs or {}
-        env = control.Environment(
-            physics, task, time_limit=_DEFAULT_TIME_LIMIT, control_timestep=_CONTROL_TIMESTEP, **environment_kwargs
-        )
+        env = control.Environment(physics, task, time_limit=_DEFAULT_TIME_LIMIT, **environment_kwargs)
         env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
         self.env = env
         # Mark the environment as clean.
@@ -137,7 +141,7 @@ class HopperDMControlWrapper(DMControlWrapper):
         grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
         grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
 
-        # Modify agent (hopper) color via material
+        # Modify agent (acrobot) color via material
         agent_color_changed = False
 
         desired_rgb = np.asarray(self.variation_space["agent"]["color"].value, dtype=np.float32).reshape(3)
@@ -152,55 +156,70 @@ class HopperDMControlWrapper(DMControlWrapper):
 
         mass_changed = False
 
-        # Modify floor friction
-        floor_geom = mjcf_model.find("geom", "floor")
-        desired_friction = float(np.asarray(self.variation_space["floor"]["friction"].value).reshape(-1)[0])
-
-        # MJCF may store geom.friction as None if not specified in XML.
-        # MuJoCo default is: [1, 0.005, 0.0001]
-        if floor_geom.friction is None:
-            current_friction = np.array([1.0, 0.005, 0.0001], dtype=np.float32)
-        else:
-            current_friction = np.asarray(floor_geom.friction, dtype=np.float32).copy()
-
-        new_friction = current_friction.copy()
-        new_friction[0] = desired_friction
-
-        friction_changed = not np.allclose(current_friction, new_friction)
-        floor_geom.friction = new_friction
-
-        mass_changed = False
-        # Modify torso density
-        torso_geom = mjcf_model.find("geom", "torso")
-        base = torso_geom.density if torso_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["torso_density"].value).reshape(-1)[0])
+        # Modify upper arm density
+        upper_arm_geom = mjcf_model.find("geom", "upper_arm")
+        base = upper_arm_geom.density if upper_arm_geom.density is not None else 1000.0
+        desired_density = float(np.asarray(self.variation_space["agent"]["upper_arm_density"].value).reshape(-1)[0])
         if not np.allclose(base, desired_density):
             mass_changed = True
-        torso_geom.density = desired_density
+        upper_arm_geom.density = desired_density
 
-        # Modify foot density
-        foot_geom = mjcf_model.find("geom", "foot")
-        base = foot_geom.density if foot_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["foot_density"].value).reshape(-1)[0])
+        # Modify lower arm density
+        lower_arm_geom = mjcf_model.find("geom", "lower_arm")
+        base = lower_arm_geom.density if lower_arm_geom.density is not None else 1000.0
+        desired_density = float(np.asarray(self.variation_space["agent"]["lower_arm_density"].value).reshape(-1)[0])
         if not np.allclose(base, desired_density):
             mass_changed = True
-        foot_geom.density = desired_density
+        lower_arm_geom.density = desired_density
 
         # Modify light intensity if a global light exists.
         light_changed = False
-        light = mjcf_model.find("light", "top")
+        light = mjcf_model.find("light", "light")
         desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
         light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
         light.diffuse = desired_diffuse
 
+        # Modify target appearance (color, shape)
+        target_changed = False
+
+        target_site = mjcf_model.find("site", "target")
+        target_mat = mjcf_model.find("material", "target")
+
+        assert target_site is not None, "Expected geom named 'target'"
+        assert target_mat is not None, "Expected material named 'target'"
+
+        # ----- Color -----
+        desired_rgb = np.asarray(self.variation_space["target"]["color"].value, dtype=np.float32).reshape(3)
+        desired_rgba = np.concatenate([desired_rgb, [1.0]], axis=0)
+
+        if target_mat.rgba is None or not np.allclose(target_mat.rgba, desired_rgba):
+            target_changed = True
+        target_mat.rgba = desired_rgba
+
+        # ----- Shape -----
+        # 0 = box, 1 = sphere
+        shape_id = int(self.variation_space["target"]["shape"].value)
+
+        if shape_id == 0:
+            desired_type = "box"
+            desired_size = np.array([_SMALL_TARGET, _SMALL_TARGET, _SMALL_TARGET], dtype=np.float32)
+        else:
+            desired_type = "sphere"
+            desired_size = np.array([_SMALL_TARGET], dtype=np.float32)
+
+        if target_site.type != desired_type:
+            target_changed = True
+        target_site.type = desired_type
+        target_site.size = desired_size
+
         # If any properties changed, mark the model as dirty.
-        if light_changed or texture_changed or friction_changed or mass_changed or agent_color_changed:
+        if light_changed or texture_changed or mass_changed or target_changed or agent_color_changed:
             self.mark_dirty()
         return mjcf_model
 
 
 if __name__ == "__main__":
-    env = HopperDMControlWrapper(seed=0)
+    env = AcrobotDMControlWrapper(seed=0)
     obs, info = env.reset()
     print("obs shape:", obs.shape)
     print("info:", info)

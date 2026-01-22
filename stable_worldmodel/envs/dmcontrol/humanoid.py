@@ -30,7 +30,7 @@ class HumanoidDMControlWrapper(DMControlWrapper):
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
         super().__init__(self.env, "humanoid")
         self.variation_space = swm_space.Dict(
-            {  # TODO check default values to match original humanoid env
+            {
                 "agent": swm_space.Dict(
                     {
                         "color": swm_space.Box(

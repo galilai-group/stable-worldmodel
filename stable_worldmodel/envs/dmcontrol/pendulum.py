@@ -4,31 +4,30 @@ import tempfile
 import numpy as np
 from dm_control import mjcf
 from dm_control.rl import control
-from dm_control.suite import hopper
+from dm_control.suite import pendulum
 from dm_control.suite.wrappers import action_scale
 
 from stable_worldmodel import spaces as swm_space
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 
-_CONTROL_TIMESTEP = 0.02
 _DEFAULT_TIME_LIMIT = 20
 
 
-class HopperDMControlWrapper(DMControlWrapper):
+class PendulumDMControlWrapper(DMControlWrapper):
     def __init__(self, seed=None, environment_kwargs=None):
-        xml, assets = hopper.get_model_and_assets()
+        xml, assets = pendulum.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
-        suite_dir = os.path.dirname(hopper.__file__)  # .../dm_control/suite
+        suite_dir = os.path.dirname(pendulum.__file__)  # .../dm_control/suite
         self._mjcf_model = mjcf.from_xml_string(
             xml,
             model_dir=suite_dir,
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, "hopper")
+        super().__init__(self.env, "pendulum")
         self.variation_space = swm_space.Dict(
-            {
+            {  # TODO check default values to match original cheetah env
                 "agent": swm_space.Dict(
                     {
                         "color": swm_space.Box(
@@ -38,33 +37,26 @@ class HopperDMControlWrapper(DMControlWrapper):
                             dtype=np.float64,
                             init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
                         ),
-                        "torso_density": swm_space.Box(
+                        "pole_density": swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        "foot_density": swm_space.Box(
+                        "mass_density": swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        # TODO lock foot joint (by default it is unlocked 1)
-                        "foot_locked": swm_space.Discrete(2, init_value=1),
+                        # TODO implement mass shape variation
+                        "mass_shape": swm_space.Discrete(2, init_value=1),  # 0: box, 1: sphere
                     }
                 ),
                 "floor": swm_space.Dict(
                     {
-                        "friction": swm_space.Box(
-                            low=0.0,
-                            high=1.0,
-                            shape=(1,),
-                            dtype=np.float32,
-                            init_value=np.array([1.0], dtype=np.float32),
-                        ),
                         "color": swm_space.Box(
                             low=0.0,
                             high=1.0,
@@ -95,15 +87,13 @@ class HopperDMControlWrapper(DMControlWrapper):
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name="hopper.xml",
+            out_file_name="pendulum.xml",
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, "hopper.xml")
-        physics = hopper.Physics.from_xml_path(xml_path)
-        task = hopper.Hopper(hopping=True, random=seed)
+        xml_path = os.path.join(self._mjcf_tempdir.name, "pendulum.xml")
+        physics = pendulum.Physics.from_xml_path(xml_path)
+        task = pendulum.SwingUp(random=seed)
         environment_kwargs = environment_kwargs or {}
-        env = control.Environment(
-            physics, task, time_limit=_DEFAULT_TIME_LIMIT, control_timestep=_CONTROL_TIMESTEP, **environment_kwargs
-        )
+        env = control.Environment(physics, task, time_limit=_DEFAULT_TIME_LIMIT, **environment_kwargs)
         env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
         self.env = env
         # Mark the environment as clean.
@@ -137,7 +127,7 @@ class HopperDMControlWrapper(DMControlWrapper):
         grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
         grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
 
-        # Modify agent (hopper) color via material
+        # Modify agent (acrobot) color via material
         agent_color_changed = False
 
         desired_rgb = np.asarray(self.variation_space["agent"]["color"].value, dtype=np.float32).reshape(3)
@@ -152,55 +142,37 @@ class HopperDMControlWrapper(DMControlWrapper):
 
         mass_changed = False
 
-        # Modify floor friction
-        floor_geom = mjcf_model.find("geom", "floor")
-        desired_friction = float(np.asarray(self.variation_space["floor"]["friction"].value).reshape(-1)[0])
-
-        # MJCF may store geom.friction as None if not specified in XML.
-        # MuJoCo default is: [1, 0.005, 0.0001]
-        if floor_geom.friction is None:
-            current_friction = np.array([1.0, 0.005, 0.0001], dtype=np.float32)
-        else:
-            current_friction = np.asarray(floor_geom.friction, dtype=np.float32).copy()
-
-        new_friction = current_friction.copy()
-        new_friction[0] = desired_friction
-
-        friction_changed = not np.allclose(current_friction, new_friction)
-        floor_geom.friction = new_friction
-
-        mass_changed = False
-        # Modify torso density
-        torso_geom = mjcf_model.find("geom", "torso")
-        base = torso_geom.density if torso_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["torso_density"].value).reshape(-1)[0])
+        # Modify pole density
+        pole_geom = mjcf_model.find("geom", "pole")
+        base = pole_geom.density if pole_geom.density is not None else 1000.0
+        desired_density = float(np.asarray(self.variation_space["agent"]["pole_density"].value).reshape(-1)[0])
         if not np.allclose(base, desired_density):
             mass_changed = True
-        torso_geom.density = desired_density
+        pole_geom.density = desired_density
 
-        # Modify foot density
-        foot_geom = mjcf_model.find("geom", "foot")
-        base = foot_geom.density if foot_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["foot_density"].value).reshape(-1)[0])
+        # Modify mass density
+        mass_geom = mjcf_model.find("geom", "mass")
+        base = mass_geom.density if mass_geom.density is not None else 1000.0
+        desired_density = float(np.asarray(self.variation_space["agent"]["mass_density"].value).reshape(-1)[0])
         if not np.allclose(base, desired_density):
             mass_changed = True
-        foot_geom.density = desired_density
+        mass_geom.density = desired_density
 
         # Modify light intensity if a global light exists.
         light_changed = False
-        light = mjcf_model.find("light", "top")
+        light = mjcf_model.find("light", "light")
         desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
         light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
         light.diffuse = desired_diffuse
 
         # If any properties changed, mark the model as dirty.
-        if light_changed or texture_changed or friction_changed or mass_changed or agent_color_changed:
+        if light_changed or texture_changed or mass_changed or agent_color_changed:
             self.mark_dirty()
         return mjcf_model
 
 
 if __name__ == "__main__":
-    env = HopperDMControlWrapper(seed=0)
+    env = PendulumDMControlWrapper(seed=0)
     obs, info = env.reset()
     print("obs shape:", obs.shape)
     print("info:", info)
