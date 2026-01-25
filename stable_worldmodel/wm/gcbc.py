@@ -1,7 +1,5 @@
 import torch
 import torch.nn.functional as F
-
-# from torchvision import transforms
 from einops import rearrange, repeat
 from torch import nn
 

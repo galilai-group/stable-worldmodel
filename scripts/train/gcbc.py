@@ -124,7 +124,8 @@ def get_gcbc_policy(cfg):
         # Replace NaN values with 0 (occurs at sequence boundaries)
         if proprio_key is not None:
             batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
-        batch['action'] = torch.nan_to_num(batch['action'], 0.0)
+        batch["action"] = torch.nan_to_num(batch["action"], 0.0)
+        # TODO this can be simplified by calling get_action
         # Encode all timesteps into latent embeddings
         batch = self.model.encode(
             batch,
@@ -142,16 +143,11 @@ def get_gcbc_policy(cfg):
         )
 
         # Use history to predict next actions
-        embedding = batch['embed'][
-            :, : cfg.dinowm.history_size, :, :
-        ]  # (B, T-1, patches, dim)
-        goal_embedding = batch['goal_embed']  # (B, 1, patches, dim)
-        action_pred = self.model.predict(
-            embedding, goal_embedding
-        )  # (B, num_preds, action_dim)
-        action_target = batch['action'][
-            :, -cfg.dinowm.num_preds :, :
-        ]  # (B, num_preds, action_dim)
+        # TODO check this slicing is correct
+        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
+        goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
+        action_pred = self.model.predict(embedding, goal_embedding)  # (B, num_preds, action_dim)
+        action_target = batch["action"][:, -cfg.dinowm.num_preds :, :]  # (B, num_preds, action_dim)
 
         # Compute action MSE
         action_loss = F.mse_loss(action_pred, action_target)
