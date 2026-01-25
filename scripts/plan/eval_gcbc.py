@@ -54,7 +54,7 @@ def run(cfg: DictConfig):
         "Planning horizon must be smaller than or equal to eval_budget"
     )
 
-    if cfg.wandb.use_wandb:
+    if cfg.wandb.enable:
         # Initialize wandb
         wandb.init(project=cfg.wandb.project, entity=cfg.wandb.entity, config=dict(cfg))
 
@@ -142,7 +142,7 @@ def run(cfg: DictConfig):
     )
     end_time = time.time()
 
-    if cfg.wandb.use_wandb:
+    if cfg.wandb.enable:
         # Log metrics to wandb
         wandb.log(metrics)
         # Finish wandb run
