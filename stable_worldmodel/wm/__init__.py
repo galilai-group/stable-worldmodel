@@ -1,4 +1,4 @@
-from . import prejepa, gcbc
+from . import prejepa, gcbc, iql
 from .prejepa import PreJEPA
 from .gcbc import GCBC
 
@@ -7,4 +7,5 @@ __all__ = [
     'PreJEPA',
     'gcbc',
     'GCBC',
+    'iql',
 ]
