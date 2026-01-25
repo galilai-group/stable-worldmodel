@@ -1,5 +1,5 @@
 from . import utils
-from .dataset import FrameDataset, HDF5Dataset, InjectedDataset, VideoDataset
+from .dataset import FrameDataset, GoalDataset, HDF5Dataset, InjectedDataset, VideoDataset
 
 
 __all__ = [
@@ -8,4 +8,5 @@ __all__ = [
     "VideoDataset",
     "InjectedDataset",
     "HDF5Dataset",
+    "GoalDataset",
 ]

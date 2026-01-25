@@ -1,0 +1,15 @@
+# @package _global_
+# Local launcher configuration (no SLURM)
+
+defaults:
+  - override /hydra/launcher: basic
+
+dataset_name: pusht_expert_train
+
+n_gpus: 1
+cpus_per_task: 8
+cache_dir: null # Use stable-worldmodel default cache
+wandb:
+  enable: false
+  entity: stable-wm
+  project: stable-wm
