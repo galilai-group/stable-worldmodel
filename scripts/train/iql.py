@@ -6,6 +6,7 @@ import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
+from einops import rearrange
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
@@ -136,9 +137,14 @@ def get_gciql_value_model(cfg):
         embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
         target_embedding = 0  # TODO
         goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
-        value_pred = self.model.value_predictor.forward_student(embedding, goal_embedding)
+
+        # Reshape to (B, T*P, dim) for the predictor
+        embedding_flat = rearrange(embedding, "b t p d -> b (t p) d")
+        goal_embedding_flat = rearrange(goal_embedding, "b t p d -> b (t p) d")
+
+        value_pred = self.model.value_predictor.forward_student(embedding_flat, goal_embedding_flat)
         with torch.no_grad():
-            value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding)
+            value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding_flat)
         value_target += 0  # TODO should TD target
 
         # Compute action MSE
@@ -251,12 +257,16 @@ def get_gciql_action_model(cfg, trained_value_model):
         target_embedding = 0  # TODO
         goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
 
-        action_pred = self.model.action_predictor.forward_student(embedding, goal_embedding)
+        # Reshape to (B, T*P, dim) for the predictor
+        embedding_flat = rearrange(embedding, "b t p d -> b (t p) d")
+        goal_embedding_flat = rearrange(goal_embedding, "b t p d -> b (t p) d")
+
+        action_pred = self.model.action_predictor.forward_student(embedding_flat, goal_embedding_flat)
         with torch.no_grad():
             gamma = 0.99
-            value = self.model.value_predictor.forward_student(embedding, goal_embedding)
-            value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding)
-            eq_mask = torch.isclose(embedding, goal_embedding, atol=1e-6, rtol=1e-5).all(dim=-1)
+            value = self.model.value_predictor.forward_student(embedding_flat, goal_embedding_flat)
+            value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding_flat)
+            eq_mask = torch.isclose(embedding_flat, goal_embedding_flat, atol=1e-6, rtol=1e-5).all(dim=-1)
             reward = -(~eq_mask).float()
 
             advantage = reward + gamma * value_target - value

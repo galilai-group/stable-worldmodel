@@ -109,12 +109,12 @@ class GCIQL(torch.nn.Module):
         return pixels_embed
 
     def predict_actions(self, embedding, embedding_goal):
-        """predict actions
+        """predict actions per frame
         Args:
             embedding: (B, T, P, d)
             embedding_goal: (B, 1, P, d)
         Returns:
-            preds: (B, effective_action_dim)
+            preds: (B, T, action_dim)
         """
 
         embedding = rearrange(embedding, "b t p d -> b (t p) d")
@@ -124,12 +124,12 @@ class GCIQL(torch.nn.Module):
         return preds
 
     def predict_values(self, embedding, embedding_goal):
-        """predict values
+        """predict values per frame
         Args:
             embedding: (B, T, P, d)
             embedding_goal: (B, 1, P, d)
         Returns:
-            preds: (B, 1)
+            preds: (B, T, 1)
         """
 
         embedding = rearrange(embedding, "b t p d -> b (t p) d")
@@ -139,14 +139,16 @@ class GCIQL(torch.nn.Module):
         return preds
 
     def get_action(self, info):
-        """Get action given observation and goal."""
+        """Get action given observation and goal (uses last frame's prediction)."""
         # first encode observation
         info = self.encode(info, pixels_key="pixels", emb_keys=["proprio"], target="embed")
         # encode goal
         info = self.encode(info, pixels_key="goal", emb_keys=["proprio"], prefix="goal_", target="goal_embed")
         # then predict action
-        values = self.predict_actions(info["embed"], info["goal_embed"])
-        return values
+        actions = self.predict_actions(info["embed"], info["goal_embed"])
+        # return last frame's action prediction
+        actions = actions[:, -1, :]
+        return actions
 
 
 class Embedder(torch.nn.Module):
@@ -187,6 +189,7 @@ class Predictor(nn.Module):
         dim_head=64,
         dropout=0.0,
         emb_dropout=0.0,
+        causal=True,
     ):
         super().__init__()
 
@@ -198,17 +201,26 @@ class Predictor(nn.Module):
             torch.randn(1, (num_patches), dim)
         )  # dim for the pos encodings of goal (assumed single image)
         self.dropout = nn.Dropout(emb_dropout)
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames)
+        self.transformer = Transformer(
+            dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames, causal=causal
+        )
         self.out_proj = nn.Linear(dim, out_dim)
 
-    def forward(self, x, g):  # x: (b, window_size * H/patch_size * W/patch_size, 384)
+    def forward(self, x, g):
+        """
+        Args:
+            x: (B, T*P, dim) - observation embeddings
+            g: (B, P, dim) - goal embeddings
+        Returns:
+            out: (B, T, out_dim) - per-frame predictions
+        """
         # prepare input for transformer
         x = x + self.pos_embedding[:, : x.shape[1]]
         g = g + self.pos_embedding_goal[:, : g.shape[1]]
         x = self.dropout(x)
-        # transformer forward
+        # transformer forward - returns (B, T, dim), one embedding per frame
         x = self.transformer(x, g)
-        # project to dimension 1 for value function
+        # project to output dimension
         x = self.out_proj(x)
         return x
 
@@ -230,10 +242,16 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1, att_type="self"):
+    def __init__(
+        self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1, att_type="self", causal=False
+    ):
         super().__init__()
-        assert att_type in {"self", "cross", "agg"}, "attention type must be either self, cross, or agg (aggregation)"
+        assert att_type in {"self", "cross", "frame_agg"}, "attention type must be self, cross, or frame_agg"
         self.att_type = att_type
+        self.causal = causal and att_type in {"self", "frame_agg"}
+        self.num_patches = num_patches
+        self.num_frames = num_frames
+
         inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
         self.heads = heads
@@ -246,23 +264,54 @@ class Attention(nn.Module):
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
-        if self.att_type == "agg":
-            self.out_token = nn.Parameter(0.02 * torch.randn(1, 1, dim))
 
-        # TODO should use mask?
+        # Frame aggregation: one learnable query token per frame
+        if self.att_type == "frame_agg":
+            self.frame_tokens = nn.Parameter(0.02 * torch.randn(1, num_frames, dim))
 
-        # self.register_buffer("bias", self.generate_mask_matrix(num_patches, num_frames))
+        # Register causal mask buffer
+        if self.causal:
+            if self.att_type == "self":
+                mask = self._generate_causal_mask(num_patches, num_frames)
+            elif self.att_type == "frame_agg":
+                mask = self._generate_frame_agg_causal_mask(num_patches, num_frames)
+            self.register_buffer("causal_mask", mask)
+
+    def _generate_causal_mask(self, num_patches, num_frames):
+        """Generate block-causal mask: tokens in frame t can attend to frames 0..t."""
+        total_tokens = num_patches * num_frames
+        mask = torch.zeros(total_tokens, total_tokens, dtype=torch.bool)
+
+        for t in range(num_frames):
+            row_start = t * num_patches
+            row_end = (t + 1) * num_patches
+            col_end = (t + 1) * num_patches  # Can attend up to and including frame t
+            mask[row_start:row_end, :col_end] = True
+
+        return mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T*P, T*P)
+
+    def _generate_frame_agg_causal_mask(self, num_patches, num_frames):
+        """Generate causal mask for frame aggregation: query t attends to patches from frames 0..t."""
+        mask = torch.zeros(num_frames, num_frames * num_patches, dtype=torch.bool)
+
+        for t in range(num_frames):
+            col_end = (t + 1) * num_patches
+            mask[t, :col_end] = True
+
+        return mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T, T*P)
 
     def forward(self, x, c=None):
-        B, T, C = x.size()
+        B, N, C = x.size()
         x = self.norm(x)
         if self.att_type == "cross":
             c = self.norm_c(c)
             q_in = x
             kv_in = c
-        elif self.att_type == "agg":
-            q_in = self.out_token.repeat(B, 1, 1)
-            kv_in = x
+        elif self.att_type == "frame_agg":
+            # Compute actual number of frames from input (supports variable-length sequences)
+            actual_frames = N // self.num_patches
+            q_in = self.frame_tokens[:, :actual_frames, :].expand(B, -1, -1)  # (B, actual_frames, dim)
+            kv_in = x  # (B, actual_frames*P, dim)
         else:  # self.att_type == "self"
             q_in = x
             kv_in = x
@@ -272,8 +321,16 @@ class Attention(nn.Module):
         k, v = self.to_kv(kv_in).chunk(2, dim=-1)
         q, k, v = (rearrange(t, "b n (h d) -> b h n d", h=self.heads) for t in (q, k, v))
 
-        # attn_mask = self.bias[:, :, :T, :T] == 1  # bool mask
-        attn_mask = None
+        # Apply causal mask if enabled
+        if self.causal:
+            attn_mask = self.causal_mask
+            if self.att_type == "self":
+                attn_mask = attn_mask[:, :, :N, :N]
+            elif self.att_type == "frame_agg":
+                actual_frames = N // self.num_patches
+                attn_mask = attn_mask[:, :, :actual_frames, :N]
+        else:
+            attn_mask = None
 
         out = F.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_mask, dropout_p=self.dropout.p if self.training else 0.0, is_causal=False
@@ -283,24 +340,11 @@ class Attention(nn.Module):
 
         return self.to_out(out)
 
-    def generate_mask_matrix(self, npatch, nwindow):
-        zeros = torch.zeros(npatch, npatch)
-        ones = torch.ones(npatch, npatch)
-        if self.att_type == "cross":
-            mask = torch.zeros(npatch, npatch).unsqueeze(0).unsqueeze(0)
-        else:
-            rows = []
-            for i in range(nwindow):
-                row = torch.cat([ones] * (i + 1) + [zeros] * (nwindow - i - 1), dim=1)
-                rows.append(row)
-            mask = torch.cat(rows, dim=0).unsqueeze(0).unsqueeze(0)
-        return mask
-
 
 class Transformer(nn.Module):
     """
-    Goal-conditioned Transformer that alternates between self-attention and cross-attention blocks.
-    The last layer is an attention-based aggregation block.
+    Goal-conditioned Transformer with causal masking and per-frame outputs.
+    Alternates between self-attention and cross-attention, ends with frame aggregation.
     """
 
     def __init__(
@@ -313,13 +357,14 @@ class Transformer(nn.Module):
         dropout=0.0,
         num_patches=1,
         num_frames=1,
+        causal=True,
     ):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.layers = nn.ModuleList([])
         for i in range(depth):
-            if i == depth - 1:  # last layer is an aggregation layer
-                att_type = "agg"
+            if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
+                att_type = "frame_agg"
             elif i % 2 == 0:
                 att_type = "self"
             else:
@@ -335,6 +380,7 @@ class Transformer(nn.Module):
                             num_patches=num_patches,
                             num_frames=num_frames,
                             att_type=att_type,
+                            causal=causal,
                         ),
                         FeedForward(dim, mlp_dim, dropout=dropout),
                     ]
@@ -342,11 +388,18 @@ class Transformer(nn.Module):
             )
 
     def forward(self, x, g):
+        """
+        Args:
+            x: (B, T*P, dim)
+            g: (B, P, dim)
+        Returns:
+            out: (B, T, dim) - one embedding per frame
+        """
         for i, (attn, ff) in enumerate(self.layers):
-            if i == len(self.layers) - 1:  # last layer is an aggregation layer
+            if i == len(self.layers) - 1:  # frame aggregation layer - no residual (dimension changes)
                 x = attn(x)
                 x = ff(x)
-            elif i % 2 == 0:  # self-attention
+            elif i % 2 == 0:  # self-attention with causal masking
                 x = attn(x) + x
                 x = ff(x) + x
             else:  # cross-attention goal conditioning
