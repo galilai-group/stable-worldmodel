@@ -149,7 +149,7 @@ def get_gciql_value_model(cfg):
             value_target = gamma * self.model.value_predictor.forward_teacher(
                 target_embedding_flat, goal_embedding_flat
             )
-            goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=target_embedding.shape[1])
+            goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=embedding.shape[1])
             eq_mask = torch.isclose(embedding, goal_embedding_repeated, atol=1e-6, rtol=1e-5).all(dim=(-1, -2))
             reward = -(~eq_mask).float().unsqueeze(-1)
             value_target += reward
@@ -273,10 +273,10 @@ def get_gciql_action_model(cfg, trained_value_model):
             gamma = 0.99
             value = self.model.value_predictor(embedding_flat, goal_embedding_flat)
             value_target = self.model.value_predictor(target_embedding_flat, goal_embedding_flat)
-            goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=target_embedding.shape[1])
+            goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=embedding.shape[1])
             eq_mask = torch.isclose(embedding, goal_embedding_repeated, atol=1e-6, rtol=1e-5).all(dim=(-1, -2))
             reward = -(~eq_mask).float().unsqueeze(-1)
-            advantage = reward + gamma * value_target - value
+            advantage = reward + gamma * value_target - value  # (B, T, 1)
 
         action_pred = self.model.action_predictor(embedding_flat.detach(), goal_embedding_flat.detach())
 
