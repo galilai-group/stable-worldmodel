@@ -293,6 +293,8 @@ class Attention(nn.Module):
         if self.att_type == 'agg':
             self.out_token = nn.Parameter(0.02 * torch.randn(1, 1, dim))
 
+        # TODO should use mask?
+
         # self.register_buffer("bias", self.generate_mask_matrix(num_patches, num_frames))
 
     def forward(self, x, c=None):
