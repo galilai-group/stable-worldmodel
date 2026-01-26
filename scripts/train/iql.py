@@ -283,7 +283,9 @@ def get_gciql_action_model(cfg, trained_value_model):
         # policy is extracted via AWR
         beta = 3.0
         # TODO how to compute std?
-        action_loss = torch.exp(advantage.detach() * beta) * F.mse_loss(action_pred, batch["action"], reduction="none")
+        action_loss = torch.exp(advantage.detach() * beta) * F.mse_loss(
+            action_pred, batch["action"][:, : cfg.dinowm.history_size], reduction="none"
+        )
         action_loss = action_loss.mean()
         batch["loss"] = action_loss
 
