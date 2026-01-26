@@ -325,8 +325,10 @@ class Attention(nn.Module):
             q_in = x
             kv_in = c
         elif self.att_type == "frame_agg":
-            q_in = self.frame_tokens.expand(B, -1, -1)  # (B, T, dim)
-            kv_in = x  # (B, T*P, dim)
+            # Compute actual number of frames from input (supports variable-length sequences)
+            actual_frames = N // self.num_patches
+            q_in = self.frame_tokens[:, :actual_frames, :].expand(B, -1, -1)  # (B, actual_frames, dim)
+            kv_in = x  # (B, actual_frames*P, dim)
         else:  # self.att_type == "self"
             q_in = x
             kv_in = x
@@ -344,6 +346,9 @@ class Attention(nn.Module):
             attn_mask = self.causal_mask
             if self.att_type == "self":
                 attn_mask = attn_mask[:, :, :N, :N]
+            elif self.att_type == "frame_agg":
+                actual_frames = N // self.num_patches
+                attn_mask = attn_mask[:, :, :actual_frames, :N]
         else:
             attn_mask = None
 
