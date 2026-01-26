@@ -152,7 +152,6 @@ def get_gciql_value_model(cfg):
             goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=target_embedding.shape[1])
             eq_mask = torch.isclose(embedding, goal_embedding_repeated, atol=1e-6, rtol=1e-5).all(dim=(-1, -2))
             reward = -(~eq_mask).float().unsqueeze(-1)
-            print(f"reward shape: {reward.shape}, value_target shape: {value_target.shape}")
             value_target += reward
 
         # Compute action MSE
@@ -274,8 +273,9 @@ def get_gciql_action_model(cfg, trained_value_model):
             gamma = 0.99
             value = self.model.value_predictor.forward_student(embedding_flat, goal_embedding_flat)
             value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding_flat)
-            eq_mask = torch.isclose(embedding_flat, goal_embedding_flat, atol=1e-6, rtol=1e-5).all(dim=-1)
-            reward = -(~eq_mask).float()
+            goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=target_embedding.shape[1])
+            eq_mask = torch.isclose(embedding, goal_embedding_repeated, atol=1e-6, rtol=1e-5).all(dim=(-1, -2))
+            reward = -(~eq_mask).float().unsqueeze(-1)
             advantage = reward + gamma * value_target - value
 
         # policy is extracted via AWR
