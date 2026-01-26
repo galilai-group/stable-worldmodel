@@ -260,19 +260,20 @@ def get_gciql_action_model(cfg, trained_value_model):
         )
 
         # Use history to predict next actions
-        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
-        target_embedding = 0  # TODO
+        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T, patches, dim)
+        target_embedding = batch["embed"][:, cfg.dinowm.num_preds :, :, :]  # (B, T, patches, dim)
         goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
 
         # Reshape to (B, T*P, dim) for the predictor
         embedding_flat = rearrange(embedding, "b t p d -> b (t p) d")
         goal_embedding_flat = rearrange(goal_embedding, "b t p d -> b (t p) d")
+        target_embedding_flat = rearrange(target_embedding, "b t p d -> b (t p) d")
 
         action_pred = self.model.action_predictor.forward_student(embedding_flat, goal_embedding_flat)
         with torch.no_grad():
             gamma = 0.99
             value = self.model.value_predictor.forward_student(embedding_flat, goal_embedding_flat)
-            value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding_flat)
+            value_target = self.model.value_predictor.forward_teacher(target_embedding_flat, goal_embedding_flat)
             goal_embedding_repeated = repeat(goal_embedding, "b 1 p d -> b t p d", t=target_embedding.shape[1])
             eq_mask = torch.isclose(embedding, goal_embedding_repeated, atol=1e-6, rtol=1e-5).all(dim=(-1, -2))
             reward = -(~eq_mask).float().unsqueeze(-1)
@@ -295,7 +296,7 @@ def get_gciql_action_model(cfg, trained_value_model):
 
     # Assemble policy
     gciql_model = swm.wm.iql.GCIQL(
-        encoder=spt.backbone.EvalOnly(trained_value_model.model.encoder),
+        encoder=spt.backbone.EvalOnly(trained_value_model.model.encoder.backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(trained_value_model.model.value_predictor.student),
         extra_encoders=spt.backbone.EvalOnly(trained_value_model.model.extra_encoders),
