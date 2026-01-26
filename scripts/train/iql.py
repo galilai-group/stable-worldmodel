@@ -77,7 +77,7 @@ def get_data(cfg):
 
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=(0.3, 0.5, 0.2),  # no random, future, current
+        goal_probabilities=(0.3, 0.5, 0.2),  # random, future, current
         goal_keys={"pixels": "goal_pixels", "proprio": "goal_proprio"},
         seed=cfg.seed,
     )
@@ -197,8 +197,8 @@ def get_gciql_value_model(cfg):
     wrapped_value_predictor = spt.TeacherStudentWrapper(
         value_predictor,
         warm_init=True,
-        base_ema_coefficient=0.996,
-        final_ema_coefficient=1.0,
+        base_ema_coefficient=0.995,
+        final_ema_coefficient=0.995,
     )
 
     # Build proprioception encoder
