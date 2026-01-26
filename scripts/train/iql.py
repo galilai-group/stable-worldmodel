@@ -403,7 +403,7 @@ def run(cfg):
     manager()
 
     # Extract policy from trained value function
-    get_gciql_action_model = get_gciql_action_model(cfg, gciql_model)
+    gciql_action_model = get_gciql_action_model(cfg, gciql_model)
 
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
@@ -421,7 +421,7 @@ def run(cfg):
 
     manager = spt.Manager(
         trainer=trainer,
-        module=get_gciql_action_model,
+        module=gciql_action_model,
         data=data,
         ckpt_path=f"{cache_dir}/{cfg.output_model_name}_policy_weights.ckpt",
     )
