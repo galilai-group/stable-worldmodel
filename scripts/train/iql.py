@@ -278,9 +278,7 @@ def get_gciql_action_model(cfg, trained_value_model):
             reward = -(~eq_mask).float().unsqueeze(-1)
             advantage = reward + gamma * value_target - value
 
-        action_pred = self.model.action_predictor.forward_student(
-            embedding_flat.detach(), goal_embedding_flat.detach()
-        )
+        action_pred = self.model.action_predictor(embedding_flat.detach(), goal_embedding_flat.detach())
 
         # policy is extracted via AWR
         beta = 3.0
