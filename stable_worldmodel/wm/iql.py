@@ -21,7 +21,7 @@ class GCIQL(torch.nn.Module):
     ):
         super().__init__()
 
-        self.backbone = encoder
+        self.encoder = encoder
         self.value_predictor = value_predictor
         self.action_predictor = action_predictor
         self.extra_encoders = extra_encoders or {}
@@ -73,7 +73,7 @@ class GCIQL(torch.nn.Module):
         pixels = rearrange(pixels, "b t ... -> (b t) ...")
 
         kwargs = {"interpolate_pos_encoding": True} if self.interpolate_pos_encoding else {}
-        pixels_embed = self.backbone(pixels, **kwargs)
+        pixels_embed = self.encoder(pixels, **kwargs)
 
         if hasattr(pixels_embed, "last_hidden_state"):
             pixels_embed = pixels_embed.last_hidden_state
@@ -100,7 +100,7 @@ class GCIQL(torch.nn.Module):
             pad_frames = past_frames[:, -1:, :, :, :].repeat(1, padding, 1, 1, 1)  # (B, padding, C, H, W)
             frames = torch.cat([past_frames, pad_frames], dim=1)  # (B, T, C, H, W)
 
-            frame_embed = self.backbone(frames, **kwargs)  # (B, 1, P, emb_dim)
+            frame_embed = self.encoder(frames, **kwargs)  # (B, 1, P, emb_dim)
             frame_embed = frame_embed.last_hidden_state
             pixels_embeddings.append(frame_embed)
 
