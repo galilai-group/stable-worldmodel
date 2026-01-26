@@ -215,7 +215,7 @@ def get_gciql_value_model(cfg):
         model=gciql_model,
         forward=forward_value,
         optim={
-            "value_predictor_opt": add_opt("model.value_predictor", cfg.value_predictor_lr),
+            "value_predictor_opt": add_opt("model.value_predictor", cfg.predictor_lr),
             "proprio_opt": add_opt("model.extra_encoders.proprio", cfg.proprio_encoder_lr),
         },
     )
@@ -294,7 +294,7 @@ def get_gciql_action_model(cfg, trained_value_model):
         model=gciql_model,
         forward=forward_action,
         optim={
-            "action_predictor_opt": add_opt("model.action_predictor", cfg.action_predictor_lr),
+            "action_predictor_opt": add_opt("model.action_predictor", cfg.predictor_lr),
         },
     )
     return gciql_action_model
