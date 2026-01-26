@@ -147,7 +147,7 @@ def get_gcbc_policy(cfg):
         embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
         goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
         action_pred = self.model.predict(embedding, goal_embedding)  # (B, num_preds, action_dim)
-        action_target = batch["action"][:, -cfg.dinowm.num_preds :, :]  # (B, num_preds, action_dim)
+        action_target = batch["action"][:, cfg.dinowm.num_preds :, :]  # (B, num_preds, action_dim)
 
         # Compute action MSE
         action_loss = F.mse_loss(action_pred, action_target)
@@ -188,7 +188,7 @@ def get_gcbc_policy(cfg):
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
-        action_dim=effective_act_dim,
+        out_dim=effective_act_dim,
         **cfg.predictor,
     )
 
