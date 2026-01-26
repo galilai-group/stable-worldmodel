@@ -299,7 +299,7 @@ def run(cfg):
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
         filename=cfg.output_model_name,
-        epoch_interval=10,
+        epoch_interval=3,
     )
     # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
