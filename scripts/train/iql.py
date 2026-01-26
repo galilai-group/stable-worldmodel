@@ -247,30 +247,29 @@ def get_gciql_action_model(cfg, trained_value_model):
         if proprio_key is not None:
             batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
         batch["action"] = torch.nan_to_num(batch["action"], 0.0)
-        # Encode all timesteps into latent embeddings
-        batch = self.model.encode(
-            batch,
-            target="embed",
-            pixels_key="pixels",
-        )
 
-        # Encode goal into latent embedding
-        batch = self.model.encode(
-            batch, target="goal_embed", pixels_key="goal_pixels", emb_keys=["proprio"], prefix="goal_"
-        )
-
-        # Use history to predict next actions
-        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T, patches, dim)
-        target_embedding = batch["embed"][:, cfg.dinowm.num_preds :, :, :]  # (B, T, patches, dim)
-        goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
-
-        # Reshape to (B, T*P, dim) for the predictor
-        embedding_flat = rearrange(embedding, "b t p d -> b (t p) d")
-        goal_embedding_flat = rearrange(goal_embedding, "b t p d -> b (t p) d")
-        target_embedding_flat = rearrange(target_embedding, "b t p d -> b (t p) d")
-
-        action_pred = self.model.action_predictor.forward_student(embedding_flat, goal_embedding_flat)
         with torch.no_grad():
+            # Encode all timesteps into latent embeddings
+            batch = self.model.encode(
+                batch,
+                target="embed",
+                pixels_key="pixels",
+            )
+
+            # Encode goal into latent embedding
+            batch = self.model.encode(
+                batch, target="goal_embed", pixels_key="goal_pixels", emb_keys=["proprio"], prefix="goal_"
+            )
+
+            # Use history to predict next actions
+            embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T, patches, dim)
+            target_embedding = batch["embed"][:, cfg.dinowm.num_preds :, :, :]  # (B, T, patches, dim)
+            goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
+
+            # Reshape to (B, T*P, dim) for the predictor
+            embedding_flat = rearrange(embedding, "b t p d -> b (t p) d")
+            goal_embedding_flat = rearrange(goal_embedding, "b t p d -> b (t p) d")
+            target_embedding_flat = rearrange(target_embedding, "b t p d -> b (t p) d")
             gamma = 0.99
             value = self.model.value_predictor.forward_student(embedding_flat, goal_embedding_flat)
             value_target = self.model.value_predictor.forward_teacher(target_embedding_flat, goal_embedding_flat)
@@ -278,6 +277,10 @@ def get_gciql_action_model(cfg, trained_value_model):
             eq_mask = torch.isclose(embedding, goal_embedding_repeated, atol=1e-6, rtol=1e-5).all(dim=(-1, -2))
             reward = -(~eq_mask).float().unsqueeze(-1)
             advantage = reward + gamma * value_target - value
+
+        action_pred = self.model.action_predictor.forward_student(
+            embedding_flat.detach(), goal_embedding_flat.detach()
+        )
 
         # policy is extracted via AWR
         beta = 3.0
@@ -295,11 +298,12 @@ def get_gciql_action_model(cfg, trained_value_model):
         return batch
 
     # Assemble policy
+    trained_value_model.model.extra_encoders.eval()
     gciql_model = swm.wm.iql.GCIQL(
         encoder=spt.backbone.EvalOnly(trained_value_model.model.encoder.backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(trained_value_model.model.value_predictor.student),
-        extra_encoders=spt.backbone.EvalOnly(trained_value_model.model.extra_encoders),
+        extra_encoders=trained_value_model.model.extra_encoders,
         history_size=cfg.dinowm.history_size,
         num_pred=cfg.dinowm.num_preds,
     )
