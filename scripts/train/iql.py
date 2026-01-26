@@ -134,21 +134,27 @@ def get_gciql_value_model(cfg):
         )
 
         # Use history to predict values
-        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
-        target_embedding = 0  # TODO
+        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T, patches, dim)
+        target_embedding = batch["embed"][:, cfg.dinowm.num_preds :, :, :]  # (B, T, patches, dim)
         goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
 
         # Reshape to (B, T*P, dim) for the predictor
         embedding_flat = rearrange(embedding, "b t p d -> b (t p) d")
         goal_embedding_flat = rearrange(goal_embedding, "b t p d -> b (t p) d")
+        target_embedding_flat = rearrange(target_embedding, "b t p d -> b (t p) d")
 
         value_pred = self.model.value_predictor.forward_student(embedding_flat, goal_embedding_flat)
         with torch.no_grad():
-            value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding_flat)
-        value_target += 0  # TODO should TD target
+            gamma = 0.99
+            value_target = gamma * self.model.value_predictor.forward_teacher(
+                target_embedding_flat, goal_embedding_flat
+            )
+            eq_mask = torch.isclose(embedding_flat, goal_embedding_flat, atol=1e-6, rtol=1e-5).all(dim=-1)
+            reward = -(~eq_mask).float()
+            value_target += reward
 
         # Compute action MSE
-        value_loss = expectile_loss(value_pred, value_target)
+        value_loss = expectile_loss(value_pred, value_target.detach())
         batch["loss"] = value_loss
 
         # Log all losses
@@ -268,13 +274,12 @@ def get_gciql_action_model(cfg, trained_value_model):
             value_target = self.model.value_predictor.forward_teacher(target_embedding, goal_embedding_flat)
             eq_mask = torch.isclose(embedding_flat, goal_embedding_flat, atol=1e-6, rtol=1e-5).all(dim=-1)
             reward = -(~eq_mask).float()
-
             advantage = reward + gamma * value_target - value
 
         # policy is extracted via AWR
         beta = 3.0
-        # TODO
-        action_loss = torch.exp(advantage * beta) * F.mse_loss(action_pred, batch["action"], reduction="none")
+        # TODO how to compute std?
+        action_loss = torch.exp(advantage.detach() * beta) * F.mse_loss(action_pred, batch["action"], reduction="none")
         action_loss = action_loss.mean()
         batch["loss"] = action_loss
 
