@@ -6,7 +6,7 @@ import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
-from einops import rearrange
+from einops import rearrange, repeat
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
@@ -149,6 +149,8 @@ def get_gciql_value_model(cfg):
             value_target = gamma * self.model.value_predictor.forward_teacher(
                 target_embedding_flat, goal_embedding_flat
             )
+            goal_embedding_flat = repeat(goal_embedding_flat, "b p d -> b n p d", n=embedding.shape[1])
+            goal_embedding_flat = rearrange(goal_embedding_flat, "b n p d -> b (n p) d")
             eq_mask = torch.isclose(embedding_flat, goal_embedding_flat, atol=1e-6, rtol=1e-5).all(dim=-1)
             reward = -(~eq_mask).float()
             value_target += reward
