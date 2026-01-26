@@ -297,7 +297,7 @@ def get_gciql_action_model(cfg, trained_value_model):
     gciql_model = swm.wm.iql.GCIQL(
         encoder=spt.backbone.EvalOnly(trained_value_model.model.encoder),
         action_predictor=trained_value_model.model.action_predictor,
-        value_predictor=spt.backbone.EvalOnly(trained_value_model.model.value_predictor),
+        value_predictor=spt.backbone.EvalOnly(trained_value_model.model.value_predictor.student),
         extra_encoders=spt.backbone.EvalOnly(trained_value_model.model.extra_encoders),
         history_size=cfg.dinowm.history_size,
         num_pred=cfg.dinowm.num_preds,
