@@ -77,7 +77,7 @@ def get_data(cfg):
 
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=(0.3, 0.7, 0.0),
+        goal_probabilities=(0.3, 0.5, 0.2),  # no random, future, current
         goal_keys={"pixels": "goal_pixels", "proprio": "goal_proprio"},
         seed=cfg.seed,
     )
@@ -110,7 +110,7 @@ def get_data(cfg):
 def get_gciql_value_model(cfg):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
-    expectile_loss = swm.wm.iql.ExpectileLoss(tau=0.95)
+    expectile_loss = swm.wm.iql.ExpectileLoss(tau=0.99)
 
     def forward_value(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
@@ -387,7 +387,7 @@ def run(cfg):
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
         filename=f"{cfg.output_model_name}_value",
-        epoch_interval=10,
+        epoch_interval=3,
     )
     # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
@@ -413,7 +413,7 @@ def run(cfg):
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
         filename=f"{cfg.output_model_name}_policy",
-        epoch_interval=10,
+        epoch_interval=3,
     )
 
     trainer = pl.Trainer(
