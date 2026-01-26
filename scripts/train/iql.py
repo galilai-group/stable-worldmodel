@@ -110,7 +110,7 @@ def get_data(cfg):
 def get_gciql_value_model(cfg):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
-    expectile_loss = swm.wm.iql.ExpectileLoss(tau=0.99)
+    expectile_loss = swm.wm.iql.ExpectileLoss(tau=0.9)
 
     def forward_value(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
