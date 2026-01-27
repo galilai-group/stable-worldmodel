@@ -25,8 +25,8 @@ def img_transform():
             transforms.ToImage(),
             transforms.ToDtype(torch.float32, scale=True),
             transforms.Normalize(**spt.data.dataset_stats.ImageNet),
-            transforms.Resize(size=196),
-            transforms.CenterCrop(size=196),
+            transforms.Resize(size=224),
+            transforms.CenterCrop(size=224),
         ]
     )
     return transform
