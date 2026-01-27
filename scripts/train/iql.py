@@ -156,6 +156,7 @@ def get_gciql_value_model(cfg):
 
         # Compute action MSE
         value_loss = expectile_loss(value_pred, value_target.detach())
+        batch["value_loss"] = value_loss
         batch["loss"] = value_loss
 
         # Log all losses
@@ -287,6 +288,7 @@ def get_gciql_action_model(cfg, trained_value_model):
             action_pred, batch["action"][:, : cfg.dinowm.history_size], reduction="none"
         )
         action_loss = action_loss.mean()
+        batch["actor_loss"] = action_loss
         batch["loss"] = action_loss
 
         # Log all losses
