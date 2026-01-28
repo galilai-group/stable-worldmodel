@@ -737,7 +737,7 @@ class World:
                 'Number of episodes to evaluate must match number of envs'
             )
 
-        data = dataset.get_chunk_data(ep_idx_arr, start_steps_arr, end_steps)
+        data = dataset.load_chunk(ep_idx_arr, start_steps_arr, end_steps)
         columns = dataset.column_names
 
         # keep relevant part of the chunk
