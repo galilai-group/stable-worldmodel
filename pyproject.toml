@@ -1,7 +1,7 @@
 [project]
 name = "stable-worldmodel"
-version = "0.0.1b1"
-description = "Reliable library to conduct world model research"
+version = "0.0.2"
+description = "World Model Research Made Simple"
 readme="README.md"
 license="MIT"
 authors = [{name = "Lucas Maes"}, {name = "Quentin Le Lidec"}, {name = "Randall Balestriero"}]
@@ -34,7 +34,7 @@ train = [
     "hydra-submitit-launcher",
     "wandb",
 ]
-  
+
 env = [
     "pygame",
     "pymunk",

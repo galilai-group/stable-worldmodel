@@ -1,5 +1,4 @@
-__version__ = "0.0.1b1"
-
+__version__ = '0.0.2'
 
 from stable_worldmodel import (
     data,
@@ -17,15 +16,15 @@ from stable_worldmodel.world import World
 
 
 __all__ = [
-    "World",
-    "PlanConfig",
-    "pretraining",
-    "spaces",
-    "utils",
-    "envs",
-    "data",
-    "policy",
-    "solver",
-    "wrapper",
-    "wm",
+    'World',
+    'PlanConfig',
+    'pretraining',
+    'spaces',
+    'utils',
+    'envs',
+    'data',
+    'policy',
+    'solver',
+    'wrapper',
+    'wm',
 ]
