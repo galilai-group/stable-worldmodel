@@ -2,8 +2,6 @@ title: Policy
 summary: Agent policies for interacting with environments
 ---
 
-# Policy Management
-
 Policies determine the actions taken by agents in the environment. `stable_worldmodel` provides base classes and implementations for random, expert, and model-based policies.
 
 /// tab | Random Policy

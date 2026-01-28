@@ -1,7 +1,6 @@
 title: Dataset
+summary: Dataset handling
 ---
-
-# Dataset Handling
 
 `stable_worldmodel` provides a flexible dataset API that supports both HDF5-based storage (for speed and compactness) and Folder-based storage.
 
@@ -133,7 +132,7 @@ item = goal_dataset[0]
 ```
 ///
 
-## **[ Base Classes ]**
+## **[ Base Class ]**
 
 ::: stable_worldmodel.data.dataset.Dataset
     options:

@@ -1,5 +1,5 @@
 title: Wrapper
-summary: Custom Environment Wrapper
+summary: Custom environment wrappers
 ---
 
 ::: stable_worldmodel.wrapper.MegaWrapper
