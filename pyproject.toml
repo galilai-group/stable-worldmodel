@@ -1,6 +1,6 @@
 [project]
 name = "stable-worldmodel"
-version = "0.0.2"
+version = "0.0.3"
 description = "World Model Research Made Simple"
 readme="README.md"
 license="MIT"

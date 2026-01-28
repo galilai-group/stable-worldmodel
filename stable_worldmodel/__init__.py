@@ -1,5 +1,3 @@
-__version__ = '0.0.2'
-
 from stable_worldmodel import (
     data,
     envs,

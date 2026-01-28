@@ -18,18 +18,24 @@ from scipy.spatial.transform import Rotation as R
 import stable_worldmodel as swm
 
 
-BASE_ASSET_ROOT_PATH = "~/robocasa/robocasa/models/assets/objects"
+BASE_ASSET_ROOT_PATH = '~/robocasa/robocasa/models/assets/objects'
 
-os.environ["MUJOCO_GL"] = "egl"
-os.environ["PYOPENGL_PLATFORM"] = "egl"
+os.environ['MUJOCO_GL'] = 'egl'
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 RCASA_CONTROLLER_INPUT_LIMS = np.array([1.0, -1])
 RCASA_CONTROLLER_OUTPUT_LIMS = np.array([0.05, 0.05, 0.05, 0.5, 0.5, 0.5, 1.0])
 
 # Default goal sampling parameters
-DEFAULT_GOAL_SAMPLING_CUBE_SIZE = 0.15  # meters - half-size of cube around initial EEF position
-DEFAULT_GOAL_SAMPLING_MAX_ATTEMPTS = 10  # max IK attempts before using fallback
-DEFAULT_GOAL_IK_TOLERANCE = 0.02  # meters - max position error for IK to be considered feasible
+DEFAULT_GOAL_SAMPLING_CUBE_SIZE = (
+    0.15  # meters - half-size of cube around initial EEF position
+)
+DEFAULT_GOAL_SAMPLING_MAX_ATTEMPTS = (
+    10  # max IK attempts before using fallback
+)
+DEFAULT_GOAL_IK_TOLERANCE = (
+    0.02  # meters - max position error for IK to be considered feasible
+)
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
@@ -41,26 +47,26 @@ class RoboCasa(gym.Env):
     """
 
     metadata = {
-        "render_modes": ["rgb_array"],
-        "render_fps": 10,
+        'render_modes': ['rgb_array'],
+        'render_fps': 10,
     }
 
     def __init__(
         self,
         env=None,
         cfg={},
-        env_name="PnPCounterToSink",
-        camera_name="robot0_agentview_left",
-        render_mode="rgb_array",
+        env_name='PnPCounterToSink',
+        camera_name='robot0_agentview_left',
+        render_mode='rgb_array',
     ):
         super().__init__()
 
         if env is None:
-            logger.info(f"Creating RoboCasa environment: {env_name}")
+            logger.info(f'Creating RoboCasa environment: {env_name}')
             env = create_env(
                 env_name=env_name,
-                robots="PandaOmron",
-                camera_names=["robot0_agentview_left"],
+                robots='PandaOmron',
+                camera_names=['robot0_agentview_left'],
                 camera_widths=224,
                 camera_heights=224,
                 seed=42,
@@ -71,19 +77,43 @@ class RoboCasa(gym.Env):
         self.cfg = cfg
 
         self.rescale_act_droid_to_rcasa = (
-            cfg.get("task_specification", {}).get("env", {}).get("rescale_act_droid_to_rcasa", False)
+            cfg.get('task_specification', {})
+            .get('env', {})
+            .get('rescale_act_droid_to_rcasa', False)
         )
-        self.custom_task = cfg.get("task_specification", {}).get("env", {}).get("custom_task", False)
-        self.subtask = cfg.get("task_specification", {}).get("env", {}).get("subtask", None)
-        self.manip_only = cfg.get("task_specification", {}).get("env", {}).get("manip_only", True)
-        self.reach_threshold = cfg.get("task_specification", {}).get("env", {}).get("reach_threshold", 0.2)
-        self.place_threshold = cfg.get("task_specification", {}).get("env", {}).get("place_threshold", 0.15)
+        self.custom_task = (
+            cfg.get('task_specification', {})
+            .get('env', {})
+            .get('custom_task', False)
+        )
+        self.subtask = (
+            cfg.get('task_specification', {})
+            .get('env', {})
+            .get('subtask', None)
+        )
+        self.manip_only = (
+            cfg.get('task_specification', {})
+            .get('env', {})
+            .get('manip_only', True)
+        )
+        self.reach_threshold = (
+            cfg.get('task_specification', {})
+            .get('env', {})
+            .get('reach_threshold', 0.2)
+        )
+        self.place_threshold = (
+            cfg.get('task_specification', {})
+            .get('env', {})
+            .get('place_threshold', 0.15)
+        )
 
-        logger.info(f"RoboCasaWrapper: {self.rescale_act_droid_to_rcasa=}")
-        logger.info(f"Set {self.reach_threshold=} and {self.place_threshold=}")
+        logger.info(f'RoboCasaWrapper: {self.rescale_act_droid_to_rcasa=}')
+        logger.info(f'Set {self.reach_threshold=} and {self.place_threshold=}')
 
         self.goal_obj_pos = None
-        self.goal_state = None  # Stores goal EEF state (7D: pos + euler + gripper)
+        self.goal_state = (
+            None  # Stores goal EEF state (7D: pos + euler + gripper)
+        )
         self.env_name = env_name
         self.camera_name = camera_name
         self.custom_camera_name = self.camera_name
@@ -98,7 +128,7 @@ class RoboCasa(gym.Env):
         )
         self.observation_space = spaces.Dict(
             {
-                "proprio": spaces.Box(
+                'proprio': spaces.Box(
                     low=-np.inf,
                     high=np.inf,
                     shape=(7,),
@@ -108,7 +138,7 @@ class RoboCasa(gym.Env):
         )
 
         if self.custom_task:
-            self.custom_camera_name = "robot0_droid_agentview_left"
+            self.custom_camera_name = 'robot0_droid_agentview_left'
             self.custom_camera_pos = ([0.4, 0.4, 0.6],)
             # [0.1, 0.4, 0.8]  # Example position [x, y, z]
             self.custom_camera_quat = [0.0, -0.0, 0.6, 1.0]
@@ -117,23 +147,23 @@ class RoboCasa(gym.Env):
         self.variation_space = swm.spaces.Dict(
             {
                 # Visual/Lighting Variations
-                "lighting": swm.spaces.Dict(
+                'lighting': swm.spaces.Dict(
                     {
-                        "ambient": swm.spaces.Box(
+                        'ambient': swm.spaces.Box(
                             low=np.array([0.3], dtype=np.float32),
                             high=np.array([0.9], dtype=np.float32),
                             init_value=np.array([0.6], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
-                        "directional": swm.spaces.Box(
+                        'directional': swm.spaces.Box(
                             low=np.array([0.2], dtype=np.float32),
                             high=np.array([0.8], dtype=np.float32),
                             init_value=np.array([0.5], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
-                        "specular": swm.spaces.Box(
+                        'specular': swm.spaces.Box(
                             low=np.array([0.1], dtype=np.float32),
                             high=np.array([0.7], dtype=np.float32),
                             init_value=np.array([0.3], dtype=np.float32),
@@ -143,23 +173,27 @@ class RoboCasa(gym.Env):
                     }
                 ),
                 # Camera Variations
-                "camera": swm.spaces.Dict(
+                'camera': swm.spaces.Dict(
                     {
-                        "position": swm.spaces.Box(
+                        'position': swm.spaces.Box(
                             low=np.array([0.3, 0.3, 0.5], dtype=np.float32),
                             high=np.array([0.5, 0.5, 0.8], dtype=np.float32),
-                            init_value=np.array([0.4, 0.4, 0.6], dtype=np.float32),
+                            init_value=np.array(
+                                [0.4, 0.4, 0.6], dtype=np.float32
+                            ),
                             shape=(3,),
                             dtype=np.float32,
                         ),
-                        "orientation": swm.spaces.Box(
+                        'orientation': swm.spaces.Box(
                             low=np.array([-0.3, -0.3, 0.3], dtype=np.float32),
                             high=np.array([0.3, 0.3, 0.9], dtype=np.float32),
-                            init_value=np.array([0.0, -0.0, 0.6], dtype=np.float32),
+                            init_value=np.array(
+                                [0.0, -0.0, 0.6], dtype=np.float32
+                            ),
                             shape=(3,),
                             dtype=np.float32,
                         ),
-                        "fovy": swm.spaces.Box(
+                        'fovy': swm.spaces.Box(
                             low=np.array([70], dtype=np.float32),
                             high=np.array([100], dtype=np.float32),
                             init_value=np.array([85], dtype=np.float32),
@@ -169,28 +203,38 @@ class RoboCasa(gym.Env):
                     }
                 ),
                 # Material Properties
-                "materials": swm.spaces.Dict(
+                'materials': swm.spaces.Dict(
                     {
                         # Kitchen surface materials
-                        "countertop_color": swm.spaces.RGBBox(init_value=np.array([180, 180, 180], dtype=np.uint8)),
-                        "cabinet_color": swm.spaces.RGBBox(
-                            init_value=np.array([139, 69, 19], dtype=np.uint8)  # Brown
+                        'countertop_color': swm.spaces.RGBBox(
+                            init_value=np.array(
+                                [180, 180, 180], dtype=np.uint8
+                            )
                         ),
-                        "floor_color": swm.spaces.RGBBox(
-                            init_value=np.array([210, 180, 140], dtype=np.uint8)  # Tan
+                        'cabinet_color': swm.spaces.RGBBox(
+                            init_value=np.array(
+                                [139, 69, 19], dtype=np.uint8
+                            )  # Brown
                         ),
-                        "wall_color": swm.spaces.RGBBox(
-                            init_value=np.array([245, 245, 245], dtype=np.uint8)  # White
+                        'floor_color': swm.spaces.RGBBox(
+                            init_value=np.array(
+                                [210, 180, 140], dtype=np.uint8
+                            )  # Tan
+                        ),
+                        'wall_color': swm.spaces.RGBBox(
+                            init_value=np.array(
+                                [245, 245, 245], dtype=np.uint8
+                            )  # White
                         ),
                         # Material reflectance
-                        "surface_reflectance": swm.spaces.Box(
+                        'surface_reflectance': swm.spaces.Box(
                             low=np.array([0.1], dtype=np.float32),
                             high=np.array([0.9], dtype=np.float32),
                             init_value=np.array([0.5], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
-                        "roughness": swm.spaces.Box(
+                        'roughness': swm.spaces.Box(
                             low=np.array([0.0], dtype=np.float32),
                             high=np.array([1.0], dtype=np.float32),
                             init_value=np.array([0.3], dtype=np.float32),
@@ -200,14 +244,16 @@ class RoboCasa(gym.Env):
                     }
                 ),
                 # Object Variations
-                "objects": swm.spaces.Dict(
+                'objects': swm.spaces.Dict(
                     {
                         # Object appearance
-                        "object_colors": swm.spaces.RGBBox(
-                            init_value=np.array([255, 0, 0], dtype=np.uint8)  # Red default
+                        'object_colors': swm.spaces.RGBBox(
+                            init_value=np.array(
+                                [255, 0, 0], dtype=np.uint8
+                            )  # Red default
                         ),
                         # Object scale variations
-                        "object_scale": swm.spaces.Box(
+                        'object_scale': swm.spaces.Box(
                             low=np.array([0.8], dtype=np.float32),
                             high=np.array([1.2], dtype=np.float32),
                             init_value=np.array([1.0], dtype=np.float32),
@@ -215,27 +261,35 @@ class RoboCasa(gym.Env):
                             dtype=np.float32,
                         ),
                         # Object position noise
-                        "position_noise": swm.spaces.Box(
-                            low=np.array([-0.05, -0.05, 0.0], dtype=np.float32),
-                            high=np.array([0.05, 0.05, 0.02], dtype=np.float32),
-                            init_value=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+                        'position_noise': swm.spaces.Box(
+                            low=np.array(
+                                [-0.05, -0.05, 0.0], dtype=np.float32
+                            ),
+                            high=np.array(
+                                [0.05, 0.05, 0.02], dtype=np.float32
+                            ),
+                            init_value=np.array(
+                                [0.0, 0.0, 0.0], dtype=np.float32
+                            ),
                             shape=(3,),
                             dtype=np.float32,
                         ),
                     }
                 ),
                 # Physics Variations
-                "physics": swm.spaces.Dict(
+                'physics': swm.spaces.Dict(
                     {
-                        "gravity": swm.spaces.Box(
+                        'gravity': swm.spaces.Box(
                             low=np.array([-9.81], dtype=np.float32),
-                            high=np.array([-9.81], dtype=np.float32),  # Keep gravity constant for realism
+                            high=np.array(
+                                [-9.81], dtype=np.float32
+                            ),  # Keep gravity constant for realism
                             init_value=np.array([-9.81], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
                         # Joint friction
-                        "joint_friction": swm.spaces.Box(
+                        'joint_friction': swm.spaces.Box(
                             low=np.array([0.1], dtype=np.float32),
                             high=np.array([0.3], dtype=np.float32),
                             init_value=np.array([0.2], dtype=np.float32),
@@ -243,7 +297,7 @@ class RoboCasa(gym.Env):
                             dtype=np.float32,
                         ),
                         # Surface friction
-                        "surface_friction": swm.spaces.Box(
+                        'surface_friction': swm.spaces.Box(
                             low=np.array([0.5], dtype=np.float32),
                             high=np.array([1.5], dtype=np.float32),
                             init_value=np.array([1.0], dtype=np.float32),
@@ -253,10 +307,10 @@ class RoboCasa(gym.Env):
                     }
                 ),
                 # Noise/Disturbances
-                "noise": swm.spaces.Dict(
+                'noise': swm.spaces.Dict(
                     {
                         # Observation noise
-                        "observation_noise": swm.spaces.Box(
+                        'observation_noise': swm.spaces.Box(
                             low=np.array([0.0], dtype=np.float32),
                             high=np.array([0.05], dtype=np.float32),
                             init_value=np.array([0.01], dtype=np.float32),
@@ -264,7 +318,7 @@ class RoboCasa(gym.Env):
                             dtype=np.float32,
                         ),
                         # Action noise
-                        "action_noise": swm.spaces.Box(
+                        'action_noise': swm.spaces.Box(
                             low=np.array([0.0], dtype=np.float32),
                             high=np.array([0.1], dtype=np.float32),
                             init_value=np.array([0.02], dtype=np.float32),
@@ -279,9 +333,11 @@ class RoboCasa(gym.Env):
     def eef_quat_to_xyz(self, eef_quat):
         # shape (4,)
         # If your quaternion is [w, x, y, z], convert to [x, y, z, w] for scipy
-        eef_quat_xyzw = np.array([eef_quat[1], eef_quat[2], eef_quat[3], eef_quat[0]])
+        eef_quat_xyzw = np.array(
+            [eef_quat[1], eef_quat[2], eef_quat[3], eef_quat[0]]
+        )
         # Convert to Euler angles (xyz order, radians)
-        eef_euler = R.from_quat(eef_quat_xyzw).as_euler("xyz", degrees=False)
+        eef_euler = R.from_quat(eef_quat_xyzw).as_euler('xyz', degrees=False)
         return eef_euler  # shape (3,)
 
     def gripper_2d_to_1d(self, gripper_qpos):
@@ -301,57 +357,77 @@ class RoboCasa(gym.Env):
         """
         obs = {}
         # info[f'{self.camera_name}_image'] # H W 3
-        eef_angle = self.eef_quat_to_xyz(info["robot0_eef_quat"])  # Convert quaternion to Euler angles
-        gripper_closure = self.gripper_2d_to_1d(info["robot0_gripper_qpos"])  # Gripper position (2,) to closure (1,)
-        obs["proprio"] = np.concatenate(
+        eef_angle = self.eef_quat_to_xyz(
+            info['robot0_eef_quat']
+        )  # Convert quaternion to Euler angles
+        gripper_closure = self.gripper_2d_to_1d(
+            info['robot0_gripper_qpos']
+        )  # Gripper position (2,) to closure (1,)
+        obs['proprio'] = np.concatenate(
             [
-                info["robot0_eef_pos"],  # Cartesian position of the end effector (3,)
+                info[
+                    'robot0_eef_pos'
+                ],  # Cartesian position of the end effector (3,)
                 eef_angle,  # Euler angles of the end effector (3,)
                 gripper_closure,  # Gripper state (1,)
             ]
         )
         # Need to call this function to define env.obj_up_once
         # and other variables used in subtask_success()
-        info["success"] = self.env._check_success()
+        info['success'] = self.env._check_success()
         if self.subtask is not None:
             info = self.subtask_success(info)
         return obs, info
 
     def subtask_success(self, info):
-        obj = self.env.objects["obj"]
+        obj = self.env.objects['obj']
         obj_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[obj.name]])
         hand_pos = np.array(
-            self.sim.data.body_xpos[self.sim.model.body_name2id(self.robots[0].gripper["right"].root_body)]
+            self.sim.data.body_xpos[
+                self.sim.model.body_name2id(
+                    self.robots[0].gripper['right'].root_body
+                )
+            ]
         )
         hand_obj_dist = np.linalg.norm(hand_pos - obj_pos)
         reach = hand_obj_dist < self.reach_threshold
         # We set goal_obj_pos after having reset the environment
-        obj_goal_dist = np.linalg.norm(self.goal_obj_pos - obj_pos) if self.goal_obj_pos is not None else -1.0
+        obj_goal_dist = (
+            np.linalg.norm(self.goal_obj_pos - obj_pos)
+            if self.goal_obj_pos is not None
+            else -1.0
+        )
         place = obj_goal_dist < self.place_threshold
-        if self.subtask == "reach-pick-place":
+        if self.subtask == 'reach-pick-place':
             success = place
-        elif self.subtask == "reach-pick":
+        elif self.subtask == 'reach-pick':
             success = reach and self.env.obj_up_once
-        elif self.subtask == "pick-place":
+        elif self.subtask == 'pick-place':
             success = self.env.obj_up_once and place
-        elif self.subtask == "reach":
+        elif self.subtask == 'reach':
             success = reach
-        elif self.subtask == "pick":
+        elif self.subtask == 'pick':
             success = self.env.obj_up_once
-        elif self.subtask == "place":
+        elif self.subtask == 'place':
             success = place
         else:
-            raise ValueError(f"Unknown subtask: {self.subtask}")
+            raise ValueError(f'Unknown subtask: {self.subtask}')
 
-        info["success"] = success
-        info["obj_pos"] = obj_pos
-        info["hand_pos"] = hand_pos
-        info["obj_goal_dist"] = obj_goal_dist
-        info["hand_obj_dist"] = hand_obj_dist
-        info["obj_initial_height"] = self.env.obj_initial_height if hasattr(self.env, "obj_initial_height") else -1
-        info["obj_lift"] = obj_pos[2] - info["obj_initial_height"]
-        info["near_object"] = hand_obj_dist
-        info["obj_up_once"] = self.env.obj_up_once if hasattr(self.env, "obj_up_once") else -1
+        info['success'] = success
+        info['obj_pos'] = obj_pos
+        info['hand_pos'] = hand_pos
+        info['obj_goal_dist'] = obj_goal_dist
+        info['hand_obj_dist'] = hand_obj_dist
+        info['obj_initial_height'] = (
+            self.env.obj_initial_height
+            if hasattr(self.env, 'obj_initial_height')
+            else -1
+        )
+        info['obj_lift'] = obj_pos[2] - info['obj_initial_height']
+        info['near_object'] = hand_obj_dist
+        info['obj_up_once'] = (
+            self.env.obj_up_once if hasattr(self.env, 'obj_up_once') else -1
+        )
         return info
 
     def _get_goal_state(self):
@@ -379,7 +455,7 @@ class RoboCasa(gym.Env):
         """Get the current end-effector position from the simulator."""
         # Get EEF position from the robot's site
         robot = self.env.robots[0]
-        eef_site_id = robot.eef_site_id["right"]
+        eef_site_id = robot.eef_site_id['right']
 
         # eef_site_id might be an integer ID or a string name
         if isinstance(eef_site_id, str):
@@ -390,7 +466,7 @@ class RoboCasa(gym.Env):
     def _get_current_eef_quat(self):
         """Get the current end-effector quaternion (wxyz) from the simulator."""
         robot = self.env.robots[0]
-        eef_site_id = robot.eef_site_id["right"]
+        eef_site_id = robot.eef_site_id['right']
 
         # eef_site_id might be an integer ID or a string name
         if isinstance(eef_site_id, str):
@@ -401,7 +477,9 @@ class RoboCasa(gym.Env):
         r = R.from_matrix(xmat)
         quat_xyzw = r.as_quat()  # scipy returns xyzw
         # Convert to wxyz format
-        return np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])
+        return np.array(
+            [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
+        )
 
     def _save_sim_state(self):
         """Save the current simulator state for later restoration."""
@@ -430,7 +508,9 @@ class RoboCasa(gym.Env):
             target_pos: Sampled target position (3,)
         """
         # Sample uniform random offset in a cube
-        offset = self.np_random.uniform(-cube_half_size, cube_half_size, size=3)
+        offset = self.np_random.uniform(
+            -cube_half_size, cube_half_size, size=3
+        )
         # Apply z-bias (e.g., to prefer positions above initial)
         offset[2] += z_bias
         target_pos = initial_eef_pos + offset
@@ -477,7 +557,9 @@ class RoboCasa(gym.Env):
                 # Create full action with proper dimension
                 # The environment expects full_action_dim (e.g., 12 for mobile manipulator)
                 action = np.zeros(self.full_action_dim)
-                action[:3] = action_pos * 10  # Scale for controller input limits
+                action[:3] = (
+                    action_pos * 10
+                )  # Scale for controller input limits
                 action[3:6] = 0.0  # No rotation change
                 action[6] = 0.0  # Gripper unchanged
                 # Remaining dimensions (e.g., base movement) stay at 0
@@ -546,10 +628,14 @@ class RoboCasa(gym.Env):
                 goal_image = self.render()
                 goal_eef_pos = final_pos.copy()
                 success = True
-                logger.debug(f"Goal sampling succeeded on attempt {attempt + 1}, error={error:.4f}m")
+                logger.debug(
+                    f'Goal sampling succeeded on attempt {attempt + 1}, error={error:.4f}m'
+                )
                 break
             else:
-                logger.debug(f"Goal sampling attempt {attempt + 1} failed, error={error:.4f}m")
+                logger.debug(
+                    f'Goal sampling attempt {attempt + 1} failed, error={error:.4f}m'
+                )
 
         # Restore the original state
         self._restore_sim_state(saved_state)
@@ -557,7 +643,7 @@ class RoboCasa(gym.Env):
         if not success:
             # Fallback: use current render as goal
             logger.warning(
-                f"Goal sampling failed after {max_attempts} attempts. Using current render as fallback goal."
+                f'Goal sampling failed after {max_attempts} attempts. Using current render as fallback goal.'
             )
             goal_image = self.render()
 
@@ -578,25 +664,33 @@ class RoboCasa(gym.Env):
         # Handle seed
         if seed is not None:
             self.seed(seed)
-        self._np_random_seed = getattr(self, "_seed", None)
+        self._np_random_seed = getattr(self, '_seed', None)
 
         info = self.env.reset()
         obs, info = self.get_obs_proprio_succ_from_info(info)
 
         # Parse options for goal sampling
         options = options or {}
-        sample_goal = options.get("sample_goal", False)
+        sample_goal = options.get('sample_goal', False)
 
         if sample_goal:
             # Sample a feasible goal state via IK
-            goal_cube_size = options.get("goal_cube_size", DEFAULT_GOAL_SAMPLING_CUBE_SIZE)
-            goal_max_attempts = options.get("goal_max_attempts", DEFAULT_GOAL_SAMPLING_MAX_ATTEMPTS)
-            goal_tolerance = options.get("goal_tolerance", DEFAULT_GOAL_IK_TOLERANCE)
+            goal_cube_size = options.get(
+                'goal_cube_size', DEFAULT_GOAL_SAMPLING_CUBE_SIZE
+            )
+            goal_max_attempts = options.get(
+                'goal_max_attempts', DEFAULT_GOAL_SAMPLING_MAX_ATTEMPTS
+            )
+            goal_tolerance = options.get(
+                'goal_tolerance', DEFAULT_GOAL_IK_TOLERANCE
+            )
 
-            goal_image, goal_eef_pos, success = self._sample_feasible_goal_state(
-                cube_half_size=goal_cube_size,
-                max_attempts=goal_max_attempts,
-                tolerance=goal_tolerance,
+            goal_image, goal_eef_pos, success = (
+                self._sample_feasible_goal_state(
+                    cube_half_size=goal_cube_size,
+                    max_attempts=goal_max_attempts,
+                    tolerance=goal_tolerance,
+                )
             )
             self._goal = goal_image
             self._goal_eef_pos = goal_eef_pos
@@ -610,11 +704,11 @@ class RoboCasa(gym.Env):
             success = False
 
         # Always include these keys in info for consistency with StackedWrapper
-        info["goal"] = self._goal
-        info["goal_eef_pos"] = self._goal_eef_pos
-        info["goal_sampling_success"] = self._goal_sampling_success
+        info['goal'] = self._goal
+        info['goal_eef_pos'] = self._goal_eef_pos
+        info['goal_sampling_success'] = self._goal_sampling_success
         # Include goal_state in info (will be None initially, set via _set_goal_state or from dataset)
-        info["goal_state"] = self.goal_state
+        info['goal_state'] = self.goal_state
         return obs, info
 
     def step(self, action):
@@ -630,18 +724,24 @@ class RoboCasa(gym.Env):
 
         scaled_action = full_action.copy()
         if self.rescale_act_droid_to_rcasa:
-            scaled_action[:7] = full_action[:7] * RCASA_CONTROLLER_INPUT_LIMS[0] / RCASA_CONTROLLER_OUTPUT_LIMS
+            scaled_action[:7] = (
+                full_action[:7]
+                * RCASA_CONTROLLER_INPUT_LIMS[0]
+                / RCASA_CONTROLLER_OUTPUT_LIMS
+            )
 
         info, reward, done, _ = self.env.step(scaled_action)
         obs, info = self.get_obs_proprio_succ_from_info(info)
         # Add goal-related keys to info (same as what was set in reset)
-        info["goal"] = self._goal
-        info["goal_eef_pos"] = self._goal_eef_pos
-        info["goal_sampling_success"] = getattr(self, "_goal_sampling_success", False)
+        info['goal'] = self._goal
+        info['goal_eef_pos'] = self._goal_eef_pos
+        info['goal_sampling_success'] = getattr(
+            self, '_goal_sampling_success', False
+        )
         # Include goal_state in step info as well
-        info["goal_state"] = self.goal_state
-        if info["success"]:
-            logger.info("RoboCasaWrapper: Task success detected in step()")
+        info['goal_state'] = self.goal_state
+        if info['success']:
+            logger.info('RoboCasaWrapper: Task success detected in step()')
         return obs, reward, None, done, info
 
     def render(self, *args, **kwargs):
@@ -651,7 +751,10 @@ class RoboCasa(gym.Env):
         Making a deepcopy is essential to avoid race conditions or corrupted images
         when the underlying simulator updates the visual buffer asynchronously
         """
-        if self.custom_camera_name in self.env.sim.model._camera_name2id.keys():
+        if (
+            self.custom_camera_name
+            in self.env.sim.model._camera_name2id.keys()
+        ):
             camera_to_use = self.custom_camera_name
         else:
             camera_to_use = self.camera_name
@@ -661,7 +764,7 @@ class RoboCasa(gym.Env):
             width=self.camera_width,
             camera_name=camera_to_use,
         ).copy()
-        if camera_to_use != "robot0_rightview":
+        if camera_to_use != 'robot0_rightview':
             result = result[::-1]  # flip vertically
         else:
             # flip horizontally
@@ -678,7 +781,11 @@ class RoboCasa(gym.Env):
         """
         Return all tasks available in the RoboCasa environment.
         """
-        return list(SINGLE_STAGE_TASK_DATASETS.keys()) + list(MULTI_STAGE_TASK_DATASETS.keys()) + ["PnPCounterTop"]
+        return (
+            list(SINGLE_STAGE_TASK_DATASETS.keys())
+            + list(MULTI_STAGE_TASK_DATASETS.keys())
+            + ['PnPCounterTop']
+        )
 
     def update_env(self, env_info):
         pass
@@ -693,8 +800,8 @@ class RoboCasa(gym.Env):
         """
         prep_start_time = time.time()
         self.seed(seed)
-        model_xml = env_info.get("model_xml", None)
-        ep_meta = env_info.get("ep_meta", None)
+        model_xml = env_info.get('model_xml', None)
+        ep_meta = env_info.get('ep_meta', None)
 
         if self.custom_task:
             # Modify the XML to add the custom camera
@@ -708,26 +815,30 @@ class RoboCasa(gym.Env):
 
             # Add the custom camera
             # camera_elem = ET.SubElement(worldbody, "camera")
-            camera_elem = ET.SubElement(camera_container, "camera")
-            camera_elem.set("name", self.custom_camera_name)
-            camera_elem.set("pos", " ".join(map(str, self.custom_camera_pos)))
-            camera_elem.set("quat", " ".join(map(str, self.custom_camera_quat)))
-            camera_elem.set("fovy", str(self.custom_camera_fovy))
-            camera_elem.set("mode", "fixed")
+            camera_elem = ET.SubElement(camera_container, 'camera')
+            camera_elem.set('name', self.custom_camera_name)
+            camera_elem.set('pos', ' '.join(map(str, self.custom_camera_pos)))
+            camera_elem.set(
+                'quat', ' '.join(map(str, self.custom_camera_quat))
+            )
+            camera_elem.set('fovy', str(self.custom_camera_fovy))
+            camera_elem.set('mode', 'fixed')
 
             # Convert the modified XML back to a string
-            model_xml = ET.tostring(tree.getroot(), encoding="unicode")
+            model_xml = ET.tostring(tree.getroot(), encoding='unicode')
         # First handle model reset if model_xml is provided
         if model_xml is not None:
             # Set episode metadata if provided
             if ep_meta is not None:
                 # filter xml file to make sure asset paths do not point to jimmyyang path
                 # like '/Users/jimmytyyang/research/robot-skills-sim/robocasa-murp/robocasa/models/assets/objects/aigen_objs/boxed_food/boxed_food_4/model.xml'
-                ep_meta["object_cfgs"] = update_mjcf_paths(ep_meta["object_cfgs"])
+                ep_meta['object_cfgs'] = update_mjcf_paths(
+                    ep_meta['object_cfgs']
+                )
                 # Once filtere, prepare env for reset with this xml
-                if hasattr(self.env, "set_attrs_from_ep_meta"):
+                if hasattr(self.env, 'set_attrs_from_ep_meta'):
                     self.env.set_attrs_from_ep_meta(ep_meta)
-                elif hasattr(self.env, "set_ep_meta"):
+                elif hasattr(self.env, 'set_ep_meta'):
                     self.env.set_ep_meta(ep_meta)
 
             # Reset the environment
@@ -735,8 +846,8 @@ class RoboCasa(gym.Env):
 
             # Process the model XML based on robosuite version
             # try:
-            logger.info("Resetting from provided model XML")
-            robosuite_version_id = int(robosuite.__version__.split(".")[1])
+            logger.info('Resetting from provided model XML')
+            robosuite_version_id = int(robosuite.__version__.split('.')[1])
             if robosuite_version_id <= 3:
                 from robosuite.utils.mjcf_utils import postprocess_model_xml
 
@@ -748,7 +859,7 @@ class RoboCasa(gym.Env):
             # Reset from XML string
             self.env.reset_from_xml_string(xml)
             self.env.sim.reset()
-            logger.info("Finished resetting from provided model XML")
+            logger.info('Finished resetting from provided model XML')
             # except Exception as e:
             #     logger.info(f"Warning: Failed to reset from model XML: {e}")
         else:
@@ -760,21 +871,23 @@ class RoboCasa(gym.Env):
             self.env.sim.forward()
 
             # Update state as needed
-            if hasattr(self.env, "update_sites"):
+            if hasattr(self.env, 'update_sites'):
                 # older versions of environment had update_sites function
                 self.env.update_sites()
-            if hasattr(self.env, "update_state"):
+            if hasattr(self.env, 'update_state'):
                 # later versions renamed this to update_state
                 self.env.update_state()
 
             # Get updated observation
-            if hasattr(self.env, "_get_observation"):
+            if hasattr(self.env, '_get_observation'):
                 obs = self.env._get_observation()
-            elif hasattr(self.env, "_get_observations"):
+            elif hasattr(self.env, '_get_observations'):
                 obs = self.env._get_observations(force_update=True)
         except Exception as e:
-            logger.info(f"Warning: Failed to set simulator state: {e}")
-        logger.info(f"robocasa env.prepare() took {time.time() - prep_start_time:.2f} seconds")
+            logger.info(f'Warning: Failed to set simulator state: {e}')
+        logger.info(
+            f'robocasa env.prepare() took {time.time() - prep_start_time:.2f} seconds'
+        )
         return obs, info
 
 
@@ -791,11 +904,15 @@ def update_mjcf_paths(object_cfgs):
         list: Updated object_cfgs with modified mjcf_path.
     """
     for i, object_cfg in enumerate(object_cfgs):
-        path = object_cfg["info"]["mjcf_path"]
-        models_index = path.find("objects")
-        relative_path = path[models_index:]  # e.g. 'models/assets/objects/aigen_objs/apple/apple_5/model.xml'
-        full_local_path = os.path.join(BASE_ASSET_ROOT_PATH, relative_path[len("objects/") :])
-        object_cfgs[i]["info"]["mjcf_path"] = full_local_path
+        path = object_cfg['info']['mjcf_path']
+        models_index = path.find('objects')
+        relative_path = path[
+            models_index:
+        ]  # e.g. 'models/assets/objects/aigen_objs/apple/apple_5/model.xml'
+        full_local_path = os.path.join(
+            BASE_ASSET_ROOT_PATH, relative_path[len('objects/') :]
+        )
+        object_cfgs[i]['info']['mjcf_path'] = full_local_path
     return object_cfgs
 
 
@@ -807,11 +924,11 @@ def path_change(xml_string):
 
     def replace_path(match):
         original_path = match.group(1)
-        model_index = original_path.find("objects/")
+        model_index = original_path.find('objects/')
         if model_index == -1:
             return f'file="{original_path}"'
 
-        relative_path = original_path[model_index + len("objects/") :]
+        relative_path = original_path[model_index + len('objects/') :]
         new_path = os.path.join(BASE_ASSET_ROOT_PATH, relative_path)
         new_path = os.path.normpath(new_path)
 
