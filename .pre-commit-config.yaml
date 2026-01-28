@@ -1,0 +1,74 @@
+# Pre-commit hooks for stable-worldmodel
+# See https://pre-commit.com for more information
+
+default_language_version:
+  python: python3
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^docs/
+      - id: end-of-file-fixer
+        exclude: ^docs/
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+
+  # Ruff - Fast Python linter (replaces flake8, isort, etc.)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.8
+    hooks:
+      - id: ruff
+        types_or: [python, pyi]
+        args: [--fix, --exit-non-zero-on-fix] # no rules/exclude here
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  # Shell scripts linter
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        require_serial: true
+
+  # Word spelling linter
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        require_serial: true
+        args:
+          - --skip=logs/**,data/**,*.ipynb
+          - --ignore-words-list=socio-economic
+
+  # Check for common Python anti-patterns
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.15.2
+    hooks:
+      - id: pyupgrade
+        args: [--py310-plus]
+
+  # Prettier for markdown, yaml, json
+  # - repo: https://github.com/pre-commit/mirrors-prettier
+  #   rev: v4.0.0-alpha.8
+  #   hooks:
+  #     - id: prettier
+  #       types_or: [markdown, yaml, json]
+  #       exclude: ^docs/
+
+  # Check docstrings
+  - repo: https://github.com/PyCQA/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        additional_dependencies: [tomli]
+        args: [--convention=google]
+        exclude: ".*" # ^(tests/|docs/)
