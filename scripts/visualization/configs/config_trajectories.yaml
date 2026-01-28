@@ -1,6 +1,6 @@
 defaults:
-  # - world_model@datasets.pusht_train.world_model: pyro
-  - world_model@datasets.pusht_val.world_model: pyro
+  # - world_model@datasets.pusht_train.world_model: prejepa
+  - world_model@datasets.pusht_val.world_model: prejepa
   - _self_ # Overrides from this file apply LAST
 
 # Global Settings (Must be consistent across datasets for TSNE dimensions to match)

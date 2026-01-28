@@ -1,0 +1,62 @@
+defaults:
+  - _self_
+  - launcher: local
+
+hydra:
+  job:
+    chdir: true
+
+wandb:
+  enable: false
+  project: swm
+  entity: stable-worldmodel
+
+dataset_name: pusht_expert_train_video
+cache_dir: null # default cache
+subdir: null
+
+trainer:
+  max_epochs: 10
+  strategy: ddp
+  devices: auto
+  accelerator: gpu
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+
+batch_size: 32
+num_workers: 16
+train_split: 0.9
+subset_prop: 1.0
+seed: 42
+
+image_size: 224
+patch_size: 16
+
+n_steps: ${eval:'${prejepa.num_preds} + ${prejepa.history_size}'}
+frameskip: 5
+
+prejepa:
+  history_size: 3
+  num_preds: 1
+  encoding: # key: target dim
+    proprio: 10
+    action: 10
+
+predictor_lr: 5e-4
+encoding_lr: 5e-4
+
+dump_object: True
+output_model_name: pusht_${backbone.type}_p${predictor.size}
+
+backbone:
+  name: facebook/dinov2-small
+  type: dinov2_small
+
+predictor:
+  size: "small"
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0

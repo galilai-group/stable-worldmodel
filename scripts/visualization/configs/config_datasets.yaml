@@ -1,20 +1,20 @@
 defaults:
-  - world_model@datasets.pusht_train.world_model: pyro
-  - world_model@datasets.pusht_val.world_model: pyro
-  - world_model@datasets.pusht_background_color_variation.world_model: pyro
-  - world_model@datasets.pusht_block_color_variation.world_model: pyro
-  - world_model@datasets.pusht_agent_color_variation.world_model: pyro
-  - world_model@datasets.pusht_block_shape_variation.world_model: pyro
-  - world_model@datasets.pusht_agent_shape_variation.world_model: pyro
-  - world_model@datasets.tworoom.world_model: pyro
-  - world_model@datasets.tworoom_agent_color_variation.world_model: pyro
-  - world_model@datasets.tworoom_agent_radius_variation.world_model: pyro
-  - world_model@datasets.tworoom_wall_color_variation.world_model: pyro
-  - world_model@datasets.tworoom_background_color_variation.world_model: pyro
-  - world_model@datasets.ogbench_cube.world_model: pyro_action_only
-  - world_model@datasets.ogbench_cube_variation_all.world_model: pyro_action_only
-  - world_model@datasets.ogbench_scene.world_model: pyro_action_only
-  - world_model@datasets.ogbench_scene_variation_all.world_model: pyro_action_only
+  - world_model@datasets.pusht_train.world_model: prejepa
+  - world_model@datasets.pusht_val.world_model: prejepa
+  - world_model@datasets.pusht_background_color_variation.world_model: prejepa
+  - world_model@datasets.pusht_block_color_variation.world_model: prejepa
+  - world_model@datasets.pusht_agent_color_variation.world_model: prejepa
+  - world_model@datasets.pusht_block_shape_variation.world_model: prejepa
+  - world_model@datasets.pusht_agent_shape_variation.world_model: prejepa
+  - world_model@datasets.tworoom.world_model: prejepa
+  - world_model@datasets.tworoom_agent_color_variation.world_model: prejepa
+  - world_model@datasets.tworoom_agent_radius_variation.world_model: prejepa
+  - world_model@datasets.tworoom_wall_color_variation.world_model: prejepa
+  - world_model@datasets.tworoom_background_color_variation.world_model: prejepa
+  - world_model@datasets.ogbench_cube.world_model: prejepa_action_only
+  - world_model@datasets.ogbench_cube_variation_all.world_model: prejepa_action_only
+  - world_model@datasets.ogbench_scene.world_model: prejepa_action_only
+  - world_model@datasets.ogbench_scene_variation_all.world_model: prejepa_action_only
   - _self_ # Overrides from this file apply LAST
 
 # Global Settings (Must be consistent across datasets for TSNE dimensions to match)

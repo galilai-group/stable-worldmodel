@@ -1,8 +1,10 @@
-from . import pyro
-from .pyro import PYRO
-
+from . import prejepa, gcbc
+from .prejepa import PreJEPA
+from .gcbc import GCBC
 
 __all__ = [
-    "pyro",
-    "PYRO",
+    'prejepa',
+    'PreJEPA',
+    'gcbc',
+    'GCBC',
 ]

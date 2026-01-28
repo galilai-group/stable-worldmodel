@@ -1,8 +1,8 @@
 defaults:
   - _self_
-  - world_model@datasets.two_room.world_model: pyro
-  - world_model@datasets.pusht.world_model: pyro
-  - world_model@datasets.ogbench_cube.world_model: pyro_action_only
+  - world_model@datasets.two_room.world_model: prejepa
+  - world_model@datasets.pusht.world_model: prejepa
+  - world_model@datasets.ogbench_cube.world_model: prejepa_action_only
 
 cache_dir: null
 device: cuda
