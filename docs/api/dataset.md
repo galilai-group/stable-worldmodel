@@ -86,6 +86,53 @@ dataset = VideoDataset(
 ```
 ///
 
+/// tab | Image Format
+The **`ImageDataset`** is a convenience alias for `FolderDataset` with image defaults. It assumes 'pixels' is stored as individual image files.
+
+**File Structure:**
+```
+dataset_name/
+├── ep_len.npz
+├── ep_offset.npz
+├── action.npz
+└── pixels/         # Folder for image files
+    ├── ep_0_step_0.jpeg
+    ├── ep_0_step_1.jpeg
+    └── ...
+```
+
+**Usage:**
+```python
+from stable_worldmodel.data import ImageDataset
+
+dataset = ImageDataset(
+    name="my_image_dataset",
+    image_keys=["pixels"]  # Default
+)
+```
+///
+
+/// tab | Goal-Conditioned
+The **`GoalDataset`** wraps any dataset to add goal observations for goal-conditioned learning. Goals are sampled from random states, future states in the same episode, or the current state.
+
+**Usage:**
+```python
+from stable_worldmodel.data import HDF5Dataset, GoalDataset
+
+# Wrap any base dataset
+base_dataset = HDF5Dataset(name="my_dataset", num_steps=50)
+goal_dataset = GoalDataset(
+    base_dataset,
+    goal_probabilities=(0.3, 0.5, 0.2),  # (random, future, current)
+    gamma=0.99,  # Discount for future sampling
+    seed=42
+)
+
+# Items now include goal_pixels and goal_proprio keys
+item = goal_dataset[0]
+```
+///
+
 ## **[ Base Classes ]**
 
 ::: stable_worldmodel.data.dataset.Dataset
@@ -113,6 +160,20 @@ dataset = VideoDataset(
         show_source: false
 
 ::: stable_worldmodel.data.VideoDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+::: stable_worldmodel.data.ImageDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+## **[ Wrappers ]**
+
+::: stable_worldmodel.data.GoalDataset
     options:
         heading_level: 3
         members: false

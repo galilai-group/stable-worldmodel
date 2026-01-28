@@ -11,11 +11,15 @@ import pytest
 import torch
 from PIL import Image
 
+import h5py
+
 from stable_worldmodel.data import (
     ImageDataset,
     VideoDataset,
     MergeDataset,
     ConcatDataset,
+    HDF5Dataset,
+    GoalDataset,
 )
 from stable_worldmodel.data.dataset import Dataset
 
@@ -959,3 +963,443 @@ class TestIntegration:
         assert concat[19] is not None  # Last of first
         assert concat[20] is not None  # First of second
         assert concat[99] is not None  # Last overall
+
+
+class TestMergeDatasetLengths:
+    """Test MergeDataset.lengths property."""
+
+    def test_lengths_property(self, mock_dataset_a, mock_dataset_b):
+        """Test lengths property returns first dataset's lengths."""
+        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+        np.testing.assert_array_equal(merged.lengths, mock_dataset_a.lengths)
+
+
+# --- HDF5Dataset fixtures for GoalDataset tests ---
+
+
+@pytest.fixture
+def sample_hdf5_for_goal(tmp_path):
+    """Create a sample HDF5 dataset for GoalDataset testing."""
+    import h5py
+
+    h5_path = tmp_path / "goal_test.h5"
+
+    ep_lengths = np.array([20, 15])
+    ep_offsets = np.array([0, 20])
+    total_steps = sum(ep_lengths)
+
+    with h5py.File(h5_path, "w") as f:
+        f.create_dataset("ep_len", data=ep_lengths)
+        f.create_dataset("ep_offset", data=ep_offsets)
+        f.create_dataset("observation", data=np.random.rand(total_steps, 4).astype(np.float32))
+        f.create_dataset("action", data=np.random.rand(total_steps, 2).astype(np.float32))
+        f.create_dataset("pixels", data=np.random.randint(0, 255, (total_steps, 64, 64, 3), dtype=np.uint8))
+        f.create_dataset("proprio", data=np.random.rand(total_steps, 6).astype(np.float32))
+
+    return tmp_path, "goal_test"
+
+
+@pytest.fixture
+def sample_hdf5_no_pixels(tmp_path):
+    """Create a sample HDF5 dataset without pixels for GoalDataset testing."""
+    import h5py
+
+    h5_path = tmp_path / "goal_no_pixels.h5"
+
+    ep_lengths = np.array([10])
+    ep_offsets = np.array([0])
+    total_steps = 10
+
+    with h5py.File(h5_path, "w") as f:
+        f.create_dataset("ep_len", data=ep_lengths)
+        f.create_dataset("ep_offset", data=ep_offsets)
+        f.create_dataset("observation", data=np.random.rand(total_steps, 4).astype(np.float32))
+        f.create_dataset("action", data=np.random.rand(total_steps, 2).astype(np.float32))
+
+    return tmp_path, "goal_no_pixels"
+
+
+@pytest.fixture
+def sample_hdf5_grayscale(tmp_path):
+    """Create a sample HDF5 dataset with grayscale images."""
+    import h5py
+
+    h5_path = tmp_path / "grayscale_test.h5"
+
+    ep_lengths = np.array([10])
+    ep_offsets = np.array([0])
+    total_steps = 10
+
+    with h5py.File(h5_path, "w") as f:
+        f.create_dataset("ep_len", data=ep_lengths)
+        f.create_dataset("ep_offset", data=ep_offsets)
+        f.create_dataset("action", data=np.random.rand(total_steps, 2).astype(np.float32))
+        # Grayscale images (1 channel)
+        f.create_dataset("pixels", data=np.random.randint(0, 255, (total_steps, 64, 64, 1), dtype=np.uint8))
+
+    return tmp_path, "grayscale_test"
+
+
+class TestGoalDataset:
+    """Tests for GoalDataset wrapper."""
+
+    def test_init(self, sample_hdf5_for_goal):
+        """Test GoalDataset initialization."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        assert goal_dataset.dataset is base_dataset
+        assert goal_dataset.goal_probabilities == (0.3, 0.5, 0.2)
+        assert goal_dataset.gamma == 0.99
+        assert len(goal_dataset.episode_lengths) == 2
+        assert goal_dataset.episode_offsets is not None
+
+    def test_init_custom_probabilities(self, sample_hdf5_for_goal):
+        """Test GoalDataset with custom goal probabilities."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(0.5, 0.3, 0.2),
+            seed=42,
+        )
+
+        assert goal_dataset.goal_probabilities == (0.5, 0.3, 0.2)
+
+    def test_init_custom_gamma(self, sample_hdf5_for_goal):
+        """Test GoalDataset with custom gamma."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, gamma=0.95, seed=42)
+
+        assert goal_dataset.gamma == 0.95
+
+    def test_init_invalid_probabilities_length(self, sample_hdf5_for_goal):
+        """Test GoalDataset raises error for invalid probability tuple length."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+        with pytest.raises(ValueError, match="3-tuple"):
+            GoalDataset(base_dataset, goal_probabilities=(0.5, 0.5))
+
+    def test_init_invalid_probabilities_sum(self, sample_hdf5_for_goal):
+        """Test GoalDataset raises error when probabilities don't sum to 1."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+        with pytest.raises(ValueError, match="sum to 1.0"):
+            GoalDataset(base_dataset, goal_probabilities=(0.3, 0.3, 0.3))
+
+    def test_init_custom_goal_keys(self, sample_hdf5_for_goal):
+        """Test GoalDataset with custom goal_keys mapping."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_keys={"observation": "goal_obs"},
+            seed=42,
+        )
+
+        assert goal_dataset.goal_keys == {"observation": "goal_obs"}
+
+    def test_init_auto_detect_goal_keys(self, sample_hdf5_for_goal):
+        """Test GoalDataset auto-detects goal keys from column names."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        # Should auto-detect pixels and proprio
+        assert "pixels" in goal_dataset.goal_keys
+        assert "proprio" in goal_dataset.goal_keys
+        assert goal_dataset.goal_keys["pixels"] == "goal_pixels"
+        assert goal_dataset.goal_keys["proprio"] == "goal_proprio"
+
+    def test_init_no_pixels_or_proprio(self, sample_hdf5_no_pixels):
+        """Test GoalDataset with dataset that has no pixels or proprio."""
+        cache_dir, name = sample_hdf5_no_pixels
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        # goal_keys should be empty
+        assert goal_dataset.goal_keys == {}
+
+    def test_len(self, sample_hdf5_for_goal):
+        """Test GoalDataset length matches base dataset."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        assert len(goal_dataset) == len(base_dataset)
+
+    def test_column_names(self, sample_hdf5_for_goal):
+        """Test GoalDataset column_names property."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        assert goal_dataset.column_names == base_dataset.column_names
+
+    def test_getitem_adds_goal_keys(self, sample_hdf5_for_goal):
+        """Test __getitem__ adds goal observations."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        item = goal_dataset[0]
+
+        # Original keys should be present
+        assert "pixels" in item
+        assert "proprio" in item
+        assert "action" in item
+        assert "observation" in item
+
+        # Goal keys should be added
+        assert "goal_pixels" in item
+        assert "goal_proprio" in item
+
+    def test_getitem_no_goal_keys(self, sample_hdf5_no_pixels):
+        """Test __getitem__ when no goal keys are configured."""
+        cache_dir, name = sample_hdf5_no_pixels
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        item = goal_dataset[0]
+
+        # Should just return base dataset item
+        assert "observation" in item
+        assert "action" in item
+        # No goal keys added
+        assert "goal_pixels" not in item
+        assert "goal_proprio" not in item
+
+    def test_sample_goal_kind_random(self, sample_hdf5_for_goal):
+        """Test _sample_goal_kind returns 'random' with high random probability."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(1.0, 0.0, 0.0),  # Always random
+            seed=42,
+        )
+
+        for _ in range(10):
+            assert goal_dataset._sample_goal_kind() == "random"
+
+    def test_sample_goal_kind_future(self, sample_hdf5_for_goal):
+        """Test _sample_goal_kind returns 'future' with high future probability."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(0.0, 1.0, 0.0),  # Always future
+            seed=42,
+        )
+
+        for _ in range(10):
+            assert goal_dataset._sample_goal_kind() == "future"
+
+    def test_sample_goal_kind_current(self, sample_hdf5_for_goal):
+        """Test _sample_goal_kind returns 'current' with high current probability."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(0.0, 0.0, 1.0),  # Always current
+            seed=42,
+        )
+
+        for _ in range(10):
+            assert goal_dataset._sample_goal_kind() == "current"
+
+    def test_sample_random_step(self, sample_hdf5_for_goal):
+        """Test _sample_random_step returns valid episode and local indices."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        for _ in range(50):
+            ep_idx, local_idx = goal_dataset._sample_random_step()
+            assert 0 <= ep_idx < len(goal_dataset.episode_lengths)
+            assert 0 <= local_idx < goal_dataset.episode_lengths[ep_idx]
+
+    def test_sample_random_step_empty_dataset(self, tmp_path):
+        """Test _sample_random_step with empty dataset."""
+        import h5py
+
+        h5_path = tmp_path / "empty.h5"
+        with h5py.File(h5_path, "w") as f:
+            f.create_dataset("ep_len", data=np.array([], dtype=np.int64))
+            f.create_dataset("ep_offset", data=np.array([], dtype=np.int64))
+            f.create_dataset("action", data=np.zeros((0, 2), dtype=np.float32))
+
+        base_dataset = HDF5Dataset("empty", cache_dir=str(tmp_path))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        # Should return (0, 0) for empty dataset
+        ep_idx, local_idx = goal_dataset._sample_random_step()
+        assert ep_idx == 0
+        assert local_idx == 0
+
+    def test_sample_future_step(self, sample_hdf5_for_goal):
+        """Test _sample_future_step returns future step in same episode."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        # Sample from episode 0, starting at step 5
+        ep_idx = 0
+        local_start = 5
+        future_ep_idx, future_local_idx = goal_dataset._sample_future_step(ep_idx, local_start)
+
+        # Should be same episode
+        assert future_ep_idx == ep_idx
+        # Should be >= local_start
+        assert future_local_idx >= local_start
+        # Should be within episode bounds
+        assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
+
+    def test_sample_future_step_at_end(self, sample_hdf5_for_goal):
+        """Test _sample_future_step when at end of episode returns same position."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        ep_idx = 0
+        # Start at last step
+        local_start = goal_dataset.episode_lengths[ep_idx] - 1
+        future_ep_idx, future_local_idx = goal_dataset._sample_future_step(ep_idx, local_start)
+
+        # Should return same position
+        assert future_ep_idx == ep_idx
+        assert future_local_idx == local_start
+
+    def test_get_clip_info(self, sample_hdf5_for_goal):
+        """Test _get_clip_info returns correct episode and local start."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        for idx in range(min(5, len(goal_dataset))):
+            ep_idx, local_start = goal_dataset._get_clip_info(idx)
+            # Should match base dataset's clip_indices
+            expected = base_dataset.clip_indices[idx]
+            assert (ep_idx, local_start) == expected
+
+    def test_load_single_step(self, sample_hdf5_for_goal):
+        """Test _load_single_step loads correct data."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        step = goal_dataset._load_single_step(0, 5)
+
+        assert isinstance(step, dict)
+        assert "pixels" in step
+        assert "observation" in step
+        # Should be single step
+        assert step["observation"].shape[0] == 1
+
+    def test_getitem_current_goal(self, sample_hdf5_for_goal):
+        """Test __getitem__ with 'current' goal sampling."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(0.0, 0.0, 1.0),  # Always current
+            seed=42,
+        )
+
+        item = goal_dataset[0]
+
+        # Goal should match current observation (first frame)
+        # The shapes should match
+        assert item["goal_pixels"].shape == item["pixels"][:1].shape
+
+    def test_getitem_random_goal(self, sample_hdf5_for_goal):
+        """Test __getitem__ with 'random' goal sampling."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(1.0, 0.0, 0.0),  # Always random
+            seed=42,
+        )
+
+        item = goal_dataset[0]
+
+        assert "goal_pixels" in item
+        assert "goal_proprio" in item
+        # Goal tensors should have shape (1, ...)
+        assert item["goal_pixels"].ndim >= 1
+
+    def test_getitem_future_goal(self, sample_hdf5_for_goal):
+        """Test __getitem__ with 'future' goal sampling."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(0.0, 1.0, 0.0),  # Always future
+            seed=42,
+        )
+
+        item = goal_dataset[0]
+
+        assert "goal_pixels" in item
+        assert "goal_proprio" in item
+
+    def test_seed_reproducibility(self, sample_hdf5_for_goal):
+        """Test that same seed produces same results."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+        goal_dataset1 = GoalDataset(base_dataset, seed=123)
+        goal_dataset2 = GoalDataset(base_dataset, seed=123)
+
+        # Sample should be deterministic with same seed
+        kind1 = [goal_dataset1._sample_goal_kind() for _ in range(10)]
+        kind2 = [goal_dataset2._sample_goal_kind() for _ in range(10)]
+        assert kind1 == kind2
+
+
+class TestHDF5DatasetEdgeCases:
+    """Additional edge case tests for HDF5Dataset."""
+
+    def test_grayscale_image_permutation(self, sample_hdf5_grayscale):
+        """Test that grayscale images (1 channel) are permuted correctly."""
+        cache_dir, name = sample_hdf5_grayscale
+        dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+        item = dataset[0]
+
+        assert "pixels" in item
+        # Should be permuted to (T, 1, H, W)
+        assert item["pixels"].shape[-3] == 1  # 1 channel
+
+    def test_get_row_data_list_indices(self, sample_hdf5_grayscale):
+        """Test get_row_data with list of indices."""
+        cache_dir, name = sample_hdf5_grayscale
+        dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+        row_data = dataset.get_row_data([0, 2, 5])
+
+        assert isinstance(row_data, dict)
+        assert "action" in row_data
+        # Should have data for 3 rows
+        assert row_data["action"].shape[0] == 3
+
+
+class TestImageDatasetEdgeCases:
+    """Additional edge case tests for ImageDataset/FolderDataset."""
+
+    def test_get_row_data_list(self, sample_image_dataset):
+        """Test get_row_data with list of indices."""
+        cache_dir, name = sample_image_dataset
+        dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+        row_data = dataset.get_row_data([0, 5, 10])
+
+        assert isinstance(row_data, dict)
+        assert "observation" in row_data
+        assert "action" in row_data
+        # pixels not in row_data (folder key)

@@ -253,7 +253,9 @@ class FolderDataset(Dataset):
 
     def get_col_data(self, col: str) -> np.ndarray:
         if col not in self._cache:
-            raise KeyError(f"'{col}' not in cache (folder keys cannot be retrieved as full array)")
+            raise KeyError(
+                f"'{col}' not in cache (folder keys cannot be retrieved as full array)"
+            )
         return self._cache[col]
 
     def get_row_data(self, row_idx: int | list[int]) -> dict:
@@ -268,7 +270,9 @@ class ImageDataset(FolderDataset):
     Assumes 'pixels' is a folder of images.
     """
 
-    def __init__(self, name: str, image_keys: list[str] | None = None, **kw: Any) -> None:
+    def __init__(
+        self, name: str, image_keys: list[str] | None = None, **kw: Any
+    ) -> None:
         super().__init__(name, folder_keys=image_keys or ['pixels'], **kw)
 
 
@@ -280,7 +284,9 @@ class VideoDataset(FolderDataset):
 
     _decord: Any = None  # Lazy-loaded module reference
 
-    def __init__(self, name: str, video_keys: list[str] | None = None, **kw: Any) -> None:
+    def __init__(
+        self, name: str, video_keys: list[str] | None = None, **kw: Any
+    ) -> None:
         if VideoDataset._decord is None:
             try:
                 import decord
@@ -333,7 +339,9 @@ class MergeDataset:
     """
 
     def __init__(
-        self, datasets: list[Any], keys_from_dataset: list[list[str]] | None = None
+        self,
+        datasets: list[Any],
+        keys_from_dataset: list[list[str]] | None = None,
     ) -> None:
         if not datasets:
             raise ValueError('Need at least one dataset')
@@ -509,3 +517,155 @@ class ConcatDataset:
                 results[k].append(v)
 
         return {k: np.stack(v) for k, v in results.items()}
+
+
+class GoalDataset:
+    """
+    Dataset wrapper that samples an additional goal observation per item.
+
+    Works with any dataset type (HDF5Dataset, FolderDataset, VideoDataset, etc.)
+
+    Goals are sampled from:
+      - random state (uniform over dataset steps)
+      - future state in same episode (Geom(1-gamma))
+      - current state
+    with probabilities (0.3, 0.5, 0.2) by default.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        goal_probabilities: tuple[float, float, float] = (0.3, 0.5, 0.2),
+        gamma: float = 0.99,
+        goal_keys: dict[str, str] | None = None,
+        seed: int | None = None,
+    ):
+        """
+        Args:
+            dataset: Base dataset to wrap.
+            goal_probabilities: Tuple of (p_random, p_future, p_current) for goal sampling.
+            gamma: Discount factor for future goal sampling.
+            goal_keys: Mapping of source observation keys to goal observation keys. If None, defaults to {"pixels": "goal", "proprio": "goal_proprio"}.
+            seed: Random seed for goal sampling.
+        """
+        self.dataset = dataset
+
+        if len(goal_probabilities) != 3:
+            raise ValueError(
+                'goal_probabilities must be a 3-tuple (random, future, current)'
+            )
+        if not np.isclose(sum(goal_probabilities), 1.0):
+            raise ValueError('goal_probabilities must sum to 1.0')
+
+        self.goal_probabilities = goal_probabilities
+        self.gamma = gamma
+        self.rng = np.random.default_rng(seed)
+
+        # All Dataset subclasses have lengths and offsets
+        self.episode_lengths = dataset.lengths
+        self.episode_offsets = dataset.offsets
+
+        self._episode_cumlen = np.cumsum(self.episode_lengths)
+        self._total_steps = (
+            int(self._episode_cumlen[-1]) if len(self._episode_cumlen) else 0
+        )
+
+        # Auto-detect goal keys if not provided
+        if goal_keys is None:
+            goal_keys = {}
+            column_names = dataset.column_names
+            if 'pixels' in column_names:
+                goal_keys['pixels'] = 'goal_pixels'
+            if 'proprio' in column_names:
+                goal_keys['proprio'] = 'goal_proprio'
+        self.goal_keys = goal_keys
+
+    def __len__(self):
+        return len(self.dataset)
+
+    @property
+    def column_names(self):
+        return self.dataset.column_names
+
+    def _sample_goal_kind(self) -> str:
+        r = self.rng.random()
+        p_random, p_future, _ = self.goal_probabilities
+        if r < p_random:
+            return 'random'
+        if r < p_random + p_future:
+            return 'future'
+        return 'current'
+
+    def _sample_random_step(self) -> tuple[int, int]:
+        """Sample random (ep_idx, local_idx) from entire dataset."""
+        if self._total_steps == 0:
+            return 0, 0
+        flat_idx = int(self.rng.integers(0, self._total_steps))
+        ep_idx = int(
+            np.searchsorted(self._episode_cumlen, flat_idx, side='right')
+        )
+        prev = self._episode_cumlen[ep_idx - 1] if ep_idx > 0 else 0
+        local_idx = flat_idx - prev
+        return ep_idx, local_idx
+
+    def _sample_future_step(
+        self, ep_idx: int, local_start: int
+    ) -> tuple[int, int]:
+        """Sample future (ep_idx, local_idx) from same episode using geometric distribution."""
+        frameskip = self.dataset.frameskip
+        max_steps = (
+            self.episode_lengths[ep_idx] - 1 - local_start
+        ) // frameskip
+        if max_steps <= 0:
+            return ep_idx, local_start
+
+        p = max(1.0 - self.gamma, 1e-6)
+        k = int(self.rng.geometric(p))
+        k = min(k, max_steps)
+        local_idx = local_start + k * frameskip
+        return ep_idx, local_idx
+
+    def _get_clip_info(self, idx: int) -> tuple[int, int]:
+        """Returns (episode_idx, local_start) for a given dataset index."""
+        return self.dataset.clip_indices[idx]
+
+    def _load_single_step(
+        self, ep_idx: int, local_idx: int
+    ) -> dict[str, torch.Tensor]:
+        """Load a single step from episode ep_idx at local index local_idx."""
+        return self.dataset._load_slice(ep_idx, local_idx, local_idx + 1)
+
+    def __getitem__(self, idx: int):
+        # Get base sample from wrapped dataset
+        steps = self.dataset[idx]
+
+        if not self.goal_keys:
+            return steps
+
+        # Get episode and local start for this index
+        ep_idx, local_start = self._get_clip_info(idx)
+
+        # Sample goal (transform will be applied via underlying dataset's load_chunk/load_slice)
+        goal_kind = self._sample_goal_kind()
+        if goal_kind == 'random':
+            goal_ep_idx, goal_local_idx = self._sample_random_step()
+        elif goal_kind == 'future':
+            goal_ep_idx, goal_local_idx = self._sample_future_step(
+                ep_idx, local_start
+            )
+        else:  # current
+            goal_ep_idx, goal_local_idx = ep_idx, local_start
+
+        # Load goal step
+        goal_step = self._load_single_step(goal_ep_idx, goal_local_idx)
+
+        # Add goal observations to steps
+        for src_key, goal_key in self.goal_keys.items():
+            if src_key not in goal_step or src_key not in steps:
+                continue
+            goal_val = goal_step[src_key]
+            if goal_val.ndim == 0:
+                goal_val = goal_val.unsqueeze(0)
+            steps[goal_key] = goal_val
+
+        return steps

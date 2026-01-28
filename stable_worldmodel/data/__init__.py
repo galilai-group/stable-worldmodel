@@ -4,6 +4,7 @@ from .dataset import (
     Dataset,
     FolderDataset,
     HDF5Dataset,
+    GoalDataset,
     ImageDataset,
     MergeDataset,
     VideoDataset,
@@ -17,5 +18,6 @@ __all__ = [
     'ImageDataset',
     'VideoDataset',
     'MergeDataset',
+    'GoalDataset',
     'ConcatDataset',
 ]

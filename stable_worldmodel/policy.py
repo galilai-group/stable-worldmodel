@@ -50,7 +50,9 @@ class Transformable(Protocol):
         """
         ...
 
-    def inverse_transform(self, x: np.ndarray) -> np.ndarray:  # pragma: no cover
+    def inverse_transform(
+        self, x: np.ndarray
+    ) -> np.ndarray:  # pragma: no cover
         """Reverse the preprocessing transformation.
 
         Args:
@@ -59,6 +61,14 @@ class Transformable(Protocol):
         Returns:
             Original data as a numpy array.
         """
+        ...
+
+
+class Actionable(Protocol):
+    """Protocol for model action computation."""
+
+    def get_action(info) -> torch.Tensor:  # pragma: no cover
+        """Compute action from observation and goal"""
         ...
 
 
@@ -80,7 +90,7 @@ class BasePolicy:
             **kwargs: Additional configuration parameters.
         """
         self.env = None
-        self.type = "base"
+        self.type = 'base'
         for arg, value in kwargs.items():
             setattr(self, arg, value)
 
@@ -107,6 +117,68 @@ class BasePolicy:
         """
         self.env = env
 
+    def _prepare_info(self, info_dict: dict) -> dict[str, torch.Tensor]:
+        """Pre-process and transform observations.
+
+        Applies preprocessing (via `self.process`) and transformations (via `self.transform`)
+        to observation data. Used by subclasses like FeedForwardPolicy and WorldModelPolicy.
+
+        Args:
+            info_dict: Raw observation dictionary from the environment.
+
+        Returns:
+            A dictionary of processed tensors.
+
+        Raises:
+            ValueError: If an expected numpy array is missing for processing.
+        """
+        for k, v in info_dict.items():
+            is_numpy = isinstance(v, (np.ndarray | np.generic))
+
+            if hasattr(self, 'process') and k in self.process:
+                if not is_numpy:
+                    raise ValueError(
+                        f"Expected numpy array for key '{k}' in process, got {type(v)}"
+                    )
+
+                # flatten extra dimensions if needed
+                shape = v.shape
+                if len(shape) > 2:
+                    v = v.reshape(-1, *shape[2:])
+
+                # process and reshape back
+                v = self.process[k].transform(v)
+                v = v.reshape(shape)
+
+            # collapse env and time dimensions for transform (e, t, ...) -> (e * t, ...)
+            # then restore after transform
+            if hasattr(self, 'transform') and k in self.transform:
+                shape = None
+                if is_numpy or torch.is_tensor(v):
+                    if v.ndim > 2:
+                        shape = v.shape
+                        v = v.reshape(-1, *shape[2:])
+                if k.startswith('pixels') or k.startswith('goal'):
+                    # permute channel first for transform
+                    if is_numpy:
+                        v = np.transpose(v, (0, 3, 1, 2))
+                    else:
+                        v = v.permute(0, 3, 1, 2)
+                v = torch.stack(
+                    [self.transform[k](tv_tensors.Image(x)) for x in v]
+                )
+                is_numpy = isinstance(v, (np.ndarray | np.generic))
+
+                if shape is not None:
+                    v = v.reshape(*shape[:2], *v.shape[1:])
+
+            if is_numpy and v.dtype.kind not in 'USO':
+                v = torch.from_numpy(v)
+
+            info_dict[k] = v
+
+        return info_dict
+
 
 class RandomPolicy(BasePolicy):
     """Policy that samples random actions from the action space."""
@@ -119,7 +191,7 @@ class RandomPolicy(BasePolicy):
             **kwargs: Additional configuration parameters.
         """
         super().__init__(**kwargs)
-        self.type = "random"
+        self.type = 'random'
         self.seed = seed
 
     def get_action(self, obs: Any, **kwargs: Any) -> np.ndarray:
@@ -154,9 +226,11 @@ class ExpertPolicy(BasePolicy):
             **kwargs: Additional configuration parameters.
         """
         super().__init__(**kwargs)
-        self.type = "expert"
+        self.type = 'expert'
 
-    def get_action(self, obs: Any, goal_obs: Any, **kwargs: Any) -> np.ndarray | None:
+    def get_action(
+        self, obs: Any, goal_obs: Any, **kwargs: Any
+    ) -> np.ndarray | None:
         """Get action from the expert policy.
 
         Args:
@@ -171,6 +245,84 @@ class ExpertPolicy(BasePolicy):
         pass
 
 
+class FeedForwardPolicy(BasePolicy):
+    """Feed-Forward Policy using a neural network model.
+
+    Actions are computed via a single forward pass through the model.
+    Useful for imitation learning policies like Goal-Conditioned Behavioral Cloning (GCBC).
+
+    Attributes:
+        model: Neural network model implementing the Actionable protocol.
+        process: Dictionary of data preprocessors for specific keys.
+        transform: Dictionary of tensor transformations (e.g., image transforms).
+    """
+
+    def __init__(
+        self,
+        model: Actionable,
+        process: dict[str, Transformable] | None = None,
+        transform: dict[str, Callable[[torch.Tensor], torch.Tensor]]
+        | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the feed-forward policy.
+
+        Args:
+            model: Neural network model with a `get_action` method.
+            process: Dictionary of data preprocessors for specific keys.
+            transform: Dictionary of tensor transformations (e.g., image transforms).
+            **kwargs: Additional configuration parameters.
+        """
+        super().__init__(**kwargs)
+        self.type = 'feed_forward'
+        self.model = model.eval()
+        self.process = process or {}
+        self.transform = transform or {}
+
+    def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
+        """Get action via a forward pass through the neural network model.
+
+        Args:
+            info_dict: Current state information containing at minimum a 'goal' key.
+            **kwargs: Additional parameters (unused).
+
+        Returns:
+            The selected action as a numpy array.
+
+        Raises:
+            AssertionError: If environment not set or 'goal' not in info_dict.
+        """
+        assert hasattr(self, 'env'), 'Environment not set for the policy'
+        assert 'goal' in info_dict, "'goal' must be provided in info_dict"
+
+        # Prepare the info dict (transforms and normalizes inputs)
+        info_dict = self._prepare_info(info_dict)
+
+        # Add goal_pixels key for GCBC model
+        if 'goal' in info_dict:
+            info_dict['goal_pixels'] = info_dict['goal']
+
+        # Move all tensors to the model's device
+        device = next(self.model.parameters()).device
+        for k, v in info_dict.items():
+            if torch.is_tensor(v):
+                info_dict[k] = v.to(device)
+
+        # Get action from model
+        with torch.no_grad():
+            action = self.model.get_action(info_dict)
+
+        # Convert to numpy
+        if torch.is_tensor(action):
+            action = action.cpu().detach().numpy()
+
+        # post-process action
+        if 'action' in self.process:
+            action = self.process['action'].inverse_transform(action)
+
+        return action
+
+
 class WorldModelPolicy(BasePolicy):
     """Policy using a world model and planning solver for action selection."""
 
@@ -179,7 +331,8 @@ class WorldModelPolicy(BasePolicy):
         solver: Solver,
         config: PlanConfig,
         process: dict[str, Transformable] | None = None,
-        transform: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None = None,
+        transform: dict[str, Callable[[torch.Tensor], torch.Tensor]]
+        | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the world model policy.
@@ -193,10 +346,12 @@ class WorldModelPolicy(BasePolicy):
         """
         super().__init__(**kwargs)
 
-        self.type = "world_model"
+        self.type = 'world_model'
         self.cfg = config
         self.solver = solver
-        self.action_buffer: deque[torch.Tensor] = deque(maxlen=self.flatten_receding_horizon)
+        self.action_buffer: deque[torch.Tensor] = deque(
+            maxlen=self.flatten_receding_horizon
+        )
         self.process = process or {}
         self.transform = transform or {}
         self._action_buffer: deque[torch.Tensor] | None = None
@@ -214,66 +369,15 @@ class WorldModelPolicy(BasePolicy):
             env: The environment to associate with the policy.
         """
         self.env = env
-        n_envs = getattr(env, "num_envs", 1)
-        self.solver.configure(action_space=env.action_space, n_envs=n_envs, config=self.cfg)
+        n_envs = getattr(env, 'num_envs', 1)
+        self.solver.configure(
+            action_space=env.action_space, n_envs=n_envs, config=self.cfg
+        )
         self._action_buffer = deque(maxlen=self.flatten_receding_horizon)
 
-        assert isinstance(self.solver, Solver), "Solver must implement the Solver protocol"
-
-    def _prepare_info(self, info_dict: dict) -> dict[str, torch.Tensor]:
-        """Pre-process and transform observations.
-
-        Args:
-            info_dict: Raw observation dictionary from the environment.
-
-        Returns:
-            A dictionary of processed tensors.
-
-        Raises:
-            ValueError: If an expected numpy array is missing for processing.
-        """
-        for k, v in info_dict.items():
-            is_numpy = isinstance(v, np.ndarray | np.generic)
-
-            if k in self.process:
-                if not is_numpy:
-                    raise ValueError(f"Expected numpy array for key '{k}' in process, got {type(v)}")
-
-                # flatten extra dimensions if needed
-                shape = v.shape
-                if len(shape) > 2:
-                    v = v.reshape(-1, *shape[2:])
-
-                # process and reshape back
-                v = self.process[k].transform(v)
-                v = v.reshape(shape)
-
-            # collapse env and time dimensions for transform (e, t, ...) -> (e * t, ...)
-            # then restore after transform
-            if k in self.transform:
-                shape = None
-                if is_numpy or torch.is_tensor(v):
-                    if v.ndim > 2:
-                        shape = v.shape
-                        v = v.reshape(-1, *shape[2:])
-                if k.startswith("pixels") or k.startswith("goal"):
-                    # permute channel first for transform
-                    if is_numpy:
-                        v = np.transpose(v, (0, 3, 1, 2))
-                    else:
-                        v = v.permute(0, 3, 1, 2)
-                v = torch.stack([self.transform[k](tv_tensors.Image(x)) for x in v])
-                is_numpy = isinstance(v, np.ndarray | np.generic)
-
-                if shape is not None:
-                    v = v.reshape(*shape[:2], *v.shape[1:])
-
-            if is_numpy and v.dtype.kind not in "USO":
-                v = torch.from_numpy(v)
-
-            info_dict[k] = v
-
-        return info_dict
+        assert isinstance(self.solver, Solver), (
+            'Solver must implement the Solver protocol'
+        )
 
     def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
         """Get action via planning with the world model.
@@ -285,9 +389,9 @@ class WorldModelPolicy(BasePolicy):
         Returns:
             The selected action(s) as a numpy array.
         """
-        assert hasattr(self, "env"), "Environment not set for the policy"
-        assert "pixels" in info_dict, "'pixels' must be provided in info_dict"
-        assert "goal" in info_dict, "'goal' must be provided in info_dict"
+        assert hasattr(self, 'env'), 'Environment not set for the policy'
+        assert 'pixels' in info_dict, "'pixels' must be provided in info_dict"
+        assert 'goal' in info_dict, "'goal' must be provided in info_dict"
 
         info_dict = self._prepare_info(info_dict)
 
@@ -295,14 +399,16 @@ class WorldModelPolicy(BasePolicy):
         if len(self._action_buffer) == 0:
             outputs = self.solver(info_dict, init_action=self._next_init)
 
-            actions = outputs["actions"]  # (num_envs, horizon, action_dim)
+            actions = outputs['actions']  # (num_envs, horizon, action_dim)
             keep_horizon = self.cfg.receding_horizon
             plan = actions[:, :keep_horizon]
             rest = actions[:, keep_horizon:]
             self._next_init = rest if self.cfg.warm_start else None
 
             # frameskip back to timestep
-            plan = plan.reshape(self.env.num_envs, self.flatten_receding_horizon, -1)
+            plan = plan.reshape(
+                self.env.num_envs, self.flatten_receding_horizon, -1
+            )
 
             self._action_buffer.extend(plan.transpose(0, 1))
 
@@ -311,24 +417,25 @@ class WorldModelPolicy(BasePolicy):
         action = action.numpy()
 
         # post-process action
-        if "action" in self.process:
-            action = self.process["action"].inverse_transform(action)
+        if 'action' in self.process:
+            action = self.process['action'].inverse_transform(action)
 
         return action  # (num_envs, action_dim)
 
 
-def AutoCostModel(run_name: str, cache_dir: str | Path | None = None) -> torch.nn.Module:
-    """Automatically load a cost model from a checkpoint.
+def _load_model_with_attribute(run_name, attribute_name, cache_dir=None):
+    """Helper function to load a model checkpoint and find a module with the specified attribute.
 
     Args:
-        run_name: Name of the run or path to the checkpoint directory.
-        cache_dir: Optional cache directory to search for the run.
+        run_name: Path or name of the model run
+        attribute_name: Name of the attribute to look for in the module (e.g., 'get_action', 'get_cost')
+        cache_dir: Optional cache directory path
 
     Returns:
-        The loaded cost model as a torch Module.
+        The module with the specified attribute
 
     Raises:
-        RuntimeError: If no cost model is found in the checkpoint.
+        RuntimeError: If no module with the specified attribute is found
     """
     if Path(run_name).exists():
         run_path = Path(run_name)
@@ -336,30 +443,24 @@ def AutoCostModel(run_name: str, cache_dir: str | Path | None = None) -> torch.n
         run_path = Path(cache_dir or swm.data.utils.get_cache_dir(), run_name)
 
     if run_path.is_dir():
-        ckpt_files = list(run_path.glob("*_object.ckpt"))
+        ckpt_files = list(run_path.glob('*_object.ckpt'))
         ckpt_files.sort(key=lambda x: x.stat().st_ctime, reverse=True)
         path = ckpt_files[0]
-        logging.info(f"Loading model from checkpoint: {path}")
+        logging.info(f'Loading model from checkpoint: {path}')
     else:
-        path = Path(f"{run_path}_object.ckpt")
-        assert path.exists(), f"Checkpoint path does not exist: {path}. Launch pretraining first."
+        path = Path(f'{run_path}_object.ckpt')
+        assert path.exists(), (
+            'Checkpoint path does not exist: {path}. Launch pretraining first.'
+        )
 
-    spt_module = torch.load(path, weights_only=False, map_location="cpu")
+    spt_module = torch.load(path, weights_only=False, map_location='cpu')
 
-    def scan_module(module: Any) -> torch.nn.Module | None:
-        """Recursively scan a module for a cost model.
-
-        Args:
-            module: The module to scan.
-
-        Returns:
-            The cost model if found, else None.
-        """
-        if hasattr(module, "get_cost"):
+    def scan_module(module):
+        if hasattr(module, attribute_name):
             if isinstance(module, torch.nn.Module):
                 module = module.eval()
             return module
-        for child in module.children() if hasattr(module, "children") else []:
+        for child in module.children():
             result = scan_module(child)
             if result is not None:
                 return result
@@ -369,7 +470,51 @@ def AutoCostModel(run_name: str, cache_dir: str | Path | None = None) -> torch.n
     if result is not None:
         return result
 
-    raise RuntimeError("No cost model found in the loaded world model.")
+    raise RuntimeError(
+        f"No module with '{attribute_name}' found in the loaded world model."
+    )
+
+
+def AutoActionableModel(
+    run_name: str, cache_dir: str | Path | None = None
+) -> torch.nn.Module:
+    """Load a model checkpoint and return the module with a `get_action` method.
+
+    Automatically scans the checkpoint for a module implementing the Actionable
+    protocol (i.e., has a `get_action` method).
+
+    Args:
+        run_name: Path or name of the model run/checkpoint.
+        cache_dir: Optional cache directory path. Defaults to STABLEWM_HOME.
+
+    Returns:
+        The module with a `get_action` method, set to eval mode.
+
+    Raises:
+        RuntimeError: If no module with `get_action` is found in the checkpoint.
+    """
+    return _load_model_with_attribute(run_name, 'get_action', cache_dir)
+
+
+def AutoCostModel(
+    run_name: str, cache_dir: str | Path | None = None
+) -> torch.nn.Module:
+    """Load a model checkpoint and return the module with a `get_cost` method.
+
+    Automatically scans the checkpoint for a module implementing a cost function
+    (i.e., has a `get_cost` method) for use with planning solvers.
+
+    Args:
+        run_name: Path or name of the model run/checkpoint.
+        cache_dir: Optional cache directory path. Defaults to STABLEWM_HOME.
+
+    Returns:
+        The module with a `get_cost` method, set to eval mode.
+
+    Raises:
+        RuntimeError: If no module with `get_cost` is found in the checkpoint.
+    """
+    return _load_model_with_attribute(run_name, 'get_cost', cache_dir)
 
 
 # Alias for backward compatibility and type hinting
