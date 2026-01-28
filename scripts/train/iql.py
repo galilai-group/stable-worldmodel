@@ -112,7 +112,7 @@ def get_gciql_value_model(cfg):
 
     expectile_loss = swm.wm.iql.ExpectileLoss(tau=0.9)
 
-    def forward_value(self, batch, stage):
+    def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
 
         proprio_key = "proprio" if "proprio" in batch else None
@@ -227,7 +227,7 @@ def get_gciql_value_model(cfg):
 
     gciql_value_model = spt.Module(
         model=gciql_model,
-        forward=forward_value,
+        forward=forward,
         optim={
             "value_predictor_opt": add_opt("model.value_predictor", cfg.predictor_lr),
             "proprio_opt": add_opt("model.extra_encoders.proprio", cfg.proprio_encoder_lr),
@@ -239,7 +239,7 @@ def get_gciql_value_model(cfg):
 def get_gciql_action_model(cfg, trained_value_model):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
-    def forward_action(self, batch, stage):
+    def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
 
         proprio_key = "proprio" if "proprio" in batch else None
@@ -316,7 +316,7 @@ def get_gciql_action_model(cfg, trained_value_model):
 
     gciql_action_model = spt.Module(
         model=gciql_model,
-        forward=forward_action,
+        forward=forward,
         optim={
             "action_predictor_opt": add_opt("model.action_predictor", cfg.predictor_lr),
         },
@@ -383,7 +383,7 @@ def run(cfg):
     data = get_data(cfg)
 
     # First train value function
-    gciql_model = get_gciql_value_model(cfg)
+    gciql_value_model = get_gciql_value_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir()
     dump_object_callback = ModelObjectCallBack(
@@ -403,14 +403,14 @@ def run(cfg):
 
     manager = spt.Manager(
         trainer=trainer,
-        module=gciql_model,
+        module=gciql_value_model,
         data=data,
         ckpt_path=f"{cache_dir}/{cfg.output_model_name}_value_weights.ckpt",
     )
     manager()
 
     # Extract policy from trained value function
-    gciql_action_model = get_gciql_action_model(cfg, gciql_model)
+    gciql_action_model = get_gciql_action_model(cfg, gciql_value_model)
 
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
