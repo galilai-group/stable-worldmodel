@@ -1,6 +1,0 @@
-OGBench
-=======
-
-.. toctree::
-
-   cube

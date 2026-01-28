@@ -9,7 +9,7 @@ from stable_worldmodel import (
     spaces,
     utils,
     wm,
-    wrappers,
+    wrapper,
 )
 from stable_worldmodel.policy import PlanConfig
 from stable_worldmodel.utils import pretraining
@@ -26,6 +26,6 @@ __all__ = [
     "data",
     "policy",
     "solver",
-    "wrappers",
+    "wrapper",
     "wm",
 ]

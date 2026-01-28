@@ -1,0 +1,75 @@
+site_name: stable-worldmodel
+
+site_url: https://galilai-group.github.io/stable-worldmodel/
+repo_url: https://github.com/galilai-group/stable-worldmodel
+use_directory_urls: true
+
+theme:
+  name: shadcn
+  show_title: true
+  show_stargazers: false
+  pygments_style:
+    light: shadcn-light
+    dark: github-dark
+  topbar_sections: false
+  show_datetime: false
+
+nav:
+  - index.md
+  - quick_start.md
+  - baselines.md
+  - Environments:
+      - envs/pusht.md
+      - envs/dmc.md
+      - envs/ogb.md
+      - envs/tworoom.md
+  # - Tutorial:
+  #     - tutorial/collect_data.md
+  #     - tutorial/new_env.md
+  #     - tutorial/training_wm.md 
+  - API:
+      - api/world.md
+      - api/policy.md
+      - api/solver.md
+      - api/spaces.md
+      - api/dataset.md
+      - api/wrapper.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          inventories:
+          - https://docs.python.org/3/objects.inv
+          paths: [stable_worldmodel]
+          options:
+            docstring_options:
+              ignore_init_summary: true
+            docstring_section_style: list
+            filters: ["!^_"]
+            heading_level: 3
+            inherited_members: false
+            merge_init_into_class: true
+            separate_signature: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_signature_annotations: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_source: false
+            signature_crossrefs: true
+            summary: true
+
+markdown_extensions:
+  shadcn.extensions.iconify:
+  codehilite:
+  admonition:
+  pymdownx.blocks.details:
+  pymdownx.tabbed:
+  pymdownx.blocks.tab:
+    combine_header_slug: true
+    separator: ___
+  pymdownx.arithmatex:
+    generic: true
+  pymdownx.blocks.caption:

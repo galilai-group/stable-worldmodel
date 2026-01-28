@@ -1,188 +1,79 @@
-[build-system]
-requires = ["setuptools", "setuptools-scm", "swig"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "stable-worldmodel"
-description = "Stable Library for evaluate and conduct world model research"
-authors = [
-    {name = "Randall Balestriero"},
-    {name = "Lucas Maes"},
-    {name = "Dan Haramati"},
+version = "0.0.1b1"
+description = "Reliable library to conduct world model research"
+readme="README.md"
+license="MIT"
+authors = [{name = "Lucas Maes"}, {name = "Quentin Le Lidec"}, {name = "Randall Balestriero"}]
+maintainers = [{name = "Lucas Maes", email = "lucas_maes@brown.edu"}]
+urls = {Homepage = "http://github.com/galilai-group/stable-worldmodel"}
+classifiers = [
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
 ]
 requires-python = ">=3.10"
-license = {text = "MIT"}
-readme = {file = "README.md", content-type = "text/markdown"}
 dependencies = [
-    # NOTE: Before running 'uv sync', install conda dependencies:
-    #   conda install -c conda-forge "ffmpeg=7" "swig" -y
-    "torch<=2.7",
-    "torchvision<=0.22",
+  "torch",
+  "torchvision",
+  "numpy",
+  "loguru",
+  "tabulate",
+  "gymnasium",
+  "einops",
+  "h5py",
+  "hdf5plugin",
+  "tqdm",
+]
+
+[project.optional-dependencies]
+train = [
     "transformers>=4.50.0",
-    "torchmetrics",
-    "lightning",
+    "stable-pretraining",
     "hydra-core",
     "hydra-submitit-launcher",
-    "loguru",
-    "tabulate",
-    "gymnasium[all]",
-    "minari",
-    "stable-pretraining",
-    "nevergrad",
-    "einops",
-    "datasets",
+    "wandb",
+]
+  
+env = [
     "pygame",
     "pymunk",
     "shapely",
     "ogbench",
-    "wandb",
-    "decord",
     "minigrid",
-    "h5py",
-    "hdf5plugin",
+    "gymnasium[all]",
+    "opencv-python",
 ]
 
-dynamic = ["version"]
-
-[project.scripts]
-stable-worldmodel = "stable_worldmodel.cli:app"
-swm = "stable_worldmodel.cli:app"
-
-[tool.setuptools]
-packages = ["stable_worldmodel"]
-
-[tool.setuptools.dynamic]
-version = {attr = "stable_worldmodel.__version__"}
-
-[project.optional-dependencies]
-
-
-env = [
-    "ogbench",
-    "pyflyt",
-]
-
-# Development tools
+[dependency-groups]
 dev = [
-    "pytest",
-    "coverage",
-    "pytest-cov",
-    "pytest-rich",
-    "codecov",
-    "pre-commit",
-    "ruff",
+  "ipdb",
+  "pytest",
+  "pytest-cov>=7.0.0",
+  "ruff",
+  "twine",
+  "mkdocs-shadcn",
+  "pymdown-extensions",
+  "pillow",
+  "decord",
+  "imageio[ffmpeg]",
+  "mkdocstrings[python]",
 ]
 
-# Documentation tools
-docs = [
-    "sphinx",
-    "sphinxawesome-theme",
-    "sphinx-gallery",
-    "sphinx-book-theme",
-    "matplotlib",
-    "memory_profiler",
-    "sphinx_design",
-    "myst-parser",
-]
+[build-system]
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
 
-
-# =======================
-#         TOOLS
-# =======================
-
-###################
-## Pytest config ##
-###################
-
-[tool.pytest.ini_options]
-pythonpath = "stable_worldmodel"
-testpaths = ["stable_worldmodel/tests"]
-
-# Test discovery patterns
-python_files = "test_*.py"
-python_classes = "Test*"
-python_functions = "test_*"
-
-# Custom markers
-markers = [
-    "unit: Unit tests (fast, no GPU required)",
-    "integration: Integration tests (slow, may require GPU)",
-    "gpu: Tests that require GPU",
-    "slow: Tests that take a long time to run",
-    "download: Tests that download data from the internet",
-]
-
-#####################
-## Coverage config ##
-#####################
-
-[tool.coverage.run]
-source = ["stable_worldmodel"]
-omit = [
-    "stable_worldmodel/wm/*",
-    "*/tests/*",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "@runtime_checkable",
-    "class .*Protocol",
-    "raise",
-    "except",
-    "register_parameter"
-]
-
-#################
-## Ruff config ##
-#################
-
-# NOTE: borrowed and adapted from: huggingface/transformers
+[tool.uv.build-backend]
+module-root = "."
 
 [tool.ruff]
-target-version = "py310"
-line-length = 119
-fix = true
-
-[tool.ruff.lint]
-# Never enforce `E501` (line length violations).
-# SIM300: Yoda condition detected
-# SIM212: Checks for if expressions that check against a negated condition.
-# SIM905: Consider using a list literal instead of `str.split`
-# UP009: UTF-8 encoding declaration is unnecessary
-# UP015: Unnecessary mode argument
-# UP031: Use format specifiers instead of percent format
-# UP004: Class `XXX` inherits from `object`
-# UP028: Checks for for loops that can be replaced with yield from expressions
-# UP045: Use `X | None` for type annotations
-# UP007: Use `X | Y` for type annotations
-# UP035: temporarily disabled to minimize upgrade changes
-ignore = ["C901", "E501", "E741", "F402", "F823", "SIM1", "SIM300", "SIM212", "SIM905", "UP009", "UP015", "UP031", "UP028", "UP004", "UP045", "UP007", "UP035"]
-# RUF013: Checks for the use of implicit Optional
-#  in type annotations when the default parameter value is None.
-select = ["C", "E", "F", "I", "W", "RUF013", "PERF102", "PLC1802", "PLC0208", "SIM", "UP"]
-extend-safe-fixes = ["UP006"]
-
-# old: config
-# select = ["E4", "E7", "E9", "F", "D"]
-# ignore = ["D100", "D102", "D103", "D104", "D105", "D107"]
-
-[tool.ruff.lint.isort]
-lines-after-imports = 2
-known-first-party = ["stable_worldmodel"]
+line-length = 79
+indent-width = 4
 
 [tool.ruff.format]
-# Like Black, use double quotes for strings.
-quote-style = "double"
-
-# Like Black, indent with spaces, rather than tabs.
 indent-style = "space"
+quote-style = "single"
 
-# Like Black, respect magic trailing commas.
-skip-magic-trailing-comma = false
-
-# Like Black, automatically detect the appropriate line ending.
-line-ending = "auto"
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
+[tool.coverage.run]
+omit = ["stable_worldmodel/envs/*"]

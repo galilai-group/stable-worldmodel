@@ -1,16 +1,13 @@
 from .cem import CEMSolver
 from .gd import GradientSolver
 from .mppi import MPPISolver
-from .nevergrad import NevergradSolver
-from .random import RandomSolver
 from .solver import Solver
-
+from .discrete_solvers import PGDSolver
 
 __all__ = [
-    "Solver",
-    "GradientSolver",
-    "CEMSolver",
-    "NevergradSolver",
-    "RandomSolver",
-    "MPPISolver",
+    'Solver',
+    'GradientSolver',
+    'CEMSolver',
+    'PGDSolver',
+    'MPPISolver',
 ]

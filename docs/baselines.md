@@ -1,0 +1,94 @@
+title: Baselines
+summary: Overview & Benchmarking of baseline world models.
+sidebar_title: Baselines
+---
+
+## DINO World-Model
+
+DINO World-Model (DINO-WM) is a self-supervised latent world model introduced by [Zhou et al., 2025](https://arxiv.org/pdf/2411.04983). To avoid learning from scratch and collapse, DINO-WM leverages frozen DINOv2 features to produce visual observation embedding. The model extracts patch-level features from a pretrained DINOv2 encoder and trains a latent dynamics model (predictor) to predict future states in the DINO feature space. Optimal actions are determined at test-time by performing planning with the [Cross-Entropy Method](https://www.iro.umontreal.ca/~lecuyer/myftp/papers/handbook13-ce.pdf) (CEM)
+
+### Training Objective
+
+The model is trained with a teacher-forcing loss, i.e. an l2-loss between the predicted next state embedding $\hat{z}_{t+1}$ and the ground-truth embedding $z_{t+1}$:
+
+$$ \mathcal{L}_{\text{DINOWM}} = \mathcal{L}_{\text{sim}} = \| \hat{z}_{t+1} - z_{t+1} \|_2^2 $$
+
+where $z_{t+1}$ represents the frozen DINOv2 features of the next observation.
+
+### Benchmark
+
+!!! danger ""
+    Evaluation is performed with fixed 50 steps budget, unlike the infinite budget of the original paper
+
+| Environment | Success Rate | Checkpoint |
+|-------------|--------------|------------|
+| [Push-T](envs/pusht.md) | ~86% | NA |
+
+## Planning with Latent Dynamics Model
+
+Planning with Latent Dynamics Model (PLDM) is a Joint-Embedding Predictive Architecture (JEPA) proposed by [Sobal et al., 2025](https://arxiv.org/pdf/2502.14819). Unlike DINO-WM which relies on frozen pretrained features, PLDM trains the encoder and predictor jointly from scratch using a combination of losses to prevent representational collapse:
+
+- $\mathcal{L}_{\text{sim}}$: teacher-forcing loss between predicted and target embeddings
+- $\mathcal{L}_{\text{std}}$, $\mathcal{L}_{\text{cov}}$: [variance-covariance regularization](https://arxiv.org/pdf/2105.04906) (VCReg) to maintain embedding diversity
+- $\mathcal{L}_{\text{temp}}$: temporal smoothness regularizer between consecutive embeddings
+- $\mathcal{L}_{\text{idm}}$: inverse dynamics modeling loss to predict actions from embedding pairs
+
+Optimal actions are found at test-time by planning with the [Model Predictive Path Integral](https://acdslab.github.io/mppi-generic-website/docs/mppi.html) (MPPI) solver.
+
+### Training Objective
+
+$$ \mathcal{L}_{\text{PLDM}} = \mathcal{L}_{\text{sim}} + \alpha \mathcal{L}_{\text{std}} + \beta \mathcal{L}_{\text{cov}} + \delta \mathcal{L}_{\text{temp}} + \omega \mathcal{L}_{\text{idm}}$$
+
+where $\alpha$, $\beta$, $\delta$, and $\omega$ are hyperparameters controlling the contribution of each regularization term.
+
+### Benchmark
+
+| Environment | Success Rate | Checkpoint |
+|-------------|--------------|------------|
+| ? | ? | NA |
+
+
+## Goal-Conditioned Behavioural Cloning
+
+Goal-Conditioned Behavioural Cloning (GCBC) is a simple imitation learning baseline introduced by [Ghosh et al., 2019](https://arxiv.org/pdf/1912.06088). A goal-conditioned policy $\pi_\theta(a \mid s, g)$ is trained via supervised learning to reproduce expert actions given the current state and a goal observation. In our implementation, observations and goals are encoded into DINOv2 patch embeddings before being fed to the policy network.
+
+### Training Objective
+
+The policy is trained to minimize the mean squared error between predicted and ground-truth actions:
+
+$$ \mathcal{L}_{\text{GCBC}} = \mathbb{E}_{(s_t, a_t, g) \sim \mathcal{D}} \left[ \| \pi_\theta(s_t, g) - a_t \|_2^2 \right] $$
+
+where $s_t$ is the observation embedding, $g$ is the goal embedding, and $a_t$ is the expert action.
+
+
+### Benchmark
+
+| Environment | Success Rate | Checkpoint |
+|-------------|--------------|------------|
+| Push-T | ~52% | NA |
+
+
+## Implicit Q-Learning
+
+Implicit Q-Learning (IQL) is an offline reinforcement learning method introduced by [Kostrikov et al., 2021](https://arxiv.org/pdf/2110.06169). IQL avoids querying out-of-distribution actions by learning a state value function $V(s, g)$ via expectile regression, then extracting a policy through advantage-weighted regression (AWR). In our implementation, observations and goals are encoded into DINOv2 patch embeddings and training proceeds in two phases: value learning followed by policy extraction.
+
+### Training Objective
+
+**Value function.** The value network $V_\theta(s_t, g)$ is trained with expectile regression against bootstrapped targets from a target network $V_{\bar{\theta}}$:
+
+$$ \mathcal{L}_{V} = \mathbb{E}_{(s_t, s_{t+1}, g) \sim \mathcal{D}} \left[ L_\tau^2 \!\left( r(s_t, g) + \gamma \, V_{\bar{\theta}}(s_{t+1}, g) - V_\theta(s_t, g) \right) \right] $$
+
+where $L_\tau^2(u) = |\tau - \mathbb{1}(u < 0)| \, u^2$ is the asymmetric expectile loss, $\gamma = 0.99$ is the discount factor, and $r(s_t, g) = 0$ if $s_t = g$, $-1$ otherwise.
+
+**Policy extraction.** The actor $\pi_\theta(s_t, g)$ is trained via advantage-weighted regression:
+
+$$ \mathcal{L}_{\pi} = \mathbb{E}_{(s_t, a_t, g) \sim \mathcal{D}} \left[ \exp\!\left(\beta \cdot A(s_t, a_t, g)\right) \| \pi_\theta(s_t, g) - a_t \|_2^2 \right] $$
+
+where $A(s_t, a_t, g) = r(s_t, g) + \gamma \, V(s_{t+1}, g) - V(s_t, g)$ is the advantage and $\beta = 3.0$ is the inverse temperature.
+
+### Benchmark
+
+| Environment | Success Rate | Checkpoint |
+|-------------|--------------|------------|
+| Push-T | ? | NA |
+

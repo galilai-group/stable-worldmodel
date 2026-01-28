@@ -1,5 +1,9 @@
-import time
+"""Model Predictive Path Integral solver for model-based planning."""
 
+import time
+from typing import Any
+
+import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.spaces import Box
@@ -9,14 +13,18 @@ from .solver import Costable
 
 
 class MPPISolver:
-    """Model Predictive Path Integral Solver.
+    """Model Predictive Path Integral solver for action optimization.
 
-    proposed in https://arxiv.org/abs/1509.01149
-    algorithm from: https://acdslab.github.io/mppi-generic-website/docs/mppi.html
-
-    Note:
-        The original MPPI compute the cost as a summation of costs along the trajectory.
-        Here, we use the final cost only, which should be updated in future updates.
+    Args:
+        model: World model implementing the Costable protocol.
+        batch_size: Number of environments to process in parallel.
+        num_samples: Number of action candidates to sample per iteration.
+        var_scale: Initial variance scale for action noise.
+        n_steps: Number of MPPI iterations.
+        topk: Number of elite samples for weighted averaging.
+        temperature: Temperature parameter for softmax weighting.
+        device: Device for tensor computations.
+        seed: Random seed for reproducibility.
     """
 
     def __init__(
@@ -28,9 +36,9 @@ class MPPISolver:
         n_steps: int = 30,
         topk: int = 30,
         temperature: float = 0.5,
-        device="cpu",
+        device: str | torch.device = "cpu",
         seed: int = 1234,
-    ):
+    ) -> None:
         self.model = model
         self.batch_size = batch_size
         self.num_samples = num_samples
@@ -41,14 +49,14 @@ class MPPISolver:
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
-    def configure(self, *, action_space, n_envs: int, config) -> None:
+    def configure(self, *, action_space: gym.Space, n_envs: int, config: Any) -> None:
+        """Configure the solver with environment specifications."""
         self._action_space = action_space
         self._n_envs = n_envs
         self._config = config
         self._action_dim = int(np.prod(action_space.shape[1:]))
         self._configured = True
 
-        # warning if action space is discrete
         if not isinstance(action_space, Box):
             logging.warning(
                 f"Action space is discrete, got {type(action_space)}. MPPISolver may not work as expected."
@@ -56,29 +64,30 @@ class MPPISolver:
 
     @property
     def n_envs(self) -> int:
+        """Number of parallel environments."""
         return self._n_envs
 
     @property
     def action_dim(self) -> int:
+        """Flattened action dimension including action_block grouping."""
         return self._action_dim * self._config.action_block
 
     @property
     def horizon(self) -> int:
+        """Planning horizon in timesteps."""
         return self._config.horizon
 
-    def __call__(self, *args, **kwargs) -> torch.Tensor:
+    def __call__(self, *args: Any, **kwargs: Any) -> dict:
+        """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action_distrib(self, actions=None):
-        """Initialize the action distribution params (mu, sigma) given the initial condition.
-
-        Args:
-            actions (n_envs, T, action_dim): initial actions, T <= horizon
-        """
+    def init_action_distrib(
+        self, actions: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Initialize the action distribution parameters (mean and variance)."""
         var = self.var_scale * torch.ones([self.n_envs, self.horizon, self.action_dim])
         mean = torch.zeros([self.n_envs, 0, self.action_dim]) if actions is None else actions
 
-        # -- fill remaining actions with random sample
         remaining = self.horizon - mean.shape[1]
         if remaining > 0:
             device = mean.device
@@ -88,7 +97,10 @@ class MPPISolver:
         return mean, var
 
     @torch.inference_mode()
-    def solve(self, info_dict, init_action=None) -> dict:
+    def solve(
+        self, info_dict: dict, init_action: torch.Tensor | None = None
+    ) -> dict:
+        """Solve the planning problem using MPPI."""
         start_time = time.time()
         outputs = {
             "costs": [],

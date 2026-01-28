@@ -234,7 +234,7 @@ class RocketLandingEnv(RocketBaseEnv):
 
         return temp_file.name
 
-    def reset(self, *, seed: None | int = None, options: None | dict[str, Any] = None) -> tuple[np.ndarray, dict]:
+    def reset(self, *, seed: None | int = None, options: None | dict = None) -> tuple[np.ndarray, dict]:
         """Resets the environment.
 
         Args:

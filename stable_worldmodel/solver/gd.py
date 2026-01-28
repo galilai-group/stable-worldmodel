@@ -1,5 +1,9 @@
-import time
+"""Gradient-based solver for model-based planning."""
 
+import time
+from typing import Any
+
+import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.spaces import Box
@@ -9,7 +13,20 @@ from .solver import Costable
 
 
 class GradientSolver(torch.nn.Module):
-    """Gradient-based Solver (SGD, Adam, etc.)."""
+    """Gradient-based solver using backpropagation through the world model.
+
+    Args:
+        model: World model implementing the Costable protocol.
+        n_steps: Number of gradient descent iterations.
+        batch_size: Number of environments to process in parallel.
+        var_scale: Initial variance scale for action perturbations.
+        num_samples: Number of action samples to optimize in parallel.
+        action_noise: Noise added to actions during optimization.
+        device: Device for tensor computations.
+        seed: Random seed for reproducibility.
+        optimizer_cls: PyTorch optimizer class to use.
+        optimizer_kwargs: Keyword arguments for the optimizer.
+    """
 
     def __init__(
         self,
@@ -19,24 +36,11 @@ class GradientSolver(torch.nn.Module):
         var_scale: float = 1,
         num_samples: int = 1,
         action_noise: float = 0.0,
-        device="cpu",
+        device: str | torch.device = "cpu",
         seed: int = 1234,
         optimizer_cls: type[torch.optim.Optimizer] = torch.optim.SGD,
         optimizer_kwargs: dict | None = None,
-    ):
-        """Gradient Descent Method Solver.
-        Args:
-            model (Costable): The world model used to compute costs.
-            n_steps (int): Number of gradient descent steps.
-            batch_size (int | None): Batch size for processing environments. If None, process all envs at once.
-            var_scale (float): Scale of the initial action variance in the samples.
-            num_samples (int): Number of initial action samples to optimize.
-            action_noise (float): Standard deviation of noise added to actions during optimization.
-            device (str): Device to run the solver on.
-            seed (int): Random seed for reproducibility.
-            optimizer_cls: The class of the optimizer to use (e.g., torch.optim.Adam).
-            optimizer_kwargs: Dictionary of arguments for the optimizer (e.g., {'lr': 1e-3}).
-        """
+    ) -> None:
         super().__init__()
         self.model = model
         self.n_steps = n_steps
@@ -55,14 +59,14 @@ class GradientSolver(torch.nn.Module):
         self._action_dim = None
         self._config = None
 
-    def configure(self, *, action_space, n_envs: int, config) -> None:
+    def configure(self, *, action_space: gym.Space, n_envs: int, config: Any) -> None:
+        """Configure the solver with environment specifications."""
         self._action_space = action_space
         self._n_envs = n_envs
         self._config = config
         self._action_dim = int(np.prod(action_space.shape[1:]))
         self._configured = True
 
-        # warning if action space is discrete
         if not isinstance(action_space, Box):
             logging.warning(
                 f"Action space is discrete, got {type(action_space)}. GradientSolver may not work as expected."
@@ -70,24 +74,25 @@ class GradientSolver(torch.nn.Module):
 
     @property
     def n_envs(self) -> int:
+        """Number of parallel environments."""
         return self._n_envs
 
     @property
     def action_dim(self) -> int:
+        """Flattened action dimension including action_block grouping."""
         return self._action_dim * self._config.action_block
 
     @property
     def horizon(self) -> int:
+        """Planning horizon in timesteps."""
         return self._config.horizon
 
-    def __call__(self, *args, **kwargs) -> torch.Tensor:
+    def __call__(self, *args: Any, **kwargs: Any) -> dict:
+        """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action(self, actions=None):
-        """Initialize the action tensor for the solver.
-
-        set self.init - initial action sequences (n_envs, horizon, action_dim)
-        """
+    def init_action(self, actions: torch.Tensor | None = None) -> None:
+        """Initialize the action tensor for optimization."""
         if actions is None:
             actions = torch.zeros((self._n_envs, 0, self.action_dim))
 
@@ -109,8 +114,10 @@ class GradientSolver(torch.nn.Module):
         else:
             self.register_parameter("init", torch.nn.Parameter(actions))
 
-    def solve(self, info_dict, init_action=None) -> dict:
-        """Solve the planning optimization problem using gradient descent with batch processing."""
+    def solve(
+        self, info_dict: dict, init_action: torch.Tensor | None = None
+    ) -> dict:
+        """Solve the planning problem using gradient descent."""
         start_time = time.time()
         outputs = {
             "cost": [],  # Will store list of cost histories per batch
