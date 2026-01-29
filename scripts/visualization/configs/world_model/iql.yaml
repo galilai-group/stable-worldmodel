@@ -1,0 +1,9 @@
+defaults:
+  - _self_
+
+# Path to trained IQL model checkpoint (required)
+# Can be absolute path or relative to STABLEWM_HOME
+model_name: null
+
+history_size: 3
+num_preds: 1
