@@ -177,7 +177,7 @@ def get_gciql_value_model(cfg):
             reward = -(~eq_mask).float().unsqueeze(-1)
             value_target += reward
 
-        # Compute action MSE
+        # Compute value loss
         value_loss = expectile_loss(value_pred, value_target.detach())
         batch['value_loss'] = value_loss
         batch['loss'] = value_loss
@@ -190,9 +190,38 @@ def get_gciql_value_model(cfg):
             if '_loss' in k
         }
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
-        self.log_dict(
-            losses_dict, on_step=True, sync_dist=True
-        )  # , on_epoch=True, sync_dist=True)
+        self.log_dict(losses_dict, on_step=True, sync_dist=True)
+
+        # Log diagnostics for collapse detection
+        with torch.no_grad():
+            td_error = value_target - value_pred
+            embed_dist = (
+                (embedding - goal_embedding_repeated)
+                .pow(2)
+                .sum(dim=(-1, -2))
+                .sqrt()
+            )
+
+            collapse_diagnostics = {
+                # Value prediction stats - std ≈ 0 indicates collapse
+                f'{prefix}value_pred_mean': value_pred.mean(),
+                f'{prefix}value_pred_std': value_pred.std(),
+                f'{prefix}value_pred_min': value_pred.min(),
+                f'{prefix}value_pred_max': value_pred.max(),
+                # Value target stats
+                f'{prefix}value_target_mean': value_target.mean(),
+                f'{prefix}value_target_std': value_target.std(),
+                # Reward stats - mean ≈ -1 means reward too sparse
+                f'{prefix}reward_mean': reward.mean(),
+                f'{prefix}goal_match_rate': eq_mask.float().mean(),
+                # TD error stats - std ≈ 0 indicates no learning signal
+                f'{prefix}td_error_mean': td_error.mean(),
+                f'{prefix}td_error_std': td_error.std(),
+                # Embedding distance to goal
+                f'{prefix}embed_goal_dist_mean': embed_dist.mean(),
+                f'{prefix}embed_goal_dist_std': embed_dist.std(),
+            }
+            self.log_dict(collapse_diagnostics, on_step=True, sync_dist=True)
 
         return batch
 

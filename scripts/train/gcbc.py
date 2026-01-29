@@ -38,6 +38,16 @@ def get_data(cfg):
         data = torch.from_numpy(dataset.get_col_data(col)[:])
         mean = data.mean(0).unsqueeze(0).clone()
         std = data.std(0).unsqueeze(0).clone()
+        # Debug: check for zero std (would cause NaN)
+        zero_std_mask = std == 0
+        if zero_std_mask.any():
+            logging.warning(
+                f'[{col}] Found {zero_std_mask.sum().item()} features with zero std!'
+            )
+            std = torch.clamp(std, min=1e-8)  # Prevent division by zero
+        logging.info(
+            f'[{col}] mean range: [{mean.min():.4f}, {mean.max():.4f}], std range: [{std.min():.4f}, {std.max():.4f}]'
+        )
         return lambda x: ((x - mean) / std).float()
 
     cache_dir = None
@@ -124,7 +134,24 @@ def get_gcbc_policy(cfg):
         # Replace NaN values with 0 (occurs at sequence boundaries)
         if proprio_key is not None:
             batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
-        batch["action"] = torch.nan_to_num(batch["action"], 0.0)
+        batch['action'] = torch.nan_to_num(batch['action'], 0.0)
+
+        # Debug: check inputs for NaN/Inf
+        def check_tensor(name, t):
+            if torch.isnan(t).any():
+                logging.error(
+                    f'NaN detected in {name}! Count: {torch.isnan(t).sum().item()}'
+                )
+            if torch.isinf(t).any():
+                logging.error(
+                    f'Inf detected in {name}! Count: {torch.isinf(t).sum().item()}'
+                )
+
+        check_tensor('pixels', batch['pixels'])
+        check_tensor('action', batch['action'])
+        if proprio_key:
+            check_tensor('proprio', batch[proprio_key])
+
         # TODO this can be simplified by calling get_action
         # Encode all timesteps into latent embeddings
         batch = self.model.encode(
@@ -132,6 +159,7 @@ def get_gcbc_policy(cfg):
             target='embed',
             pixels_key='pixels',
         )
+        check_tensor('embed', batch['embed'])
 
         # Encode goal into latent embedding
         batch = self.model.encode(
@@ -141,16 +169,36 @@ def get_gcbc_policy(cfg):
             emb_keys=['proprio'],
             prefix='goal_',
         )
+        check_tensor('goal_embed', batch['goal_embed'])
 
         # Use history to predict next actions
         # TODO check this slicing is correct
-        embedding = batch["embed"][:, : cfg.dinowm.history_size, :, :]  # (B, T-1, patches, dim)
-        goal_embedding = batch["goal_embed"]  # (B, 1, patches, dim)
-        action_pred = self.model.predict(embedding, goal_embedding)  # (B, num_preds, action_dim)
-        action_target = batch["action"][:, cfg.dinowm.num_preds :, :]  # (B, num_preds, action_dim)
+        embedding = batch['embed'][
+            :, : cfg.dinowm.history_size, :, :
+        ]  # (B, T-1, patches, dim)
+        goal_embedding = batch['goal_embed']  # (B, 1, patches, dim)
+        action_pred = self.model.predict(
+            embedding, goal_embedding
+        )  # (B, num_preds, action_dim)
+        action_target = batch['action'][
+            :, cfg.dinowm.num_preds :, :
+        ]  # (B, num_preds, action_dim)
+
+        check_tensor('action_pred', action_pred)
+        check_tensor('action_target', action_target)
+        logging.debug(
+            f'action_pred range: [{action_pred.min():.4f}, {action_pred.max():.4f}]'
+        )
+        logging.debug(
+            f'action_target range: [{action_target.min():.4f}, {action_target.max():.4f}]'
+        )
 
         # Compute action MSE
         action_loss = F.mse_loss(action_pred, action_target)
+        if torch.isnan(action_loss):
+            logging.error(
+                f'NaN loss! action_pred has nan: {torch.isnan(action_pred).any()}, action_target has nan: {torch.isnan(action_target).any()}'
+            )
         batch['loss'] = action_loss
 
         # Log all losses
