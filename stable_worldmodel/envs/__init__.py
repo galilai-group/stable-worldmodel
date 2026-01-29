@@ -103,6 +103,11 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.manipulator:ManipulatorDMControlWrapper',
 )
 
+register(
+    id='swm/QuadrupedDMControl-v0',
+    entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
+)
+
 
 ############
 # DISCRETE #

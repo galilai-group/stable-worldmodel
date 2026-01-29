@@ -4,31 +4,34 @@ import tempfile
 import numpy as np
 from dm_control import mjcf
 from dm_control.rl import control
-from dm_control.suite import walker
+from dm_control.suite import quadruped
 from dm_control.suite.wrappers import action_scale
 
 from stable_worldmodel import spaces as swm_space
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 
-_CONTROL_TIMESTEP = 0.025
-_DEFAULT_TIME_LIMIT = 25
+_DEFAULT_TIME_LIMIT = 20
+_CONTROL_TIMESTEP = 0.02
 
-_WALK_SPEED = 1
+_WALK_SPEED = 0.5
 
 
-class WalkerDMControlWrapper(DMControlWrapper):
+class QuadrupedDMControlWrapper(DMControlWrapper):
     def __init__(self, seed=None, environment_kwargs=None):
-        xml, assets = walker.get_model_and_assets()
+        xml = quadruped.make_model(
+            floor_size=_DEFAULT_TIME_LIMIT * _WALK_SPEED
+        )
+        assets = quadruped.common.ASSETS
         xml = xml.replace(b'file="./common/', b'file="common/')
-        suite_dir = os.path.dirname(walker.__file__)  # .../dm_control/suite
+        suite_dir = os.path.dirname(quadruped.__file__)  # .../dm_control/suite
         self._mjcf_model = mjcf.from_xml_string(
             xml,
             model_dir=suite_dir,
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, 'walker')
+        super().__init__(self.env, 'quadruped')
         self.variation_space = swm_space.Dict(
             {
                 'agent': swm_space.Dict(
@@ -39,7 +42,7 @@ class WalkerDMControlWrapper(DMControlWrapper):
                             shape=(3,),
                             dtype=np.float64,
                             init_value=np.array(
-                                [0.7, 0.5, 0.3], dtype=np.float64
+                                [0.6, 0.3, 0.3], dtype=np.float64
                             ),
                         ),
                         'torso_density': swm_space.Box(
@@ -49,15 +52,15 @@ class WalkerDMControlWrapper(DMControlWrapper):
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        'left_foot_density': swm_space.Box(
+                        'foot_back_left_density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        # TODO lock right knee joint (by default it is unlocked 1)
-                        'right_knee_locked': swm_space.Discrete(
+                        # TODO lock back left knee joint (by default it is unlocked 1)
+                        'knee_back_left_locked': swm_space.Discrete(
                             2, init_value=1
                         ),
                     }
@@ -80,13 +83,6 @@ class WalkerDMControlWrapper(DMControlWrapper):
                                 [[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]],
                                 dtype=np.float64,
                             ),
-                        ),
-                        'rotation_y': swm_space.Box(
-                            low=-10.0,
-                            high=10.0,
-                            shape=(1,),
-                            dtype=np.float64,
-                            init_value=np.array([0.0], dtype=np.float64),
                         ),
                     }
                 ),
@@ -111,11 +107,11 @@ class WalkerDMControlWrapper(DMControlWrapper):
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name='walker.xml',
+            out_file_name='quadruped.xml',
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, 'walker.xml')
-        physics = walker.Physics.from_xml_path(xml_path)
-        task = walker.PlanarWalker(move_speed=_WALK_SPEED, random=seed)
+        xml_path = os.path.join(self._mjcf_tempdir.name, 'quadruped.xml')
+        physics = quadruped.Physics.from_xml_path(xml_path)
+        task = quadruped.Move(random=seed, desired_speed=_WALK_SPEED)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics,
@@ -160,7 +156,7 @@ class WalkerDMControlWrapper(DMControlWrapper):
         grid_texture.rgb1 = self.variation_space['floor']['color'].value[0]
         grid_texture.rgb2 = self.variation_space['floor']['color'].value[1]
 
-        # Modify agent (walker) color via material
+        # Modify agent (quadruped) color via material
         agent_color_changed = False
 
         desired_rgb = np.asarray(
@@ -204,19 +200,6 @@ class WalkerDMControlWrapper(DMControlWrapper):
         friction_changed = not np.allclose(current_friction, new_friction)
         floor_geom.friction = new_friction
 
-        # Modify floor rotation
-        floor_orientation_changed = False
-        desired_angle = np.deg2rad(
-            self.variation_space['floor']['rotation_y'].value[0]
-        )
-        c = np.cos(desired_angle)
-        s = np.sin(desired_angle)
-        # rotate around y axis
-        desired_zaxis = np.array([s, 0.0, c], dtype=np.float32)
-        if not np.allclose(floor_geom.zaxis, desired_zaxis):
-            floor_orientation_changed = True
-        floor_geom.zaxis = desired_zaxis
-
         mass_changed = False
         # Modify torso density
         torso_geom = mjcf_model.find('geom', 'torso')
@@ -230,17 +213,17 @@ class WalkerDMControlWrapper(DMControlWrapper):
             mass_changed = True
         torso_geom.density = desired_density
 
-        # Modify foot density
-        foot_geom = mjcf_model.find('geom', 'left_foot')
-        base = foot_geom.density if foot_geom.density is not None else 1000.0
+        # Modify left back foot density
+        bfoot_geom = mjcf_model.find('geom', 'foot_back_left')
+        base = bfoot_geom.density if bfoot_geom.density is not None else 1000.0
         desired_density = float(
             np.asarray(
-                self.variation_space['agent']['left_foot_density'].value
+                self.variation_space['agent']['foot_back_left_density'].value
             ).reshape(-1)[0]
         )
         if not np.allclose(base, desired_density):
             mass_changed = True
-        foot_geom.density = desired_density
+        bfoot_geom.density = desired_density
 
         # Modify light intensity if a global light exists.
         light_changed = False
@@ -260,14 +243,13 @@ class WalkerDMControlWrapper(DMControlWrapper):
             or friction_changed
             or mass_changed
             or agent_color_changed
-            or floor_orientation_changed
         ):
             self.mark_dirty()
         return mjcf_model
 
 
 if __name__ == '__main__':
-    env = WalkerDMControlWrapper(seed=0)
+    env = QuadrupedDMControlWrapper(seed=0)
     obs, info = env.reset()
     print('obs shape:', obs.shape)
     print('info:', info)

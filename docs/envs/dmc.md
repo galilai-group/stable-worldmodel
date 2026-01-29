@@ -26,6 +26,7 @@ world = swm.World('swm/CheetahDMControl-v0', num_envs=4)
 | [Hopper](#hopper) | `swm/HopperDMControl-v0` | Hop forward |
 | [Reacher](#reacher) | `swm/ReacherDMControl-v0` | Reach a target |
 | [Walker](#walker) | `swm/WalkerDMControl-v0` | Walk forward at 1 m/s |
+| [Quadruped](#quadruped) | `swm/QuadrupedDMControl-v0` | Walk forward |
 | [Acrobot](#acrobot) | `swm/AcrobotDMControl-v0` | Swing up and balance |
 | [Pendulum](#pendulum) | `swm/PendulumDMControl-v0` | Swing up and balance |
 | [Cartpole](#cartpole) | `swm/CartpoleDMControl-v0` | Swing up and balance |
@@ -206,6 +207,41 @@ world = swm.World('swm/WalkerDMControl-v0', num_envs=4)
 | `agent.torso_density` | Box(500, 1500, shape=(1,)) | Torso geom density |
 | `agent.left_foot_density` | Box(500, 1500, shape=(1,)) | Left foot geom density |
 | `agent.right_knee_locked` | Discrete(2) | Whether the right knee joint is locked |
+| `floor.friction` | Box(0, 1, shape=(1,)) | Floor friction coefficient |
+| `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
+| `floor.rotation_y` | Box(-10, 10, shape=(1,)) | Floor rotation around Y axis (degrees) |
+| `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
+
+---
+
+## Quadruped
+
+A four-legged quadruped robot that must learn to walk forward. The task uses feature-based observations (joint angles, velocities, torso orientation, end effector positions).
+
+**Task**: Walk forward at a speed of 0.5 m/s.
+
+```python
+world = swm.World('swm/QuadrupedDMControl-v0', num_envs=4)
+```
+
+### Environment Specs
+
+| Property | Value |
+|----------|-------|
+| Action Space | `Box(-1, 1, shape=(12,))` — 12 joint torques (4 legs × 3 joints) |
+| Observation Space | Feature vector (joint angles, velocities, torso orientation, end effectors) |
+| Episode Length | 1000 steps (20s at 0.02s timestep) |
+| Environment ID | `swm/QuadrupedDMControl-v0` |
+| Physics | MuJoCo |
+
+### Variation Space
+
+| Factor | Type | Description |
+|--------|------|-------------|
+| `agent.color` | Box(0, 1, shape=(3,)) | Quadruped body RGB color |
+| `agent.torso_density` | Box(500, 1500, shape=(1,)) | Torso geom density |
+| `agent.foot_back_left_density` | Box(500, 1500, shape=(1,)) | Back left foot geom density |
+| `agent.knee_back_left_locked` | Discrete(2) | Whether the back left knee joint is locked |
 | `floor.friction` | Box(0, 1, shape=(1,)) | Floor friction coefficient |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
