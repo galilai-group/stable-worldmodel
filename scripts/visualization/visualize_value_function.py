@@ -18,7 +18,7 @@ import stable_worldmodel as swm
 from stable_worldmodel.envs.ogbench_manip.cube_env import CubeEnv
 from stable_worldmodel.envs.pusht.env import PushT
 from stable_worldmodel.envs.two_room.env import TwoRoomEnv
-from stable_worldmodel.wrappers import MegaWrapper, VariationWrapper
+from stable_worldmodel.wrapper import MegaWrapper, VariationWrapper
 
 
 # ============================================================================
