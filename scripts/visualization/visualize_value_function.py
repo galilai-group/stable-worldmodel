@@ -397,9 +397,7 @@ def plot_value_maps(
             ref_x, ref_y, c='red', marker='X', s=100, edgecolors='white'
         )
 
-        ax_map.set_title(
-            f'Value Function (goal at ({ref_x:.2f}, {ref_y:.2f}))'
-        )
+        ax_map.set_title(f'goal at ({ref_x:.2f}, {ref_y:.2f})')
         ax_map.axis('off')
 
         # Add colorbar
