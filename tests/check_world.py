@@ -2,6 +2,7 @@ import os
 import shutil
 
 import gymnasium as gym
+import h5py
 import imageio.v3 as iio
 import numpy as np
 import pytest
@@ -144,3 +145,55 @@ def test_each_env(env, temp_path):
             assert world.infos[key].shape[:4] == (1, 1, 224, 224), f"image shape is {world.infos[key].shape}"
 
     return
+
+
+def test_ep_idx_in_recorded_dataset(temp_path):
+    """Test that ep_idx is correctly recorded in the dataset."""
+    NUM_EPISODES = 3
+    EPISODE_LENGTH = 5
+
+    # Use a simple env for this test
+    env_name = swm_env[0] if swm_env else "swm/PushT-v0"
+
+    world = swm.World(
+        env_name,
+        num_envs=1,
+        image_shape=(64, 64),
+        max_episode_steps=EPISODE_LENGTH,
+        render_mode="rgb_array",
+        verbose=0,
+    )
+
+    ds_name = "test-ep-idx"
+    policy = swm.policy.RandomPolicy(42)
+    world.set_policy(policy)
+    world.record_dataset(ds_name, episodes=NUM_EPISODES, seed=123, cache_dir=temp_path)
+
+    # Open the H5 file and verify ep_idx
+    h5_path = temp_path / f"{ds_name}.h5"
+    assert h5_path.exists(), "H5 file should exist"
+
+    with h5py.File(h5_path, "r") as f:
+        # Check ep_idx dataset exists
+        assert "ep_idx" in f, "ep_idx should be in the H5 file"
+
+        ep_idx = f["ep_idx"][:]
+        ep_len = f["ep_len"][:]
+        ep_offset = f["ep_offset"][:]
+
+        # Verify ep_idx has correct length (sum of all episode lengths)
+        total_steps = sum(ep_len)
+        assert len(ep_idx) == total_steps, f"ep_idx length {len(ep_idx)} should equal total steps {total_steps}"
+
+        # Verify each episode has the correct ep_idx value
+        for i in range(NUM_EPISODES):
+            start = ep_offset[i]
+            end = start + ep_len[i]
+            episode_indices = ep_idx[start:end]
+
+            # All indices in this episode should equal the episode number
+            assert np.all(episode_indices == i), (
+                f"Episode {i} should have ep_idx={i}, got {np.unique(episode_indices)}"
+            )
+
+    world.close()

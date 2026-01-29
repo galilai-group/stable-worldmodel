@@ -1,23 +1,23 @@
 import hydra
 import numpy as np
 from loguru import logger as logging
+
 import stable_worldmodel as swm
-from stable_worldmodel.envs.two_room import ExpertPolicy
+from stable_worldmodel.envs.pusht import WeakPolicy
 
 
 @hydra.main(version_base=None, config_path='./', config_name='config')
 def run(cfg):
     """Run data collection script"""
 
-    world = swm.World('swm/TwoRoom-v1', **cfg.world, render_mode='rgb_array')
-    world.set_policy(ExpertPolicy())
+    world = swm.World('swm/PushT-v1', **cfg.world, render_mode='rgb_array')
+    world.set_policy(WeakPolicy(dist_constraint=100))
 
     variation_list = list(world.single_variation_space.names())
     variation_default = {
-        'agent.position',
-        'goal.position',
-        'door.size',
-        'door.position',
+        'agent.start_position',
+        'block.start_position',
+        'block.angle',
     }
 
     # exclude default variations
@@ -28,14 +28,12 @@ def run(cfg):
         var = var.replace('variation.', '')
         if var in variation_default:
             continue
-        world = swm.World(
-            'swm/TwoRoom-v1', **cfg.world, render_mode='rgb_array'
-        )
-        world.set_policy(ExpertPolicy())
+        world = swm.World('swm/PushT-v1', **cfg.world, render_mode='rgb_array')
+        world.set_policy(WeakPolicy(dist_constraint=100))
         print(f'Collecting data for variable: {var}')
         var_name = var.replace('.', '/')
         world.record_dataset(
-            f'tworoom_fov/{var_name}',
+            f'pusht_fov/{var_name}',
             episodes=1000,
             seed=rng.integers(0, 1_000_000).item(),
             cache_dir=cfg.cache_dir,
@@ -43,7 +41,7 @@ def run(cfg):
         )
 
         logging.success(
-            f' 🎉🎉🎉 Completed data collection for tworoom {var_name} 🎉🎉🎉'
+            f' 🎉🎉🎉 Completed data collection for pusht {var_name} 🎉🎉🎉'
         )
 
 

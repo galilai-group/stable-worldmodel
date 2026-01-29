@@ -40,7 +40,8 @@ class ExpertPolicy(BasePolicy):
             wall_axis = env.variation_space.value["wall"][
                 "axis"
             ]  # 0: horizontal wall (splits vertically), 1: vertical wall
-            wall_pos = env.wall_pos
+            border_size = env.border_size
+            wall_pos = env.wall_pos  # wall position (matches physics and check_collide)
 
             # index of coordinate used to distinguish rooms
             # vertical wall at x = wall_pos -> use x (0)
@@ -60,7 +61,6 @@ class ExpertPolicy(BasePolicy):
                 positions = env.variation_space.value["door"]["position"]
                 sizes = env.variation_space.value["door"]["size"]
                 agent_radius = env.variation_space.value["agent"]["radius"].item()
-                border_size = env.border_size
 
                 best_center = None
                 best_dist = float("inf")

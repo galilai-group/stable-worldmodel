@@ -154,7 +154,7 @@ class World:
         """Advance all environments by one step using the current policy."""
         # note: reset happens before because of auto-reset, should fix that
         if self.policy is None:
-            raise RuntimeError("No policy set. Call set_policy() first.")
+            raise RuntimeError('No policy set. Call set_policy() first.')
 
         actions = self.policy.get_action(self.infos)
         (
@@ -330,7 +330,7 @@ class World:
                 global_step_ptr = 0
                 initialized = False
 
-            self.reset(seed)
+            self.reset(seed, options=options)
             seed = None if seed is None else (seed + self.num_envs)
             self._dump_step_data(episode_buffers)  # record initial state
 
@@ -373,7 +373,9 @@ class World:
 
         logging.info(f'Recording complete. Total frames: {global_step_ptr}')
 
-    def _init_h5_datasets(self, f: h5py.File, sample_episode: dict[str, list[Any]]) -> None:
+    def _init_h5_datasets(
+        self, f: h5py.File, sample_episode: dict[str, list[Any]]
+    ) -> None:
         """Initialize resizable HDF5 datasets based on the first episode.
 
         Args:
@@ -418,6 +420,15 @@ class World:
             'ep_len', shape=(0,), maxshape=(None,), dtype=np.int32
         )
 
+        # per-step episode index
+        f.create_dataset(
+            'ep_idx',
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.int32,
+            chunks=(1000,),
+        )
+
     def _reset_single_env(
         self,
         env_idx: int,
@@ -435,7 +446,8 @@ class World:
         _, infos = self.envs.envs[env_idx].reset(seed=seed, options=options)
 
         for k, v in infos.items():
-            self.infos[k][env_idx] = v
+            if k in self.infos:
+                self.infos[k][env_idx] = v
 
     def _handle_done_ep(
         self,
@@ -466,6 +478,11 @@ class World:
         ep_buffer.clear()
         self.terminateds[env_idx] = False
         self.truncateds[env_idx] = False
+
+        # Add episode index to all steps
+        ep_len = len(out['step_idx'])
+        out['ep_idx'] = [n_ep_recorded] * ep_len
+
         return out
 
     def _write_episode(
@@ -504,7 +521,9 @@ class World:
         return ep_len
 
     def _dump_step_data(
-        self, tmp_buffer: list[dict[str, list[Any]]], env_idx: int | None = None
+        self,
+        tmp_buffer: list[dict[str, list[Any]]],
+        env_idx: int | None = None,
     ) -> None:
         """Append current step data to temporary episode buffers.
 

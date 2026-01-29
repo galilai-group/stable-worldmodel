@@ -8,7 +8,7 @@ defaults:
 #   launcher:
 #     max_num_timeout: 999
 #     cpus_per_task: 8
-#     mem_gb: 512
+#     mem_gb: 256
 #     timeout_min: 1440
 #     partition: long-cpu
 #     signal_delay_s: 120
@@ -25,9 +25,6 @@ world:
 
 num_workers: 4
 seed: 3072
-
-ds_type: video # frame
 num_traj: 20000
-num_shards: 10
 
 options: null

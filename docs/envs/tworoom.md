@@ -17,7 +17,7 @@ The agent starts in one room and must navigate to the goal in the other room whi
 
 ```python
 import stable_worldmodel as swm
-world = swm.World('swm/TwoRoom-v0', num_envs=4, image_shape=(128, 128))
+world = swm.World('swm/TwoRoom-v1', num_envs=4, image_shape=(128, 128))
 ```
 
 ## Environment Specs
