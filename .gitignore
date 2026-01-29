@@ -207,6 +207,7 @@ node_modules/
 logs/
 .vscode/
 *.sh
+!scripts/minerl.sh
 
 outputs/
 multirun/
