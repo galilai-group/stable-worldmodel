@@ -381,6 +381,11 @@ def plot_value_maps(
         values = values_per_ref[ref_idx][0]
         values_2d = values.reshape(height, width)
 
+        # print statistics of values for this reference
+        logging.info(
+            f'Reference {ref_idx}: Value stats - min: {values.min():.4f}, max: {values.max():.4f}, mean: {values.mean():.4f}, std: {values.std():.4f}'
+        )
+
         # Negate values since higher value = closer to goal (less "distance")
         # For visualization, we want lower values (darker) = closer to goal
         display_values = -values_2d
