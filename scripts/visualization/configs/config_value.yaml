@@ -1,6 +1,6 @@
 defaults:
-  - _self_
   - world_model@datasets.pusht.world_model: iql
+  - _self_
 
 cache_dir: null
 device: cuda
@@ -24,3 +24,5 @@ datasets:
         - variation:
             fields: null
             values: null
+      world_model:
+        model_name: iql10_policy_epoch_9
