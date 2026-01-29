@@ -14,6 +14,7 @@ patch_size: 14
 # ===============================
 datasets:
   pusht:
+    training_dataset: pusht_expert_train  # dataset used during training for preprocessing stats
     env:
       env_name: swm/PushT-v1
       history_size: 3

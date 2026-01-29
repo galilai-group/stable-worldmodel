@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 os.environ['MUJOCO_GL'] = 'egl'
@@ -19,6 +20,18 @@ from stable_worldmodel.envs.ogbench_manip.cube_env import CubeEnv
 from stable_worldmodel.envs.pusht.env import PushT
 from stable_worldmodel.envs.two_room.env import TwoRoomEnv
 from stable_worldmodel.wrapper import MegaWrapper, VariationWrapper
+
+
+# ============================================================================
+# Dataset Loading
+# ============================================================================
+
+
+def get_dataset(cfg, dataset_name):
+    """Load a dataset for preprocessing statistics."""
+    dataset_path = Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+    dataset = swm.data.HDF5Dataset(dataset_name, cache_dir=dataset_path)
+    return dataset
 
 
 # ============================================================================
@@ -70,75 +83,29 @@ def get_env(cfg):
         'goal': img_transform(),
     }
 
-    # create the processing
-    ACTION_MEAN = np.array([-0.0087, 0.0068])
-    ACTION_STD = np.array([0.2019, 0.2002])
-    PROPRIO_MEAN = np.array([236.6155, 264.5674, -2.93032027, 2.54307914])
-    PROPRIO_STD = np.array([101.1202, 87.0112, 74.84556075, 74.14009094])
+    # create the processing by fitting scalers on the training dataset
+    training_dataset_name = cfg.get('training_dataset', None)
+    if training_dataset_name is None:
+        raise ValueError(
+            'training_dataset must be specified in config to compute preprocessing stats'
+        )
 
-    obs_space = env.unwrapped.observation_space
-    action_space = env.unwrapped.action_space
-
-    def _space_dim(space):
-        if space is None or not hasattr(space, 'shape') or not space.shape:
-            return None
-        return space.shape[-1]
-
-    def _obs_dim(key):
-        if hasattr(obs_space, 'spaces') and key in obs_space.spaces:
-            return _space_dim(obs_space.spaces[key])
-        return None
-
-    def _make_scaler(key, target_dim, mean, std):
-        if target_dim is None:
-            logging.warning(
-                f"Missing target dim for '{key}', skipping standardization."
-            )
-            return None
-
-        mean = np.asarray(mean) if mean is not None else None
-        std = np.asarray(std) if std is not None else None
-
-        if (
-            mean is None
-            or std is None
-            or mean.shape[0] != target_dim
-            or std.shape[0] != target_dim
-        ):
-            logging.warning(
-                f"Stats for '{key}' do not match dim {target_dim}; using identity standardization."
-            )
-            mean = np.zeros(target_dim, dtype=np.float32)
-            std = np.ones(target_dim, dtype=np.float32)
-
-        scaler = preprocessing.StandardScaler()
-        scaler.mean_ = mean
-        scaler.scale_ = std
-        scaler.var_ = std**2
-        scaler.n_features_in_ = target_dim
-        return scaler
-
-    action_dim = _space_dim(action_space)
-    proprio_dim = _obs_dim('proprio')
-    goal_proprio_dim = _obs_dim('goal_proprio') or proprio_dim
-
-    action_process = _make_scaler(
-        'action', action_dim, ACTION_MEAN, ACTION_STD
-    )
-    proprio_process = _make_scaler(
-        'proprio', proprio_dim, PROPRIO_MEAN, PROPRIO_STD
-    )
-    goal_proprio_process = _make_scaler(
-        'goal_proprio', goal_proprio_dim, PROPRIO_MEAN, PROPRIO_STD
+    dataset = get_dataset(cfg, training_dataset_name)
+    logging.info(
+        f'Fitting preprocessing scalers on dataset: {training_dataset_name}'
     )
 
-    process = {}
-    if action_process is not None:
-        process['action'] = action_process
-    if proprio_process is not None:
-        process['proprio'] = proprio_process
-    if goal_proprio_process is not None:
-        process['goal_proprio'] = goal_proprio_process
+    action_process = preprocessing.StandardScaler()
+    action_process.fit(dataset.get_col_data('action'))
+
+    proprio_process = preprocessing.StandardScaler()
+    proprio_process.fit(dataset.get_col_data('proprio'))
+
+    process = {
+        'action': action_process,
+        'proprio': proprio_process,
+        'goal_proprio': proprio_process,
+    }
 
     return env, process, transform
 
