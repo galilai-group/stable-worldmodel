@@ -1,5 +1,6 @@
 defaults:
-  - world_model@datasets.pusht.world_model: iql
+  - world_model@datasets.tworoom.world_model: iql
+  # - world_model@datasets.pusht.world_model: iql
   - _self_
 
 cache_dir: null
