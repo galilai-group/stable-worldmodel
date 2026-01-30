@@ -202,23 +202,34 @@ def get_gciql_value_model(cfg):
                 .sqrt()
             )
 
-            # Check if raw pixels match when "current" goal was selected
+            # Check per-sample pixel match (not batch-wide)
             first_frame_pixels = batch['pixels'][:, 0]  # (B, C, H, W)
-            goal_pixels = batch['goal_pixels'][:, 0]  # (B, C, H, W)
-            pixels_match = torch.allclose(
-                first_frame_pixels, goal_pixels, atol=1e-6
-            )
+            goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
 
-            # Check embedding difference
-            first_frame_embed = embedding[:, 0]  # (B, P, D)
-            goal_embed_squeezed = goal_embedding[:, 0]  # (B, P, D)
-            embed_diff = (first_frame_embed - goal_embed_squeezed).abs()
+            # Per-sample: are all pixels identical?
+            pixels_match_per_sample = (
+                first_frame_pixels == goal_pixels_squeezed
+            ).all(dim=(1, 2, 3))  # (B,)
+            pixels_match_rate = pixels_match_per_sample.float().mean()
+
+            # For samples where pixels DO match, check embedding diff
+            if pixels_match_per_sample.any():
+                matching_embed = embedding[
+                    pixels_match_per_sample, 0
+                ]  # matching samples, first frame
+                matching_goal = goal_embedding[pixels_match_per_sample, 0]
+                embed_diff_when_pixels_match = (
+                    (matching_embed - matching_goal).abs().max()
+                )
+            else:
+                embed_diff_when_pixels_match = torch.tensor(
+                    -1.0, device=embedding.device
+                )  # sentinel value
 
             self.log_dict(
                 {
-                    f'{prefix}debug_pixels_match': float(pixels_match),
-                    f'{prefix}debug_embed_diff_max': embed_diff.max(),
-                    f'{prefix}debug_embed_diff_mean': embed_diff.mean(),
+                    f'{prefix}debug_pixels_match_rate': pixels_match_rate,
+                    f'{prefix}debug_embed_diff_when_match': embed_diff_when_pixels_match,
                 },
                 on_step=True,
                 sync_dist=True,
