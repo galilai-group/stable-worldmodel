@@ -202,6 +202,28 @@ def get_gciql_value_model(cfg):
                 .sqrt()
             )
 
+            # Check if raw pixels match when "current" goal was selected
+            first_frame_pixels = batch['pixels'][:, 0]  # (B, C, H, W)
+            goal_pixels = batch['goal_pixels'][:, 0]  # (B, C, H, W)
+            pixels_match = torch.allclose(
+                first_frame_pixels, goal_pixels, atol=1e-6
+            )
+
+            # Check embedding difference
+            first_frame_embed = embedding[:, 0]  # (B, P, D)
+            goal_embed_squeezed = goal_embedding[:, 0]  # (B, P, D)
+            embed_diff = (first_frame_embed - goal_embed_squeezed).abs()
+
+            self.log_dict(
+                {
+                    f'{prefix}debug_pixels_match': float(pixels_match),
+                    f'{prefix}debug_embed_diff_max': embed_diff.max(),
+                    f'{prefix}debug_embed_diff_mean': embed_diff.mean(),
+                },
+                on_step=True,
+                sync_dist=True,
+            )
+
             collapse_diagnostics = {
                 # Value prediction stats - std ≈ 0 indicates collapse
                 f'{prefix}value_pred_mean': value_pred.mean(),
