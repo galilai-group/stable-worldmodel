@@ -307,7 +307,7 @@ class TwoRoomEnv(gym.Env):
 
         # Build observation
         state = self._get_obs()
-        proprio = np.concatenate((state[:2], state[-1:]))
+        proprio = state[:2]
         observation = {'proprio': proprio, 'state': state}
 
         info = self._get_info()
@@ -342,7 +342,7 @@ class TwoRoomEnv(gym.Env):
 
         # Build observation
         state = self._get_obs()
-        proprio = np.concatenate((state[:2], state[-1:]))
+        proprio = state[:2]
         observation = {'proprio': proprio, 'state': state}
 
         # Calculate goal overlap
