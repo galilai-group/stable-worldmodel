@@ -1317,15 +1317,20 @@ class TestGoalDataset:
             ep_idx, local_start
         )
 
+        # Calculate clip_end (last frame of the clip)
+        frameskip = base_dataset.frameskip
+        num_steps = base_dataset.num_steps
+        clip_end = local_start + (num_steps - 1) * frameskip
+
         # Should be same episode
         assert future_ep_idx == ep_idx
-        # Should be >= local_start
-        assert future_local_idx >= local_start
+        # Should be >= clip_end (last frame of the clip)
+        assert future_local_idx >= clip_end
         # Should be within episode bounds
         assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
 
     def test_sample_future_step_at_end(self, sample_hdf5_for_goal):
-        """Test _sample_future_step when at end of episode returns same position."""
+        """Test _sample_future_step when at end of episode returns clip_end."""
         cache_dir, name = sample_hdf5_for_goal
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(base_dataset, seed=42)
@@ -1337,9 +1342,14 @@ class TestGoalDataset:
             ep_idx, local_start
         )
 
-        # Should return same position
+        # Calculate clip_end (last frame of the clip)
+        frameskip = base_dataset.frameskip
+        num_steps = base_dataset.num_steps
+        clip_end = local_start + (num_steps - 1) * frameskip
+
+        # Should return clip_end (clamped to episode bounds)
         assert future_ep_idx == ep_idx
-        assert future_local_idx == local_start
+        assert future_local_idx == clip_end
 
     def test_get_clip_info(self, sample_hdf5_for_goal):
         """Test _get_clip_info returns correct episode and local start."""
@@ -1379,9 +1389,9 @@ class TestGoalDataset:
 
         item = goal_dataset[0]
 
-        # Goal should match current observation (first frame)
+        # Goal should match last frame of the clip
         # The shapes should match
-        assert item['goal_pixels'].shape == item['pixels'][:1].shape
+        assert item['goal_pixels'].shape == item['pixels'][-1:].shape
 
     def test_getitem_random_goal(self, sample_hdf5_for_goal):
         """Test __getitem__ with 'random' goal sampling."""
@@ -1429,7 +1439,7 @@ class TestGoalDataset:
         assert kind1 == kind2
 
     def test_current_goal_equals_current_state(self, tmp_path):
-        """Test that with p_current=1, goal equals the current state exactly."""
+        """Test that with p_current=1, goal equals the last frame of the clip."""
         # Create dataset with unique identifiable values per step
         h5_path = tmp_path / 'current_goal_test.h5'
         ep_lengths = np.array([10, 8])
@@ -1466,19 +1476,21 @@ class TestGoalDataset:
             item = goal_dataset[idx]
             ep_idx, local_start = goal_dataset._get_clip_info(idx)
 
-            # Goal should be the current state (first frame of the clip)
+            # Goal should be the last frame of the clip
             # The goal is loaded as a single step, so it has shape (1, C, H, W) for pixels
-            current_pixels = item['pixels'][:1]  # First frame of current clip
+            last_frame_pixels = item['pixels'][
+                -1:
+            ]  # Last frame of current clip
             goal_pixels = item['goal_pixels']
 
-            current_proprio = item['proprio'][:1]  # First step proprio
+            last_frame_proprio = item['proprio'][-1:]  # Last step proprio
             goal_proprio = item['goal_proprio']
 
-            assert torch.allclose(goal_pixels, current_pixels), (
-                f'Goal pixels should match current state at idx {idx}'
+            assert torch.allclose(goal_pixels, last_frame_pixels), (
+                f'Goal pixels should match last frame at idx {idx}'
             )
-            assert torch.allclose(goal_proprio, current_proprio), (
-                f'Goal proprio should match current state at idx {idx}'
+            assert torch.allclose(goal_proprio, last_frame_proprio), (
+                f'Goal proprio should match last frame at idx {idx}'
             )
 
     def test_future_goal_is_from_same_trajectory_future(self, tmp_path):
@@ -1528,6 +1540,11 @@ class TestGoalDataset:
             item = goal_dataset[idx]
             ep_idx, local_start = goal_dataset._get_clip_info(idx)
 
+            # Calculate clip_end (last frame of the clip)
+            frameskip = base_dataset.frameskip
+            num_steps = base_dataset.num_steps
+            clip_end = local_start + (num_steps - 1) * frameskip
+
             # Extract goal proprio info (encoded episode and local indices)
             goal_proprio = item['goal_proprio']
             goal_ep_idx = int(goal_proprio[0, 0].item())
@@ -1535,16 +1552,15 @@ class TestGoalDataset:
 
             # Current state info
             current_ep_idx = ep_idx
-            current_local_start = local_start
 
             # Goal must be from the same episode
             assert goal_ep_idx == current_ep_idx, (
                 f'Goal episode {goal_ep_idx} should match current episode {current_ep_idx}'
             )
 
-            # Goal must be from a future or equal step (>= local_start)
-            assert goal_local_idx >= current_local_start, (
-                f'Goal local idx {goal_local_idx} should be >= current start {current_local_start}'
+            # Goal must be from a future or equal step (>= clip_end, the last frame of the clip)
+            assert goal_local_idx >= clip_end, (
+                f'Goal local idx {goal_local_idx} should be >= clip_end {clip_end}'
             )
 
             # Goal must be within episode bounds
