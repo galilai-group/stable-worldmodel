@@ -79,7 +79,7 @@ class TwoRoomEnv(gym.Env):
         self.observation_space = spaces.Dict(
             {
                 'proprio': spaces.Box(
-                    low=np.array([bs, bs, 0, 10]),
+                    low=np.array([bs, bs]),
                     high=np.array(
                         [
                             self.size + bs,
