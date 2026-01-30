@@ -33,15 +33,15 @@ class GCIQL(torch.nn.Module):
     def encode(
         self,
         info,
-        pixels_key="pixels",
+        pixels_key='pixels',
         emb_keys=None,
         prefix=None,
-        target="embed",
+        target='embed',
         is_video=False,
     ):
-        assert target not in info, f"{target} key already in info_dict"
+        assert target not in info, f'{target} key already in info_dict'
         emb_keys = emb_keys or self.extra_encoders.keys()
-        prefix = prefix or ""
+        prefix = prefix or ''
 
         encode_fn = self._encode_video if is_video else self._encode_image
         pixels_embed = encode_fn(info[pixels_key].float())  # (B, T, 3, H, W)
@@ -49,16 +49,20 @@ class GCIQL(torch.nn.Module):
         # == improve the embedding
         n_patches = pixels_embed.shape[2]
         embedding = pixels_embed
-        info[f"pixels_{target}"] = pixels_embed
+        info[f'pixels_{target}'] = pixels_embed
 
         for key in emb_keys:
             extr_enc = self.extra_encoders[key]
-            extra_input = info[f"{prefix}{key}"].float()  # (B, T, dim)
-            extra_embed = extr_enc(extra_input)  # (B, T, dim) -> (B, T, emb_dim)
-            info[f"{key}_{target}"] = extra_embed
+            extra_input = info[f'{prefix}{key}'].float()  # (B, T, dim)
+            extra_embed = extr_enc(
+                extra_input
+            )  # (B, T, dim) -> (B, T, emb_dim)
+            info[f'{key}_{target}'] = extra_embed
 
             # copy extra embedding across patches for each time step
-            extra_tiled = repeat(extra_embed.unsqueeze(2), "b t 1 d -> b t p d", p=n_patches)
+            extra_tiled = repeat(
+                extra_embed.unsqueeze(2), 'b t 1 d -> b t p d', p=n_patches
+            )
 
             # concatenate along feature dimension
             embedding = torch.cat([embedding, extra_tiled], dim=3)
@@ -70,24 +74,36 @@ class GCIQL(torch.nn.Module):
     def _encode_image(self, pixels):
         # == pixels embedding
         B = pixels.shape[0]
-        pixels = rearrange(pixels, "b t ... -> (b t) ...")
+        pixels = rearrange(pixels, 'b t ... -> (b t) ...')
 
-        kwargs = {"interpolate_pos_encoding": True} if self.interpolate_pos_encoding else {}
+        kwargs = (
+            {'interpolate_pos_encoding': True}
+            if self.interpolate_pos_encoding
+            else {}
+        )
         pixels_embed = self.encoder(pixels, **kwargs)
 
-        if hasattr(pixels_embed, "last_hidden_state"):
+        if hasattr(pixels_embed, 'last_hidden_state'):
             pixels_embed = pixels_embed.last_hidden_state
             pixels_embed = pixels_embed[:, 1:, :]  # drop cls token
         else:
-            pixels_embed = pixels_embed.logits.unsqueeze(1)  # (B*T, 1, emb_dim)
+            pixels_embed = pixels_embed.logits.unsqueeze(
+                1
+            )  # (B*T, 1, emb_dim)
 
-        pixels_embed = rearrange(pixels_embed.detach(), "(b t) p d -> b t p d", b=B)
+        pixels_embed = rearrange(
+            pixels_embed.detach(), '(b t) p d -> b t p d', b=B
+        )
 
         return pixels_embed
 
     def _encode_video(self, pixels):
         B, T, C, H, W = pixels.shape
-        kwargs = {"interpolate_pos_encoding": True} if self.interpolate_pos_encoding else {}
+        kwargs = (
+            {'interpolate_pos_encoding': True}
+            if self.interpolate_pos_encoding
+            else {}
+        )
 
         pixels_embeddings = []
 
@@ -97,14 +113,20 @@ class GCIQL(torch.nn.Module):
             past_frames = pixels[:, : t + 1, :, :, :]  # (B, t+1, C, H, W)
 
             # repeat last frame to pad
-            pad_frames = past_frames[:, -1:, :, :, :].repeat(1, padding, 1, 1, 1)  # (B, padding, C, H, W)
-            frames = torch.cat([past_frames, pad_frames], dim=1)  # (B, T, C, H, W)
+            pad_frames = past_frames[:, -1:, :, :, :].repeat(
+                1, padding, 1, 1, 1
+            )  # (B, padding, C, H, W)
+            frames = torch.cat(
+                [past_frames, pad_frames], dim=1
+            )  # (B, T, C, H, W)
 
             frame_embed = self.encoder(frames, **kwargs)  # (B, 1, P, emb_dim)
             frame_embed = frame_embed.last_hidden_state
             pixels_embeddings.append(frame_embed)
 
-        pixels_embed = torch.stack(pixels_embeddings, dim=1)  # (B, T, P, emb_dim)
+        pixels_embed = torch.stack(
+            pixels_embeddings, dim=1
+        )  # (B, T, P, emb_dim)
 
         return pixels_embed
 
@@ -117,8 +139,8 @@ class GCIQL(torch.nn.Module):
             preds: (B, T, action_dim)
         """
 
-        embedding = rearrange(embedding, "b t p d -> b (t p) d")
-        embedding_goal = rearrange(embedding_goal, "b t p d -> b (t p) d")
+        embedding = rearrange(embedding, 'b t p d -> b (t p) d')
+        embedding_goal = rearrange(embedding_goal, 'b t p d -> b (t p) d')
         preds = self.action_predictor(embedding, embedding_goal)
 
         return preds
@@ -132,8 +154,8 @@ class GCIQL(torch.nn.Module):
             preds: (B, T, 1)
         """
 
-        embedding = rearrange(embedding, "b t p d -> b (t p) d")
-        embedding_goal = rearrange(embedding_goal, "b t p d -> b (t p) d")
+        embedding = rearrange(embedding, 'b t p d -> b (t p) d')
+        embedding_goal = rearrange(embedding_goal, 'b t p d -> b (t p) d')
         preds = self.value_predictor(embedding, embedding_goal)
 
         return preds
@@ -141,11 +163,19 @@ class GCIQL(torch.nn.Module):
     def get_action(self, info):
         """Get action given observation and goal (uses last frame's prediction)."""
         # first encode observation
-        info = self.encode(info, pixels_key="pixels", emb_keys=["proprio"], target="embed")
+        info = self.encode(
+            info, pixels_key='pixels', emb_keys=['proprio'], target='embed'
+        )
         # encode goal
-        info = self.encode(info, pixels_key="goal", emb_keys=["proprio"], prefix="goal_", target="goal_embed")
+        info = self.encode(
+            info,
+            pixels_key='goal',
+            emb_keys=['proprio'],
+            prefix='goal_',
+            target='goal_embed',
+        )
         # then predict action
-        actions = self.predict_actions(info["embed"], info["goal_embed"])
+        actions = self.predict_actions(info['embed'], info['goal_embed'])
         # return last frame's action prediction
         actions = actions[:, -1, :]
         return actions
@@ -165,7 +195,9 @@ class Embedder(torch.nn.Module):
         self.tubelet_size = tubelet_size
         self.in_chans = in_chans
         self.emb_dim = emb_dim
-        self.patch_embed = torch.nn.Conv1d(in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size)
+        self.patch_embed = torch.nn.Conv1d(
+            in_chans, emb_dim, kernel_size=tubelet_size, stride=tubelet_size
+        )
 
     def forward(self, x):
         with torch.amp.autocast(enabled=False, device_type=x.device.type):
@@ -190,19 +222,31 @@ class Predictor(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         causal=True,
+        non_positive_output=False,
     ):
         super().__init__()
 
         self.num_patches = num_patches
         self.num_frames = num_frames
+        self.non_positive_output = non_positive_output
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_frames * (num_patches), dim))  # dim for the pos encodings
+        self.pos_embedding = nn.Parameter(
+            torch.randn(1, num_frames * (num_patches), dim)
+        )  # dim for the pos encodings
         self.pos_embedding_goal = nn.Parameter(
             torch.randn(1, (num_patches), dim)
         )  # dim for the pos encodings of goal (assumed single image)
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(
-            dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames, causal=causal
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            num_patches,
+            num_frames,
+            causal=causal,
         )
         self.out_proj = nn.Linear(dim, out_dim)
 
@@ -222,6 +266,9 @@ class Predictor(nn.Module):
         x = self.transformer(x, g)
         # project to output dimension
         x = self.out_proj(x)
+        # apply non-positive constraint for value functions (rewards <= 0)
+        if self.non_positive_output:
+            x = -F.softplus(x)
         return x
 
 
@@ -243,12 +290,22 @@ class FeedForward(nn.Module):
 
 class Attention(nn.Module):
     def __init__(
-        self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1, att_type="self", causal=False
+        self,
+        dim,
+        heads=8,
+        dim_head=64,
+        dropout=0.0,
+        num_patches=1,
+        num_frames=1,
+        att_type='self',
+        causal=False,
     ):
         super().__init__()
-        assert att_type in {"self", "cross", "frame_agg"}, "attention type must be self, cross, or frame_agg"
+        assert att_type in {'self', 'cross', 'frame_agg'}, (
+            'attention type must be self, cross, or frame_agg'
+        )
         self.att_type = att_type
-        self.causal = causal and att_type in {"self", "frame_agg"}
+        self.causal = causal and att_type in {'self', 'frame_agg'}
         self.num_patches = num_patches
         self.num_frames = num_frames
 
@@ -257,25 +314,33 @@ class Attention(nn.Module):
         self.heads = heads
         self.scale = dim_head**-0.5
         self.norm = nn.LayerNorm(dim)
-        if self.att_type == "cross":
+        if self.att_type == 'cross':
             self.norm_c = nn.LayerNorm(dim)
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
+        self.to_out = (
+            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
+            if project_out
+            else nn.Identity()
+        )
 
         # Frame aggregation: one learnable query token per frame
-        if self.att_type == "frame_agg":
-            self.frame_tokens = nn.Parameter(0.02 * torch.randn(1, num_frames, dim))
+        if self.att_type == 'frame_agg':
+            self.frame_tokens = nn.Parameter(
+                0.02 * torch.randn(1, num_frames, dim)
+            )
 
         # Register causal mask buffer
         if self.causal:
-            if self.att_type == "self":
+            if self.att_type == 'self':
                 mask = self._generate_causal_mask(num_patches, num_frames)
-            elif self.att_type == "frame_agg":
-                mask = self._generate_frame_agg_causal_mask(num_patches, num_frames)
-            self.register_buffer("causal_mask", mask)
+            elif self.att_type == 'frame_agg':
+                mask = self._generate_frame_agg_causal_mask(
+                    num_patches, num_frames
+                )
+            self.register_buffer('causal_mask', mask)
 
     def _generate_causal_mask(self, num_patches, num_frames):
         """Generate block-causal mask: tokens in frame t can attend to frames 0..t."""
@@ -285,14 +350,18 @@ class Attention(nn.Module):
         for t in range(num_frames):
             row_start = t * num_patches
             row_end = (t + 1) * num_patches
-            col_end = (t + 1) * num_patches  # Can attend up to and including frame t
+            col_end = (
+                t + 1
+            ) * num_patches  # Can attend up to and including frame t
             mask[row_start:row_end, :col_end] = True
 
         return mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T*P, T*P)
 
     def _generate_frame_agg_causal_mask(self, num_patches, num_frames):
         """Generate causal mask for frame aggregation: query t attends to patches from frames 0..t."""
-        mask = torch.zeros(num_frames, num_frames * num_patches, dtype=torch.bool)
+        mask = torch.zeros(
+            num_frames, num_frames * num_patches, dtype=torch.bool
+        )
 
         for t in range(num_frames):
             col_end = (t + 1) * num_patches
@@ -303,14 +372,16 @@ class Attention(nn.Module):
     def forward(self, x, c=None):
         B, N, C = x.size()
         x = self.norm(x)
-        if self.att_type == "cross":
+        if self.att_type == 'cross':
             c = self.norm_c(c)
             q_in = x
             kv_in = c
-        elif self.att_type == "frame_agg":
+        elif self.att_type == 'frame_agg':
             # Compute actual number of frames from input (supports variable-length sequences)
             actual_frames = N // self.num_patches
-            q_in = self.frame_tokens[:, :actual_frames, :].expand(B, -1, -1)  # (B, actual_frames, dim)
+            q_in = self.frame_tokens[:, :actual_frames, :].expand(
+                B, -1, -1
+            )  # (B, actual_frames, dim)
             kv_in = x  # (B, actual_frames*P, dim)
         else:  # self.att_type == "self"
             q_in = x
@@ -319,24 +390,32 @@ class Attention(nn.Module):
         # q, k, v: (B, heads, T, dim_head)
         q = self.to_q(q_in)
         k, v = self.to_kv(kv_in).chunk(2, dim=-1)
-        q, k, v = (rearrange(t, "b n (h d) -> b h n d", h=self.heads) for t in (q, k, v))
+        q, k, v = (
+            rearrange(t, 'b n (h d) -> b h n d', h=self.heads)
+            for t in (q, k, v)
+        )
 
         # Apply causal mask if enabled
         if self.causal:
             attn_mask = self.causal_mask
-            if self.att_type == "self":
+            if self.att_type == 'self':
                 attn_mask = attn_mask[:, :, :N, :N]
-            elif self.att_type == "frame_agg":
+            elif self.att_type == 'frame_agg':
                 actual_frames = N // self.num_patches
                 attn_mask = attn_mask[:, :, :actual_frames, :N]
         else:
             attn_mask = None
 
         out = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, dropout_p=self.dropout.p if self.training else 0.0, is_causal=False
+            q,
+            k,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout.p if self.training else 0.0,
+            is_causal=False,
         )
 
-        out = rearrange(out, "b h n d -> b n (h d)")
+        out = rearrange(out, 'b h n d -> b n (h d)')
 
         return self.to_out(out)
 
@@ -364,11 +443,11 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([])
         for i in range(depth):
             if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
-                att_type = "frame_agg"
+                att_type = 'frame_agg'
             elif i % 2 == 0:
-                att_type = "self"
+                att_type = 'self'
             else:
-                att_type = "cross"
+                att_type = 'cross'
             self.layers.append(
                 nn.ModuleList(
                     [
@@ -396,7 +475,9 @@ class Transformer(nn.Module):
             out: (B, T, dim) - one embedding per frame
         """
         for i, (attn, ff) in enumerate(self.layers):
-            if i == len(self.layers) - 1:  # frame aggregation layer - no residual (dimension changes)
+            if (
+                i == len(self.layers) - 1
+            ):  # frame aggregation layer - no residual (dimension changes)
                 x = attn(x)
                 x = ff(x)
             elif i % 2 == 0:  # self-attention with causal masking

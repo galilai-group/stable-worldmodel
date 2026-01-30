@@ -378,6 +378,7 @@ def get_gciql_value_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=1,
+        non_positive_output=True,
         **cfg.predictor,
     )
     wrapped_value_predictor = spt.TeacherStudentWrapper(
