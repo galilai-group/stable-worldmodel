@@ -71,16 +71,8 @@ def get_data(cfg):
     # Apply transforms to all steps and goal observations
     transform = spt.data.transforms.Compose(
         get_img_pipeline('pixels', 'pixels', cfg.image_size),
-        spt.data.transforms.WrapTorchTransform(
-            norm_action_transform,
-            source='action',
-            target='action',
-        ),
-        spt.data.transforms.WrapTorchTransform(
-            norm_proprio_transform,
-            source='proprio',
-            target='proprio',
-        ),
+        norm_action_transform,
+        norm_proprio_transform,
     )
 
     dataset.transform = transform
