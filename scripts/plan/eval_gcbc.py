@@ -77,8 +77,11 @@ def run(cfg: DictConfig):
 
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
 
+    col_name = (
+        'episode_idx' if 'episode_idx' in dataset.column_names else 'ep_idx'
+    )
     ep_indices, _ = np.unique(
-        dataset.get_col_data('episode_idx'), return_index=True
+        dataset.get_col_data(col_name), return_index=True
     )
 
     # create the processing
