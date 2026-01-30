@@ -48,9 +48,9 @@ action_encoder_lr: 5e-4
 
 # Goal sampling probabilities (random, future, current) - must sum to 1.0
 goal_probabilities:
-  random: 0.3
-  future: 0.5
-  current: 0.2
+  random: 0.375 #0.3
+  future: 0.625 #0.5
+  current: 0.0 #0.2
 goal_gamma: 0.99  # Discount factor for geometric distribution when sampling future goals
 
 dump_object: True
