@@ -33,22 +33,21 @@ def get_data(cfg):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    def norm_col_transform(dataset, col='pixels'):
-        """Normalize column to zero mean, unit variance."""
-        data = torch.from_numpy(dataset.get_col_data(col)[:])
-        mean = data.mean(0).unsqueeze(0).clone()
-        std = data.std(0).unsqueeze(0).clone()
-        # Debug: check for zero std (would cause NaN)
-        zero_std_mask = std == 0
-        if zero_std_mask.any():
-            logging.warning(
-                f'[{col}] Found {zero_std_mask.sum().item()} features with zero std!'
-            )
-            std = torch.clamp(std, min=1e-8)  # Prevent division by zero
-        logging.info(
-            f'[{col}] mean range: [{mean.min():.4f}, {mean.max():.4f}], std range: [{std.min():.4f}, {std.max():.4f}]'
+    def get_column_normalizer(dataset, source: str, target: str):
+        """Get normalizer for a specific column in the dataset."""
+        data = torch.from_numpy(dataset.get_col_data(source)[:])
+        data = data[~torch.isnan(data).any(dim=1)]
+        mean = data.mean(0, keepdim=True).clone()
+        std = data.std(0, keepdim=True).clone()
+
+        def norm_fn(x):
+            return ((x - mean) / std).float()
+
+        normalizer = spt.data.transforms.WrapTorchTransform(
+            norm_fn, source=source, target=target
         )
-        return lambda x: ((x - mean) / std).float()
+
+        return normalizer
 
     cache_dir = None
     if not hasattr(cfg, 'local_cache_dir'):
@@ -64,8 +63,10 @@ def get_data(cfg):
         keys_to_cache=['action', 'proprio'],
     )
 
-    norm_action_transform = norm_col_transform(dataset, 'action')
-    norm_proprio_transform = norm_col_transform(dataset, 'proprio')
+    norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
+    norm_proprio_transform = get_column_normalizer(
+        dataset, 'proprio', 'proprio'
+    )
 
     # Apply transforms to all steps and goal observations
     transform = spt.data.transforms.Compose(
