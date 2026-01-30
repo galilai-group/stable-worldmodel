@@ -34,12 +34,21 @@ def get_data(cfg):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    def norm_col_transform(dataset, col='pixels'):
-        """Normalize column to zero mean, unit variance."""
-        data = torch.from_numpy(dataset.get_col_data(col)[:])
-        mean = data.mean(0).unsqueeze(0).clone()
-        std = data.std(0).unsqueeze(0).clone()
-        return lambda x: ((x - mean) / std).float()
+    def get_column_normalizer(dataset, source: str, target: str):
+        """Get normalizer for a specific column in the dataset."""
+        data = torch.from_numpy(dataset.get_col_data(source)[:])
+        data = data[~torch.isnan(data).any(dim=1)]
+        mean = data.mean(0, keepdim=True).clone()
+        std = data.std(0, keepdim=True).clone()
+
+        def norm_fn(x):
+            return ((x - mean) / std).float()
+
+        normalizer = spt.data.transforms.WrapTorchTransform(
+            norm_fn, source=source, target=target
+        )
+
+        return normalizer
 
     cache_dir = None
     if not hasattr(cfg, 'local_cache_dir'):
@@ -55,22 +64,16 @@ def get_data(cfg):
         keys_to_cache=['action', 'proprio'],
     )
 
-    norm_action_transform = norm_col_transform(dataset, 'action')
-    norm_proprio_transform = norm_col_transform(dataset, 'proprio')
+    norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
+    norm_proprio_transform = get_column_normalizer(
+        dataset, 'proprio', 'proprio'
+    )
 
     # Apply transforms to all steps and goal observations
     transform = spt.data.transforms.Compose(
         get_img_pipeline('pixels', 'pixels', cfg.image_size),
-        spt.data.transforms.WrapTorchTransform(
-            norm_action_transform,
-            source='action',
-            target='action',
-        ),
-        spt.data.transforms.WrapTorchTransform(
-            norm_proprio_transform,
-            source='proprio',
-            target='proprio',
-        ),
+        norm_action_transform,
+        norm_proprio_transform,
     )
 
     dataset.transform = transform
@@ -144,6 +147,25 @@ def get_gciql_value_model(cfg):
             prefix='goal_',
         )
 
+        # NaN detection after encoding
+        nan_checks = {
+            'proprio': batch.get('proprio'),
+            'goal_proprio': batch.get('goal_proprio'),
+            'proprio_embed': batch.get('proprio_embed'),
+            'proprio_goal_embed': batch.get('proprio_goal_embed'),
+            'pixels_embed': batch.get('pixels_embed'),
+            'pixels_goal_embed': batch.get('pixels_goal_embed'),
+            'embed': batch.get('embed'),
+            'goal_embed': batch.get('goal_embed'),
+        }
+        for name, tensor in nan_checks.items():
+            if tensor is not None and torch.isnan(tensor).any():
+                logging.warning(
+                    f'NaN detected in {name}! '
+                    f'count={torch.isnan(tensor).sum().item()}, '
+                    f'shape={tensor.shape}'
+                )
+
         # Use history to predict values
         embedding = batch['embed'][
             :, : cfg.dinowm.history_size, :, :
@@ -193,10 +215,30 @@ def get_gciql_value_model(cfg):
             reward = -(~eq_mask).float().unsqueeze(-1)
             value_target += reward
 
+        # NaN detection after value prediction
+        if torch.isnan(value_pred).any():
+            logging.warning(
+                f'NaN in value_pred! count={torch.isnan(value_pred).sum().item()}, '
+                f'min={value_pred[~torch.isnan(value_pred)].min().item() if not torch.isnan(value_pred).all() else "all_nan"}, '
+                f'max={value_pred[~torch.isnan(value_pred)].max().item() if not torch.isnan(value_pred).all() else "all_nan"}'
+            )
+        if torch.isnan(value_target).any():
+            logging.warning(
+                f'NaN in value_target! count={torch.isnan(value_target).sum().item()}'
+            )
+
         # Compute value loss
         value_loss = expectile_loss(value_pred, value_target.detach())
         batch['value_loss'] = value_loss
         batch['loss'] = value_loss
+
+        # NaN detection after loss computation
+        if torch.isnan(value_loss):
+            logging.warning(
+                f'NaN in value_loss! '
+                f'value_pred range: [{value_pred.min().item():.4f}, {value_pred.max().item():.4f}], '
+                f'value_target range: [{value_target.min().item():.4f}, {value_target.max().item():.4f}]'
+            )
 
         # Log all losses
         prefix = 'train/' if self.training else 'val/'
