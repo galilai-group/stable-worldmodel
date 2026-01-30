@@ -168,14 +168,34 @@ def get_gciql_value_model(cfg):
             value_target = gamma * self.model.value_predictor.forward_teacher(
                 target_embedding_flat, goal_embedding_flat
             )
+            # Compare raw data instead of embeddings (embeddings differ due to GPU non-determinism)
+            obs_pixels = batch['pixels'][
+                :, : cfg.dinowm.history_size
+            ]  # (B, T, C, H, W)
+            goal_pixels_repeated = repeat(
+                batch['goal_pixels'],
+                'b 1 c h w -> b t c h w',
+                t=obs_pixels.shape[1],
+            )
+            obs_proprio = batch['proprio'][
+                :, : cfg.dinowm.history_size
+            ]  # (B, T, D)
+            goal_proprio_repeated = repeat(
+                batch['goal_proprio'], 'b 1 d -> b t d', t=obs_proprio.shape[1]
+            )
+            pixels_match = (obs_pixels == goal_pixels_repeated).all(
+                dim=(2, 3, 4)
+            )  # (B, T)
+            proprio_match = (obs_proprio == goal_proprio_repeated).all(
+                dim=2
+            )  # (B, T)
+            eq_mask = pixels_match & proprio_match  # (B, T)
+            reward = -(~eq_mask).float().unsqueeze(-1)
+            value_target += reward
+            # Keep for logging
             goal_embedding_repeated = repeat(
                 goal_embedding, 'b 1 p d -> b t p d', t=embedding.shape[1]
             )
-            eq_mask = torch.isclose(
-                embedding, goal_embedding_repeated, atol=1e-3, rtol=1e-3
-            ).all(dim=(-1, -2))
-            reward = -(~eq_mask).float().unsqueeze(-1)
-            value_target += reward
 
         # Compute value loss
         value_loss = expectile_loss(value_pred, value_target.detach())
@@ -422,12 +442,28 @@ def get_gciql_action_model(cfg, trained_value_model):
             value_target = self.model.value_predictor(
                 target_embedding_flat, goal_embedding_flat
             )
-            goal_embedding_repeated = repeat(
-                goal_embedding, 'b 1 p d -> b t p d', t=embedding.shape[1]
+            # Compare raw data instead of embeddings (embeddings differ due to GPU non-determinism)
+            obs_pixels = batch['pixels'][
+                :, : cfg.dinowm.history_size
+            ]  # (B, T, C, H, W)
+            goal_pixels_repeated = repeat(
+                batch['goal_pixels'],
+                'b 1 c h w -> b t c h w',
+                t=obs_pixels.shape[1],
             )
-            eq_mask = torch.isclose(
-                embedding, goal_embedding_repeated, atol=1e-3, rtol=1e-3
-            ).all(dim=(-1, -2))
+            obs_proprio = batch['proprio'][
+                :, : cfg.dinowm.history_size
+            ]  # (B, T, D)
+            goal_proprio_repeated = repeat(
+                batch['goal_proprio'], 'b 1 d -> b t d', t=obs_proprio.shape[1]
+            )
+            pixels_match = (obs_pixels == goal_pixels_repeated).all(
+                dim=(2, 3, 4)
+            )  # (B, T)
+            proprio_match = (obs_proprio == goal_proprio_repeated).all(
+                dim=2
+            )  # (B, T)
+            eq_mask = pixels_match & proprio_match  # (B, T)
             reward = -(~eq_mask).float().unsqueeze(-1)
             advantage = reward + gamma * value_target - value  # (B, T, 1)
 
