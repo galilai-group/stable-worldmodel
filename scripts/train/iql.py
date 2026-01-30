@@ -192,10 +192,6 @@ def get_gciql_value_model(cfg):
             eq_mask = pixels_match & proprio_match  # (B, T)
             reward = -(~eq_mask).float().unsqueeze(-1)
             value_target += reward
-            # Keep for logging
-            goal_embedding_repeated = repeat(
-                goal_embedding, 'b 1 p d -> b t p d', t=embedding.shape[1]
-            )
 
         # Compute value loss
         value_loss = expectile_loss(value_pred, value_target.detach())
@@ -212,97 +208,101 @@ def get_gciql_value_model(cfg):
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
         self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
-        # Log diagnostics for collapse detection
-        with torch.no_grad():
-            td_error = value_target - value_pred
-            embed_dist = (
-                (embedding - goal_embedding_repeated)
-                .pow(2)
-                .sum(dim=(-1, -2))
-                .sqrt()
-            )
+        # # Log diagnostics for collapse detection
+        # with torch.no_grad():
+        #     # Keep for logging
+        #     goal_embedding_repeated = repeat(
+        #         goal_embedding, 'b 1 p d -> b t p d', t=embedding.shape[1]
+        #     )
+        #     td_error = value_target - value_pred
+        #     embed_dist = (
+        #         (embedding - goal_embedding_repeated)
+        #         .pow(2)
+        #         .sum(dim=(-1, -2))
+        #         .sqrt()
+        #     )
 
-            # Check per-sample pixel AND proprio match
-            first_frame_pixels = batch['pixels'][:, 0]  # (B, C, H, W)
-            goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
-            first_frame_proprio = batch['proprio'][:, 0]  # (B, D)
-            goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
+        #     # Check per-sample pixel AND proprio match
+        #     first_frame_pixels = batch['pixels'][:, 0]  # (B, C, H, W)
+        #     goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
+        #     first_frame_proprio = batch['proprio'][:, 0]  # (B, D)
+        #     goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
 
-            # Per-sample checks
-            pixels_match_per_sample = (
-                first_frame_pixels == goal_pixels_squeezed
-            ).all(dim=(1, 2, 3))  # (B,)
-            proprio_match_per_sample = (
-                first_frame_proprio == goal_proprio_squeezed
-            ).all(dim=1)  # (B,)
-            both_match = pixels_match_per_sample & proprio_match_per_sample
+        #     # Per-sample checks
+        #     pixels_match_per_sample = (
+        #         first_frame_pixels == goal_pixels_squeezed
+        #     ).all(dim=(1, 2, 3))  # (B,)
+        #     proprio_match_per_sample = (
+        #         first_frame_proprio == goal_proprio_squeezed
+        #     ).all(dim=1)  # (B,)
+        #     both_match = pixels_match_per_sample & proprio_match_per_sample
 
-            # Check embedding components separately
-            # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
-            pixels_embed_obs = batch['pixels_embed'][:, 0]  # (B, P, D_pixels)
-            pixels_embed_goal = batch['pixels_goal_embed'][
-                :, 0
-            ]  # (B, P, D_pixels)
-            proprio_embed_obs = batch['proprio_embed'][:, 0]  # (B, D_proprio)
-            proprio_embed_goal = batch['proprio_goal_embed'][
-                :, 0
-            ]  # (B, D_proprio)
+        #     # Check embedding components separately
+        #     # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
+        #     pixels_embed_obs = batch['pixels_embed'][:, 0]  # (B, P, D_pixels)
+        #     pixels_embed_goal = batch['pixels_goal_embed'][
+        #         :, 0
+        #     ]  # (B, P, D_pixels)
+        #     proprio_embed_obs = batch['proprio_embed'][:, 0]  # (B, D_proprio)
+        #     proprio_embed_goal = batch['proprio_goal_embed'][
+        #         :, 0
+        #     ]  # (B, D_proprio)
 
-            if both_match.any():
-                pixel_embed_diff = (
-                    (
-                        pixels_embed_obs[both_match]
-                        - pixels_embed_goal[both_match]
-                    )
-                    .abs()
-                    .max()
-                )
-                proprio_embed_diff = (
-                    (
-                        proprio_embed_obs[both_match]
-                        - proprio_embed_goal[both_match]
-                    )
-                    .abs()
-                    .max()
-                )
-            else:
-                pixel_embed_diff = torch.tensor(-1.0, device=embedding.device)
-                proprio_embed_diff = torch.tensor(
-                    -1.0, device=embedding.device
-                )
+        #     if both_match.any():
+        #         pixel_embed_diff = (
+        #             (
+        #                 pixels_embed_obs[both_match]
+        #                 - pixels_embed_goal[both_match]
+        #             )
+        #             .abs()
+        #             .max()
+        #         )
+        #         proprio_embed_diff = (
+        #             (
+        #                 proprio_embed_obs[both_match]
+        #                 - proprio_embed_goal[both_match]
+        #             )
+        #             .abs()
+        #             .max()
+        #         )
+        #     else:
+        #         pixel_embed_diff = torch.tensor(-1.0, device=embedding.device)
+        #         proprio_embed_diff = torch.tensor(
+        #             -1.0, device=embedding.device
+        #         )
 
-            self.log_dict(
-                {
-                    f'{prefix}debug_pixels_match_rate': pixels_match_per_sample.float().mean(),
-                    f'{prefix}debug_proprio_match_rate': proprio_match_per_sample.float().mean(),
-                    f'{prefix}debug_both_match_rate': both_match.float().mean(),
-                    f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
-                    f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
-                },
-                on_step=True,
-                sync_dist=True,
-            )
+        #     self.log_dict(
+        #         {
+        #             f'{prefix}debug_pixels_match_rate': pixels_match_per_sample.float().mean(),
+        #             f'{prefix}debug_proprio_match_rate': proprio_match_per_sample.float().mean(),
+        #             f'{prefix}debug_both_match_rate': both_match.float().mean(),
+        #             f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
+        #             f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
+        #         },
+        #         on_step=True,
+        #         sync_dist=True,
+        #     )
 
-            collapse_diagnostics = {
-                # Value prediction stats - std ≈ 0 indicates collapse
-                f'{prefix}value_pred_mean': value_pred.mean(),
-                f'{prefix}value_pred_std': value_pred.std(),
-                f'{prefix}value_pred_min': value_pred.min(),
-                f'{prefix}value_pred_max': value_pred.max(),
-                # Value target stats
-                f'{prefix}value_target_mean': value_target.mean(),
-                f'{prefix}value_target_std': value_target.std(),
-                # Reward stats - mean ≈ -1 means reward too sparse
-                f'{prefix}reward_mean': reward.mean(),
-                f'{prefix}goal_match_rate': eq_mask.float().mean(),
-                # TD error stats - std ≈ 0 indicates no learning signal
-                f'{prefix}td_error_mean': td_error.mean(),
-                f'{prefix}td_error_std': td_error.std(),
-                # Embedding distance to goal
-                f'{prefix}embed_goal_dist_mean': embed_dist.mean(),
-                f'{prefix}embed_goal_dist_std': embed_dist.std(),
-            }
-            self.log_dict(collapse_diagnostics, on_step=True, sync_dist=True)
+        #     collapse_diagnostics = {
+        #         # Value prediction stats - std ≈ 0 indicates collapse
+        #         f'{prefix}value_pred_mean': value_pred.mean(),
+        #         f'{prefix}value_pred_std': value_pred.std(),
+        #         f'{prefix}value_pred_min': value_pred.min(),
+        #         f'{prefix}value_pred_max': value_pred.max(),
+        #         # Value target stats
+        #         f'{prefix}value_target_mean': value_target.mean(),
+        #         f'{prefix}value_target_std': value_target.std(),
+        #         # Reward stats - mean ≈ -1 means reward too sparse
+        #         f'{prefix}reward_mean': reward.mean(),
+        #         f'{prefix}goal_match_rate': eq_mask.float().mean(),
+        #         # TD error stats - std ≈ 0 indicates no learning signal
+        #         f'{prefix}td_error_mean': td_error.mean(),
+        #         f'{prefix}td_error_std': td_error.std(),
+        #         # Embedding distance to goal
+        #         f'{prefix}embed_goal_dist_mean': embed_dist.mean(),
+        #         f'{prefix}embed_goal_dist_std': embed_dist.std(),
+        #     }
+        #     self.log_dict(collapse_diagnostics, on_step=True, sync_dist=True)
 
         return batch
 
