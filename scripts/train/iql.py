@@ -78,9 +78,15 @@ def get_data(cfg):
 
     dataset.transform = transform
 
+    goal_probs = (
+        cfg.goal_probabilities.random,
+        cfg.goal_probabilities.future,
+        cfg.goal_probabilities.current,
+    )
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=(0.3, 0.5, 0.2),  # random, future, current
+        goal_probabilities=goal_probs,
+        gamma=cfg.goal_gamma,
         goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
         seed=cfg.seed,
     )
