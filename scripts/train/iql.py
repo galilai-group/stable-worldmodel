@@ -373,12 +373,22 @@ def get_gciql_value_model(cfg):
         **cfg.predictor,
     )
 
-    value_predictor = swm.wm.iql.Predictor(
+    # Original Predictor-based value function (uses cross-attention)
+    # value_predictor = swm.wm.iql.Predictor(
+    #     num_patches=num_patches,
+    #     num_frames=cfg.dinowm.history_size,
+    #     dim=embedding_dim,
+    #     out_dim=1,
+    #     non_positive_output=True,
+    #     **cfg.predictor,
+    # )
+
+    # Metric-based value function: V(s, g) = -||φ(s) - φ(g)||
+    value_predictor = swm.wm.iql.MetricValuePredictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
-        out_dim=1,
-        non_positive_output=True,
+        embed_dim=cfg.get('value_embed_dim', 64),
         **cfg.predictor,
     )
     wrapped_value_predictor = spt.TeacherStudentWrapper(
