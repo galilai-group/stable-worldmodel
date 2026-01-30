@@ -1,0 +1,48 @@
+#output_dir: ./outputs
+
+defaults:
+  - launcher: local
+  - _self_
+
+
+output_model_name: dinoiql
+
+trainer:
+  max_epochs: 100
+  strategy: auto #ddp
+  devices: 1
+  accelerator: gpu
+  precision: 16-mixed
+
+batch_size: 32
+num_workers: ${cpus_per_task}
+train_split: 0.9
+seed: 42
+
+image_size: 224
+patch_size: 14
+
+n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size}'}
+frameskip: 1
+
+dinowm:
+  history_size: 3
+  num_preds: 1
+  proprio_dim: 4
+  proprio_embed_dim: 10
+  action_dim: 2
+  action_embed_dim: 10
+
+predictor:
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+
+predictor_lr: 5e-4
+proprio_encoder_lr: 5e-4
+action_encoder_lr: 5e-4
+
+dump_object: True
