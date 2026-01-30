@@ -202,34 +202,62 @@ def get_gciql_value_model(cfg):
                 .sqrt()
             )
 
-            # Check per-sample pixel match (not batch-wide)
+            # Check per-sample pixel AND proprio match
             first_frame_pixels = batch['pixels'][:, 0]  # (B, C, H, W)
             goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
+            first_frame_proprio = batch['proprio'][:, 0]  # (B, D)
+            goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
 
-            # Per-sample: are all pixels identical?
+            # Per-sample checks
             pixels_match_per_sample = (
                 first_frame_pixels == goal_pixels_squeezed
             ).all(dim=(1, 2, 3))  # (B,)
-            pixels_match_rate = pixels_match_per_sample.float().mean()
+            proprio_match_per_sample = (
+                first_frame_proprio == goal_proprio_squeezed
+            ).all(dim=1)  # (B,)
+            both_match = pixels_match_per_sample & proprio_match_per_sample
 
-            # For samples where pixels DO match, check embedding diff
-            if pixels_match_per_sample.any():
-                matching_embed = embedding[
-                    pixels_match_per_sample, 0
-                ]  # matching samples, first frame
-                matching_goal = goal_embedding[pixels_match_per_sample, 0]
-                embed_diff_when_pixels_match = (
-                    (matching_embed - matching_goal).abs().max()
+            # Check embedding components separately
+            # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
+            pixels_embed_obs = batch['pixels_embed'][:, 0]  # (B, P, D_pixels)
+            pixels_embed_goal = batch['pixels_goal_embed'][
+                :, 0
+            ]  # (B, P, D_pixels)
+            proprio_embed_obs = batch['proprio_embed'][:, 0]  # (B, D_proprio)
+            proprio_embed_goal = batch['proprio_goal_embed'][
+                :, 0
+            ]  # (B, D_proprio)
+
+            if both_match.any():
+                pixel_embed_diff = (
+                    (
+                        pixels_embed_obs[both_match]
+                        - pixels_embed_goal[both_match]
+                    )
+                    .abs()
+                    .max()
+                )
+                proprio_embed_diff = (
+                    (
+                        proprio_embed_obs[both_match]
+                        - proprio_embed_goal[both_match]
+                    )
+                    .abs()
+                    .max()
                 )
             else:
-                embed_diff_when_pixels_match = torch.tensor(
+                pixel_embed_diff = torch.tensor(-1.0, device=embedding.device)
+                proprio_embed_diff = torch.tensor(
                     -1.0, device=embedding.device
-                )  # sentinel value
+                )
 
             self.log_dict(
                 {
-                    f'{prefix}debug_pixels_match_rate': pixels_match_rate,
-                    f'{prefix}debug_embed_diff_when_match': embed_diff_when_pixels_match,
+                    f'{prefix}debug_pixels_match_rate': pixels_match_per_sample.float().mean(),
+                    f'{prefix}debug_proprio_match_rate': proprio_match_per_sample.float().mean(),
+                    f'{prefix}debug_both_match_rate': both_match.float().mean(),
+                    f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
+                    f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
                 },
                 on_step=True,
                 sync_dist=True,
