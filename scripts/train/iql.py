@@ -265,27 +265,29 @@ def get_gciql_value_model(cfg):
             )
 
             # Check per-sample pixel AND proprio match
-            first_frame_pixels = batch['pixels'][:, 0]  # (B, C, H, W)
+            # Compare last frame of clip (goal is sampled from last frame or later)
+            last_frame_pixels = batch['pixels'][:, -1]  # (B, C, H, W)
             goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
-            first_frame_proprio = batch['proprio'][:, 0]  # (B, D)
+            last_frame_proprio = batch['proprio'][:, -1]  # (B, D)
             goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
 
             # Per-sample checks
             pixels_match_per_sample = (
-                first_frame_pixels == goal_pixels_squeezed
+                last_frame_pixels == goal_pixels_squeezed
             ).all(dim=(1, 2, 3))  # (B,)
             proprio_match_per_sample = (
-                first_frame_proprio == goal_proprio_squeezed
+                last_frame_proprio == goal_proprio_squeezed
             ).all(dim=1)  # (B,)
             both_match = pixels_match_per_sample & proprio_match_per_sample
 
             # Check embedding components separately
             # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
-            pixels_embed_obs = batch['pixels_embed'][:, 0]  # (B, P, D_pixels)
+            # Compare last frame of clip (goal is sampled from last frame or later)
+            pixels_embed_obs = batch['pixels_embed'][:, -1]  # (B, P, D_pixels)
             pixels_embed_goal = batch['pixels_goal_embed'][
                 :, 0
             ]  # (B, P, D_pixels)
-            proprio_embed_obs = batch['proprio_embed'][:, 0]  # (B, D_proprio)
+            proprio_embed_obs = batch['proprio_embed'][:, -1]  # (B, D_proprio)
             proprio_embed_goal = batch['proprio_goal_embed'][
                 :, 0
             ]  # (B, D_proprio)
