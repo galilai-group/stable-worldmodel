@@ -13,7 +13,7 @@ patch_size: 14
 # Dataset / Environment definitions
 # ===============================
 datasets:
-  pusht:
+  tworoom:
     training_dataset: tworoom  # dataset used during training for preprocessing stats
     env:
       env_name: swm/TwoRoom-v1
