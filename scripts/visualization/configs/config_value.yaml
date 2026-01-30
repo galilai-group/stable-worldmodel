@@ -14,10 +14,10 @@ patch_size: 14
 # ===============================
 datasets:
   pusht:
-    training_dataset: pusht_expert_train  # dataset used during training for preprocessing stats
+    training_dataset: tworoom  # dataset used during training for preprocessing stats
     env:
-      env_name: swm/PushT-v1
-      history_size: 3
+      env_name: swm/TwoRoom-v1
+      history_size: 1
       frame_skip: 1
       grid_size: 20
       default_variation: ["agent.start_position"]
@@ -26,4 +26,18 @@ datasets:
             fields: null
             values: null
     world_model:
-      model_name: iql10_policy_epoch_9
+      model_name: iql_tworoom_value_epoch_3
+  # pusht:
+  #   training_dataset: pusht_expert_train  # dataset used during training for preprocessing stats
+  #   env:
+  #     env_name: swm/PushT-v1
+  #     history_size: 3
+  #     frame_skip: 1
+  #     grid_size: 20
+  #     default_variation: ["agent.start_position"]
+  #     variations:
+  #       - variation:
+  #           fields: null
+  #           values: null
+  #   world_model:
+  #     model_name: iql10_policy_epoch_9
