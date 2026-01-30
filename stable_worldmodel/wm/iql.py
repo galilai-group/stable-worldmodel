@@ -638,9 +638,9 @@ class MetricValuePredictor(nn.Module):
         g_embed = self.embed_proj(g_embed)  # (B, 1, embed_dim)
 
         # Compute negative L2 distance: V(s, g) = -||φ(s) - φ(g)||
-        value = -torch.norm(
-            x_embed - g_embed, dim=-1, keepdim=True
-        )  # (B, T, 1)
+        diff = x_embed - g_embed
+        squared_dist = (diff**2).sum(dim=-1, keepdim=True)
+        value = -torch.sqrt(torch.clamp(squared_dist, min=1e-6))  # (B, T, 1)
 
         return value
 
