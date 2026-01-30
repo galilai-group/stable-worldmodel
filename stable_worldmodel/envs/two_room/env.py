@@ -184,7 +184,7 @@ class TwoRoomEnv(gym.Env):
                             ),
                             constrain_fn=lambda x: (
                                 not self.check_collide(x, entity='goal')
-                                and self.check_other_room(x)
+                                # and self.check_other_room(x)
                             ),
                         ),
                     },
