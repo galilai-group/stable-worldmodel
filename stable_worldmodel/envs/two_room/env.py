@@ -307,7 +307,7 @@ class TwoRoomEnv(gym.Env):
 
         # Build observation
         state = self._get_obs()
-        proprio = np.concatenate((state[:2], state[-2:]))
+        proprio = np.concatenate((state[:2], state[-1:]))
         observation = {'proprio': proprio, 'state': state}
 
         info = self._get_info()
@@ -342,7 +342,7 @@ class TwoRoomEnv(gym.Env):
 
         # Build observation
         state = self._get_obs()
-        proprio = np.concatenate((state[:2], state[-2:]))
+        proprio = np.concatenate((state[:2], state[-1:]))
         observation = {'proprio': proprio, 'state': state}
 
         # Calculate goal overlap
@@ -572,11 +572,10 @@ class TwoRoomEnv(gym.Env):
 
     def _get_obs(self):
         """Build observation array."""
-        speed = self.variation_space['agent']['speed'].value.item()
         obs = (
             tuple(self.agent.position)
             + tuple(self.goal.position)
-            + (self.energy, speed)
+            + (self.energy)
         )
         return np.array(obs, dtype=np.float64)
 
