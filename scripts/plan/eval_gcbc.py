@@ -33,7 +33,10 @@ def img_transform():
 
 
 def get_episodes_length(dataset, episodes):
-    episode_idx = dataset.get_col_data('episode_idx')
+    col_name = (
+        'episode_idx' if 'episode_idx' in dataset.column_names else 'ep_idx'
+    )
+    episode_idx = dataset.get_col_data(col_name)
     step_idx = dataset.get_col_data('step_idx')
     lengths = []
     for ep_id in episodes:
