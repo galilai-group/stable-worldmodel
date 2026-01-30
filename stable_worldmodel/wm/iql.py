@@ -490,6 +490,161 @@ class Transformer(nn.Module):
         return self.norm(x)
 
 
+class SelfAttentionTransformer(nn.Module):
+    """
+    Transformer with only self-attention (no cross-attention).
+    Used for embedding state and goal separately in metric-based value functions.
+    """
+
+    def __init__(
+        self,
+        dim,
+        depth,
+        heads,
+        dim_head,
+        mlp_dim,
+        dropout=0.0,
+        num_patches=1,
+        num_frames=1,
+        causal=True,
+    ):
+        super().__init__()
+        self.num_patches = num_patches
+        self.num_frames = num_frames
+        self.norm = nn.LayerNorm(dim)
+
+        self.layers = nn.ModuleList([])
+        for i in range(depth):
+            if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
+                att_type = 'frame_agg'
+            else:
+                att_type = 'self'
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            heads=heads,
+                            dim_head=dim_head,
+                            dropout=dropout,
+                            num_patches=num_patches,
+                            num_frames=num_frames,
+                            att_type=att_type,
+                            causal=causal,
+                        ),
+                        FeedForward(dim, mlp_dim, dropout=dropout),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        """
+        Process state sequence with causal self-attention.
+        Args:
+            x: (B, T*P, dim)
+        Returns:
+            out: (B, T, dim) - one embedding per frame
+        """
+        for i, (attn, ff) in enumerate(self.layers):
+            if i == len(self.layers) - 1:  # frame aggregation layer
+                x = attn(x)
+                x = ff(x)
+            else:  # self-attention
+                x = attn(x) + x
+                x = ff(x) + x
+
+        return self.norm(x)
+
+
+class MetricValuePredictor(nn.Module):
+    """
+    Value predictor using L2 distance in learned embedding space.
+
+    V(s, g) = -||φ(s) - φ(g)||₂
+
+    This architecture embeds state and goal separately (no cross-attention)
+    and computes value as the negative L2 distance between embeddings.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_patches,
+        num_frames,
+        dim,
+        depth,
+        heads,
+        mlp_dim,
+        embed_dim=64,
+        dim_head=64,
+        dropout=0.0,
+        emb_dropout=0.0,
+        causal=True,
+    ):
+        super().__init__()
+
+        self.num_patches = num_patches
+        self.num_frames = num_frames
+        self.embed_dim = embed_dim
+
+        # Positional embeddings for state (multiple frames)
+        self.pos_embedding = nn.Parameter(
+            torch.randn(1, num_frames * num_patches, dim)
+        )
+        # Positional embeddings for goal (single frame)
+        self.pos_embedding_goal = nn.Parameter(
+            torch.randn(1, num_patches, dim)
+        )
+        self.dropout = nn.Dropout(emb_dropout)
+
+        # Self-attention transformer (shared for state and goal)
+        self.transformer = SelfAttentionTransformer(
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            num_patches,
+            num_frames,
+            causal=causal,
+        )
+
+        # Project to learned embedding space
+        self.embed_proj = nn.Linear(dim, embed_dim)
+
+    def forward(self, x, g):
+        """
+        Compute value as negative L2 distance in embedding space.
+
+        Args:
+            x: (B, T*P, dim) - observation embeddings
+            g: (B, P, dim) - goal embeddings
+        Returns:
+            value: (B, T, 1) - negative L2 distance per frame
+        """
+        # Add positional embeddings
+        x = x + self.pos_embedding[:, : x.shape[1]]
+        g = g + self.pos_embedding_goal[:, : g.shape[1]]
+        x = self.dropout(x)
+        g = self.dropout(g)
+
+        # Embed state and goal separately through transformer
+        x_embed = self.transformer(x)  # (B, T, dim)
+        g_embed = self.transformer(g)  # (B, 1, dim)
+
+        # Project to learned embedding space
+        x_embed = self.embed_proj(x_embed)  # (B, T, embed_dim)
+        g_embed = self.embed_proj(g_embed)  # (B, 1, embed_dim)
+
+        # Compute negative L2 distance: V(s, g) = -||φ(s) - φ(g)||
+        value = -torch.norm(
+            x_embed - g_embed, dim=-1, keepdim=True
+        )  # (B, T, 1)
+
+        return value
+
+
 class ExpectileLoss(nn.Module):
     def __init__(self, tau=0.9):
         super().__init__()
