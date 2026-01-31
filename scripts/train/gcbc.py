@@ -33,12 +33,21 @@ def get_data(cfg):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    def norm_col_transform(dataset, col='pixels'):
-        """Normalize column to zero mean, unit variance."""
-        data = torch.from_numpy(dataset.get_col_data(col)[:])
-        mean = data.mean(0).unsqueeze(0).clone()
-        std = data.std(0).unsqueeze(0).clone()
-        return lambda x: ((x - mean) / std).float()
+    def get_column_normalizer(dataset, source: str, target: str):
+        """Get normalizer for a specific column in the dataset."""
+        data = torch.from_numpy(dataset.get_col_data(source)[:])
+        data = data[~torch.isnan(data).any(dim=1)]
+        mean = data.mean(0, keepdim=True).clone()
+        std = data.std(0, keepdim=True).clone()
+
+        def norm_fn(x):
+            return ((x - mean) / std).float()
+
+        normalizer = spt.data.transforms.WrapTorchTransform(
+            norm_fn, source=source, target=target
+        )
+
+        return normalizer
 
     cache_dir = None
     if not hasattr(cfg, 'local_cache_dir'):
@@ -54,22 +63,16 @@ def get_data(cfg):
         keys_to_cache=['action', 'proprio'],
     )
 
-    norm_action_transform = norm_col_transform(dataset, 'action')
-    norm_proprio_transform = norm_col_transform(dataset, 'proprio')
+    norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
+    norm_proprio_transform = get_column_normalizer(
+        dataset, 'proprio', 'proprio'
+    )
 
     # Apply transforms to all steps and goal observations
     transform = spt.data.transforms.Compose(
         get_img_pipeline('pixels', 'pixels', cfg.image_size),
-        spt.data.transforms.WrapTorchTransform(
-            norm_action_transform,
-            source='action',
-            target='action',
-        ),
-        spt.data.transforms.WrapTorchTransform(
-            norm_proprio_transform,
-            source='proprio',
-            target='proprio',
-        ),
+        norm_action_transform,
+        norm_proprio_transform,
     )
 
     dataset.transform = transform
@@ -125,12 +128,31 @@ def get_gcbc_policy(cfg):
         if proprio_key is not None:
             batch[proprio_key] = torch.nan_to_num(batch[proprio_key], 0.0)
         batch['action'] = torch.nan_to_num(batch['action'], 0.0)
+
+        # Debug: check inputs for NaN/Inf
+        def check_tensor(name, t):
+            if torch.isnan(t).any():
+                logging.error(
+                    f'NaN detected in {name}! Count: {torch.isnan(t).sum().item()}'
+                )
+            if torch.isinf(t).any():
+                logging.error(
+                    f'Inf detected in {name}! Count: {torch.isinf(t).sum().item()}'
+                )
+
+        check_tensor('pixels', batch['pixels'])
+        check_tensor('action', batch['action'])
+        if proprio_key:
+            check_tensor('proprio', batch[proprio_key])
+
+        # TODO this can be simplified by calling get_action
         # Encode all timesteps into latent embeddings
         batch = self.model.encode(
             batch,
             target='embed',
             pixels_key='pixels',
         )
+        check_tensor('embed', batch['embed'])
 
         # Encode goal into latent embedding
         batch = self.model.encode(
@@ -140,8 +162,10 @@ def get_gcbc_policy(cfg):
             emb_keys=['proprio'],
             prefix='goal_',
         )
+        check_tensor('goal_embed', batch['goal_embed'])
 
         # Use history to predict next actions
+        # TODO check this slicing is correct
         embedding = batch['embed'][
             :, : cfg.dinowm.history_size, :, :
         ]  # (B, T-1, patches, dim)
@@ -150,11 +174,24 @@ def get_gcbc_policy(cfg):
             embedding, goal_embedding
         )  # (B, num_preds, action_dim)
         action_target = batch['action'][
-            :, -cfg.dinowm.num_preds :, :
+            :, cfg.dinowm.num_preds :, :
         ]  # (B, num_preds, action_dim)
+
+        check_tensor('action_pred', action_pred)
+        check_tensor('action_target', action_target)
+        logging.debug(
+            f'action_pred range: [{action_pred.min():.4f}, {action_pred.max():.4f}]'
+        )
+        logging.debug(
+            f'action_target range: [{action_target.min():.4f}, {action_target.max():.4f}]'
+        )
 
         # Compute action MSE
         action_loss = F.mse_loss(action_pred, action_target)
+        if torch.isnan(action_loss):
+            logging.error(
+                f'NaN loss! action_pred has nan: {torch.isnan(action_pred).any()}, action_target has nan: {torch.isnan(action_target).any()}'
+            )
         batch['loss'] = action_loss
 
         # Log all losses
@@ -192,7 +229,7 @@ def get_gcbc_policy(cfg):
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
-        action_dim=effective_act_dim,
+        out_dim=effective_act_dim,
         **cfg.predictor,
     )
 
@@ -303,7 +340,7 @@ def run(cfg):
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
         filename=cfg.output_model_name,
-        epoch_interval=10,
+        epoch_interval=3,
     )
     # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 

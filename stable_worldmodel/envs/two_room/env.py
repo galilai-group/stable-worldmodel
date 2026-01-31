@@ -184,7 +184,7 @@ class TwoRoomEnv(gym.Env):
                             ),
                             constrain_fn=lambda x: (
                                 not self.check_collide(x, entity='goal')
-                                and self.check_other_room(x)
+                                # and self.check_other_room(x)
                             ),
                         ),
                     },
@@ -291,7 +291,8 @@ class TwoRoomEnv(gym.Env):
         goal_pos = options.get(
             'goal_state', self.variation_space['goal']['position'].value
         )
-        self._set_position(goal_pos, goal_pos)
+        self._set_state(goal_pos)
+        self._set_goal_state(goal_pos)
         self._goal = self.render()
 
         # Set initial positions
@@ -301,7 +302,8 @@ class TwoRoomEnv(gym.Env):
         goal_pos = options.get(
             'goal_state', self.variation_space['goal']['position'].value
         )
-        self._set_position(agent_pos, goal_pos)
+        self._set_state(agent_pos)
+        self._set_goal_state(goal_pos)
 
         # Build observation
         state = self._get_obs()
@@ -551,22 +553,22 @@ class TwoRoomEnv(gym.Env):
 
         return body
 
-    def _set_position(self, agent_position, goal_position):
-        """Set agent and goal positions."""
-        agent_pos = (
-            agent_position.tolist()
-            if isinstance(agent_position, np.ndarray)
-            else agent_position
-        )
-        goal_pos = (
-            goal_position.tolist()
-            if isinstance(goal_position, np.ndarray)
-            else goal_position
-        )
+    def _set_state(self, state):
+        """Set agent state from state array."""
+        if isinstance(state, np.ndarray):
+            state = state.tolist()
+        pos_agent = state[:2]
+        self.agent.position = pos_agent
 
-        self.agent.position = agent_pos
-        self.goal.position = goal_pos
+        # Run physics to take effect
         self.space.step(self.dt)
+
+    def _set_goal_state(self, goal_state):
+        """Set goal state from goal state array."""
+        if isinstance(goal_state, np.ndarray):
+            goal_state = goal_state.tolist()
+        pos_goal = goal_state[:2]
+        self.goal.position = pos_goal
 
     def _get_obs(self):
         """Build observation array."""

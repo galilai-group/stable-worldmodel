@@ -4,15 +4,16 @@ from einops import rearrange, repeat
 from torch import nn
 
 
-# TODO encode is very similar to the one in prejepa.py - consider refactoring
-# TODO models are very similar to the ones in prejepa.py - consider refactoring
+# TODO encode is very similar to the one in pyro.py - consider refactoring
+# TODO models are very similar to the ones in pyro.py - consider refactoring
 
 
-class GCBC(torch.nn.Module):
+class GCIQL(torch.nn.Module):
     def __init__(
         self,
         encoder,
-        predictor,
+        value_predictor,
+        action_predictor,
         extra_encoders=None,
         history_size=3,
         num_pred=1,
@@ -20,8 +21,9 @@ class GCBC(torch.nn.Module):
     ):
         super().__init__()
 
-        self.backbone = encoder
-        self.predictor = predictor
+        self.encoder = encoder
+        self.value_predictor = value_predictor
+        self.action_predictor = action_predictor
         self.extra_encoders = extra_encoders or {}
         self.history_size = history_size
         self.num_pred = num_pred
@@ -79,7 +81,7 @@ class GCBC(torch.nn.Module):
             if self.interpolate_pos_encoding
             else {}
         )
-        pixels_embed = self.backbone(pixels, **kwargs)
+        pixels_embed = self.encoder(pixels, **kwargs)
 
         if hasattr(pixels_embed, 'last_hidden_state'):
             pixels_embed = pixels_embed.last_hidden_state
@@ -118,7 +120,7 @@ class GCBC(torch.nn.Module):
                 [past_frames, pad_frames], dim=1
             )  # (B, T, C, H, W)
 
-            frame_embed = self.backbone(frames, **kwargs)  # (B, 1, P, emb_dim)
+            frame_embed = self.encoder(frames, **kwargs)  # (B, 1, P, emb_dim)
             frame_embed = frame_embed.last_hidden_state
             pixels_embeddings.append(frame_embed)
 
@@ -128,7 +130,7 @@ class GCBC(torch.nn.Module):
 
         return pixels_embed
 
-    def predict(self, embedding, embedding_goal):
+    def predict_actions(self, embedding, embedding_goal):
         """predict actions per frame
         Args:
             embedding: (B, T, P, d)
@@ -139,7 +141,22 @@ class GCBC(torch.nn.Module):
 
         embedding = rearrange(embedding, 'b t p d -> b (t p) d')
         embedding_goal = rearrange(embedding_goal, 'b t p d -> b (t p) d')
-        preds = self.predictor(embedding, embedding_goal)
+        preds = self.action_predictor(embedding, embedding_goal)
+
+        return preds
+
+    def predict_values(self, embedding, embedding_goal):
+        """predict values per frame
+        Args:
+            embedding: (B, T, P, d)
+            embedding_goal: (B, 1, P, d)
+        Returns:
+            preds: (B, T, 1)
+        """
+
+        embedding = rearrange(embedding, 'b t p d -> b (t p) d')
+        embedding_goal = rearrange(embedding_goal, 'b t p d -> b (t p) d')
+        preds = self.value_predictor(embedding, embedding_goal)
 
         return preds
 
@@ -158,7 +175,7 @@ class GCBC(torch.nn.Module):
             target='goal_embed',
         )
         # then predict action
-        actions = self.predict(info["embed"], info["goal_embed"])
+        actions = self.predict_actions(info['embed'], info['goal_embed'])
         # return last frame's action prediction
         actions = actions[:, -1, :]
         return actions
@@ -205,11 +222,13 @@ class Predictor(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         causal=True,
+        non_positive_output=False,
     ):
         super().__init__()
 
         self.num_patches = num_patches
         self.num_frames = num_frames
+        self.non_positive_output = non_positive_output
 
         self.pos_embedding = nn.Parameter(
             torch.randn(1, num_frames * (num_patches), dim)
@@ -219,7 +238,15 @@ class Predictor(nn.Module):
         )  # dim for the pos encodings of goal (assumed single image)
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(
-            dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames, causal=causal
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            num_patches,
+            num_frames,
+            causal=causal,
         )
         self.out_proj = nn.Linear(dim, out_dim)
 
@@ -239,6 +266,9 @@ class Predictor(nn.Module):
         x = self.transformer(x, g)
         # project to output dimension
         x = self.out_proj(x)
+        # apply non-positive constraint for value functions (rewards <= 0)
+        if self.non_positive_output:
+            x = -F.softplus(x)
         return x
 
 
@@ -260,12 +290,22 @@ class FeedForward(nn.Module):
 
 class Attention(nn.Module):
     def __init__(
-        self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1, att_type="self", causal=False
+        self,
+        dim,
+        heads=8,
+        dim_head=64,
+        dropout=0.0,
+        num_patches=1,
+        num_frames=1,
+        att_type='self',
+        causal=False,
     ):
         super().__init__()
-        assert att_type in {"self", "cross", "frame_agg"}, "attention type must be self, cross, or frame_agg"
+        assert att_type in {'self', 'cross', 'frame_agg'}, (
+            'attention type must be self, cross, or frame_agg'
+        )
         self.att_type = att_type
-        self.causal = causal and att_type in {"self", "frame_agg"}
+        self.causal = causal and att_type in {'self', 'frame_agg'}
         self.num_patches = num_patches
         self.num_frames = num_frames
 
@@ -280,19 +320,27 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
+        self.to_out = (
+            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
+            if project_out
+            else nn.Identity()
+        )
 
         # Frame aggregation: one learnable query token per frame
-        if self.att_type == "frame_agg":
-            self.frame_tokens = nn.Parameter(0.02 * torch.randn(1, num_frames, dim))
+        if self.att_type == 'frame_agg':
+            self.frame_tokens = nn.Parameter(
+                0.02 * torch.randn(1, num_frames, dim)
+            )
 
         # Register causal mask buffer
         if self.causal:
-            if self.att_type == "self":
+            if self.att_type == 'self':
                 mask = self._generate_causal_mask(num_patches, num_frames)
-            elif self.att_type == "frame_agg":
-                mask = self._generate_frame_agg_causal_mask(num_patches, num_frames)
-            self.register_buffer("causal_mask", mask)
+            elif self.att_type == 'frame_agg':
+                mask = self._generate_frame_agg_causal_mask(
+                    num_patches, num_frames
+                )
+            self.register_buffer('causal_mask', mask)
 
     def _generate_causal_mask(self, num_patches, num_frames):
         """Generate block-causal mask: tokens in frame t can attend to frames 0..t."""
@@ -302,14 +350,18 @@ class Attention(nn.Module):
         for t in range(num_frames):
             row_start = t * num_patches
             row_end = (t + 1) * num_patches
-            col_end = (t + 1) * num_patches  # Can attend up to and including frame t
+            col_end = (
+                t + 1
+            ) * num_patches  # Can attend up to and including frame t
             mask[row_start:row_end, :col_end] = True
 
         return mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T*P, T*P)
 
     def _generate_frame_agg_causal_mask(self, num_patches, num_frames):
         """Generate causal mask for frame aggregation: query t attends to patches from frames 0..t."""
-        mask = torch.zeros(num_frames, num_frames * num_patches, dtype=torch.bool)
+        mask = torch.zeros(
+            num_frames, num_frames * num_patches, dtype=torch.bool
+        )
 
         for t in range(num_frames):
             col_end = (t + 1) * num_patches
@@ -324,10 +376,12 @@ class Attention(nn.Module):
             c = self.norm_c(c)
             q_in = x
             kv_in = c
-        elif self.att_type == "frame_agg":
+        elif self.att_type == 'frame_agg':
             # Compute actual number of frames from input (supports variable-length sequences)
             actual_frames = N // self.num_patches
-            q_in = self.frame_tokens[:, :actual_frames, :].expand(B, -1, -1)  # (B, actual_frames, dim)
+            q_in = self.frame_tokens[:, :actual_frames, :].expand(
+                B, -1, -1
+            )  # (B, actual_frames, dim)
             kv_in = x  # (B, actual_frames*P, dim)
         else:  # self.att_type == "self"
             q_in = x
@@ -344,9 +398,9 @@ class Attention(nn.Module):
         # Apply causal mask if enabled
         if self.causal:
             attn_mask = self.causal_mask
-            if self.att_type == "self":
+            if self.att_type == 'self':
                 attn_mask = attn_mask[:, :, :N, :N]
-            elif self.att_type == "frame_agg":
+            elif self.att_type == 'frame_agg':
                 actual_frames = N // self.num_patches
                 attn_mask = attn_mask[:, :, :actual_frames, :N]
         else:
@@ -389,7 +443,7 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([])
         for i in range(depth):
             if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
-                att_type = "frame_agg"
+                att_type = 'frame_agg'
             elif i % 2 == 0:
                 att_type = 'self'
             else:
@@ -421,7 +475,9 @@ class Transformer(nn.Module):
             out: (B, T, dim) - one embedding per frame
         """
         for i, (attn, ff) in enumerate(self.layers):
-            if i == len(self.layers) - 1:  # frame aggregation layer - no residual (dimension changes)
+            if (
+                i == len(self.layers) - 1
+            ):  # frame aggregation layer - no residual (dimension changes)
                 x = attn(x)
                 x = ff(x)
             elif i % 2 == 0:  # self-attention with causal masking
@@ -432,3 +488,171 @@ class Transformer(nn.Module):
                 x = ff(x) + x
 
         return self.norm(x)
+
+
+class SelfAttentionTransformer(nn.Module):
+    """
+    Transformer with only self-attention (no cross-attention).
+    Used for embedding state and goal separately in metric-based value functions.
+    """
+
+    def __init__(
+        self,
+        dim,
+        depth,
+        heads,
+        dim_head,
+        mlp_dim,
+        dropout=0.0,
+        num_patches=1,
+        num_frames=1,
+        causal=True,
+    ):
+        super().__init__()
+        self.num_patches = num_patches
+        self.num_frames = num_frames
+        self.norm = nn.LayerNorm(dim)
+
+        self.layers = nn.ModuleList([])
+        for i in range(depth):
+            if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
+                att_type = 'frame_agg'
+            else:
+                att_type = 'self'
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            heads=heads,
+                            dim_head=dim_head,
+                            dropout=dropout,
+                            num_patches=num_patches,
+                            num_frames=num_frames,
+                            att_type=att_type,
+                            causal=causal,
+                        ),
+                        FeedForward(dim, mlp_dim, dropout=dropout),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        """
+        Process state sequence with causal self-attention.
+        Args:
+            x: (B, T*P, dim)
+        Returns:
+            out: (B, T, dim) - one embedding per frame
+        """
+        for i, (attn, ff) in enumerate(self.layers):
+            if i == len(self.layers) - 1:  # frame aggregation layer
+                x = attn(x)
+                x = ff(x)
+            else:  # self-attention
+                x = attn(x) + x
+                x = ff(x) + x
+
+        return self.norm(x)
+
+
+class MetricValuePredictor(nn.Module):
+    """
+    Value predictor using L2 distance in learned embedding space.
+
+    V(s, g) = -||φ(s) - φ(g)||₂
+
+    This architecture embeds state and goal separately (no cross-attention)
+    and computes value as the negative L2 distance between embeddings.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_patches,
+        num_frames,
+        dim,
+        depth,
+        heads,
+        mlp_dim,
+        embed_dim=64,
+        dim_head=64,
+        dropout=0.0,
+        emb_dropout=0.0,
+        causal=True,
+    ):
+        super().__init__()
+
+        self.num_patches = num_patches
+        self.num_frames = num_frames
+        self.embed_dim = embed_dim
+
+        # Positional embeddings for state (multiple frames)
+        self.pos_embedding = nn.Parameter(
+            torch.randn(1, num_frames * num_patches, dim)
+        )
+        # Positional embeddings for goal (single frame)
+        self.pos_embedding_goal = nn.Parameter(
+            torch.randn(1, num_patches, dim)
+        )
+        self.dropout = nn.Dropout(emb_dropout)
+
+        # Self-attention transformer (shared for state and goal)
+        self.transformer = SelfAttentionTransformer(
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            num_patches,
+            num_frames,
+            causal=causal,
+        )
+
+        # Project to learned embedding space
+        self.embed_proj = nn.Linear(dim, embed_dim)
+
+    def forward(self, x, g):
+        """
+        Compute value as negative L2 distance in embedding space.
+
+        Args:
+            x: (B, T*P, dim) - observation embeddings
+            g: (B, P, dim) - goal embeddings
+        Returns:
+            value: (B, T, 1) - negative L2 distance per frame
+        """
+        # Add positional embeddings
+        x = x + self.pos_embedding[:, : x.shape[1]]
+        g = g + self.pos_embedding_goal[:, : g.shape[1]]
+        x = self.dropout(x)
+        g = self.dropout(g)
+
+        # Embed state and goal separately through transformer
+        x_embed = self.transformer(x)  # (B, T, dim)
+        g_embed = self.transformer(g)  # (B, 1, dim)
+
+        # Project to learned embedding space
+        x_embed = self.embed_proj(x_embed)  # (B, T, embed_dim)
+        g_embed = self.embed_proj(g_embed)  # (B, 1, embed_dim)
+
+        # Compute negative L2 distance: V(s, g) = -||φ(s) - φ(g)||
+        diff = x_embed - g_embed
+        squared_dist = (diff**2).sum(dim=-1, keepdim=True)
+        value = -torch.sqrt(torch.clamp(squared_dist, min=1e-6))  # (B, T, 1)
+
+        return value
+
+
+class ExpectileLoss(nn.Module):
+    def __init__(self, tau=0.9):
+        super().__init__()
+        self.tau = tau
+
+    def forward(self, preds: torch.Tensor, targets: torch.Tensor):
+        residual = targets - preds
+        # expectile weights
+        weight = torch.abs(self.tau - (residual < 0).float())
+        loss = (weight * residual.pow(2)).mean()
+        return loss

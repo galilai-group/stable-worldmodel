@@ -613,16 +613,17 @@ class GoalDataset:
     ) -> tuple[int, int]:
         """Sample future (ep_idx, local_idx) from same episode using geometric distribution."""
         frameskip = self.dataset.frameskip
-        max_steps = (
-            self.episode_lengths[ep_idx] - 1 - local_start
-        ) // frameskip
+        num_steps = self.dataset.num_steps
+        # The minimum goal index should be the last frame of the clip
+        clip_end = local_start + (num_steps - 1) * frameskip
+        max_steps = (self.episode_lengths[ep_idx] - 1 - clip_end) // frameskip
         if max_steps <= 0:
-            return ep_idx, local_start
+            return ep_idx, clip_end
 
         p = max(1.0 - self.gamma, 1e-6)
         k = int(self.rng.geometric(p))
         k = min(k, max_steps)
-        local_idx = local_start + k * frameskip
+        local_idx = clip_end + k * frameskip
         return ep_idx, local_idx
 
     def _get_clip_info(self, idx: int) -> tuple[int, int]:
@@ -654,7 +655,11 @@ class GoalDataset:
                 ep_idx, local_start
             )
         else:  # current
-            goal_ep_idx, goal_local_idx = ep_idx, local_start
+            # Use the last frame of the clip, not the first
+            frameskip = self.dataset.frameskip
+            num_steps = self.dataset.num_steps
+            goal_local_idx = local_start + (num_steps - 1) * frameskip
+            goal_ep_idx = ep_idx
 
         # Load goal step
         goal_step = self._load_single_step(goal_ep_idx, goal_local_idx)
