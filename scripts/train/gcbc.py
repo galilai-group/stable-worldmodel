@@ -79,7 +79,7 @@ def get_data(cfg):
 
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=(0.0, 1.0, 0.0),
+        goal_probabilities=(0.0, 0.0, 1.0, 0.0),
         goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
         seed=cfg.seed,
     )

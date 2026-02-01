@@ -527,15 +527,21 @@ class GoalDataset:
 
     Goals are sampled from:
       - random state (uniform over dataset steps)
-      - future state in same episode (Geom(1-gamma))
+      - geometric future state in same episode (Geom(1-gamma))
+      - uniform future state in same episode (uniform over future steps)
       - current state
-    with probabilities (0.3, 0.5, 0.2) by default.
+    with probabilities (0.3, 0.5, 0.0, 0.2) by default.
     """
 
     def __init__(
         self,
         dataset: Dataset,
-        goal_probabilities: tuple[float, float, float] = (0.3, 0.5, 0.2),
+        goal_probabilities: tuple[float, float, float, float] = (
+            0.3,
+            0.5,
+            0.0,
+            0.2,
+        ),
         gamma: float = 0.99,
         goal_keys: dict[str, str] | None = None,
         seed: int | None = None,
@@ -543,16 +549,16 @@ class GoalDataset:
         """
         Args:
             dataset: Base dataset to wrap.
-            goal_probabilities: Tuple of (p_random, p_future, p_current) for goal sampling.
-            gamma: Discount factor for future goal sampling.
+            goal_probabilities: Tuple of (p_random, p_geometric_future, p_uniform_future, p_current) for goal sampling.
+            gamma: Discount factor for geometric future goal sampling.
             goal_keys: Mapping of source observation keys to goal observation keys. If None, defaults to {"pixels": "goal", "proprio": "goal_proprio"}.
             seed: Random seed for goal sampling.
         """
         self.dataset = dataset
 
-        if len(goal_probabilities) != 3:
+        if len(goal_probabilities) != 4:
             raise ValueError(
-                'goal_probabilities must be a 3-tuple (random, future, current)'
+                'goal_probabilities must be a 4-tuple (random, geometric_future, uniform_future, current)'
             )
         if not np.isclose(sum(goal_probabilities), 1.0):
             raise ValueError('goal_probabilities must sum to 1.0')
@@ -589,11 +595,15 @@ class GoalDataset:
 
     def _sample_goal_kind(self) -> str:
         r = self.rng.random()
-        p_random, p_future, _ = self.goal_probabilities
+        p_random, p_geometric_future, p_uniform_future, _ = (
+            self.goal_probabilities
+        )
         if r < p_random:
             return 'random'
-        if r < p_random + p_future:
-            return 'future'
+        if r < p_random + p_geometric_future:
+            return 'geometric_future'
+        if r < p_random + p_geometric_future + p_uniform_future:
+            return 'uniform_future'
         return 'current'
 
     def _sample_random_step(self) -> tuple[int, int]:
@@ -608,7 +618,7 @@ class GoalDataset:
         local_idx = flat_idx - prev
         return ep_idx, local_idx
 
-    def _sample_future_step(
+    def _sample_geometric_future_step(
         self, ep_idx: int, local_start: int
     ) -> tuple[int, int]:
         """Sample future (ep_idx, local_idx) from same episode using geometric distribution."""
@@ -623,6 +633,22 @@ class GoalDataset:
         p = max(1.0 - self.gamma, 1e-6)
         k = int(self.rng.geometric(p))
         k = min(k, max_steps)
+        local_idx = clip_end + k * frameskip
+        return ep_idx, local_idx
+
+    def _sample_uniform_future_step(
+        self, ep_idx: int, local_start: int
+    ) -> tuple[int, int]:
+        """Sample future (ep_idx, local_idx) from same episode using uniform distribution."""
+        frameskip = self.dataset.frameskip
+        num_steps = self.dataset.num_steps
+        # The minimum goal index should be the last frame of the clip
+        clip_end = local_start + (num_steps - 1) * frameskip
+        max_steps = (self.episode_lengths[ep_idx] - 1 - clip_end) // frameskip
+        if max_steps <= 0:
+            return ep_idx, clip_end
+
+        k = int(self.rng.integers(1, max_steps + 1))
         local_idx = clip_end + k * frameskip
         return ep_idx, local_idx
 
@@ -650,8 +676,12 @@ class GoalDataset:
         goal_kind = self._sample_goal_kind()
         if goal_kind == 'random':
             goal_ep_idx, goal_local_idx = self._sample_random_step()
-        elif goal_kind == 'future':
-            goal_ep_idx, goal_local_idx = self._sample_future_step(
+        elif goal_kind == 'geometric_future':
+            goal_ep_idx, goal_local_idx = self._sample_geometric_future_step(
+                ep_idx, local_start
+            )
+        elif goal_kind == 'uniform_future':
+            goal_ep_idx, goal_local_idx = self._sample_uniform_future_step(
                 ep_idx, local_start
             )
         else:  # current

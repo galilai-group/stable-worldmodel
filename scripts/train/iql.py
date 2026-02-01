@@ -80,7 +80,8 @@ def get_data(cfg):
 
     goal_probs = (
         cfg.goal_probabilities.random,
-        cfg.goal_probabilities.future,
+        cfg.goal_probabilities.geometric_future,
+        cfg.goal_probabilities.uniform_future,
         cfg.goal_probabilities.current,
     )
     dataset = swm.data.GoalDataset(
