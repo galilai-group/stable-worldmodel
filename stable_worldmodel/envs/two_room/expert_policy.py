@@ -134,7 +134,7 @@ class ExpertPolicy(BasePolicy):
                     tol = (
                         float(self.door_reach_tol)
                         if self.door_reach_tol is not None
-                        else float(3.0 * env.scale)
+                        else 10.5  # was 3.0 * scale (3.5)
                     )
                     if np.linalg.norm(best - agent_pos) > tol:
                         waypoint = best

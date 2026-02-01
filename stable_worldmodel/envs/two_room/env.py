@@ -20,43 +20,36 @@ DEFAULT_VARIATIONS = ('agent.position', 'target.position')
 class TwoRoomEnv(gym.Env):
     metadata = {'render_modes': ['rgb_array'], 'render_fps': 10}
 
+    # Fixed geometry for 224x224 (scale = 224/64 = 3.5)
+    IMG_SIZE = 224
+    BORDER_SIZE = 14
+    DOT_STD = 7.0
+    PADDING = 14
+    MAX_SPEED = 10.5
+    WALL_CENTER = 112
+    WALL_WIDTH_DEFAULT = 10
+    MAX_DOOR = 3
+
     def __init__(
         self,
-        render_size: int = 224,
         render_mode: str = 'rgb_array',
         render_target: bool = False,
         init_value: dict | None = None,
     ):
         assert render_mode in self.metadata['render_modes']
         self.render_mode = render_mode
-        self.render_size = int(render_size)
         self.render_target_flag = bool(render_target)
 
-        # Geometry (scaled from 64x64 reference)
-        self.img_size = self.render_size
-        self.scale = self.img_size / 64.0
-
-        self.border_size = int(round(4 * self.scale))
-        self.dot_std = float(2 * self.scale)
-        self.padding = int(round(2 * self.dot_std))
-
-        # Movement
-        self.max_speed = float(3.0 * self.scale)
-        self.max_door = 3
-
-        # Wall reference positions (static center)
-        self.wall_center = self.img_size // 2
-
-        # Precompute coordinate grids once (H,W) everywhere
-        y = torch.arange(self.img_size, dtype=torch.float32)
-        x = torch.arange(self.img_size, dtype=torch.float32)
+        # Precompute coordinate grids once (H,W)
+        y = torch.arange(self.IMG_SIZE, dtype=torch.float32)
+        x = torch.arange(self.IMG_SIZE, dtype=torch.float32)
         self.grid_y, self.grid_x = torch.meshgrid(y, x, indexing='ij')  # (H,W)
 
-        # Observation space
-        state_dim = 2 + 2 + self.max_door * 2
+        # Observation space: state = agent(2) + target(2) + door_centers(max_door*2)
+        state_dim = 2 + 2 + self.MAX_DOOR * 2
         self.observation_space = spaces.Box(
             low=0,
-            high=self.img_size,
+            high=self.IMG_SIZE,
             shape=(state_dim,),
             dtype=np.float32,
         )
@@ -78,30 +71,18 @@ class TwoRoomEnv(gym.Env):
 
         # Cached params set in reset()
         self.wall_axis = 1
-        self.wall_thickness = int(round(3 * self.scale))
+        self.wall_thickness = self.WALL_WIDTH_DEFAULT
         self.num_doors = 1
-        self.door_positions = torch.zeros(self.max_door, dtype=torch.float32)
-        self.door_sizes = torch.zeros(
-            self.max_door, dtype=torch.float32
-        )  # half-extent
-        self.wall_pos = float(self.wall_center)  # along the axis that matters
+        self.door_positions = torch.zeros(self.MAX_DOOR, dtype=torch.float32)
+        self.door_sizes = torch.zeros(self.MAX_DOOR, dtype=torch.float32)
+        self.wall_pos = float(self.WALL_CENTER)
 
     # ---------------- Variation Space ----------------
 
     def _build_variation_space(self):
-        # bounds for positions
-        border_padding = self.border_size - 1 + self.padding
-
-        wall_width = int(round(3 * self.scale))
-        left_wall_x = self.wall_center - wall_width // 2
-        right_wall_x = self.wall_center + wall_width // 2
-
-        left_min_x = border_padding
-        left_max_x = left_wall_x - self.padding
-        right_min_x = right_wall_x + self.padding
-        right_max_x = self.img_size - 1 - border_padding
-        min_y = border_padding
-        max_y = self.img_size - 1 - border_padding
+        # Valid position bounds: inside border with some padding for agent radius
+        pos_min = float(self.BORDER_SIZE)
+        pos_max = float(self.IMG_SIZE - self.BORDER_SIZE - 1)
 
         return swm_spaces.Dict(
             {
@@ -111,40 +92,28 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array([255, 0, 0], dtype=np.uint8)
                         ),
                         'radius': swm_spaces.Box(
-                            low=np.array([self.dot_std], dtype=np.float32),
-                            high=np.array(
-                                [2 * self.dot_std], dtype=np.float32
-                            ),
-                            init_value=np.array(
-                                [self.dot_std], dtype=np.float32
-                            ),
+                            low=np.array([7.0], dtype=np.float32),
+                            high=np.array([14.0], dtype=np.float32),
+                            init_value=np.array([7.0], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
                         'position': swm_spaces.Box(
-                            low=np.array(
-                                [left_min_x, min_y], dtype=np.float32
-                            ),
+                            low=np.array([pos_min, pos_min], dtype=np.float32),
                             high=np.array(
-                                [right_max_x, max_y], dtype=np.float32
+                                [pos_max, pos_max], dtype=np.float32
                             ),
                             shape=(2,),
                             dtype=np.float32,
                             init_value=np.array(
-                                [
-                                    (left_min_x + left_max_x) / 2,
-                                    (min_y + max_y) / 2,
-                                ],
-                                dtype=np.float32,
+                                [60.0, 112.0], dtype=np.float32
                             ),
                             constrain_fn=self._constrain_agent_not_in_wall,
                         ),
                         'speed': swm_spaces.Box(
-                            low=np.array([0.5 * self.scale], dtype=np.float32),
-                            high=np.array([self.max_speed], dtype=np.float32),
-                            init_value=np.array(
-                                [2.0 * self.scale], dtype=np.float32
-                            ),
+                            low=np.array([1.75], dtype=np.float32),
+                            high=np.array([10.5], dtype=np.float32),
+                            init_value=np.array([5.0], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
@@ -157,31 +126,21 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array([0, 255, 0], dtype=np.uint8)
                         ),
                         'radius': swm_spaces.Box(
-                            low=np.array([self.dot_std], dtype=np.float32),
-                            high=np.array(
-                                [2 * self.dot_std], dtype=np.float32
-                            ),
-                            init_value=np.array(
-                                [self.dot_std], dtype=np.float32
-                            ),
+                            low=np.array([7.0], dtype=np.float32),
+                            high=np.array([14.0], dtype=np.float32),
+                            init_value=np.array([7.0], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
                         'position': swm_spaces.Box(
-                            low=np.array(
-                                [left_min_x, min_y], dtype=np.float32
-                            ),
+                            low=np.array([pos_min, pos_min], dtype=np.float32),
                             high=np.array(
-                                [right_max_x, max_y], dtype=np.float32
+                                [pos_max, pos_max], dtype=np.float32
                             ),
                             shape=(2,),
                             dtype=np.float32,
                             init_value=np.array(
-                                [
-                                    (right_min_x + right_max_x) / 2,
-                                    (min_y + max_y) / 2,
-                                ],
-                                dtype=np.float32,
+                                [164.0, 112.0], dtype=np.float32
                             ),
                             constrain_fn=self._constrain_target_by_min_steps,
                         ),
@@ -194,9 +153,7 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array([0, 0, 0], dtype=np.uint8)
                         ),
                         'thickness': swm_spaces.Discrete(
-                            int(10 * self.scale),
-                            start=int(max(1, round(2 * self.scale))),
-                            init_value=int(max(1, round(3 * self.scale))),
+                            35, start=7, init_value=10
                         ),
                         'axis': swm_spaces.Discrete(
                             2, init_value=1
@@ -220,20 +177,19 @@ class TwoRoomEnv(gym.Env):
                             )
                         ),
                         'number': swm_spaces.Discrete(
-                            self.max_door, start=1, init_value=1
+                            3, start=1, init_value=1
                         ),
-                        # door "size" is treated as half-extent along wall direction
+                        # door size is half-extent: range [1, 21] pixels
                         'size': swm_spaces.MultiDiscrete(
-                            nvec=[int(self.dot_std * 3)] * self.max_door,
-                            start=[int(self.dot_std / 4)] * self.max_door,
-                            init_value=[int(self.dot_std * 2)] * self.max_door,
+                            nvec=[21, 21, 21],
+                            start=[1, 1, 1],
+                            init_value=[14, 14, 14],
                             constrain_fn=self._check_door_fit,
                         ),
-                        # door "position" is center coordinate along the wall direction (0..img_size-1)
+                        # door position is center coord along wall: [0, 223]
                         'position': swm_spaces.MultiDiscrete(
-                            nvec=[self.img_size] * self.max_door,
-                            init_value=[int(round(14 * self.scale))]
-                            * self.max_door,
+                            nvec=[224, 224, 224],
+                            init_value=[49, 49, 49],
                         ),
                     },
                     sampling_order=['color', 'number', 'size', 'position'],
@@ -248,14 +204,10 @@ class TwoRoomEnv(gym.Env):
                     }
                 ),
                 'rendering': swm_spaces.Dict(
-                    {
-                        'render_target': swm_spaces.Discrete(2, init_value=0)
-                    }  # 0 False, 1 True
+                    {'render_target': swm_spaces.Discrete(2, init_value=0)}
                 ),
                 'task': swm_spaces.Dict(
                     {
-                        # min_steps: 0 means no constraint, >0 means target is sampled
-                        # such that min path length / speed >= min_steps
                         'min_steps': swm_spaces.Discrete(
                             100, start=15, init_value=25
                         ),
@@ -316,7 +268,7 @@ class TwoRoomEnv(gym.Env):
         self.agent_position = pos_new
 
         dist = float(torch.norm(self.agent_position - self.target_position))
-        terminated = dist < float(4.5 * self.scale)
+        terminated = dist < 16.0  # ~4.5 * 3.5 scale
         truncated = False
         reward = 0.0
 
@@ -356,12 +308,12 @@ class TwoRoomEnv(gym.Env):
         )  # half-extent
 
         # For policy / observation: wall position on relevant axis
-        self.wall_pos = float(self.wall_center)
+        self.wall_pos = float(self.WALL_CENTER)
 
     def _get_obs(self):
-        # state = agent(2) + target(2) + door_centers(max_door*2)
+        # state = agent(2) + target(2) + door_centers(MAX_DOOR*2)
         door_coords = []
-        for i in range(self.max_door):
+        for i in range(self.MAX_DOOR):
             if i < self.num_doors:
                 center_1d = float(self.door_positions[i].item())
                 if self.wall_axis == 1:  # vertical wall => door varies along y
@@ -384,6 +336,8 @@ class TwoRoomEnv(gym.Env):
 
         return state
 
+        return state
+
     def _get_info(self):
         return {
             'pos_agent': self.agent_position.detach().cpu().numpy(),
@@ -394,7 +348,7 @@ class TwoRoomEnv(gym.Env):
     # ---------------- Rendering ----------------
 
     def _render_frame(self, agent_pos: torch.Tensor):
-        H = W = self.img_size
+        H = W = self.IMG_SIZE
 
         bg = self.variation_space['background']['color'].value
         img = torch.empty((3, H, W), dtype=torch.uint8)
@@ -473,13 +427,13 @@ class TwoRoomEnv(gym.Env):
           wall_mask: (H,W) bool (wall including borders, with door cutouts removed)
           door_mask: (H,W) bool (door pixels only, on the central wall)
         """
-        H = W = self.img_size
+        H = W = self.IMG_SIZE
         half = self.wall_thickness // 2
 
         # Central wall stripe
         if self.wall_axis == 1:  # vertical wall at x = center
-            wall_stripe = (self.grid_x >= (self.wall_center - half)) & (
-                self.grid_x <= (self.wall_center + half)
+            wall_stripe = (self.grid_x >= (self.WALL_CENTER - half)) & (
+                self.grid_x <= (self.WALL_CENTER + half)
             )
             door_span = torch.zeros((H, W), dtype=torch.bool)
             for i in range(self.num_doors):
@@ -489,8 +443,8 @@ class TwoRoomEnv(gym.Env):
                     self.grid_y <= (c + s)
                 )
         else:  # horizontal wall at y = center
-            wall_stripe = (self.grid_y >= (self.wall_center - half)) & (
-                self.grid_y <= (self.wall_center + half)
+            wall_stripe = (self.grid_y >= (self.WALL_CENTER - half)) & (
+                self.grid_y <= (self.WALL_CENTER + half)
             )
             door_span = torch.zeros((H, W), dtype=torch.bool)
             for i in range(self.num_doors):
@@ -504,8 +458,8 @@ class TwoRoomEnv(gym.Env):
         wall_mask = wall_stripe & (~door_span)
 
         # Borders
-        bs = self.border_size
-        t = max(1, int(round(self.scale)))  # thickness of border line
+        bs = self.BORDER_SIZE
+        t = 4  # thickness of border line (was int(round(3.5)))
         # left / right
         wall_mask[:, bs - t : bs] = True
         wall_mask[:, W - bs : W - bs + t] = True
@@ -523,19 +477,19 @@ class TwoRoomEnv(gym.Env):
         Collision is triggered when agent radius touches the wall, not just the center.
         Also handles border clamping.
         """
-        bs = float(self.border_size)
-        door_margin = float(0.5 * self.scale)
+        bs = float(self.BORDER_SIZE)
+        door_margin = 1.75  # was 0.5 * 3.5 scale
         agent_r = float(self.variation_space['agent']['radius'].value.item())
 
         # border clamp first - account for agent radius
         x2, y2 = float(pos2[0]), float(pos2[1])
-        x2 = min(max(x2, bs + agent_r), self.img_size - bs - agent_r)
-        y2 = min(max(y2, bs + agent_r), self.img_size - bs - agent_r)
+        x2 = min(max(x2, bs + agent_r), self.IMG_SIZE - bs - agent_r)
+        y2 = min(max(y2, bs + agent_r), self.IMG_SIZE - bs - agent_r)
         pos2c = torch.tensor([x2, y2], dtype=torch.float32)
 
         # central wall collision - account for agent radius
         half = self.wall_thickness // 2
-        c = float(self.wall_center)
+        c = float(self.WALL_CENTER)
 
         if self.wall_axis == 1:
             # For vertical wall
@@ -622,8 +576,8 @@ class TwoRoomEnv(gym.Env):
         agent_r = float(self.variation_space['agent']['radius'].value.item())
 
         # Effective wall zone including agent radius
-        wall_min = self.wall_center - half_thickness - agent_r
-        wall_max = self.wall_center + half_thickness + agent_r
+        wall_min = self.WALL_CENTER - half_thickness - agent_r
+        wall_max = self.WALL_CENTER + half_thickness + agent_r
 
         if wall_axis == 1:  # vertical wall
             # Check if agent x is in wall zone
@@ -662,23 +616,23 @@ class TwoRoomEnv(gym.Env):
 
         # First check: target must be in opposite room from agent
         if wall_axis == 1:  # vertical wall
-            agent_side = agent_pos[0] < self.wall_center  # True = left room
-            target_side = target_pos[0] < self.wall_center  # True = left room
+            agent_side = agent_pos[0] < self.WALL_CENTER  # True = left room
+            target_side = target_pos[0] < self.WALL_CENTER  # True = left room
             if agent_side == target_side:
                 return False  # Same room, reject
             # Also ensure target is not in wall zone
-            wall_min = self.wall_center - half_thickness - agent_r
-            wall_max = self.wall_center + half_thickness + agent_r
+            wall_min = self.WALL_CENTER - half_thickness - agent_r
+            wall_max = self.WALL_CENTER + half_thickness + agent_r
             if wall_min <= target_pos[0] <= wall_max:
                 return False
         else:  # horizontal wall
-            agent_side = agent_pos[1] < self.wall_center  # True = top room
-            target_side = target_pos[1] < self.wall_center  # True = top room
+            agent_side = agent_pos[1] < self.WALL_CENTER  # True = top room
+            target_side = target_pos[1] < self.WALL_CENTER  # True = top room
             if agent_side == target_side:
                 return False  # Same room, reject
             # Also ensure target is not in wall zone
-            wall_min = self.wall_center - half_thickness - agent_r
-            wall_max = self.wall_center + half_thickness + agent_r
+            wall_min = self.WALL_CENTER - half_thickness - agent_r
+            wall_max = self.WALL_CENTER + half_thickness + agent_r
             if wall_min <= target_pos[1] <= wall_max:
                 return False
 
@@ -707,7 +661,7 @@ class TwoRoomEnv(gym.Env):
 
             if wall_axis == 1:  # vertical wall
                 # Door is at x=wall_center, y=door_center_1d
-                door_x = float(self.wall_center)
+                door_x = float(self.WALL_CENTER)
                 door_y = door_center_1d
                 # Distance from agent to door
                 dist_to_door = np.sqrt(
@@ -721,7 +675,7 @@ class TwoRoomEnv(gym.Env):
             else:  # horizontal wall
                 # Door is at x=door_center_1d, y=wall_center
                 door_x = door_center_1d
-                door_y = float(self.wall_center)
+                door_y = float(self.WALL_CENTER)
                 dist_to_door = np.sqrt(
                     (agent_pos[0] - door_x) ** 2 + (agent_pos[1] - door_y) ** 2
                 )
