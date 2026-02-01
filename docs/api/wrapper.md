@@ -57,3 +57,9 @@ summary: Custom environment wrappers
         heading_level: 2
         members: false
         show_source: false
+
+::: stable_worldmodel.wrapper.SyncWorld
+    options:
+        heading_level: 2
+        members: false
+        show_source: false

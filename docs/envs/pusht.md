@@ -106,11 +106,48 @@ world.reset(options={'variation': ['all']})
 
 ## Expert Policy
 
-This environment includes a built-in weak expert policy for data collection:
+This environment includes a built-in weak expert policy for data collection. The `WeakPolicy` generates actions that keep the agent near the block, increasing the probability of meaningful interactions during data collection.
 
 ```python
 from stable_worldmodel.envs.pusht import WeakPolicy
 
-policy = WeakPolicy()
+policy = WeakPolicy(dist_constraint=100)
+world.set_policy(policy)
+```
+
+### WeakPolicy Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dist_constraint` | int | 100 | Pixel distance constraint around the block for sampling actions. Actions are clipped to keep the agent within this distance of the block center. |
+
+### Usage with Vectorized Environments
+
+The `WeakPolicy` works seamlessly with both single and vectorized environments. When used with vectorized environments (like those created by `World`), it automatically detects the environment spec from sub-environments:
+
+```python
+import stable_worldmodel as swm
+from stable_worldmodel.envs.pusht import WeakPolicy
+
+# Works with vectorized environments
+world = swm.World('swm/PushT-v1', num_envs=4, image_shape=(64, 64))
+policy = WeakPolicy(dist_constraint=50)  # Tighter constraint for more interactions
+world.set_policy(policy)
+
+# Collect data
+world.record_dataset(
+    dataset_name='pusht_weak_expert',
+    episodes=100,
+    seed=42
+)
+```
+
+### Discrete Action Space
+
+The policy automatically detects and handles discrete action spaces when using `swm/PushTDiscrete-v*` environments:
+
+```python
+world = swm.World('swm/PushTDiscrete-v1', num_envs=4, image_shape=(64, 64))
+policy = WeakPolicy()  # Automatically uses quantized actions
 world.set_policy(policy)
 ```

@@ -6,6 +6,7 @@ import os
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from copy import deepcopy
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,34 @@ from tqdm import tqdm
 from stable_worldmodel.data.utils import get_cache_dir
 from stable_worldmodel.policy import Policy
 
-from .wrapper import MegaWrapper, VariationWrapper
+from .wrapper import MegaWrapper, SyncWorld, VariationWrapper
+
+
+def _make_env(env_name, max_episode_steps, wrappers, **kwargs):
+    """Create a gymnasium environment with specified wrappers.
+
+    Factory function for creating environments within a vectorized setup.
+    Creates the base environment and applies wrappers in order.
+
+    Args:
+        env_name: Name of the gymnasium environment to create.
+        max_episode_steps: Maximum steps per episode before truncation.
+        wrappers: List of wrapper functions/classes to apply. Each wrapper
+            should accept an environment and return a wrapped environment.
+        **kwargs: Additional keyword arguments passed to gym.make.
+
+    Returns:
+        The wrapped gymnasium environment.
+
+    Example:
+        >>> from functools import partial
+        >>> wrappers = [partial(MegaWrapper, image_shape=(64, 64))]
+        >>> env = _make_env("CartPole-v1", max_episode_steps=500, wrappers=wrappers)
+    """
+    env = gym.make(env_name, max_episode_steps=max_episode_steps, **kwargs)
+    for wrapper in wrappers:
+        env = wrapper(env)
+    return env
 
 
 class World:
@@ -63,27 +91,24 @@ class World:
         goal_conditioned: bool = True,
         **kwargs: Any,
     ) -> None:
-        self.envs: VectorEnv = gym.make_vec(
-            env_name,
-            num_envs=num_envs,
-            vectorization_mode='sync',
-            wrappers=[
-                lambda x: MegaWrapper(
-                    x,
-                    image_shape,
-                    image_transform,
-                    goal_transform,
-                    history_size=history_size,
-                    frame_skip=frame_skip,
-                    separate_goal=goal_conditioned,
-                )
-            ]
-            + (extra_wrappers or []),
-            max_episode_steps=max_episode_steps,
-            **kwargs,
-        )
+        wrappers = [
+            partial(
+                MegaWrapper,
+                image_shape=image_shape,
+                pixels_transform=image_transform,
+                goal_transform=goal_transform,
+                history_size=history_size,
+                frame_skip=frame_skip,
+                separate_goal=goal_conditioned,
+            ),
+            *(extra_wrappers or []),
+        ]
 
-        self.envs = VariationWrapper(self.envs)
+        env_fn = partial(
+            _make_env, env_name, max_episode_steps, wrappers, **kwargs
+        )
+        env_fns = [env_fn for _ in range(num_envs)]
+        self.envs: VectorEnv = VariationWrapper(SyncWorld(env_fns))
         self.envs.unwrapped.autoreset_mode = gym.vector.AutoresetMode.DISABLED
 
         self._history_size = history_size
@@ -366,9 +391,12 @@ class World:
                                 break
 
                             # reset terminated env and record initial state
-                            self._reset_single_env(
-                                i, seed + n_ep_recorded, options
+                            n_seed = (
+                                None
+                                if seed is None
+                                else (seed + n_ep_recorded)
                             )
+                            self._reset_single_env(i, n_seed, options)
                             self._dump_step_data(episode_buffers, env_idx=i)
 
         logging.info(f'Recording complete. Total frames: {global_step_ptr}')
@@ -817,11 +845,14 @@ class World:
             if k.startswith(vkey)
         }
 
-        options = {}
+        options = [{} for _ in range(self.num_envs)]
 
         if len(variations_dict) > 0:
-            options['variation'] = list(variations_dict.keys())
-            options['variation_values'] = variations_dict
+            for i in range(self.num_envs):
+                options[i]['variation'] = list(variations_dict.keys())
+                options[i]['variation_values'] = {
+                    k: v[i] for k, v in variations_dict.items()
+                }
 
         init_step.update(deepcopy(goal_step))
         self.reset(seed=seeds, options=options)  # set seeds for all envs

@@ -1,3 +1,4 @@
+from copy import deepcopy
 import re
 import time
 from collections import deque
@@ -43,10 +44,14 @@ class EnsureInfoKeysWrapper(gym.Wrapper):
             RuntimeError: If any required pattern is missing from info.
         """
         keys = list(info.keys())
-        missing = [p.pattern for p in self._patterns if not any(p.fullmatch(k) for k in keys)]
+        missing = [
+            p.pattern
+            for p in self._patterns
+            if not any(p.fullmatch(k) for k in keys)
+        ]
         if missing:
             raise RuntimeError(
-                f"{where}: required info keys missing (patterns with no match): {missing}. Present keys: {keys}"
+                f'{where}: required info keys missing (patterns with no match): {missing}. Present keys: {keys}'
             )
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
@@ -59,7 +64,7 @@ class EnsureInfoKeysWrapper(gym.Wrapper):
             Standard Gymnasium step results.
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self._check(info, "step()")
+        self._check(info, 'step()')
         return obs, reward, terminated, truncated, info
 
     def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:
@@ -73,14 +78,16 @@ class EnsureInfoKeysWrapper(gym.Wrapper):
             Standard Gymnasium reset results.
         """
         obs, info = self.env.reset(*args, **kwargs)
-        self._check(info, "reset()")
+        self._check(info, 'reset()')
         return obs, info
 
 
 class EnsureImageShape(gym.Wrapper):
     """Validates that an image in the info dict has the expected spatial dimensions."""
 
-    def __init__(self, env: gym.Env, image_key: str, image_shape: tuple[int, int]):
+    def __init__(
+        self, env: gym.Env, image_key: str, image_shape: tuple[int, int]
+    ):
         """Initialize the wrapper.
 
         Args:
@@ -106,7 +113,9 @@ class EnsureImageShape(gym.Wrapper):
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
         if info[self.image_key].shape[:-1] != self.image_shape:
-            raise RuntimeError(f"Image shape {info[self.image_key].shape} should be {self.image_shape}")
+            raise RuntimeError(
+                f'Image shape {info[self.image_key].shape} should be {self.image_shape}'
+            )
         return obs, reward, terminated, truncated, info
 
     def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:
@@ -124,14 +133,18 @@ class EnsureImageShape(gym.Wrapper):
         """
         obs, info = self.env.reset(*args, **kwargs)
         if info[self.image_key].shape[:-1] != self.image_shape:
-            raise RuntimeError(f"Image shape {info[self.image_key].shape} should be {self.image_shape}")
+            raise RuntimeError(
+                f'Image shape {info[self.image_key].shape} should be {self.image_shape}'
+            )
         return obs, info
 
 
 class EnsureGoalInfoWrapper(gym.Wrapper):
     """Validates that 'goal' key is present in info dict."""
 
-    def __init__(self, env: gym.Env, check_reset: bool, check_step: bool = False):
+    def __init__(
+        self, env: gym.Env, check_reset: bool, check_step: bool = False
+    ):
         """Initialize the wrapper.
 
         Args:
@@ -157,8 +170,10 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
             RuntimeError: If 'goal' is missing and check_reset is True.
         """
         obs, info = self.env.reset(*args, **kwargs)
-        if self.check_reset and "goal" not in info:
-            raise RuntimeError("The info dict returned by reset() must contain the key 'goal'.")
+        if self.check_reset and 'goal' not in info:
+            raise RuntimeError(
+                "The info dict returned by reset() must contain the key 'goal'."
+            )
         return obs, info
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
@@ -174,8 +189,10 @@ class EnsureGoalInfoWrapper(gym.Wrapper):
             RuntimeError: If 'goal' is missing and check_step is True.
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
-        if self.check_step and "goal" not in info:
-            raise RuntimeError("The info dict returned by step() must contain the key 'goal'.")
+        if self.check_step and 'goal' not in info:
+            raise RuntimeError(
+                "The info dict returned by step() must contain the key 'goal'."
+            )
         return obs, reward, terminated, truncated, info
 
 
@@ -201,7 +218,11 @@ class EverythingToInfoWrapper(gym.Wrapper):
         """
         max_int = np.iinfo(np.int64).max
         rng = self.env.unwrapped.np_random
-        return int(rng.integers(0, max_int) if hasattr(rng, "integers") else rng.randint(0, max_int))
+        return int(
+            rng.integers(0, max_int)
+            if hasattr(rng, 'integers')
+            else rng.randint(0, max_int)
+        )
 
     def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:
         """Reset environment and move all data to info.
@@ -216,7 +237,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
         self._step_counter = 0
         obs, info = self.env.reset(*args, **kwargs)
         if not isinstance(obs, dict):
-            _obs = {"observation": obs}
+            _obs = {'observation': obs}
         else:
             _obs = obs
 
@@ -224,44 +245,48 @@ class EverythingToInfoWrapper(gym.Wrapper):
             assert key not in info
             info[key] = val
 
-        assert "reward" not in info
-        info["reward"] = np.nan
-        assert "terminated" not in info
-        info["terminated"] = False
-        assert "truncated" not in info
-        info["truncated"] = False
-        assert "action" not in info
-        info["action"] = self.env.action_space.sample()
-        assert "step_idx" not in info
-        info["step_idx"] = self._step_counter
-        assert "id" not in info
+        assert 'reward' not in info
+        info['reward'] = np.nan
+        assert 'terminated' not in info
+        info['terminated'] = False
+        assert 'truncated' not in info
+        info['truncated'] = False
+        assert 'action' not in info
+        info['action'] = self.env.action_space.sample()
+        assert 'step_idx' not in info
+        info['step_idx'] = self._step_counter
+        assert 'id' not in info
         self._id = self._gen_id()
-        info["id"] = self._id
+        info['id'] = self._id
 
         # add all variations to info if needed
-        options = kwargs.get("options") or {}
+        options = kwargs.get('options') or {}
 
-        if "variation" in options:
-            var_opt = options["variation"]
+        if 'variation' in options:
+            var_opt = options['variation']
             assert isinstance(var_opt, list | tuple), (
-                "variation option must be a list or tuple containing variation names to sample, found: "
-                f"{type(var_opt)}"
+                'variation option must be a list or tuple containing variation names to sample, found: '
+                f'{type(var_opt)}'
             )
-            if len(var_opt) == 1 and var_opt[0] == "all":
-                self._variations_watch = self.env.unwrapped.variation_space.names()
+            if len(var_opt) == 1 and var_opt[0] == 'all':
+                self._variations_watch = (
+                    self.env.unwrapped.variation_space.names()
+                )
             else:
                 self._variations_watch = var_opt
 
         for key in self._variations_watch:
-            var_key = f"variation.{key}"
+            var_key = f'variation.{key}'
             assert var_key not in info
-            subvar_space = get_in(self.env.unwrapped.variation_space, key.split("."))
+            subvar_space = get_in(
+                self.env.unwrapped.variation_space, key.split('.')
+            )
             info[var_key] = subvar_space.value
 
-        if isinstance(info["action"], dict):
+        if isinstance(info['action'], dict):
             raise NotImplementedError
         else:
-            info["action"] = np.full_like(info["action"], np.nan)
+            info['action'] = np.full_like(info['action'], np.nan)
         return obs, info
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
@@ -276,29 +301,31 @@ class EverythingToInfoWrapper(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self._step_counter += 1
         if not isinstance(obs, dict):
-            _obs = {"observation": obs}
+            _obs = {'observation': obs}
         else:
             _obs = obs
         for key, val in _obs.items():
             assert key not in info
             info[key] = val
-        assert "reward" not in info
-        info["reward"] = reward
-        assert "terminated" not in info
-        info["terminated"] = bool(terminated)
-        assert "truncated" not in info
-        info["truncated"] = bool(truncated)
-        assert "action" not in info
-        info["action"] = action
-        assert "step_idx" not in info
-        info["step_idx"] = self._step_counter
-        assert "id" not in info
-        info["id"] = self._id
+        assert 'reward' not in info
+        info['reward'] = reward
+        assert 'terminated' not in info
+        info['terminated'] = bool(terminated)
+        assert 'truncated' not in info
+        info['truncated'] = bool(truncated)
+        assert 'action' not in info
+        info['action'] = action
+        assert 'step_idx' not in info
+        info['step_idx'] = self._step_counter
+        assert 'id' not in info
+        info['id'] = self._id
 
         for key in self._variations_watch:
-            var_key = f"variation.{key}"
+            var_key = f'variation.{key}'
             assert var_key not in info
-            subvar_space = get_in(self.env.unwrapped.variation_space, key.split("."))
+            subvar_space = get_in(
+                self.env.unwrapped.variation_space, key.split('.')
+            )
             info[var_key] = subvar_space.value
 
         return obs, reward, terminated, truncated, info
@@ -335,7 +362,7 @@ class AddPixelsWrapper(gym.Wrapper):
             A tuple of (pixels dictionary, render time).
         """
         # Render the environment as an RGB array
-        render = getattr(self.env.unwrapped, "render_multiview", None)
+        render = getattr(self.env.unwrapped, 'render_multiview', None)
         render_fn = render if callable(render) else self.env.render
 
         t0 = time.time()
@@ -355,11 +382,13 @@ class AddPixelsWrapper(gym.Wrapper):
             return pixels
 
         if isinstance(img, dict):
-            pixels = {f"pixels.{k}": _process_img(v) for k, v in img.items()}
+            pixels = {f'pixels.{k}': _process_img(v) for k, v in img.items()}
         elif isinstance(img, (list | tuple)):
-            pixels = {f"pixels.{i}": _process_img(v) for i, v in enumerate(img)}
+            pixels = {
+                f'pixels.{i}': _process_img(v) for i, v in enumerate(img)
+            }
         else:
-            pixels = {"pixels": _process_img(img)}
+            pixels = {'pixels': _process_img(img)}
 
         return pixels, t1 - t0
 
@@ -374,7 +403,7 @@ class AddPixelsWrapper(gym.Wrapper):
             Standard Gymnasium reset results.
         """
         obs, info = self.env.reset(*args, **kwargs)
-        pixels, info["render_time"] = self._get_pixels()
+        pixels, info['render_time'] = self._get_pixels()
         info.update(pixels)
         return obs, info
 
@@ -388,7 +417,7 @@ class AddPixelsWrapper(gym.Wrapper):
             Standard Gymnasium step results.
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
-        pixels, info["render_time"] = self._get_pixels()
+        pixels, info['render_time'] = self._get_pixels()
         info.update(pixels)
         return obs, reward, terminated, truncated, info
 
@@ -448,8 +477,8 @@ class ResizeGoalWrapper(gym.Wrapper):
             Standard Gymnasium reset results.
         """
         obs, info = self.env.reset(*args, **kwargs)
-        if "goal" in info:
-            info["goal"] = self._format(info["goal"])
+        if 'goal' in info:
+            info['goal'] = self._format(info['goal'])
         return obs, info
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
@@ -462,8 +491,8 @@ class ResizeGoalWrapper(gym.Wrapper):
             Standard Gymnasium step results.
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
-        if "goal" in info:
-            info["goal"] = self._format(info["goal"])
+        if 'goal' in info:
+            info['goal'] = self._format(info['goal'])
         return obs, reward, terminated, truncated, info
 
 
@@ -489,7 +518,9 @@ class StackedWrapper(gym.Wrapper):
         self.keys = [key] if isinstance(key, str) else key
         self.history_size = history_size
         self.frameskip = frameskip
-        self.buffers: dict[str, deque[Any]] = {k: deque([], maxlen=self.capacity) for k in self.keys}
+        self.buffers: dict[str, deque[Any]] = {
+            k: deque([], maxlen=self.capacity) for k in self.keys
+        }
 
     @property
     def capacity(self) -> int:
@@ -513,7 +544,9 @@ class StackedWrapper(gym.Wrapper):
             return []
 
         new_info = list(buffer)[:: -self.frameskip][::-1]
-        assert len(new_info) == self.history_size, f"Buffer for key {key} has incorrect length."
+        assert len(new_info) == self.history_size, (
+            f'Buffer for key {key} has incorrect length.'
+        )
 
         return self._stack_elements(new_info)
 
@@ -535,7 +568,9 @@ class StackedWrapper(gym.Wrapper):
             return torch.stack(elements)
         elif isinstance(first_elem, np.ndarray):
             return np.stack(elements)
-        elif isinstance(first_elem, (int, float, bool)) or issubclass(type(first_elem), np.number):
+        elif isinstance(first_elem, (int, float, bool)) or issubclass(
+            type(first_elem), np.number
+        ):
             return np.array(elements)
         else:
             return elements
@@ -553,7 +588,9 @@ class StackedWrapper(gym.Wrapper):
             AssertionError: If a required key is missing from info.
         """
         for k in self.keys:
-            assert k in info, f"Key {k} not found in info dict during buffer initialization."
+            assert k in info, (
+                f'Key {k} not found in info dict during buffer initialization.'
+            )
             data = info[k]
             buffer = self.buffers[k]
             buffer.clear()
@@ -589,7 +626,7 @@ class StackedWrapper(gym.Wrapper):
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
         for k in self.keys:
-            assert k in info, f"Key {k} not found in info dict during step."
+            assert k in info, f'Key {k} not found in info dict during step.'
             self.buffers[k].append(info[k])
             info[k] = self.get_buffer_data(k)
         return obs, reward, terminated, truncated, info
@@ -624,7 +661,7 @@ class MegaWrapper(gym.Wrapper):
         super().__init__(env)
 
         req_keys = list(required_keys) if required_keys is not None else []
-        req_keys.append(r"^pixels(?:\..*)?$")
+        req_keys.append(r'^pixels(?:\..*)?$')
 
         # Build pipeline
         # this adds `pixels` key to info with optional transform
@@ -650,7 +687,9 @@ class MegaWrapper(gym.Wrapper):
             info: Current environment info dict to determine keys to stack.
         """
         keys = list(info.keys())
-        self.env = StackedWrapper(self.env, keys, self._history_size, self._frameskip)
+        self.env = StackedWrapper(
+            self.env, keys, self._history_size, self._frameskip
+        )
         self._stack_initialized = True
         self.env.init_buffer(info)
 
@@ -684,8 +723,93 @@ class MegaWrapper(gym.Wrapper):
             RuntimeError: If reset() has not been called yet.
         """
         if not self._stack_initialized:
-            raise RuntimeError("StackedWrapper not yet initialized — call reset() first.")
+            raise RuntimeError(
+                'StackedWrapper not yet initialized — call reset() first.'
+            )
         return self.env.step(action)
+
+
+class SyncWorld(gym.vector.SyncVectorEnv):
+    """Synchronous vectorized environment with per-environment options support.
+
+    Extends SyncVectorEnv to allow passing different options to each
+    sub-environment during reset, enabling per-environment variations
+    and configurations.
+
+    This is useful for scenarios where each environment in the vector
+    needs different initialization parameters, such as different
+    variation values or seeds.
+
+    Example:
+        >>> env_fns = [lambda: gym.make("MyEnv-v0") for _ in range(3)]
+        >>> vec_env = SyncWorld(env_fns)
+        >>> # Reset with per-env options
+        >>> options = [{"variation": ["color"]}, {"variation": ["size"]}, None]
+        >>> obs, infos = vec_env.reset(options=options)
+    """
+
+    def reset(
+        self,
+        *,
+        seed: int | list[int | None] | None = None,
+        options: dict[str, Any] | list[dict[str, Any] | None] | None = None,
+    ):
+        """Reset all environments with optional per-environment configuration.
+
+        Args:
+            seed: Random seed(s) for reproducibility. Can be:
+                - None: No seeding
+                - int: Base seed, each env gets seed + env_index
+                - list[int | None]: Explicit seed per environment
+            options: Reset options. Can be:
+                - None: No options for any environment
+                - dict: Same options applied to all environments
+                - list[dict | None]: Per-environment options (must match num_envs)
+
+        Returns:
+            A tuple of (observations, infos) where observations is the
+            concatenated observations from all environments and infos
+            is a dictionary with batched info from each environment.
+
+        Raises:
+            AssertionError: If options list length doesn't match num_envs.
+        """
+
+        if seed is None:
+            seed = [None for _ in range(self.num_envs)]
+        elif isinstance(seed, int):
+            seed = [seed + i for i in range(self.num_envs)]
+
+        if options is None:
+            options_list = [None for _ in range(self.num_envs)]
+        elif isinstance(options, list):
+            assert len(options) == self.num_envs, (
+                f'options list length must match num_envs={self.num_envs}'
+            )
+            options_list = options
+        else:
+            options_list = [options for _ in range(self.num_envs)]
+
+        self._terminations = np.zeros((self.num_envs,), dtype=np.bool_)
+        self._truncations = np.zeros((self.num_envs,), dtype=np.bool_)
+        self._autoreset_envs = np.zeros((self.num_envs,), dtype=np.bool_)
+
+        infos = {}
+        for i, (env, single_seed, single_options) in enumerate(
+            zip(self.envs, seed, options_list, strict=True)
+        ):
+            self._env_obs[i], env_info = env.reset(
+                seed=single_seed, options=single_options
+            )
+            infos = self._add_info(infos, env_info, i)
+
+        self._observations = gym.vector.utils.concatenate(
+            self.single_observation_space, self._env_obs, self._observations
+        )
+
+        return (
+            deepcopy(self._observations) if self.copy else self._observations
+        ), infos
 
 
 class VariationWrapper(VectorWrapper):
@@ -694,7 +818,7 @@ class VariationWrapper(VectorWrapper):
     def __init__(
         self,
         env: gym.vector.VectorEnv,
-        variation_mode: str | gym.Space = "same",
+        variation_mode: str | gym.Space = 'same',
     ):
         """Initialize the variation wrapper.
 
@@ -709,18 +833,22 @@ class VariationWrapper(VectorWrapper):
 
         base_env = env.envs[0].unwrapped
 
-        if not hasattr(base_env, "variation_space"):
+        if not hasattr(base_env, 'variation_space'):
             self.single_variation_space: gym.Space | None = None
             self.variation_space: gym.Space | None = None
             return
 
-        if variation_mode == "same":
+        if variation_mode == 'same':
             self.single_variation_space = base_env.variation_space
-            self.variation_space = batch_space(self.single_variation_space, self.num_envs)
+            self.variation_space = batch_space(
+                self.single_variation_space, self.num_envs
+            )
 
-        elif variation_mode == "different":
+        elif variation_mode == 'different':
             self.single_variation_space = base_env.variation_space
-            self.variation_space = batch_differing_spaces([sub_env.unwrapped.variation_space for sub_env in env.envs])
+            self.variation_space = batch_differing_spaces(
+                [sub_env.unwrapped.variation_space for sub_env in env.envs]
+            )
 
         else:
             raise ValueError(
@@ -729,13 +857,19 @@ class VariationWrapper(VectorWrapper):
 
         # check sub-environment obs and action spaces
         for sub_env in env.envs:
-            if variation_mode == "same":
-                if not is_space_dtype_shape_equiv(sub_env.unwrapped.observation_space, self.single_observation_space):
+            if variation_mode == 'same':
+                if not is_space_dtype_shape_equiv(
+                    sub_env.unwrapped.observation_space,
+                    self.single_observation_space,
+                ):
                     raise ValueError(
                         f"VariationWrapper(..., variation_mode='same') however the sub-environments observation spaces do not share a common shape and dtype, single_observation_space={self.single_observation_space}, sub-environment observation_space={sub_env.observation_space}"
                     )
             else:
-                if not is_space_dtype_shape_equiv(sub_env.unwrapped.observation_space, self.single_observation_space):
+                if not is_space_dtype_shape_equiv(
+                    sub_env.unwrapped.observation_space,
+                    self.single_observation_space,
+                ):
                     raise ValueError(
                         f"VariationWrapper(..., variation_mode='different' or custom space) however the sub-environments observation spaces do not share a common shape and dtype, single_observation_space={self.single_observation_space}, sub-environment observation_space={sub_env.observation_space}"
                     )
@@ -743,4 +877,4 @@ class VariationWrapper(VectorWrapper):
     @property
     def envs(self) -> list[gym.Env] | None:
         """Access sub-environments if available."""
-        return getattr(self.env, "envs", None)
+        return getattr(self.env, 'envs', None)
