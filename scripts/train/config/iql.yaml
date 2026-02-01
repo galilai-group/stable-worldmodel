@@ -46,10 +46,11 @@ predictor_lr: 5e-4
 proprio_encoder_lr: 5e-4
 action_encoder_lr: 5e-4
 
-# Goal sampling probabilities (random, future, current) - must sum to 1.0
+# Goal sampling probabilities (random, geometric_future, uniform_future, current) - must sum to 1.0
 goal_probabilities:
   random: 0.375 #0.3
-  future: 0.625 #0.5
+  geometric_future: 0.625 #0.5
+  uniform_future: 0.0
   current: 0.0 #0.2
 goal_gamma: 0.99  # Discount factor for geometric distribution when sampling future goals
 
