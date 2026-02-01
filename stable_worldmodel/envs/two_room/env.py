@@ -126,7 +126,7 @@ class TwoRoomEnv(gym.Env):
                                 [left_min_x, min_y], dtype=np.float32
                             ),
                             high=np.array(
-                                [left_max_x, max_y], dtype=np.float32
+                                [right_max_x, max_y], dtype=np.float32
                             ),
                             shape=(2,),
                             dtype=np.float32,
@@ -137,6 +137,7 @@ class TwoRoomEnv(gym.Env):
                                 ],
                                 dtype=np.float32,
                             ),
+                            constrain_fn=self._constrain_agent_not_in_wall,
                         ),
                         'speed': swm_spaces.Box(
                             low=np.array([0.5 * self.scale], dtype=np.float32),
@@ -168,7 +169,7 @@ class TwoRoomEnv(gym.Env):
                         ),
                         'position': swm_spaces.Box(
                             low=np.array(
-                                [right_min_x, min_y], dtype=np.float32
+                                [left_min_x, min_y], dtype=np.float32
                             ),
                             high=np.array(
                                 [right_max_x, max_y], dtype=np.float32
@@ -182,6 +183,7 @@ class TwoRoomEnv(gym.Env):
                                 ],
                                 dtype=np.float32,
                             ),
+                            constrain_fn=self._constrain_target_by_min_steps,
                         ),
                     },
                     sampling_order=['color', 'radius', 'position'],
@@ -250,12 +252,22 @@ class TwoRoomEnv(gym.Env):
                         'render_target': swm_spaces.Discrete(2, init_value=0)
                     }  # 0 False, 1 True
                 ),
+                'task': swm_spaces.Dict(
+                    {
+                        # min_steps: 0 means no constraint, >0 means target is sampled
+                        # such that min path length / speed >= min_steps
+                        'min_steps': swm_spaces.Discrete(
+                            100, start=15, init_value=25
+                        ),
+                    }
+                ),
             },
             sampling_order=[
                 'background',
                 'wall',
                 'agent',
                 'door',
+                'task',
                 'target',
                 'rendering',
             ],
@@ -599,6 +611,31 @@ class TwoRoomEnv(gym.Env):
 
     # ---------------- Constraint ----------------
 
+    def _constrain_agent_not_in_wall(self, agent_pos):
+        """
+        Ensure agent position is not inside the wall (unless in a door).
+        Agent can start in either room.
+        """
+        wall_axis = int(self.variation_space['wall']['axis'].value)
+        wall_thickness = int(self.variation_space['wall']['thickness'].value)
+        half_thickness = wall_thickness // 2
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+
+        # Effective wall zone including agent radius
+        wall_min = self.wall_center - half_thickness - agent_r
+        wall_max = self.wall_center + half_thickness + agent_r
+
+        if wall_axis == 1:  # vertical wall
+            # Check if agent x is in wall zone
+            if wall_min <= agent_pos[0] <= wall_max:
+                return False  # Agent would be in wall
+        else:  # horizontal wall
+            # Check if agent y is in wall zone
+            if wall_min <= agent_pos[1] <= wall_max:
+                return False  # Agent would be in wall
+
+        return True
+
     def _check_door_fit(self, sizes):
         """
         Ensure at least one door half-extent can fit agent radius.
@@ -606,6 +643,102 @@ class TwoRoomEnv(gym.Env):
         num = int(self.variation_space['door']['number'].value)
         agent_r = float(self.variation_space['agent']['radius'].value.item())
         return any(float(s) >= 1.1 * agent_r for s in sizes[:num])
+
+    def _constrain_target_by_min_steps(self, target_pos):
+        """
+        Check if target position satisfies:
+        1. Target must be in the opposite room from agent
+        2. min_steps constraint (if set)
+
+        min_steps specifies the minimum number of steps to reach target.
+        Path length = dist(agent -> door) + dist(door -> target)
+        min_steps <= path_length / speed
+        """
+        agent_pos = self.variation_space['agent']['position'].value
+        wall_axis = int(self.variation_space['wall']['axis'].value)
+        wall_thickness = int(self.variation_space['wall']['thickness'].value)
+        half_thickness = wall_thickness // 2
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+
+        # First check: target must be in opposite room from agent
+        if wall_axis == 1:  # vertical wall
+            agent_side = agent_pos[0] < self.wall_center  # True = left room
+            target_side = target_pos[0] < self.wall_center  # True = left room
+            if agent_side == target_side:
+                return False  # Same room, reject
+            # Also ensure target is not in wall zone
+            wall_min = self.wall_center - half_thickness - agent_r
+            wall_max = self.wall_center + half_thickness + agent_r
+            if wall_min <= target_pos[0] <= wall_max:
+                return False
+        else:  # horizontal wall
+            agent_side = agent_pos[1] < self.wall_center  # True = top room
+            target_side = target_pos[1] < self.wall_center  # True = top room
+            if agent_side == target_side:
+                return False  # Same room, reject
+            # Also ensure target is not in wall zone
+            wall_min = self.wall_center - half_thickness - agent_r
+            wall_max = self.wall_center + half_thickness + agent_r
+            if wall_min <= target_pos[1] <= wall_max:
+                return False
+
+        # Second check: min_steps constraint
+        min_steps = int(self.variation_space['task']['min_steps'].value)
+        if min_steps <= 0:
+            return True  # No min_steps constraint
+
+        speed = float(self.variation_space['agent']['speed'].value.item())
+
+        # Get door info
+        num_doors = int(self.variation_space['door']['number'].value)
+        door_positions = self.variation_space['door']['position'].value[
+            :num_doors
+        ]
+        door_sizes = self.variation_space['door']['size'].value[:num_doors]
+
+        # Find the best (shortest path) door that fits the agent
+        min_path_length = float('inf')
+        for i in range(num_doors):
+            door_size = float(door_sizes[i])
+            if door_size < 1.1 * agent_r:
+                continue  # Door too small
+
+            door_center_1d = float(door_positions[i])
+
+            if wall_axis == 1:  # vertical wall
+                # Door is at x=wall_center, y=door_center_1d
+                door_x = float(self.wall_center)
+                door_y = door_center_1d
+                # Distance from agent to door
+                dist_to_door = np.sqrt(
+                    (agent_pos[0] - door_x) ** 2 + (agent_pos[1] - door_y) ** 2
+                )
+                # Distance from door to target
+                dist_door_to_target = np.sqrt(
+                    (target_pos[0] - door_x) ** 2
+                    + (target_pos[1] - door_y) ** 2
+                )
+            else:  # horizontal wall
+                # Door is at x=door_center_1d, y=wall_center
+                door_x = door_center_1d
+                door_y = float(self.wall_center)
+                dist_to_door = np.sqrt(
+                    (agent_pos[0] - door_x) ** 2 + (agent_pos[1] - door_y) ** 2
+                )
+                dist_door_to_target = np.sqrt(
+                    (target_pos[0] - door_x) ** 2
+                    + (target_pos[1] - door_y) ** 2
+                )
+
+            path_length = dist_to_door + dist_door_to_target
+            min_path_length = min(min_path_length, path_length)
+
+        if min_path_length == float('inf'):
+            return True  # No valid door, accept any target
+
+        # Check if min_steps constraint is satisfied
+        steps_required = min_path_length / speed
+        return steps_required >= min_steps
 
     # ---------------- Convenience setters ----------------
 

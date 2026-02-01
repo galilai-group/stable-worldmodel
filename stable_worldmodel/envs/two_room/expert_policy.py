@@ -13,6 +13,7 @@ class ExpertPolicy(BasePolicy):
     def __init__(
         self,
         action_noise: float = 0.0,
+        action_repeat_prob: float = 0.0,
         door_fit_margin: float = 1.10,
         door_reach_tol: float | None = None,
         **kwargs,
@@ -159,6 +160,21 @@ class ExpertPolicy(BasePolicy):
             actions = actions + np.random.normal(
                 0.0, self.action_noise, size=actions.shape
             ).astype(np.float32)
+
+        # action repeat stochasticity
+        self._last_action = getattr(self, '_last_action', None)
+        if self._last_action is not None and self.action_repeat_prob > 0.0:
+            repeat_mask = (
+                np.random.uniform(
+                    0.0, 1.0, size=(actions.shape[0],) if is_vectorized else ()
+                )
+                < self.action_repeat_prob
+            )
+            if is_vectorized:
+                actions[repeat_mask] = self._last_action[repeat_mask]
+            else:
+                if repeat_mask:
+                    actions = self._last_action
 
         # Keep within action space
         return np.clip(actions, -1.0, 1.0).astype(np.float32)
