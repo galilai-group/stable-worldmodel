@@ -25,6 +25,6 @@ world:
 
 num_workers: 4
 seed: 3072
-num_traj: 20000
+num_traj: 10000
 
 options: null

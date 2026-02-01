@@ -11,7 +11,7 @@ def run(cfg):
     """Run data collection script"""
 
     world = swm.World('swm/TwoRoom-v1', **cfg.world, render_mode='rgb_array')
-    world.set_policy(ExpertPolicy())
+    world.set_policy(ExpertPolicy(action_noise=2.0, action_repeat_prob=0.05))
 
     options = cfg.get('options')
     rng = np.random.default_rng(cfg.seed)

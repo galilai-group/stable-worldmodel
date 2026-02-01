@@ -1,114 +1,90 @@
-"""TwoRoom Navigation Environment.
+"""
+TwoRoom Navigation Environment - Clean Torch-based Implementation (Refactored).
 
-A simple two-room navigation environment where an agent must navigate
-through a door opening to reach a target position.
+- Torch-only rendering + collision
+- Fixes mask shape bug (W,H vs H,W) by using meshgrid(y,x,indexing="ij")
+- Consistent door semantics: door_size is half-extent in pixels
 """
 
-import math
-import cv2
+from __future__ import annotations
+
 import gymnasium as gym
 import numpy as np
-import pygame
-import pymunk
+import torch
 from gymnasium import spaces
-from pymunk.vec2d import Vec2d
 from stable_worldmodel import spaces as swm_spaces
 
-from ..utils import light_color, pymunk_to_shapely
-
-DEFAULT_VARIATIONS = (
-    'agent.position',
-    'target.position',
-    'door.size',
-    'door.position',
-)
+DEFAULT_VARIATIONS = ('agent.position', 'target.position')
 
 
 class TwoRoomEnv(gym.Env):
-    """A simple navigation two-room environment.
+    metadata = {'render_modes': ['rgb_array'], 'render_fps': 10}
 
-    The environment consists of two rooms separated by a wall with door openings.
-    The agent must navigate from its starting position to the target position.
-
-    Physics:
-        - Agent: Dynamic circle body
-        - target: Kinematic circle (sensor, no collision)
-        - Walls: Static segments (solid, blocks agent)
-        - Doors: Empty gaps in walls (agent can pass if it fits)
-
-    Rendering:
-        - Layers (back to front): background, target, walls, agent
-        - Agent is always rendered on top
-    """
-
-    metadata = {
-        'render_modes': ['human', 'rgb_array'],
-        'render_fps': 10,
-    }
+    # Fixed geometry for 224x224 (scale = 224/64 = 3.5)
+    IMG_SIZE = 224
+    BORDER_SIZE = 14
+    DOT_STD = 7.0
+    PADDING = 14
+    MAX_SPEED = 10.5
+    WALL_CENTER = 112
+    WALL_WIDTH_DEFAULT = 10
+    MAX_DOOR = 3
 
     def __init__(
         self,
-        render_size: int = 224,
         render_mode: str = 'rgb_array',
+        render_target: bool = False,
         init_value: dict | None = None,
     ):
         assert render_mode in self.metadata['render_modes']
         self.render_mode = render_mode
+        self.render_target_flag = bool(render_target)
 
-        # Render configuration
-        self.window_size = 512
-        self.border_size = 9
-        self.size = self.window_size - 2 * self.border_size
-        self.render_size = render_size
+        # Precompute coordinate grids once (H,W)
+        y = torch.arange(self.IMG_SIZE, dtype=torch.float32)
+        x = torch.arange(self.IMG_SIZE, dtype=torch.float32)
+        self.grid_y, self.grid_x = torch.meshgrid(y, x, indexing='ij')  # (H,W)
 
-        # Physics configuration
-        self.control_hz = self.metadata['render_fps']
-        self.dt = 0.01
-        self.energy_bound = 200
-        self.max_door = 3
-        self.max_speed = 20.0
-        self.wall_pos = math.ceil(self.size / 2)
-        self.max_step_norm = 2.45
-
-        bs = self.border_size
-
-        # Observation space
-        self.observation_space = spaces.Dict(
-            {
-                'proprio': spaces.Box(
-                    low=np.array([bs, bs]),
-                    high=np.array(
-                        [
-                            self.size + bs,
-                            self.size + bs,
-                        ]
-                    ),
-                    dtype=np.float64,
-                ),
-                'state': spaces.Box(
-                    low=np.array([bs, bs, bs, bs, 0, 10]),
-                    high=np.array(
-                        [
-                            self.size + bs,
-                            self.size + bs,
-                            self.size + bs,
-                            self.size + bs,
-                            self.energy_bound,
-                            self.max_speed,
-                        ]
-                    ),
-                    dtype=np.float64,
-                ),
-            }
+        # Observation space: state = agent(2) + target(2) + door_centers(max_door*2)
+        state_dim = 2 + 2 + self.MAX_DOOR * 2
+        self.observation_space = spaces.Box(
+            low=0,
+            high=self.IMG_SIZE,
+            shape=(state_dim,),
+            dtype=np.float32,
         )
 
-        # Action space: 2D velocity
+        # Action: 2D velocity direction (scaled by speed)
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
 
-        # Variation space (must be defined before constraint functions)
-        self.variation_space = swm_spaces.Dict(
+        # Variation space
+        self.variation_space = self._build_variation_space()
+        if init_value is not None:
+            self.variation_space.set_init_value(init_value)
+
+        # Runtime state
+        self.agent_position = torch.zeros(2, dtype=torch.float32)
+        self.target_position = torch.zeros(2, dtype=torch.float32)
+        self._target_img = None
+
+        # Cached params set in reset()
+        self.wall_axis = 1
+        self.wall_thickness = self.WALL_WIDTH_DEFAULT
+        self.num_doors = 1
+        self.door_positions = torch.zeros(self.MAX_DOOR, dtype=torch.float32)
+        self.door_sizes = torch.zeros(self.MAX_DOOR, dtype=torch.float32)
+        self.wall_pos = float(self.WALL_CENTER)
+
+    # ---------------- Variation Space ----------------
+
+    def _build_variation_space(self):
+        # Valid position bounds: inside border with some padding for agent radius
+        pos_min = float(self.BORDER_SIZE)
+        pos_max = float(self.IMG_SIZE - self.BORDER_SIZE - 1)
+
+        return swm_spaces.Dict(
             {
                 'agent': swm_spaces.Dict(
                     {
@@ -116,45 +92,33 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array([255, 0, 0], dtype=np.uint8)
                         ),
                         'radius': swm_spaces.Box(
-                            low=np.array([15], dtype=np.float32),
-                            high=np.array([30], dtype=np.float32),
-                            init_value=np.array([15], dtype=np.float32),
+                            low=np.array([7.0], dtype=np.float32),
+                            high=np.array([14.0], dtype=np.float32),
+                            init_value=np.array([7.0], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
                         'position': swm_spaces.Box(
-                            low=np.array([bs, bs], dtype=np.float32),
+                            low=np.array([pos_min, pos_min], dtype=np.float32),
                             high=np.array(
-                                [self.size + bs, self.size + bs],
-                                dtype=np.float32,
+                                [pos_max, pos_max], dtype=np.float32
                             ),
                             shape=(2,),
                             dtype=np.float32,
                             init_value=np.array(
-                                [50.0, 50.0], dtype=np.float32
+                                [60.0, 112.0], dtype=np.float32
                             ),
-                            constrain_fn=lambda x: not self.check_collide(
-                                x, entity='agent'
-                            ),
-                        ),
-                        'max_energy': swm_spaces.Discrete(
-                            self.energy_bound - 50, start=50, init_value=100
+                            constrain_fn=self._constrain_agent_not_in_wall,
                         ),
                         'speed': swm_spaces.Box(
-                            low=np.array([10], dtype=np.float32),
-                            high=np.array([self.max_speed], dtype=np.float32),
-                            init_value=np.array([10.0], dtype=np.float32),
+                            low=np.array([1.75], dtype=np.float32),
+                            high=np.array([10.5], dtype=np.float32),
+                            init_value=np.array([5.0], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
                     },
-                    sampling_order=[
-                        'color',
-                        'radius',
-                        'position',
-                        'max_energy',
-                        'speed',
-                    ],
+                    sampling_order=['color', 'radius', 'position', 'speed'],
                 ),
                 'target': swm_spaces.Dict(
                     {
@@ -162,27 +126,23 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array([0, 255, 0], dtype=np.uint8)
                         ),
                         'radius': swm_spaces.Box(
-                            low=np.array([15], dtype=np.float32),
-                            high=np.array([30], dtype=np.float32),
-                            init_value=np.array([15], dtype=np.float32),
+                            low=np.array([7.0], dtype=np.float32),
+                            high=np.array([14.0], dtype=np.float32),
+                            init_value=np.array([7.0], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
                         'position': swm_spaces.Box(
-                            low=np.array([bs, bs], dtype=np.float32),
+                            low=np.array([pos_min, pos_min], dtype=np.float32),
                             high=np.array(
-                                [self.size + bs, self.size + bs],
-                                dtype=np.float32,
+                                [pos_max, pos_max], dtype=np.float32
                             ),
                             shape=(2,),
                             dtype=np.float32,
                             init_value=np.array(
-                                [450.0, 450.0], dtype=np.float32
+                                [164.0, 112.0], dtype=np.float32
                             ),
-                            constrain_fn=lambda x: (
-                                not self.check_collide(x, entity='target')
-                                and self.check_other_room(x)
-                            ),
+                            constrain_fn=self._constrain_target_by_min_steps,
                         ),
                     },
                     sampling_order=['color', 'radius', 'position'],
@@ -190,20 +150,16 @@ class TwoRoomEnv(gym.Env):
                 'wall': swm_spaces.Dict(
                     {
                         'color': swm_spaces.RGBBox(
-                            init_value=np.array(
-                                [115, 127, 145], dtype=np.uint8
-                            )
+                            init_value=np.array([0, 0, 0], dtype=np.uint8)
                         ),
                         'thickness': swm_spaces.Discrete(
-                            25, start=9, init_value=19
+                            35, start=7, init_value=10
                         ),
                         'axis': swm_spaces.Discrete(
                             2, init_value=1
                         ),  # 0: horizontal, 1: vertical
                         'border_color': swm_spaces.RGBBox(
-                            init_value=np.array(
-                                [180, 189, 204], dtype=np.uint8
-                            )
+                            init_value=np.array([0, 0, 0], dtype=np.uint8)
                         ),
                     },
                     sampling_order=[
@@ -221,17 +177,19 @@ class TwoRoomEnv(gym.Env):
                             )
                         ),
                         'number': swm_spaces.Discrete(
-                            self.max_door, start=1, init_value=1
+                            3, start=1, init_value=1
                         ),
+                        # door size is half-extent: range [1, 21] pixels
                         'size': swm_spaces.MultiDiscrete(
-                            nvec=[90] * self.max_door,
-                            start=[10] * self.max_door,
-                            init_value=[75] * self.max_door,
-                            constrain_fn=self.check_one_door_fit,
+                            nvec=[21, 21, 21],
+                            start=[1, 1, 1],
+                            init_value=[14, 14, 14],
+                            constrain_fn=self._check_door_fit,
                         ),
+                        # door position is center coord along wall: [0, 223]
                         'position': swm_spaces.MultiDiscrete(
-                            nvec=[self.size] * self.max_door,
-                            init_value=[self.size // 2] * self.max_door,
+                            nvec=[224, 224, 224],
+                            init_value=[49, 49, 49],
                         ),
                     },
                     sampling_order=['color', 'number', 'size', 'position'],
@@ -242,533 +200,508 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array(
                                 [255, 255, 255], dtype=np.uint8
                             )
+                        )
+                    }
+                ),
+                'rendering': swm_spaces.Dict(
+                    {'render_target': swm_spaces.Discrete(2, init_value=0)}
+                ),
+                'task': swm_spaces.Dict(
+                    {
+                        'min_steps': swm_spaces.Discrete(
+                            100, start=15, init_value=25
                         ),
                     }
                 ),
             },
-            sampling_order=['background', 'wall', 'agent', 'door', 'target'],
+            sampling_order=[
+                'background',
+                'wall',
+                'agent',
+                'door',
+                'task',
+                'target',
+                'rendering',
+            ],
         )
 
-        if init_value is not None:
-            self.variation_space.set_init_value(init_value)
-
-        # Pygame state
-        self.window = None
-        self.clock = None
+    # ---------------- Gym API ----------------
 
     def reset(self, seed=None, options=None):
-        super().reset(seed=seed, options=options)
+        super().reset(seed=seed)
         options = options or {}
+
         swm_spaces.reset_variation_space(
-            self.variation_space,
-            seed,
-            options,
-            DEFAULT_VARIATIONS,
+            self.variation_space, seed, options, DEFAULT_VARIATIONS
         )
 
-        # Initialize physics world
-        self._setup()
-
-        # Generate target image
-        state = self._get_obs()
-        state[:2] = options.get(
-            'target_state', self.variation_space['target']['position'].value
-        )
-        self._set_state(state)
-        self._target = self.render()
-
-        # Set initial positions
-        state = self._get_obs()
-        state[:2] = options.get(
+        agent_pos = options.get(
             'state', self.variation_space['agent']['position'].value
         )
-        state[2:4] = options.get(
+        target_pos = options.get(
             'target_state', self.variation_space['target']['position'].value
         )
-        self._set_state(state)
-        proprio = np.array(state[:2])
-        observation = {'proprio': proprio, 'state': state}
 
+        self.agent_position = torch.as_tensor(agent_pos, dtype=torch.float32)
+        self.target_position = torch.as_tensor(target_pos, dtype=torch.float32)
+
+        self._cache_params()
+
+        # render “target image” = agent drawn at target position
+        self._target_img = self._render_frame(agent_pos=self.target_position)
+
+        obs = self._get_obs()
         info = self._get_info()
-        info['fraction_of_target'] = 0.0
-        info['fraction_of_agent'] = 0.0
-
-        return observation, info
+        info['distance_to_target'] = float(
+            torch.norm(self.agent_position - self.target_position)
+        )
+        return obs, info
 
     def step(self, action):
-        self.n_contact_points = 0
-        n_steps = int(1 / (self.dt * self.control_hz))
-        control_period = n_steps * self.dt
+        action_t = torch.as_tensor(action, dtype=torch.float32)
+        action_t = torch.clamp(action_t, -1.0, 1.0)
 
-        # Clamp action
-        action = np.asarray(action)
-        action_norm = np.linalg.norm(action)
-        if action_norm > self.max_step_norm:
-            action = (action / action_norm) * self.max_step_norm
+        speed = float(self.variation_space['agent']['speed'].value.item())
+        pos_next = self.agent_position + action_t * speed
 
-        velocity = action / control_period
-        speed = self.variation_space['agent']['speed'].value.item()
+        pos_new = self._apply_collisions(self.agent_position, pos_next)
+        self.agent_position = pos_new
 
-        self.latest_action = action
-        self.space.iterations = 30
+        dist = float(torch.norm(self.agent_position - self.target_position))
+        terminated = dist < 16.0  # ~4.5 * 3.5 scale
+        truncated = False
+        reward = 0.0
 
-        # Run physics simulation
-        for _ in range(n_steps):
-            self.agent.velocity = Vec2d(0, 0) + velocity * speed
-            self.space.step(self.dt)
-
-        self.energy -= 1
-
-        # Build observation
-        state = self._get_obs()
-        proprio = np.array(state[:2])
-        observation = {'proprio': proprio, 'state': state}
-
-        # Calculate target overlap
-        target_geom = pymunk_to_shapely(self.target, self.target.shapes)
-        agent_geom = pymunk_to_shapely(self.agent, self.agent.shapes)
-
-        intersection_area = target_geom.intersection(agent_geom).area
-        target_area = target_geom.area
-        agent_area = agent_geom.area
-
-        fraction_of_target = intersection_area / target_area
-        fraction_of_agent = intersection_area / agent_area
-
+        obs = self._get_obs()
         info = self._get_info()
-        info['fraction_of_target'] = fraction_of_target
-        info['fraction_of_agent'] = fraction_of_agent
-
-        terminated = (fraction_of_target >= 0.5) or (fraction_of_agent >= 0.5)
-        truncated = self.energy <= 0
-        reward = 1.0 if terminated else -0.01
-
-        return observation, reward, terminated, truncated, info
-
-    def _setup(self):
-        """Initialize the physics world."""
-        self.space = pymunk.Space()
-        self.space.gravity = (0, 0)
-        self.space.damping = 0
-
-        # Build borders
-        self.border_segments = self._build_borders()
-
-        # Build wall with door gaps
-        self.wall_segments = self._build_wall_segments()
-
-        # Create agent
-        agent_pos = self.variation_space['agent']['position'].value.tolist()
-        agent_radius = self.variation_space['agent']['radius'].value.item()
-        self.agent = self._add_circle(agent_pos, agent_radius, is_sensor=False)
-
-        # Create target
-        target_pos = self.variation_space['target']['position'].value.tolist()
-        target_radius = self.variation_space['target']['radius'].value.item()
-        self.target = self._add_circle(
-            target_pos, target_radius, is_sensor=True
-        )
-
-        # Set energy
-        self.energy = self.variation_space['agent']['max_energy'].value
-
-        # Collision tracking
-        self.space.on_collision(0, 0, post_solve=self._handle_collision)
-        self.n_contact_points = 0
-
-    def _build_borders(self):
-        """Create border segments around the arena."""
-        border_color = self.variation_space['wall'][
-            'border_color'
-        ].value.tolist()
-        radius = self.border_size / 2
-
-        # Border corner points
-        corners = [
-            (0, 0),
-            (self.window_size, 0),
-            (self.window_size, self.window_size),
-            (0, self.window_size),
-        ]
-
-        segments = []
-        for i in range(4):
-            a = corners[i]
-            b = corners[(i + 1) % 4]
-            seg = self._add_segment(a, b, radius, border_color)
-            segments.append(seg)
-
-        return segments
-
-    def _build_wall_segments(self):
-        """Build wall segments with gaps for doors."""
-        wall_color = self.variation_space['wall']['color'].value.tolist()
-        wall_thickness = float(self.variation_space['wall']['thickness'].value)
-        wall_axis = int(self.variation_space['wall']['axis'].value)
-        radius = wall_thickness / 2
-
-        door_color = self.variation_space['door']['color'].value.tolist()
-        door_number = int(self.variation_space['door']['number'].value)
-        door_positions = list(
-            self.variation_space['door']['position'].value[:door_number]
-        )
-        door_sizes = list(
-            self.variation_space['door']['size'].value[:door_number]
-        )
-
-        # Sort doors by position
-        if door_number > 0:
-            door_data = sorted(
-                zip(door_positions, door_sizes), key=lambda x: x[0]
-            )
-            door_positions = [d[0] for d in door_data]
-            door_sizes = [d[1] for d in door_data]
-
-        # Merge overlapping doors
-        merged = []
-        for pos, size in zip(door_positions, door_sizes):
-            pos, size = int(pos), int(size)
-            if merged and pos <= merged[-1][0] + merged[-1][1]:
-                # Overlapping - extend previous door
-                prev_pos, prev_size = merged[-1]
-                new_end = max(prev_pos + prev_size, pos + size)
-                merged[-1] = (prev_pos, new_end - prev_pos)
-            else:
-                merged.append((pos, size))
-
-        def pt(t):
-            """Convert t position along wall axis to (x, y) coordinate."""
-            # wall_axis == 1 -> vertical wall at x=wall_pos; t moves along y
-            # wall_axis == 0 -> horizontal wall at y=wall_pos; t moves along x
-            if wall_axis == 1:
-                return (self.wall_pos, self.border_size + t)
-            else:
-                return (self.border_size + t, self.wall_pos)
-
-        def clamp_span(lo, hi):
-            lo = int(max(0, min(self.size, int(lo))))
-            hi = int(max(0, min(self.size, int(hi))))
-            return lo, hi
-
-        wall_segments = []
-        door_segments = []
-        current = 0
-
-        for door_pos, door_size in merged:
-            # Clamp door span into bounds
-            d0, d1 = clamp_span(door_pos, door_pos + door_size)
-
-            # Wall span before door
-            w0, w1 = clamp_span(current, d0 - 1)
-
-            # Add wall only if it has length >= 1
-            if (w1 - w0) >= 1:
-                wall = self._add_segment(pt(w0), pt(w1), radius, wall_color)
-                if wall is not None:
-                    wall_segments.append(wall)
-
-            # Add door only if it has length >= 1 (non-colliding)
-            if (d1 - d0) >= 1:
-                door = self._add_segment(
-                    pt(d0), pt(d1), radius, door_color, collision=False
-                )
-                if door is not None:
-                    door_segments.append(door)
-
-            current = d1 + 1
-
-        # Add last wall segment
-        w0, w1 = clamp_span(current, self.size)
-        if (w1 - w0) >= 1:
-            last_wall = self._add_segment(pt(w0), pt(w1), radius, wall_color)
-            if last_wall is not None:
-                wall_segments.append(last_wall)
-
-        # Store door segments for rendering
-        self.doors = door_segments
-
-        return wall_segments
-
-    def _add_segment(self, a, b, thickness, color, collision=True):
-        """Create a thick wall as a convex polygon.
-
-        This creates a rectangle from point a to b with the given thickness.
-        """
-        a, b = Vec2d(*a), Vec2d(*b)
-
-        # Guard against degenerate inputs
-        if (b - a).length < 1e-6:
-            return None
-
-        ab = (b - a).normalized()
-        perp = ab.perpendicular() * (thickness / 2)
-        points = [a + perp, b + perp, b - perp, a - perp]
-
-        shape = pymunk.Poly(self.space.static_body, points)
-        shape.color = pygame.Color(*color)
-        shape.sensor = not collision
-        shape.friction = 0.8
-        shape.elasticity = 0.0
-        self.space.add(shape)
-        return shape
-
-    def _add_circle(self, position, radius, is_sensor=False):
-        """Create a circle body."""
-        if is_sensor:
-            body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-        else:
-            mass = 1.0
-            moment = pymunk.moment_for_circle(mass, 0, radius)
-            body = pymunk.Body(mass, moment, body_type=pymunk.Body.DYNAMIC)
-
-        body.position = position
-        body.friction = 1
-
-        shape = pymunk.Circle(body, radius)
-        shape.sensor = is_sensor
-        shape.friction = 0.8
-        shape.elasticity = 0.0
-
-        if not is_sensor:
-            self.space.add(body, shape)
-
-        return body
-
-    def _set_state(self, state):
-        """Set agent and target positions."""
-
-        agent_pos = state[:2]
-        target_pos = state[2:4]
-
-        agent_pos = (
-            agent_pos.tolist()
-            if isinstance(agent_pos, np.ndarray)
-            else agent_pos
-        )
-
-        target_pos = (
-            target_pos.tolist()
-            if isinstance(target_pos, np.ndarray)
-            else target_pos
-        )
-        self.energy = state[4]
-
-        self.agent.position = agent_pos
-        self.target.position = target_pos
-        self.space.step(self.dt)
-
-    def _set_target_state(self, target_state):
-        """Set only the target position."""
-        target_pos = (
-            target_state.tolist()
-            if isinstance(target_state, np.ndarray)
-            else target_state
-        )
-        self.target.position = target_pos[2:4]
-        self.space.step(self.dt)
-
-    def _get_obs(self):
-        """Build observation array."""
-        speed = self.variation_space['agent']['speed'].value.item()
-        obs = (
-            tuple(self.agent.position)
-            + tuple(self.target.position)
-            + (self.energy, speed)
-        )
-
-        return np.array(obs, dtype=np.float64)
-
-    def _get_info(self):
-        """Build info dict."""
-        n_steps = int(1 / (self.dt * self.control_hz))
-        n_contact_points_per_step = int(
-            np.ceil(self.n_contact_points / n_steps)
-        )
-        return {
-            'pos_agent': np.array(self.agent.position),
-            'pos_target': np.array(self.target.position),
-            'n_contacts': n_contact_points_per_step,
-            'target_pos': self.variation_space['target']['position'].value,
-            'target': self._target,
-            'energy': self.energy,
-            'max_energy': self.variation_space['agent']['max_energy'].value,
-        }
-
-    def _handle_collision(self, arbiter, space, data):
-        """Track collision contacts."""
-        self.n_contact_points += len(arbiter.contact_point_set.points)
+        info['distance_to_target'] = dist
+        return obs, reward, terminated, truncated, info
 
     def render(self):
-        """Render the environment."""
-        return self._render_frame(self.render_mode)
-
-    def _render_frame(self, mode):
-        """Render a single frame with explicit layer ordering."""
-        if self.window is None and mode == 'human':
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(
-                (self.window_size, self.window_size)
-            )
-
-        if self.clock is None and mode == 'human':
-            self.clock = pygame.time.Clock()
-
-        canvas = pygame.Surface((self.window_size, self.window_size))
-
-        # Layer 1: Background
-        bg_color = self.variation_space['background']['color'].value.tolist()
-        canvas.fill(bg_color)
-
-        # Layer 2: target (below walls, can be partially hidden)
-        target_color = self.variation_space['target']['color'].value.tolist()
-        self._draw_circle(canvas, self.target, target_color)
-
-        # Layer 3: Walls, doors, and borders
-        for segment in self.wall_segments:
-            self._draw_segment(canvas, segment, rounded=False)
-        for segment in self.doors:
-            self._draw_segment(canvas, segment, rounded=False)
-        for segment in self.border_segments:
-            self._draw_segment(canvas, segment, rounded=True)
-
-        # Layer 4: Agent (always on top)
-        agent_color = self.variation_space['agent']['color'].value.tolist()
-        self._draw_circle(canvas, self.agent, agent_color)
-
-        # Convert to numpy array
-        img = np.transpose(
-            np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
+        # returns HWC uint8 numpy for compatibility with PIL/wrappers
+        img_chw = (
+            self._render_frame(agent_pos=self.agent_position).cpu().numpy()
         )
-        img = cv2.resize(img, (self.render_size, self.render_size))
+        return img_chw.transpose(1, 2, 0)  # CHW -> HWC
 
-        if mode == 'human':
-            self.window.blit(canvas, canvas.get_rect())
-            pygame.event.pump()
-            pygame.display.update()
-            self.clock.tick(self.metadata['render_fps'])
+    # ---------------- Internal helpers ----------------
+
+    def _cache_params(self):
+        self.wall_thickness = int(
+            self.variation_space['wall']['thickness'].value
+        )
+        self.wall_axis = int(self.variation_space['wall']['axis'].value)
+
+        self.num_doors = int(self.variation_space['door']['number'].value)
+        door_pos = self.variation_space['door']['position'].value[
+            : self.num_doors
+        ]
+        door_size = self.variation_space['door']['size'].value[
+            : self.num_doors
+        ]
+
+        self.door_positions = torch.as_tensor(
+            door_pos, dtype=torch.float32
+        )  # center positions
+        self.door_sizes = torch.as_tensor(
+            door_size, dtype=torch.float32
+        )  # half-extent
+
+        # For policy / observation: wall position on relevant axis
+        self.wall_pos = float(self.WALL_CENTER)
+
+    def _get_obs(self):
+        # state = agent(2) + target(2) + door_centers(MAX_DOOR*2)
+        door_coords = []
+        for i in range(self.MAX_DOOR):
+            if i < self.num_doors:
+                center_1d = float(self.door_positions[i].item())
+                if self.wall_axis == 1:  # vertical wall => door varies along y
+                    door_coords.extend([self.wall_pos, center_1d])
+                else:  # horizontal wall => door varies along x
+                    door_coords.extend([center_1d, self.wall_pos])
+            else:
+                door_coords.extend([0.0, 0.0])
+
+        state = torch.tensor(
+            [
+                float(self.agent_position[0]),
+                float(self.agent_position[1]),
+                float(self.target_position[0]),
+                float(self.target_position[1]),
+                *door_coords,
+            ],
+            dtype=torch.float32,
+        )
+
+        return state
+
+        return state
+
+    def _get_info(self):
+        return {
+            'pos_agent': self.agent_position.detach().cpu().numpy(),
+            'pos_target': self.target_position.detach().cpu().numpy(),
+            'proprio': self.agent_position.detach().cpu().numpy(),
+        }
+
+    # ---------------- Rendering ----------------
+
+    def _render_frame(self, agent_pos: torch.Tensor):
+        H = W = self.IMG_SIZE
+
+        bg = self.variation_space['background']['color'].value
+        img = torch.empty((3, H, W), dtype=torch.uint8)
+        img[0].fill_(int(bg[0]))
+        img[1].fill_(int(bg[1]))
+        img[2].fill_(int(bg[2]))
+
+        wall_mask, door_mask = self._wall_and_door_masks()
+
+        # doors
+        door_color = self.variation_space['door']['color'].value
+        if door_mask.any():
+            img[0, door_mask] = int(door_color[0])
+            img[1, door_mask] = int(door_color[1])
+            img[2, door_mask] = int(door_color[2])
+
+        # walls
+        wall_color = self.variation_space['wall']['color'].value
+        if wall_mask.any():
+            img[0, wall_mask] = int(wall_color[0])
+            img[1, wall_mask] = int(wall_color[1])
+            img[2, wall_mask] = int(wall_color[2])
+
+        # optional target
+        render_target = (
+            bool(self.variation_space['rendering']['render_target'].value)
+            or self.render_target_flag
+        )
+        if render_target:
+            tgt_color = self.variation_space['target']['color'].value
+            tgt_r = float(
+                self.variation_space['target']['radius'].value.item()
+            )
+            tgt_dot = self._gaussian_dot(self.target_position, tgt_r)
+            img = self._alpha_blend(img, tgt_dot, tgt_color)
+
+        # agent
+        agent_color = self.variation_space['agent']['color'].value
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+        agent_dot = self._gaussian_dot(agent_pos, agent_r)
+        img = self._alpha_blend(img, agent_dot, agent_color)
 
         return img
 
-    def _draw_circle(self, canvas, body, color):
-        """Draw a circle with highlight effect."""
-        pos = (round(body.position.x), round(body.position.y))
-        radius = round(list(body.shapes)[0].radius)
+    @staticmethod
+    def _alpha_blend(
+        img_u8: torch.Tensor, alpha_01: torch.Tensor, rgb_u8: np.ndarray
+    ):
+        """
+        img_u8: (3,H,W) uint8
+        alpha_01: (H,W) float32 in [0,1]
+        rgb_u8: (3,) uint8-like
+        """
+        a = alpha_01.clamp(0, 1).to(torch.float32)
+        out = img_u8.to(torch.float32)
+        for c in range(3):
+            out[c] = out[c] * (1.0 - a) + float(rgb_u8[c]) * a
+        return out.to(torch.uint8)
 
-        # Main circle
-        pygame.draw.circle(canvas, color, pos, radius)
+    def _gaussian_dot(self, pos_xy: torch.Tensor, radius: float):
+        # pos_xy is (2,) in x,y coordinates
+        # grid_x/grid_y are (H,W)
+        dx = self.grid_x - float(pos_xy[0])
+        dy = self.grid_y - float(pos_xy[1])
+        dist2 = dx * dx + dy * dy
+        std = max(1e-6, float(radius))
+        dot = torch.exp(-dist2 / (2.0 * std * std))
+        m = dot.max()
+        if m > 0:
+            dot = dot / m
+        return dot
 
-        # Highlight (lighter inner circle)
-        highlight_color = light_color(pygame.Color(*color)).as_int()
-        inner_radius = max(0, radius - 4)
-        if inner_radius > 0:
-            pygame.draw.circle(canvas, highlight_color, pos, inner_radius)
+    def _wall_and_door_masks(self):
+        """
+        Returns:
+          wall_mask: (H,W) bool (wall including borders, with door cutouts removed)
+          door_mask: (H,W) bool (door pixels only, on the central wall)
+        """
+        H = W = self.IMG_SIZE
+        half = self.wall_thickness // 2
 
-    def _draw_poly(self, canvas, shape):
-        """Draw a polygon shape with highlight effect."""
-        if shape is None:
-            return
-
-        verts = shape.get_vertices()
-        if len(verts) < 3:
-            return
-
-        color = shape.color
-        points = [(round(v.x), round(v.y)) for v in verts]
-
-        # Draw main polygon
-        pygame.draw.polygon(canvas, color, points)
-
-        # Draw lighter inner polygon (highlight)
-        highlight_color = light_color(pygame.Color(color)).as_int()
-
-        # Calculate centroid and shrink vertices toward it for highlight
-        cx = sum(v.x for v in verts) / len(verts)
-        cy = sum(v.y for v in verts) / len(verts)
-        shrink = 4
-        inner_points = []
-        for v in verts:
-            dx = cx - v.x
-            dy = cy - v.y
-            dist = math.sqrt(dx * dx + dy * dy)
-            if dist > shrink:
-                scale = shrink / dist
-                inner_points.append(
-                    (round(v.x + dx * scale), round(v.y + dy * scale))
+        # Central wall stripe
+        if self.wall_axis == 1:  # vertical wall at x = center
+            wall_stripe = (self.grid_x >= (self.WALL_CENTER - half)) & (
+                self.grid_x <= (self.WALL_CENTER + half)
+            )
+            door_span = torch.zeros((H, W), dtype=torch.bool)
+            for i in range(self.num_doors):
+                c = self.door_positions[i]
+                s = self.door_sizes[i]
+                door_span |= (self.grid_y >= (c - s)) & (
+                    self.grid_y <= (c + s)
                 )
+        else:  # horizontal wall at y = center
+            wall_stripe = (self.grid_y >= (self.WALL_CENTER - half)) & (
+                self.grid_y <= (self.WALL_CENTER + half)
+            )
+            door_span = torch.zeros((H, W), dtype=torch.bool)
+            for i in range(self.num_doors):
+                c = self.door_positions[i]
+                s = self.door_sizes[i]
+                door_span |= (self.grid_x >= (c - s)) & (
+                    self.grid_x <= (c + s)
+                )
+
+        door_mask = wall_stripe & door_span
+        wall_mask = wall_stripe & (~door_span)
+
+        # Borders
+        bs = self.BORDER_SIZE
+        t = 4  # thickness of border line (was int(round(3.5)))
+        # left / right
+        wall_mask[:, bs - t : bs] = True
+        wall_mask[:, W - bs : W - bs + t] = True
+        # top / bottom
+        wall_mask[bs - t : bs, :] = True
+        wall_mask[H - bs : H - bs + t, :] = True
+
+        return wall_mask, door_mask
+
+    # ---------------- Collision ----------------
+
+    def _apply_collisions(self, pos1: torch.Tensor, pos2: torch.Tensor):
+        """
+        If attempting to cross central wall outside doors => clamp at wall edge with small pushback.
+        Collision is triggered when agent radius touches the wall, not just the center.
+        Also handles border clamping.
+        """
+        bs = float(self.BORDER_SIZE)
+        door_margin = 1.75  # was 0.5 * 3.5 scale
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+
+        # border clamp first - account for agent radius
+        x2, y2 = float(pos2[0]), float(pos2[1])
+        x2 = min(max(x2, bs + agent_r), self.IMG_SIZE - bs - agent_r)
+        y2 = min(max(y2, bs + agent_r), self.IMG_SIZE - bs - agent_r)
+        pos2c = torch.tensor([x2, y2], dtype=torch.float32)
+
+        # central wall collision - account for agent radius
+        half = self.wall_thickness // 2
+        c = float(self.WALL_CENTER)
+
+        if self.wall_axis == 1:
+            # For vertical wall
+            # Wall spans from (c - half) to (c + half)
+            wall_left = c - half
+            wall_right = c + half
+
+            # Effective wall boundaries considering agent radius
+            effective_left = wall_left - agent_r
+            effective_right = wall_right + agent_r
+
+            x1, x2_val = float(pos1[0]), float(pos2c[0])
+            y2_val = float(pos2c[1])
+
+            # Determine which side the agent started on
+            started_left = x1 < c
+
+            # Check if agent is trying to enter the wall zone
+            if started_left:
+                # Agent is on left side, check if moving into wall
+                if x2_val > effective_left:
+                    # Check if in a door
+                    if not self._in_any_door_1d(y2_val, door_margin):
+                        # Clamp to effective wall boundary
+                        pos2c[0] = effective_left - 0.5
             else:
-                inner_points.append((round(v.x), round(v.y)))
-
-        if len(inner_points) >= 3:
-            pygame.draw.polygon(canvas, highlight_color, inner_points)
-
-    def _draw_segment(self, canvas, shape, rounded=True):
-        """Draw a polygon segment (for backwards compatibility)."""
-        self._draw_poly(canvas, shape)
-
-    def close(self):
-        """Clean up pygame resources."""
-        if self.window is not None:
-            pygame.display.quit()
-            pygame.quit()
-
-    def seed(self, seed=None):
-        """Set random seed."""
-        if seed is None:
-            seed = np.random.randint(0, 25536)
-        self._seed = seed
-        self.np_random = np.random.default_rng(seed)
-        self.random_state = np.random.RandomState(seed)
-        self.observation_space.seed(seed)
-        self.action_space.seed(seed)
-        self.variation_space.seed(seed)
-
-    # ---- Constraint functions for variation space ----
-
-    def check_one_door_fit(self, x):
-        """Ensure at least one door is large enough for the agent to pass."""
-        number = self.variation_space.value['door']['number']
-        agent_radius = self.variation_space.value['agent']['radius'].item()
-        for size in x[:number]:
-            if size >= 2.5 * agent_radius:
-                return True
-        return False
-
-    def check_other_room(self, x):
-        """Check if position x is in a different room than the agent."""
-        agent_pos = self.variation_space.value['agent']['position']
-        wall_axis = self.variation_space.value['wall']['axis']
-        wall_pos = self.wall_pos
-
-        # pick the relevant axis: 0 = x (vertical wall), 1 = y (horizontal wall)
-        i = 1 if wall_axis == 0 else 0
-        return (agent_pos[i] < wall_pos and x[i] > wall_pos) or (
-            agent_pos[i] > wall_pos and x[i] < wall_pos
-        )
-
-    def check_collide(self, x, entity='agent'):
-        """Check if position collides with walls or borders."""
-        assert entity in ['agent', 'target']
-        cx, cy = x
-        r = self.variation_space.value[entity]['radius']
-
-        # collide with border
-        if (cx - r) <= self.border_size or (cx + r) >= self.size:
-            return True
-
-        if (cy - r) <= self.border_size or (cy + r) >= self.size:
-            return True
-
-        # check collide with wall
-        wall_axis = self.variation_space.value['wall']['axis']
-        wall_pos = self.wall_pos
-        wall_thickness = self.variation_space.value['wall']['thickness']
-
-        if wall_axis == 0:
-            if abs(cy - wall_pos) <= (wall_thickness / 2 + r):
-                return True
+                # Agent is on right side, check if moving into wall
+                if x2_val < effective_right:
+                    # Check if in a door
+                    if not self._in_any_door_1d(y2_val, door_margin):
+                        # Clamp to effective wall boundary
+                        pos2c[0] = effective_right + 0.5
         else:
-            if abs(cx - wall_pos) <= (wall_thickness / 2 + r):
-                return True
+            # For horizontal wall
+            wall_top = c - half
+            wall_bottom = c + half
 
+            # Effective wall boundaries considering agent radius
+            effective_top = wall_top - agent_r
+            effective_bottom = wall_bottom + agent_r
+
+            y1, y2_val = float(pos1[1]), float(pos2c[1])
+            x2_val = float(pos2c[0])
+
+            # Determine which side the agent started on
+            started_top = y1 < c
+
+            # Check if agent is trying to enter the wall zone
+            if started_top:
+                # Agent is on top side, check if moving into wall
+                if y2_val > effective_top:
+                    # Check if in a door
+                    if not self._in_any_door_1d(x2_val, door_margin):
+                        # Clamp to effective wall boundary
+                        pos2c[1] = effective_top - 0.5
+            else:
+                # Agent is on bottom side, check if moving into wall
+                if y2_val < effective_bottom:
+                    # Check if in a door
+                    if not self._in_any_door_1d(x2_val, door_margin):
+                        # Clamp to effective wall boundary
+                        pos2c[1] = effective_bottom + 0.5
+
+        return pos2c
+
+    def _in_any_door_1d(self, coord_1d: float, margin: float):
+        for i in range(self.num_doors):
+            c = float(self.door_positions[i])
+            s = float(self.door_sizes[i])
+            if (c - s - margin) <= coord_1d <= (c + s + margin):
+                return True
         return False
+
+    # ---------------- Constraint ----------------
+
+    def _constrain_agent_not_in_wall(self, agent_pos):
+        """
+        Ensure agent position is not inside the wall (unless in a door).
+        Agent can start in either room.
+        """
+        wall_axis = int(self.variation_space['wall']['axis'].value)
+        wall_thickness = int(self.variation_space['wall']['thickness'].value)
+        half_thickness = wall_thickness // 2
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+
+        # Effective wall zone including agent radius
+        wall_min = self.WALL_CENTER - half_thickness - agent_r
+        wall_max = self.WALL_CENTER + half_thickness + agent_r
+
+        if wall_axis == 1:  # vertical wall
+            # Check if agent x is in wall zone
+            if wall_min <= agent_pos[0] <= wall_max:
+                return False  # Agent would be in wall
+        else:  # horizontal wall
+            # Check if agent y is in wall zone
+            if wall_min <= agent_pos[1] <= wall_max:
+                return False  # Agent would be in wall
+
+        return True
+
+    def _check_door_fit(self, sizes):
+        """
+        Ensure at least one door half-extent can fit agent radius.
+        """
+        num = int(self.variation_space['door']['number'].value)
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+        return any(float(s) >= 1.1 * agent_r for s in sizes[:num])
+
+    def _constrain_target_by_min_steps(self, target_pos):
+        """
+        Check if target position satisfies:
+        1. Target must be in the opposite room from agent
+        2. min_steps constraint (if set)
+
+        min_steps specifies the minimum number of steps to reach target.
+        Path length = dist(agent -> door) + dist(door -> target)
+        min_steps <= path_length / speed
+        """
+        agent_pos = self.variation_space['agent']['position'].value
+        wall_axis = int(self.variation_space['wall']['axis'].value)
+        wall_thickness = int(self.variation_space['wall']['thickness'].value)
+        half_thickness = wall_thickness // 2
+        agent_r = float(self.variation_space['agent']['radius'].value.item())
+
+        # First check: target must be in opposite room from agent
+        if wall_axis == 1:  # vertical wall
+            agent_side = agent_pos[0] < self.WALL_CENTER  # True = left room
+            target_side = target_pos[0] < self.WALL_CENTER  # True = left room
+            if agent_side == target_side:
+                return False  # Same room, reject
+            # Also ensure target is not in wall zone
+            wall_min = self.WALL_CENTER - half_thickness - agent_r
+            wall_max = self.WALL_CENTER + half_thickness + agent_r
+            if wall_min <= target_pos[0] <= wall_max:
+                return False
+        else:  # horizontal wall
+            agent_side = agent_pos[1] < self.WALL_CENTER  # True = top room
+            target_side = target_pos[1] < self.WALL_CENTER  # True = top room
+            if agent_side == target_side:
+                return False  # Same room, reject
+            # Also ensure target is not in wall zone
+            wall_min = self.WALL_CENTER - half_thickness - agent_r
+            wall_max = self.WALL_CENTER + half_thickness + agent_r
+            if wall_min <= target_pos[1] <= wall_max:
+                return False
+
+        # Second check: min_steps constraint
+        min_steps = int(self.variation_space['task']['min_steps'].value)
+        if min_steps <= 0:
+            return True  # No min_steps constraint
+
+        speed = float(self.variation_space['agent']['speed'].value.item())
+
+        # Get door info
+        num_doors = int(self.variation_space['door']['number'].value)
+        door_positions = self.variation_space['door']['position'].value[
+            :num_doors
+        ]
+        door_sizes = self.variation_space['door']['size'].value[:num_doors]
+
+        # Find the best (shortest path) door that fits the agent
+        min_path_length = float('inf')
+        for i in range(num_doors):
+            door_size = float(door_sizes[i])
+            if door_size < 1.1 * agent_r:
+                continue  # Door too small
+
+            door_center_1d = float(door_positions[i])
+
+            if wall_axis == 1:  # vertical wall
+                # Door is at x=wall_center, y=door_center_1d
+                door_x = float(self.WALL_CENTER)
+                door_y = door_center_1d
+                # Distance from agent to door
+                dist_to_door = np.sqrt(
+                    (agent_pos[0] - door_x) ** 2 + (agent_pos[1] - door_y) ** 2
+                )
+                # Distance from door to target
+                dist_door_to_target = np.sqrt(
+                    (target_pos[0] - door_x) ** 2
+                    + (target_pos[1] - door_y) ** 2
+                )
+            else:  # horizontal wall
+                # Door is at x=door_center_1d, y=wall_center
+                door_x = door_center_1d
+                door_y = float(self.WALL_CENTER)
+                dist_to_door = np.sqrt(
+                    (agent_pos[0] - door_x) ** 2 + (agent_pos[1] - door_y) ** 2
+                )
+                dist_door_to_target = np.sqrt(
+                    (target_pos[0] - door_x) ** 2
+                    + (target_pos[1] - door_y) ** 2
+                )
+
+            path_length = dist_to_door + dist_door_to_target
+            min_path_length = min(min_path_length, path_length)
+
+        if min_path_length == float('inf'):
+            return True  # No valid door, accept any target
+
+        # Check if min_steps constraint is satisfied
+        steps_required = min_path_length / speed
+        return steps_required >= min_steps
+
+    # ---------------- Convenience setters ----------------
+
+    def _set_state(self, state):
+        self.agent_position = torch.tensor(state, dtype=torch.float32)
+
+    def _set_target(self, target):
+        self.target_position = torch.tensor(target, dtype=torch.float32)
+        self.variation_space['target']['position'].value = np.array(
+            target, dtype=np.float32
+        )
+        self._target_img = self._render_frame(agent_pos=self.target_position)

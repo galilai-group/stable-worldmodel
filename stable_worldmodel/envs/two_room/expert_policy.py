@@ -1,119 +1,180 @@
 import numpy as np
-
 from stable_worldmodel.policy import BasePolicy
 
 
 class ExpertPolicy(BasePolicy):
-    """Expert Policy for Two Room Environment."""
+    """Expert Policy for Two Room Environment.
 
-    def __init__(self, action_noise=1.3, **kwargs):
+    Behavior:
+      - If target is in other room: go to center of closest door that fits -> then go to target.
+      - Otherwise: go directly to target.
+    """
+
+    def __init__(
+        self,
+        action_noise: float = 0.0,
+        action_repeat_prob: float = 0.0,
+        door_fit_margin: float = 1.10,
+        door_reach_tol: float | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        self.type = "expert"
-        self.action_noise = action_noise
+        self.type = 'expert'
+        self.action_noise = float(action_noise)
+        self.door_fit_margin = float(door_fit_margin)
+        # If None, will default to ~3*scale per-env at runtime
+        self.door_reach_tol = door_reach_tol
 
     def set_env(self, env):
         self.env = env
 
     def get_action(self, info_dict, **kwargs):
-        assert hasattr(self, "env"), "Environment not set for the policy"
-        assert "pixels" in info_dict, "'pixels' must be provided in info_dict"
-        assert "goal" in info_dict, "'goal' must be provided in info_dict"
-        assert "pos_agent" in info_dict, "'pos_agent' must be provided in info_dict"
-        assert "goal_pos" in info_dict, "'goal_pos' must be provided in info_dict"
+        assert hasattr(self, 'env'), 'Environment not set for the policy'
+        assert 'pos_agent' in info_dict, (
+            "'pos_agent' must be provided in info_dict"
+        )
+        assert 'pos_target' in info_dict, (
+            "'pos_target' must be provided in info_dict"
+        )
 
-        # Handle vectorized envs (VecEnv-style) and single envs gracefully
         base_env = self.env.unwrapped
-        if hasattr(base_env, "envs"):
+        if hasattr(base_env, 'envs'):
             envs = [e.unwrapped for e in base_env.envs]
+            is_vectorized = True
         else:
             envs = [base_env]
+            is_vectorized = False
 
-        act_shape = self.env.action_space.shape
-        actions = np.zeros(act_shape, dtype=np.float32)
+        actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
 
         for i, env in enumerate(envs):
-            agent_pos = np.asarray(info_dict["pos_agent"][i]).squeeze().astype(np.float32)
-            goal_pos = np.asarray(info_dict["goal_pos"][i]).squeeze().astype(np.float32)
-            max_norm = env.max_step_norm
+            if is_vectorized:
+                agent_pos = np.asarray(
+                    info_dict['pos_agent'][i], dtype=np.float32
+                ).squeeze()
+                pos_target = np.asarray(
+                    info_dict['pos_target'][i], dtype=np.float32
+                ).squeeze()
+            else:
+                agent_pos = np.asarray(
+                    info_dict['pos_agent'], dtype=np.float32
+                ).squeeze()
+                pos_target = np.asarray(
+                    info_dict['pos_target'], dtype=np.float32
+                ).squeeze()
 
-            # --- determine if goal is in the other room w.r.t. CURRENT agent position ---
-            wall_axis = env.variation_space.value["wall"][
-                "axis"
-            ]  # 0: horizontal wall (splits vertically), 1: vertical wall
-            border_size = env.border_size
-            wall_pos = env.wall_pos  # wall position (matches physics and check_collide)
+            # --- environment params (avoid env.variation_space.value; use .value fields) ---
+            wall_axis = int(
+                env.variation_space['wall']['axis'].value
+            )  # 1 vertical, 0 horizontal
+            wall_pos = float(env.wall_pos)  # must match env physics/collision
 
-            # index of coordinate used to distinguish rooms
-            # vertical wall at x = wall_pos -> use x (0)
-            # horizontal wall at y = wall_pos -> use y (1)
-            room_idx = 1 if wall_axis == 0 else 0
+            # Room is determined by x if vertical wall, by y if horizontal wall
+            room_idx = 0 if wall_axis == 1 else 1
 
-            agent_coord = agent_pos[room_idx]
-            goal_coord = goal_pos[room_idx]
+            agent_side = agent_pos[room_idx] > wall_pos
+            target_side = pos_target[room_idx] > wall_pos
+            target_other_room = agent_side != target_side
 
-            goal_other_room = (agent_coord < wall_pos and goal_coord > wall_pos) or (
-                agent_coord > wall_pos and goal_coord < wall_pos
-            )
+            waypoint = None
 
-            if goal_other_room:
-                # --- go to the closest door that fits the agent ---
-                number = env.variation_space.value["door"]["number"]
-                positions = env.variation_space.value["door"]["position"]
-                sizes = env.variation_space.value["door"]["size"]
-                agent_radius = env.variation_space.value["agent"]["radius"].item()
+            if target_other_room:
+                # Doors: interpret consistently with env:
+                # - position: center coordinate along wall direction (no border offset)
+                # - size: half-extent along wall direction
+                num = int(env.variation_space['door']['number'].value)
+                door_pos = np.asarray(
+                    env.variation_space['door']['position'].value,
+                    dtype=np.float32,
+                )[:num]
+                door_size = np.asarray(
+                    env.variation_space['door']['size'].value, dtype=np.float32
+                )[:num]
+                agent_radius = float(
+                    env.variation_space['agent']['radius'].value.item()
+                )
 
-                best_center = None
-                best_dist = float("inf")
+                # Choose closest door center that fits
+                best = None
+                best_dist = float('inf')
 
-                for pos_1d, size in zip(positions[:number], sizes[:number]):
-                    # door must be wide enough
-                    if size < 2.5 * agent_radius:
+                for c_1d, s in zip(door_pos, door_size):
+                    # Fit test: opening half-extent should exceed radius (with margin)
+                    if float(s) < self.door_fit_margin * agent_radius:
                         continue
 
-                    # 1D center along the wall's orthogonal axis
-                    center_t = pos_1d + size / 2.0
-
                     if wall_axis == 1:
-                        # vertical wall at x = wall_pos, door spans along y
+                        # vertical wall at x=wall_pos, door center at y=c_1d
                         door_center = np.array(
-                            [wall_pos, border_size + center_t],
-                            dtype=np.float32,
+                            [wall_pos, float(c_1d)], dtype=np.float32
                         )
                     else:
-                        # horizontal wall at y = wall_pos, door spans along x
+                        # horizontal wall at y=wall_pos, door center at x=c_1d
                         door_center = np.array(
-                            [border_size + center_t, wall_pos],
-                            dtype=np.float32,
+                            [float(c_1d), wall_pos], dtype=np.float32
                         )
 
-                    dist = np.linalg.norm(door_center - agent_pos)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_center = door_center
+                    d = float(np.linalg.norm(door_center - agent_pos))
+                    if d < best_dist:
+                        best_dist = d
+                        best = door_center
 
-                if best_center is None:
-                    # Fallback: aim for a point on the wall aligned with the goal
+                if best is None:
+                    # Fallback: go to the wall aligned with target (still better than nothing)
                     if wall_axis == 1:
-                        target = np.array([wall_pos, goal_pos[1]], dtype=np.float32)
+                        waypoint = np.array(
+                            [wall_pos, pos_target[1]], dtype=np.float32
+                        )
                     else:
-                        target = np.array([goal_pos[0], wall_pos], dtype=np.float32)
+                        waypoint = np.array(
+                            [pos_target[0], wall_pos], dtype=np.float32
+                        )
                 else:
-                    target = best_center
+                    # Two-stage: go to door center first; once close, go to target
+                    tol = (
+                        float(self.door_reach_tol)
+                        if self.door_reach_tol is not None
+                        else 10.5  # was 3.0 * scale (3.5)
+                    )
+                    if np.linalg.norm(best - agent_pos) > tol:
+                        waypoint = best
+                    else:
+                        waypoint = pos_target
             else:
-                # --- already on the same side as the goal: go directly to goal ---
-                target = goal_pos
+                waypoint = pos_target
 
-            # --- turn target point into an action vector ---
-            direction = target - agent_pos
-            norm = np.linalg.norm(direction)
-
+            # --- convert waypoint to action direction (unit vector) ---
+            direction = waypoint - agent_pos
+            norm = float(np.linalg.norm(direction))
             if norm > 1e-8:
-                if norm > max_norm:
-                    direction = direction / norm * max_norm
+                direction = direction / norm
             else:
-                direction = np.zeros_like(direction)
+                direction = np.zeros_like(direction, dtype=np.float32)
 
-            actions[i] = direction.astype(np.float32)
+            if is_vectorized:
+                actions[i] = direction.astype(np.float32)
+            else:
+                actions = direction.astype(np.float32)
 
-        actions += np.random.normal(0, self.action_noise, size=actions.shape)
-        return actions
+        if self.action_noise > 0:
+            actions = actions + np.random.normal(
+                0.0, self.action_noise, size=actions.shape
+            ).astype(np.float32)
+
+        # action repeat stochasticity
+        self._last_action = getattr(self, '_last_action', None)
+        if self._last_action is not None and self.action_repeat_prob > 0.0:
+            repeat_mask = (
+                np.random.uniform(
+                    0.0, 1.0, size=(actions.shape[0],) if is_vectorized else ()
+                )
+                < self.action_repeat_prob
+            )
+            if is_vectorized:
+                actions[repeat_mask] = self._last_action[repeat_mask]
+            else:
+                if repeat_mask:
+                    actions = self._last_action
+
+        # Keep within action space
+        return np.clip(actions, -1.0, 1.0).astype(np.float32)
