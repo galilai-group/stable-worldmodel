@@ -811,10 +811,17 @@ class World:
         seeds = init_step.get('seed')
         # get dataset variation
         vkey = 'variation.'
-        variations = [
-            col.removeprefix(vkey) for col in columns if col.startswith(vkey)
-        ]
-        options = {'variations': variations or None}
+        variations_dict = {
+            k.removeprefix(vkey): v
+            for k, v in init_step.items()
+            if k.startswith(vkey)
+        }
+
+        options = {}
+
+        if len(variations_dict) > 0:
+            options['variation'] = list(variations_dict.keys())
+            options['variation_values'] = variations_dict
 
         init_step.update(deepcopy(goal_step))
         self.reset(seed=seeds, options=options)  # set seeds for all envs

@@ -30,15 +30,13 @@ Example:
    https://github.com/seohongpark/ogbench/
 """
 
-from collections.abc import Sequence
-
 import mujoco
 import numpy as np
 from dm_control import mjcf
 from ogbench.manipspace import lie
 from ogbench.manipspace.envs.manipspace_env import ManipSpaceEnv
 
-import stable_worldmodel as swm
+from stable_worldmodel import spaces as swm_spaces
 from stable_worldmodel.envs.utils import perturb_camera_angle
 
 
@@ -89,8 +87,8 @@ class CubeEnv(ManipSpaceEnv):
 
     def __init__(
         self,
-        env_type="single",
-        ob_type="pixels",
+        env_type='single',
+        ob_type='pixels',
         permute_blocks=True,
         multiview=False,
         height=224,
@@ -131,18 +129,18 @@ class CubeEnv(ManipSpaceEnv):
         self._permute_blocks = permute_blocks
         self._multiview = multiview
 
-        if self._env_type == "single":
+        if self._env_type == 'single':
             self._num_cubes = 1
-        elif self._env_type == "double":
+        elif self._env_type == 'double':
             self._num_cubes = 2
-        elif self._env_type == "triple":
+        elif self._env_type == 'triple':
             self._num_cubes = 3
-        elif self._env_type == "quadruple":
+        elif self._env_type == 'quadruple':
             self._num_cubes = 4
-        elif self._env_type == "octuple":
+        elif self._env_type == 'octuple':
             self._num_cubes = 8
         else:
-            raise ValueError(f"Invalid env_type: {env_type}")
+            raise ValueError(f'Invalid env_type: {env_type}')
 
         super().__init__(*args, height=height, width=width, **kwargs)
 
@@ -151,129 +149,158 @@ class CubeEnv(ManipSpaceEnv):
         # Define constants.
         self._cube_colors = np.array(
             [
-                self._colors["red"],
-                self._colors["blue"],
-                self._colors["orange"],
-                self._colors["green"],
-                self._colors["purple"],
-                self._colors["yellow"],
-                self._colors["magenta"],
-                self._colors["gray"],
+                self._colors['red'],
+                self._colors['blue'],
+                self._colors['orange'],
+                self._colors['green'],
+                self._colors['purple'],
+                self._colors['yellow'],
+                self._colors['magenta'],
+                self._colors['gray'],
             ]
         )
         self._cube_success_colors = np.array(
             [
-                self._colors["lightred"],
-                self._colors["lightblue"],
-                self._colors["lightorange"],
-                self._colors["lightgreen"],
-                self._colors["lightpurple"],
-                self._colors["lightyellow"],
-                self._colors["lightmagenta"],
-                self._colors["white"],
+                self._colors['lightred'],
+                self._colors['lightblue'],
+                self._colors['lightorange'],
+                self._colors['lightgreen'],
+                self._colors['lightpurple'],
+                self._colors['lightyellow'],
+                self._colors['lightmagenta'],
+                self._colors['white'],
             ]
         )
 
         # Target info.
-        self._target_task = "cube"
+        self._target_task = 'cube'
         # The target cube position is stored in the mocap object.
         self._target_block = 0
 
         default_start_position = np.array([0.3, 0.0], dtype=np.float64)
 
-        self.variation_space = swm.spaces.Dict(
+        self.variation_space = swm_spaces.Dict(
             {
-                "cube": swm.spaces.Dict(
+                'cube': swm_spaces.Dict(
                     {
-                        # "num": swm.spaces.Discrete(),
-                        "color": swm.spaces.Box(
+                        # "num": swm_spaces.Discrete(),
+                        'color': swm_spaces.Box(
                             low=0.0,
                             high=1.0,
                             shape=(self._num_cubes, 3),
                             dtype=np.float64,
-                            init_value=self._cube_colors[: self._num_cubes, :3].copy(),
+                            init_value=self._cube_colors[
+                                : self._num_cubes, :3
+                            ].copy(),
                         ),
-                        "size": swm.spaces.Box(
+                        'size': swm_spaces.Box(
                             low=0.01,
                             high=0.03,
                             shape=(self._num_cubes,),
                             dtype=np.float64,
-                            init_value=0.02 * np.ones((self._num_cubes,), dtype=np.float32),
+                            init_value=0.02
+                            * np.ones((self._num_cubes,), dtype=np.float32),
                         ),
-                        "start_position": swm.spaces.Box(  # x, y positions
-                            low=np.tile(self._object_sampling_bounds[0], (self._num_cubes, 1)),
-                            high=np.tile(self._object_sampling_bounds[1], (self._num_cubes, 1)),
+                        'start_position': swm_spaces.Box(  # x, y positions
+                            low=np.tile(
+                                self._object_sampling_bounds[0],
+                                (self._num_cubes, 1),
+                            ),
+                            high=np.tile(
+                                self._object_sampling_bounds[1],
+                                (self._num_cubes, 1),
+                            ),
                             shape=(self._num_cubes, 2),
                             dtype=np.float64,
-                            init_value=np.tile(default_start_position, (self._num_cubes, 1)),
+                            init_value=np.tile(
+                                default_start_position, (self._num_cubes, 1)
+                            ),
                         ),
-                        "start_yaw": swm.spaces.Box(  # yaw angles
+                        'start_yaw': swm_spaces.Box(  # yaw angles
                             low=0.0,
                             high=2 * np.pi,
                             shape=(self._num_cubes,),
                             dtype=np.float64,
-                            init_value=np.zeros((self._num_cubes,), dtype=np.float32),
+                            init_value=np.zeros(
+                                (self._num_cubes,), dtype=np.float32
+                            ),
                         ),
-                        "goal_position": swm.spaces.Box(  # x, y positions
-                            low=np.tile(self._target_sampling_bounds[0], (self._num_cubes, 1)),
-                            high=np.tile(self._target_sampling_bounds[1], (self._num_cubes, 1)),
+                        'goal_position': swm_spaces.Box(  # x, y positions
+                            low=np.tile(
+                                self._target_sampling_bounds[0],
+                                (self._num_cubes, 1),
+                            ),
+                            high=np.tile(
+                                self._target_sampling_bounds[1],
+                                (self._num_cubes, 1),
+                            ),
                             shape=(self._num_cubes, 2),
                             dtype=np.float64,
-                            init_value=np.tile(default_start_position, (self._num_cubes, 1)),
+                            init_value=np.tile(
+                                default_start_position, (self._num_cubes, 1)
+                            ),
                         ),
-                        "goal_yaw": swm.spaces.Box(  # yaw angles
+                        'goal_yaw': swm_spaces.Box(  # yaw angles
                             low=0.0,
                             high=2 * np.pi,
                             shape=(self._num_cubes,),
                             dtype=np.float64,
-                            init_value=np.zeros((self._num_cubes,), dtype=np.float32),
+                            init_value=np.zeros(
+                                (self._num_cubes,), dtype=np.float32
+                            ),
                         ),
                     }
                     # sampling_order=["num", "color", "size"]
                 ),
-                "agent": swm.spaces.Dict(
+                'agent': swm_spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
+                        'color': swm_spaces.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=self._colors["purple"][:3],
+                            init_value=self._colors['purple'][:3],
                         ),
-                        "ee_start_position": swm.spaces.Box(  # x, y, z positions
+                        'ee_start_position': swm_spaces.Box(  # x, y, z positions
                             low=self._arm_sampling_bounds[0],
                             high=self._arm_sampling_bounds[1],
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.mean(self._arm_sampling_bounds, axis=0),
+                            init_value=np.mean(
+                                self._arm_sampling_bounds, axis=0
+                            ),
                         ),
                     }
                 ),
-                "floor": swm.spaces.Dict(
+                'floor': swm_spaces.Dict(
                     {
-                        "color": swm.spaces.Box(
+                        'color': swm_spaces.Box(
                             low=0.0,
                             high=1.0,
                             shape=(2, 3),
                             dtype=np.float64,
-                            init_value=np.array([[0.08, 0.11, 0.16], [0.15, 0.18, 0.25]]),
+                            init_value=np.array(
+                                [[0.08, 0.11, 0.16], [0.15, 0.18, 0.25]]
+                            ),
                         ),
                     }
                 ),
-                "camera": swm.spaces.Dict(
+                'camera': swm_spaces.Dict(
                     {
-                        "angle_delta": swm.spaces.Box(
+                        'angle_delta': swm_spaces.Box(
                             low=-10.0,
                             high=10.0,
                             shape=(2, 2) if self._multiview else (1, 2),
                             dtype=np.float64,
-                            init_value=np.zeros([2, 2]) if self._multiview else np.zeros([1, 2]),
+                            init_value=np.zeros([2, 2])
+                            if self._multiview
+                            else np.zeros([1, 2]),
                         ),
                     }
                 ),
-                "light": swm.spaces.Dict(
+                'light': swm_spaces.Dict(
                     {
-                        "intensity": swm.spaces.Box(
+                        'intensity': swm_spaces.Box(
                             low=0.0,
                             high=1.0,
                             shape=(1,),
@@ -304,45 +331,45 @@ class CubeEnv(ManipSpaceEnv):
             Also sets the default reward_task_id to 2 if not already configured.
             All positions are in MuJoCo world coordinates (x, y, z) in meters.
         """
-        if self._env_type == "single":
+        if self._env_type == 'single':
             self.task_infos = [
                 {
-                    "task_name": "task1_horizontal",
-                    "init_xyzs": np.array([[0.425, 0.1, 0.02]]),
-                    "goal_xyzs": np.array([[0.425, -0.1, 0.02]]),
+                    'task_name': 'task1_horizontal',
+                    'init_xyzs': np.array([[0.425, 0.1, 0.02]]),
+                    'goal_xyzs': np.array([[0.425, -0.1, 0.02]]),
                 },
                 {
-                    "task_name": "task2_vertical1",
-                    "init_xyzs": np.array([[0.35, 0.0, 0.02]]),
-                    "goal_xyzs": np.array([[0.50, 0.0, 0.02]]),
+                    'task_name': 'task2_vertical1',
+                    'init_xyzs': np.array([[0.35, 0.0, 0.02]]),
+                    'goal_xyzs': np.array([[0.50, 0.0, 0.02]]),
                 },
                 {
-                    "task_name": "task3_vertical2",
-                    "init_xyzs": np.array([[0.50, 0.0, 0.02]]),
-                    "goal_xyzs": np.array([[0.35, 0.0, 0.02]]),
+                    'task_name': 'task3_vertical2',
+                    'init_xyzs': np.array([[0.50, 0.0, 0.02]]),
+                    'goal_xyzs': np.array([[0.35, 0.0, 0.02]]),
                 },
                 {
-                    "task_name": "task4_diagonal1",
-                    "init_xyzs": np.array([[0.35, -0.2, 0.02]]),
-                    "goal_xyzs": np.array([[0.50, 0.2, 0.02]]),
+                    'task_name': 'task4_diagonal1',
+                    'init_xyzs': np.array([[0.35, -0.2, 0.02]]),
+                    'goal_xyzs': np.array([[0.50, 0.2, 0.02]]),
                 },
                 {
-                    "task_name": "task5_diagonal2",
-                    "init_xyzs": np.array([[0.35, 0.2, 0.02]]),
-                    "goal_xyzs": np.array([[0.50, -0.2, 0.02]]),
+                    'task_name': 'task5_diagonal2',
+                    'init_xyzs': np.array([[0.35, 0.2, 0.02]]),
+                    'goal_xyzs': np.array([[0.50, -0.2, 0.02]]),
                 },
             ]
-        elif self._env_type == "double":
+        elif self._env_type == 'double':
             self.task_infos = [
                 {
-                    "task_name": "task1_single_pnp",
-                    "init_xyzs": np.array(
+                    'task_name': 'task1_single_pnp',
+                    'init_xyzs': np.array(
                         [
                             [0.425, 0.0, 0.02],
                             [0.425, -0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.425, 0.0, 0.02],
                             [0.425, 0.1, 0.02],
@@ -350,14 +377,14 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task2_double_pnp1",
-                    "init_xyzs": np.array(
+                    'task_name': 'task2_double_pnp1',
+                    'init_xyzs': np.array(
                         [
                             [0.35, -0.1, 0.02],
                             [0.50, -0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.35, 0.1, 0.02],
                             [0.50, 0.1, 0.02],
@@ -365,14 +392,14 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task3_double_pnp2",
-                    "init_xyzs": np.array(
+                    'task_name': 'task3_double_pnp2',
+                    'init_xyzs': np.array(
                         [
                             [0.35, 0.0, 0.02],
                             [0.50, 0.0, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.425, -0.2, 0.02],
                             [0.425, 0.2, 0.02],
@@ -380,14 +407,14 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task4_swap",
-                    "init_xyzs": np.array(
+                    'task_name': 'task4_swap',
+                    'init_xyzs': np.array(
                         [
                             [0.425, -0.1, 0.02],
                             [0.425, 0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.425, 0.1, 0.02],
                             [0.425, -0.1, 0.02],
@@ -395,14 +422,14 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task5_stack",
-                    "init_xyzs": np.array(
+                    'task_name': 'task5_stack',
+                    'init_xyzs': np.array(
                         [
                             [0.425, -0.2, 0.02],
                             [0.425, 0.2, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.425, 0.0, 0.02],
                             [0.425, 0.0, 0.06],
@@ -410,18 +437,18 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
             ]
-        elif self._env_type == "triple":
+        elif self._env_type == 'triple':
             self.task_infos = [
                 {
-                    "task_name": "task1_single_pnp",
-                    "init_xyzs": np.array(
+                    'task_name': 'task1_single_pnp',
+                    'init_xyzs': np.array(
                         [
                             [0.35, -0.1, 0.02],
                             [0.35, 0.1, 0.02],
                             [0.50, -0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.35, -0.1, 0.02],
                             [0.35, 0.1, 0.02],
@@ -430,15 +457,15 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task2_triple_pnp",
-                    "init_xyzs": np.array(
+                    'task_name': 'task2_triple_pnp',
+                    'init_xyzs': np.array(
                         [
                             [0.35, -0.2, 0.02],
                             [0.35, 0.0, 0.02],
                             [0.35, 0.2, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.50, 0.0, 0.02],
                             [0.50, 0.2, 0.02],
@@ -447,15 +474,15 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task3_pnp_from_stack",
-                    "init_xyzs": np.array(
+                    'task_name': 'task3_pnp_from_stack',
+                    'init_xyzs': np.array(
                         [
                             [0.425, 0.2, 0.02],
                             [0.425, 0.2, 0.06],
                             [0.425, 0.2, 0.10],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.35, -0.1, 0.02],
                             [0.50, -0.2, 0.02],
@@ -464,15 +491,15 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task4_cycle",
-                    "init_xyzs": np.array(
+                    'task_name': 'task4_cycle',
+                    'init_xyzs': np.array(
                         [
                             [0.35, 0.0, 0.02],
                             [0.50, -0.1, 0.02],
                             [0.50, 0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.50, -0.1, 0.02],
                             [0.50, 0.1, 0.02],
@@ -481,15 +508,15 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task5_stack",
-                    "init_xyzs": np.array(
+                    'task_name': 'task5_stack',
+                    'init_xyzs': np.array(
                         [
                             [0.35, -0.1, 0.02],
                             [0.50, -0.2, 0.02],
                             [0.50, 0.0, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.425, 0.2, 0.02],
                             [0.425, 0.2, 0.06],
@@ -498,11 +525,11 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
             ]
-        elif self._env_type == "quadruple":
+        elif self._env_type == 'quadruple':
             self.task_infos = [
                 {
-                    "task_name": "task1_double_pnp",
-                    "init_xyzs": np.array(
+                    'task_name': 'task1_double_pnp',
+                    'init_xyzs': np.array(
                         [
                             [0.35, -0.1, 0.02],
                             [0.35, 0.1, 0.02],
@@ -510,7 +537,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.50, 0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.35, -0.25, 0.02],
                             [0.35, 0.1, 0.02],
@@ -520,8 +547,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task2_quadruple_pnp",
-                    "init_xyzs": np.array(
+                    'task_name': 'task2_quadruple_pnp',
+                    'init_xyzs': np.array(
                         [
                             [0.325, -0.2, 0.02],
                             [0.325, 0.2, 0.02],
@@ -529,7 +556,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.525, 0.2, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.375, 0.1, 0.02],
                             [0.475, 0.1, 0.02],
@@ -539,8 +566,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task3_pnp_from_square",
-                    "init_xyzs": np.array(
+                    'task_name': 'task3_pnp_from_square',
+                    'init_xyzs': np.array(
                         [
                             [0.425, -0.02, 0.02],
                             [0.425, 0.02, 0.02],
@@ -548,7 +575,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.425, 0.02, 0.06],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.525, -0.2, 0.02],
                             [0.325, 0.2, 0.02],
@@ -558,8 +585,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task4_cycle",
-                    "init_xyzs": np.array(
+                    'task_name': 'task4_cycle',
+                    'init_xyzs': np.array(
                         [
                             [0.525, -0.1, 0.02],
                             [0.525, 0.1, 0.02],
@@ -567,7 +594,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.325, -0.1, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.525, 0.1, 0.02],
                             [0.325, 0.1, 0.02],
@@ -577,8 +604,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task5_stack",
-                    "init_xyzs": np.array(
+                    'task_name': 'task5_stack',
+                    'init_xyzs': np.array(
                         [
                             [0.50, -0.05, 0.02],
                             [0.50, -0.2, 0.02],
@@ -586,7 +613,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.35, -0.05, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.425, 0.2, 0.02],
                             [0.425, 0.2, 0.06],
@@ -596,11 +623,11 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
             ]
-        elif self._env_type == "octuple":
+        elif self._env_type == 'octuple':
             self.task_infos = [
                 {
-                    "task_name": "task1_quadruple_pnp",
-                    "init_xyzs": np.array(
+                    'task_name': 'task1_quadruple_pnp',
+                    'init_xyzs': np.array(
                         [
                             [0.325, -0.15, 0.02],
                             [0.425, -0.15, 0.02],
@@ -612,7 +639,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.525, 0.15, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.525, 0.05, 0.02],
                             [0.425, -0.15, 0.02],
@@ -626,8 +653,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task2_octuple_pnp1",
-                    "init_xyzs": np.array(
+                    'task_name': 'task2_octuple_pnp1',
+                    'init_xyzs': np.array(
                         [
                             [0.40, -0.15, 0.02],
                             [0.40, -0.05, 0.02],
@@ -639,7 +666,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.45, 0.15, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.525, 0.2, 0.02],
                             [0.525, 0.0, 0.02],
@@ -653,8 +680,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task3_octuple_pnp2",
-                    "init_xyzs": np.array(
+                    'task_name': 'task3_octuple_pnp2',
+                    'init_xyzs': np.array(
                         [
                             [0.32, -0.15, 0.02],
                             [0.32, 0.05, 0.02],
@@ -666,7 +693,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.53, 0.15, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.32, 0.15, 0.02],
                             [0.46, 0.15, 0.02],
@@ -680,8 +707,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task4_stack1",
-                    "init_xyzs": np.array(
+                    'task_name': 'task4_stack1',
+                    'init_xyzs': np.array(
                         [
                             [0.40, -0.025, 0.02],
                             [0.40, -0.025, 0.06],
@@ -693,7 +720,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.45, 0.025, 0.06],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.525, 0.05, 0.02],
                             [0.525, -0.05, 0.02],
@@ -707,8 +734,8 @@ class CubeEnv(ManipSpaceEnv):
                     ),
                 },
                 {
-                    "task_name": "task5_stack2",
-                    "init_xyzs": np.array(
+                    'task_name': 'task5_stack2',
+                    'init_xyzs': np.array(
                         [
                             [0.50, 0.2, 0.06],
                             [0.50, 0.2, 0.02],
@@ -720,7 +747,7 @@ class CubeEnv(ManipSpaceEnv):
                             [0.35, 0.2, 0.02],
                         ]
                     ),
-                    "goal_xyzs": np.array(
+                    'goal_xyzs': np.array(
                         [
                             [0.325, 0.0, 0.02],
                             [0.325, 0.0, 0.06],
@@ -775,35 +802,23 @@ class CubeEnv(ManipSpaceEnv):
 
                 obs, info = env.reset(options={'variation': ['cube.color', 'camera.angle_delta']})
         """
-
-        if hasattr(self, "variation_space"):
-            self.variation_space.seed(seed)
-
         options = options or {}
 
-        variations = options.get("variation", ["cube.start_position", "cube.start_yaw"])
+        swm_spaces.reset_variation_space(
+            self.variation_space, seed=None, options=options
+        )
 
-        if not isinstance(variations, Sequence):
-            raise ValueError("variation option must be a Sequence containing variations names to sample")
+        ob, info = super().reset(options=options, *args, **kwargs)
 
-        self.variation_space.reset()
-
-        self.variation_space.update(variations)
-
-        if options is not None and "variation_values" in options:
-            self.variation_space.set_value(options["variation_values"])
-
-        assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
-
-        ob, info = super().reset(seed=seed, options=options, *args, **kwargs)
-
-        if "state" in options and options["state"] is not None:
-            state = options["state"]
+        if 'state' in options and options['state'] is not None:
+            state = options['state']
             # state should be a np.ndarray representing the concatenation of qpos and qvel
-            assert isinstance(state, np.ndarray), "State option must be a numpy ndarray!"
-            assert state.ndim == 1, "State option must be a 1D array!"
+            assert isinstance(state, np.ndarray), (
+                'State option must be a numpy ndarray!'
+            )
+            assert state.ndim == 1, 'State option must be a 1D array!'
             assert state.shape[0] == self._model.nq + self._model.nv, (
-                f"State option must have shape ({self._model.nq + self._model.nv},)!"
+                f'State option must have shape ({self._model.nq + self._model.nv},)!'
             )
             qpos = state[: self._model.nq]
             qvel = state[self._model.nq :]
@@ -833,48 +848,62 @@ class CubeEnv(ManipSpaceEnv):
             - All cube geoms are stored for later color and property modifications
         """
         # Add cube scene.
-        cube_outer_mjcf = mjcf.from_path((self._desc_dir / "cube_outer.xml").as_posix())
+        cube_outer_mjcf = mjcf.from_path(
+            (self._desc_dir / 'cube_outer.xml').as_posix()
+        )
         arena_mjcf.include_copy(cube_outer_mjcf)
 
         # Add `num_cubes` cubes to the scene.
         distance = 0.05
         for i in range(self._num_cubes):
-            cube_mjcf = mjcf.from_path((self._desc_dir / "cube_inner.xml").as_posix())
+            cube_mjcf = mjcf.from_path(
+                (self._desc_dir / 'cube_inner.xml').as_posix()
+            )
             pos = -distance * (self._num_cubes - 1) + 2 * distance * i
-            cube_mjcf.find("body", "object_0").pos[1] = pos
-            cube_mjcf.find("body", "object_target_0").pos[1] = pos
-            for tag in ["body", "joint", "geom", "site"]:
+            cube_mjcf.find('body', 'object_0').pos[1] = pos
+            cube_mjcf.find('body', 'object_target_0').pos[1] = pos
+            for tag in ['body', 'joint', 'geom', 'site']:
                 for item in cube_mjcf.find_all(tag):
-                    if hasattr(item, "name") and item.name is not None and item.name.endswith("_0"):
-                        item.name = item.name[:-2] + f"_{i}"
+                    if (
+                        hasattr(item, 'name')
+                        and item.name is not None
+                        and item.name.endswith('_0')
+                    ):
+                        item.name = item.name[:-2] + f'_{i}'
             arena_mjcf.include_copy(cube_mjcf)
 
         # Save cube geoms.
         self._cube_geoms_list = []
         for i in range(self._num_cubes):
-            self._cube_geoms_list.append(arena_mjcf.find("body", f"object_{i}").find_all("geom"))
+            self._cube_geoms_list.append(
+                arena_mjcf.find('body', f'object_{i}').find_all('geom')
+            )
         self._cube_target_geoms_list = []
         for i in range(self._num_cubes):
-            self._cube_target_geoms_list.append(arena_mjcf.find("body", f"object_target_{i}").find_all("geom"))
+            self._cube_target_geoms_list.append(
+                arena_mjcf.find('body', f'object_target_{i}').find_all('geom')
+            )
 
         # Add cameras.
         self.cameras = {
-            "front": {
-                "pos": (1.287, 0.000, 0.509),
-                "xyaxes": (0.000, 1.000, 0.000, -0.342, 0.000, 0.940),
+            'front': {
+                'pos': (1.287, 0.000, 0.509),
+                'xyaxes': (0.000, 1.000, 0.000, -0.342, 0.000, 0.940),
             },
-            "front_pixels": {
-                "pos": (1.053, -0.014, 0.639),
-                "xyaxes": (0.000, 1.000, 0.000, -0.628, 0.001, 0.778),
+            'front_pixels': {
+                'pos': (1.053, -0.014, 0.639),
+                'xyaxes': (0.000, 1.000, 0.000, -0.628, 0.001, 0.778),
             },
-            "side_pixels": {
-                "pos": (0.414, -0.753, 0.639),
-                "xyaxes": (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
+            'side_pixels': {
+                'pos': (0.414, -0.753, 0.639),
+                'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
             },
         }
 
         for camera_name, camera_kwargs in self.cameras.items():
-            arena_mjcf.worldbody.add("camera", name=camera_name, **camera_kwargs)
+            arena_mjcf.worldbody.add(
+                'camera', name=camera_name, **camera_kwargs
+            )
 
     def post_compilation_objects(self):
         """Extract MuJoCo object IDs after model compilation.
@@ -889,13 +918,18 @@ class CubeEnv(ManipSpaceEnv):
         """
         # Cube geom IDs.
         self._cube_geom_ids_list = [
-            [self._model.geom(geom.full_identifier).id for geom in cube_geoms] for cube_geoms in self._cube_geoms_list
+            [self._model.geom(geom.full_identifier).id for geom in cube_geoms]
+            for cube_geoms in self._cube_geoms_list
         ]
         self._cube_target_mocap_ids = [
-            self._model.body(f"object_target_{i}").mocapid[0] for i in range(self._num_cubes)
+            self._model.body(f'object_target_{i}').mocapid[0]
+            for i in range(self._num_cubes)
         ]
         self._cube_target_geom_ids_list = [
-            [self._model.geom(geom.full_identifier).id for geom in cube_target_geoms]
+            [
+                self._model.geom(geom.full_identifier).id
+                for geom in cube_target_geoms
+            ]
             for cube_target_geoms in self._cube_target_geoms_list
         ]
 
@@ -918,67 +952,99 @@ class CubeEnv(ManipSpaceEnv):
             - Camera angle perturbations use the perturb_camera_angle helper function
         """
         # Modify floor color
-        grid_texture = mjcf_model.find("texture", "grid")
+        grid_texture = mjcf_model.find('texture', 'grid')
         texture_changed = grid_texture.rgb1 is None or not np.allclose(
-            grid_texture.rgb1, self.variation_space["floor"]["color"].value[0]
+            grid_texture.rgb1, self.variation_space['floor']['color'].value[0]
         )
         texture_changed = texture_changed or (
             grid_texture.rgb2 is None
-            or not np.allclose(grid_texture.rgb2, self.variation_space["floor"]["color"].value[1])
+            or not np.allclose(
+                grid_texture.rgb2,
+                self.variation_space['floor']['color'].value[1],
+            )
         )
-        grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
-        grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
+        grid_texture.rgb1 = self.variation_space['floor']['color'].value[0]
+        grid_texture.rgb2 = self.variation_space['floor']['color'].value[1]
 
         # Modify arm color
         agent_color_changed = np.allclose(
-            mjcf_model.find("material", "ur5e/robotiq/black").rgba[:3], self.variation_space["agent"]["color"].value
+            mjcf_model.find('material', 'ur5e/robotiq/black').rgba[:3],
+            self.variation_space['agent']['color'].value,
         )
         agent_color_changed = agent_color_changed or np.allclose(
-            mjcf_model.find("material", "ur5e/robotiq/pad_gray").rgba[:3], self.variation_space["agent"]["color"].value
+            mjcf_model.find('material', 'ur5e/robotiq/pad_gray').rgba[:3],
+            self.variation_space['agent']['color'].value,
         )
-        mjcf_model.find("material", "ur5e/robotiq/black").rgba[:3] = self.variation_space["agent"]["color"].value
-        mjcf_model.find("material", "ur5e/robotiq/pad_gray").rgba[:3] = self.variation_space["agent"]["color"].value
+        mjcf_model.find('material', 'ur5e/robotiq/black').rgba[:3] = (
+            self.variation_space['agent']['color'].value
+        )
+        mjcf_model.find('material', 'ur5e/robotiq/pad_gray').rgba[:3] = (
+            self.variation_space['agent']['color'].value
+        )
 
         size_changed = False
         # Modify cube size based on variation space
         for i in range(self._num_cubes):
             # Regular cubes
-            body = mjcf_model.find("body", f"object_{i}")
+            body = mjcf_model.find('body', f'object_{i}')
             if body:
-                for geom in body.find_all("geom"):
-                    desired_size = self.variation_space["cube"]["size"].value[i] * np.ones(
+                for geom in body.find_all('geom'):
+                    desired_size = self.variation_space['cube']['size'].value[
+                        i
+                    ] * np.ones(
                         (3), dtype=np.float32
                     )  # half-extents (x, y, z)
-                    if geom.size is None or not np.allclose(geom.size, desired_size):
+                    if geom.size is None or not np.allclose(
+                        geom.size, desired_size
+                    ):
                         size_changed = True
                     geom.size = desired_size
 
             # Target cubes (if any)
-            target_body = mjcf_model.find("body", f"object_target_{i}")
+            target_body = mjcf_model.find('body', f'object_target_{i}')
             if target_body:
-                for geom in target_body.find_all("geom"):
-                    desired_size = self.variation_space["cube"]["size"].value[i] * np.ones((3), dtype=np.float32)
-                    if geom.size is None or not np.allclose(geom.size, desired_size):
+                for geom in target_body.find_all('geom'):
+                    desired_size = self.variation_space['cube']['size'].value[
+                        i
+                    ] * np.ones((3), dtype=np.float32)
+                    if geom.size is None or not np.allclose(
+                        geom.size, desired_size
+                    ):
                         size_changed = True
                     geom.size = desired_size
 
         # Perturb camera angle
         camera_angle_changed = False
-        cameras_to_vary = ["front_pixels", "side_pixels"] if self._multiview else ["front_pixels"]
+        cameras_to_vary = (
+            ['front_pixels', 'side_pixels']
+            if self._multiview
+            else ['front_pixels']
+        )
         for i, cam_name in enumerate(cameras_to_vary):
-            cam = mjcf_model.find("camera", cam_name)
+            cam = mjcf_model.find('camera', cam_name)
             cam.xyaxes = perturb_camera_angle(
-                self.cameras[cam_name]["xyaxes"], self.variation_space["camera"]["angle_delta"].value[i]
+                self.cameras[cam_name]['xyaxes'],
+                self.variation_space['camera']['angle_delta'].value[i],
             )
             camera_angle_changed = camera_angle_changed or not np.allclose(
-                cam.xyaxes, self.cameras[cam_name]["xyaxes"]
+                cam.xyaxes, self.cameras[cam_name]['xyaxes']
             )
         # Modify light intensity
-        light = mjcf_model.find("light", "global")
-        desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
-        light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
+        light = mjcf_model.find('light', 'global')
+        desired_diffuse = self.variation_space['light']['intensity'].value[
+            0
+        ] * np.ones((3), dtype=np.float32)
+        light_changed = light.diffuse is None or not np.allclose(
+            light.diffuse, desired_diffuse
+        )
         light.diffuse = desired_diffuse
-        if size_changed or light_changed or texture_changed or camera_angle_changed or agent_color_changed:
+        if (
+            size_changed
+            or light_changed
+            or texture_changed
+            or camera_angle_changed
+            or agent_color_changed
+        ):
             self.mark_dirty()
         return mjcf_model
 
@@ -1006,27 +1072,31 @@ class CubeEnv(ManipSpaceEnv):
         # Set cube colors.
         for i in range(self._num_cubes):
             for gid in self._cube_geom_ids_list[i]:
-                self._model.geom(gid).rgba[:3] = self.variation_space["cube"]["color"].value[i]
+                self._model.geom(gid).rgba[:3] = self.variation_space['cube'][
+                    'color'
+                ].value[i]
                 self._model.geom(gid).rgba[3] = 1.0
             for gid in self._cube_target_geom_ids_list[i]:
-                self._model.geom(gid).rgba[:3] = self.variation_space["cube"]["color"].value[i]
+                self._model.geom(gid).rgba[:3] = self.variation_space['cube'][
+                    'color'
+                ].value[i]
 
         self._data.qpos[self._arm_joint_ids] = self._home_qpos
         mujoco.mj_kinematics(self._model, self._data)
 
-        if self._mode == "data_collection":
+        if self._mode == 'data_collection':
             # Randomize the scene.
 
             self.initialize_arm()
 
             # Randomize object positions and orientations.
             for i in range(self._num_cubes):
-                xy = self.variation_space["cube"]["start_position"].value[i]
+                xy = self.variation_space['cube']['start_position'].value[i]
                 obj_pos = (*xy, 0.02)
-                yaw = self.variation_space["cube"]["start_yaw"].value[i]
+                yaw = self.variation_space['cube']['start_yaw'].value[i]
                 obj_ori = lie.SO3.from_z_radians(yaw).wxyz.tolist()
-                self._data.joint(f"object_joint_{i}").qpos[:3] = obj_pos
-                self._data.joint(f"object_joint_{i}").qpos[3:] = obj_ori
+                self._data.joint(f'object_joint_{i}').qpos[:3] = obj_pos
+                self._data.joint(f'object_joint_{i}').qpos[3:] = obj_ori
 
             # Set a new target.
             self.set_new_target(return_info=False)
@@ -1041,18 +1111,24 @@ class CubeEnv(ManipSpaceEnv):
                 permutation = self.np_random.permutation(self._num_cubes)
             else:
                 permutation = np.arange(self._num_cubes)
-            init_xyzs = self.cur_task_info["init_xyzs"].copy()[permutation]
-            goal_xyzs = self.cur_task_info["goal_xyzs"].copy()[permutation]
+            init_xyzs = self.cur_task_info['init_xyzs'].copy()[permutation]
+            goal_xyzs = self.cur_task_info['goal_xyzs'].copy()[permutation]
 
             # First, force set the current scene to the goal state to obtain the goal observation.
             saved_qpos = self._data.qpos.copy()
             saved_qvel = self._data.qvel.copy()
             self.initialize_arm()
             for i in range(self._num_cubes):
-                self._data.joint(f"object_joint_{i}").qpos[:3] = goal_xyzs[i]
-                self._data.joint(f"object_joint_{i}").qpos[3:] = lie.SO3.identity().wxyz.tolist()
-                self._data.mocap_pos[self._cube_target_mocap_ids[i]] = goal_xyzs[i]
-                self._data.mocap_quat[self._cube_target_mocap_ids[i]] = lie.SO3.identity().wxyz.tolist()
+                self._data.joint(f'object_joint_{i}').qpos[:3] = goal_xyzs[i]
+                self._data.joint(f'object_joint_{i}').qpos[3:] = (
+                    lie.SO3.identity().wxyz.tolist()
+                )
+                self._data.mocap_pos[self._cube_target_mocap_ids[i]] = (
+                    goal_xyzs[i]
+                )
+                self._data.mocap_quat[self._cube_target_mocap_ids[i]] = (
+                    lie.SO3.identity().wxyz.tolist()
+                )
             mujoco.mj_forward(self._model, self._data)
 
             # Do a few random steps to make the scene stable.
@@ -1061,7 +1137,9 @@ class CubeEnv(ManipSpaceEnv):
 
             # Save the goal observation.
             self._cur_goal_ob = (
-                self.compute_oracle_observation() if self._use_oracle_rep else self.compute_observation()
+                self.compute_oracle_observation()
+                if self._use_oracle_rep
+                else self.compute_observation()
             )
             if self._render_goal:
                 self._cur_goal_rendered = self.render()
@@ -1076,12 +1154,16 @@ class CubeEnv(ManipSpaceEnv):
                 # Randomize the position and orientation of the cube slightly.
                 obj_pos = init_xyzs[i].copy()
                 obj_pos[:2] += self.np_random.uniform(-0.01, 0.01, size=2)
-                self._data.joint(f"object_joint_{i}").qpos[:3] = obj_pos
+                self._data.joint(f'object_joint_{i}').qpos[:3] = obj_pos
                 yaw = self.np_random.uniform(0, 2 * np.pi)
                 obj_ori = lie.SO3.from_z_radians(yaw).wxyz.tolist()
-                self._data.joint(f"object_joint_{i}").qpos[3:] = obj_ori
-                self._data.mocap_pos[self._cube_target_mocap_ids[i]] = goal_xyzs[i]
-                self._data.mocap_quat[self._cube_target_mocap_ids[i]] = lie.SO3.identity().wxyz.tolist()
+                self._data.joint(f'object_joint_{i}').qpos[3:] = obj_ori
+                self._data.mocap_pos[self._cube_target_mocap_ids[i]] = (
+                    goal_xyzs[i]
+                )
+                self._data.mocap_quat[self._cube_target_mocap_ids[i]] = (
+                    lie.SO3.identity().wxyz.tolist()
+                )
 
         # Forward kinematics to update site positions.
         self.pre_step()
@@ -1092,7 +1174,7 @@ class CubeEnv(ManipSpaceEnv):
 
     def initialize_arm(self):
         # Sample initial effector position and orientation.
-        eff_pos = self.variation_space["agent"]["ee_start_position"].value
+        eff_pos = self.variation_space['agent']['ee_start_position'].value
         cur_ori = self._effector_down_rotation
         yaw = self.np_random.uniform(-np.pi, np.pi)
         rotz = lie.SO3.from_z_radians(yaw)
@@ -1137,9 +1219,14 @@ class CubeEnv(ManipSpaceEnv):
             - Stacking targets are positioned 0.04m above the base cube's z-position
             - Non-stacking targets are randomly sampled from the target sampling bounds
         """
-        assert self._mode == "data_collection"
+        assert self._mode == 'data_collection'
 
-        block_xyzs = np.array([self._data.joint(f"object_joint_{i}").qpos[:3] for i in range(self._num_cubes)])
+        block_xyzs = np.array(
+            [
+                self._data.joint(f'object_joint_{i}').qpos[:3]
+                for i in range(self._num_cubes)
+            ]
+        )
 
         # Compute the top blocks.
         top_blocks = []
@@ -1149,7 +1236,8 @@ class CubeEnv(ManipSpaceEnv):
                     continue
                 if (
                     block_xyzs[j][2] > block_xyzs[i][2]
-                    and np.linalg.norm(block_xyzs[i][:2] - block_xyzs[j][:2]) < 0.02
+                    and np.linalg.norm(block_xyzs[i][:2] - block_xyzs[j][:2])
+                    < 0.02
                 ):
                     break
             else:
@@ -1161,15 +1249,19 @@ class CubeEnv(ManipSpaceEnv):
         stack = len(top_blocks) >= 2 and self.np_random.uniform() < p_stack
         if stack:
             # Stack the target block on top of another block.
-            block_idx = self.np_random.choice(list(set(top_blocks) - {self._target_block}))
-            block_pos = self._data.joint(f"object_joint_{block_idx}").qpos[:3]
-            tar_pos = np.array([block_pos[0], block_pos[1], block_pos[2] + 0.04])
+            block_idx = self.np_random.choice(
+                list(set(top_blocks) - {self._target_block})
+            )
+            block_pos = self._data.joint(f'object_joint_{block_idx}').qpos[:3]
+            tar_pos = np.array(
+                [block_pos[0], block_pos[1], block_pos[2] + 0.04]
+            )
         else:
             # Randomize target position.
-            xy = self.variation_space["cube"]["goal_position"].value[0]
+            xy = self.variation_space['cube']['goal_position'].value[0]
             tar_pos = (*xy, 0.02)
         # Randomize target orientation.
-        yaw = self.variation_space["cube"]["goal_yaw"].value[0]
+        yaw = self.variation_space['cube']['goal_yaw'].value[0]
         tar_ori = lie.SO3.from_z_radians(yaw).wxyz.tolist()
 
         # Only show the target block.
@@ -1180,8 +1272,14 @@ class CubeEnv(ManipSpaceEnv):
                 self._data.mocap_quat[self._cube_target_mocap_ids[i]] = tar_ori
             else:
                 # Move the non-target blocks out of the way.
-                self._data.mocap_pos[self._cube_target_mocap_ids[i]] = (0, 0, -0.3)
-                self._data.mocap_quat[self._cube_target_mocap_ids[i]] = lie.SO3.identity().wxyz.tolist()
+                self._data.mocap_pos[self._cube_target_mocap_ids[i]] = (
+                    0,
+                    0,
+                    -0.3,
+                )
+                self._data.mocap_quat[self._cube_target_mocap_ids[i]] = (
+                    lie.SO3.identity().wxyz.tolist()
+                )
 
         # Set the target colors.
         for i in range(self._num_cubes):
@@ -1213,7 +1311,7 @@ class CubeEnv(ManipSpaceEnv):
         """
         cube_successes = []
         for i in range(self._num_cubes):
-            obj_pos = self._data.joint(f"object_joint_{i}").qpos[:3]
+            obj_pos = self._data.joint(f'object_joint_{i}').qpos[:3]
             tar_pos = self._data.mocap_pos[self._cube_target_mocap_ids[i]]
 
             if np.linalg.norm(obj_pos - tar_pos) <= 0.04:
@@ -1227,9 +1325,13 @@ class CubeEnv(ManipSpaceEnv):
         """Set the target position and optional orientation for a specific cube."""
         num_target_pos = len(self._cube_target_mocap_ids)
         if cube_id < 0 or cube_id >= num_target_pos:
-            raise ValueError(f"cube_id out of range (maximum {num_target_pos - 1})")
+            raise ValueError(
+                f'cube_id out of range (maximum {num_target_pos - 1})'
+            )
         mocap_id = self._cube_target_mocap_ids[cube_id]
-        self._data.mocap_pos[mocap_id] = np.asarray(target_pos, dtype=np.float64)
+        self._data.mocap_pos[mocap_id] = np.asarray(
+            target_pos, dtype=np.float64
+        )
         if target_quat is not None:
             self._data.mocap_quat[mocap_id] = target_quat
         # mujoco.mj_forward(self._model, self._data)
@@ -1252,14 +1354,16 @@ class CubeEnv(ManipSpaceEnv):
         """
         # Check if the cubes are in the target positions.
         cube_successes = self._compute_successes()
-        if self._mode == "data_collection":
+        if self._mode == 'data_collection':
             self._success = cube_successes[self._target_block]
         else:
             self._success = all(cube_successes)
 
         # Adjust the colors of the cubes based on success.
         for i in range(self._num_cubes):
-            if self._visualize_info and (self._mode == "task" or i == self._target_block):
+            if self._visualize_info and (
+                self._mode == 'task' or i == self._target_block
+            ):
                 for gid in self._cube_target_geom_ids_list[i]:
                     self._model.geom(gid).rgba[3] = 0.2
             else:
@@ -1282,8 +1386,8 @@ class CubeEnv(ManipSpaceEnv):
             Called after initialize_episode() to provide initial state information.
         """
         reset_info = self.compute_ob_info()
-        reset_info["goal"] = self._cur_goal_ob
-        reset_info["success"] = self._success
+        reset_info['goal'] = self._cur_goal_ob
+        reset_info['success'] = self._success
         return reset_info
 
     def get_step_info(self):
@@ -1302,8 +1406,8 @@ class CubeEnv(ManipSpaceEnv):
             Called after each step to provide feedback about current state and progress.
         """
         ob_info = self.compute_ob_info()
-        ob_info["goal"] = self._cur_goal_ob
-        ob_info["success"] = self._success
+        ob_info['goal'] = self._cur_goal_ob
+        ob_info['success'] = self._success
         return ob_info
 
     def add_object_info(self, ob_info):
@@ -1330,20 +1434,34 @@ class CubeEnv(ManipSpaceEnv):
         """
         # Cube positions and orientations.
         for i in range(self._num_cubes):
-            ob_info[f"privileged/block_{i}_pos"] = self._data.joint(f"object_joint_{i}").qpos[:3].copy()
-            ob_info[f"privileged/block_{i}_quat"] = self._data.joint(f"object_joint_{i}").qpos[3:].copy()
-            ob_info[f"privileged/block_{i}_yaw"] = np.array(
-                [lie.SO3(wxyz=self._data.joint(f"object_joint_{i}").qpos[3:]).compute_yaw_radians()]
+            ob_info[f'privileged/block_{i}_pos'] = (
+                self._data.joint(f'object_joint_{i}').qpos[:3].copy()
+            )
+            ob_info[f'privileged/block_{i}_quat'] = (
+                self._data.joint(f'object_joint_{i}').qpos[3:].copy()
+            )
+            ob_info[f'privileged/block_{i}_yaw'] = np.array(
+                [
+                    lie.SO3(
+                        wxyz=self._data.joint(f'object_joint_{i}').qpos[3:]
+                    ).compute_yaw_radians()
+                ]
             )
 
-        if self._mode == "data_collection":
+        if self._mode == 'data_collection':
             # Target cube info.
-            ob_info["privileged/target_task"] = self._target_task
+            ob_info['privileged/target_task'] = self._target_task
             target_mocap_id = self._cube_target_mocap_ids[self._target_block]
-            ob_info["privileged/target_block"] = self._target_block
-            ob_info["privileged/target_block_pos"] = self._data.mocap_pos[target_mocap_id].copy()
-            ob_info["privileged/target_block_yaw"] = np.array(
-                [lie.SO3(wxyz=self._data.mocap_quat[target_mocap_id]).compute_yaw_radians()]
+            ob_info['privileged/target_block'] = self._target_block
+            ob_info['privileged/target_block_pos'] = self._data.mocap_pos[
+                target_mocap_id
+            ].copy()
+            ob_info['privileged/target_block_yaw'] = np.array(
+                [
+                    lie.SO3(
+                        wxyz=self._data.mocap_quat[target_mocap_id]
+                    ).compute_yaw_radians()
+                ]
             )
 
     def compute_observation(self):
@@ -1367,7 +1485,7 @@ class CubeEnv(ManipSpaceEnv):
             factors (10.0 for positions, 3.0 for gripper) to normalize values.
             Yaw angles are encoded as (cos, sin) pairs for continuity.
         """
-        if self._ob_type == "pixels":
+        if self._ob_type == 'pixels':
             return self.get_pixel_observation()
         else:
             xyz_center = np.array([0.425, 0.0, 0.0])
@@ -1376,21 +1494,22 @@ class CubeEnv(ManipSpaceEnv):
 
             ob_info = self.compute_ob_info()
             ob = [
-                ob_info["proprio/joint_pos"],
-                ob_info["proprio/joint_vel"],
-                (ob_info["proprio/effector_pos"] - xyz_center) * xyz_scaler,
-                np.cos(ob_info["proprio/effector_yaw"]),
-                np.sin(ob_info["proprio/effector_yaw"]),
-                ob_info["proprio/gripper_opening"] * gripper_scaler,
-                ob_info["proprio/gripper_contact"],
+                ob_info['proprio/joint_pos'],
+                ob_info['proprio/joint_vel'],
+                (ob_info['proprio/effector_pos'] - xyz_center) * xyz_scaler,
+                np.cos(ob_info['proprio/effector_yaw']),
+                np.sin(ob_info['proprio/effector_yaw']),
+                ob_info['proprio/gripper_opening'] * gripper_scaler,
+                ob_info['proprio/gripper_contact'],
             ]
             for i in range(self._num_cubes):
                 ob.extend(
                     [
-                        (ob_info[f"privileged/block_{i}_pos"] - xyz_center) * xyz_scaler,
-                        ob_info[f"privileged/block_{i}_quat"],
-                        np.cos(ob_info[f"privileged/block_{i}_yaw"]),
-                        np.sin(ob_info[f"privileged/block_{i}_yaw"]),
+                        (ob_info[f'privileged/block_{i}_pos'] - xyz_center)
+                        * xyz_scaler,
+                        ob_info[f'privileged/block_{i}_quat'],
+                        np.cos(ob_info[f'privileged/block_{i}_yaw']),
+                        np.sin(ob_info[f'privileged/block_{i}_yaw']),
                     ]
                 )
 
@@ -1419,7 +1538,10 @@ class CubeEnv(ManipSpaceEnv):
         ob_info = self.compute_ob_info()
         ob = []
         for i in range(self._num_cubes):
-            ob.append((ob_info[f"privileged/block_{i}_pos"] - xyz_center) * xyz_scaler)
+            ob.append(
+                (ob_info[f'privileged/block_{i}_pos'] - xyz_center)
+                * xyz_scaler
+            )
 
         return np.concatenate(ob)
 
@@ -1456,7 +1578,7 @@ class CubeEnv(ManipSpaceEnv):
 
     def render(
         self,
-        camera="front_pixels",
+        camera='front_pixels',
         *args,
         **kwargs,
     ):
@@ -1484,7 +1606,7 @@ class CubeEnv(ManipSpaceEnv):
 
     def render_multiview(
         self,
-        camera="front_pixels",
+        camera='front_pixels',
         *args,
         **kwargs,
     ):
@@ -1517,6 +1639,8 @@ class CubeEnv(ManipSpaceEnv):
         if not self._multiview:
             return self.render(camera=camera, *args, **kwargs)
 
-        cam_names = ["front_pixels", "side_pixels"]
-        multi_view = {cam: self.render(camera=cam, *args, **kwargs) for cam in cam_names}
+        cam_names = ['front_pixels', 'side_pixels']
+        multi_view = {
+            cam: self.render(camera=cam, *args, **kwargs) for cam in cam_names
+        }
         return multi_view
