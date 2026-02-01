@@ -1,12 +1,10 @@
 """TwoRoom Navigation Environment.
 
 A simple two-room navigation environment where an agent must navigate
-through a door opening to reach a goal position.
+through a door opening to reach a target position.
 """
 
 import math
-from collections.abc import Sequence
-
 import cv2
 import gymnasium as gym
 import numpy as np
@@ -14,14 +12,13 @@ import pygame
 import pymunk
 from gymnasium import spaces
 from pymunk.vec2d import Vec2d
-
-import stable_worldmodel as swm
+from stable_worldmodel import spaces as swm_spaces
 
 from ..utils import light_color, pymunk_to_shapely
 
 DEFAULT_VARIATIONS = (
     'agent.position',
-    'goal.position',
+    'target.position',
     'door.size',
     'door.position',
 )
@@ -31,16 +28,16 @@ class TwoRoomEnv(gym.Env):
     """A simple navigation two-room environment.
 
     The environment consists of two rooms separated by a wall with door openings.
-    The agent must navigate from its starting position to the goal position.
+    The agent must navigate from its starting position to the target position.
 
     Physics:
         - Agent: Dynamic circle body
-        - Goal: Kinematic circle (sensor, no collision)
+        - target: Kinematic circle (sensor, no collision)
         - Walls: Static segments (solid, blocks agent)
         - Doors: Empty gaps in walls (agent can pass if it fits)
 
     Rendering:
-        - Layers (back to front): background, goal, walls, agent
+        - Layers (back to front): background, target, walls, agent
         - Agent is always rendered on top
     """
 
@@ -111,21 +108,21 @@ class TwoRoomEnv(gym.Env):
         )
 
         # Variation space (must be defined before constraint functions)
-        self.variation_space = swm.spaces.Dict(
+        self.variation_space = swm_spaces.Dict(
             {
-                'agent': swm.spaces.Dict(
+                'agent': swm_spaces.Dict(
                     {
-                        'color': swm.spaces.RGBBox(
+                        'color': swm_spaces.RGBBox(
                             init_value=np.array([255, 0, 0], dtype=np.uint8)
                         ),
-                        'radius': swm.spaces.Box(
+                        'radius': swm_spaces.Box(
                             low=np.array([15], dtype=np.float32),
                             high=np.array([30], dtype=np.float32),
                             init_value=np.array([15], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
-                        'position': swm.spaces.Box(
+                        'position': swm_spaces.Box(
                             low=np.array([bs, bs], dtype=np.float32),
                             high=np.array(
                                 [self.size + bs, self.size + bs],
@@ -140,10 +137,10 @@ class TwoRoomEnv(gym.Env):
                                 x, entity='agent'
                             ),
                         ),
-                        'max_energy': swm.spaces.Discrete(
+                        'max_energy': swm_spaces.Discrete(
                             self.energy_bound - 50, start=50, init_value=100
                         ),
-                        'speed': swm.spaces.Box(
+                        'speed': swm_spaces.Box(
                             low=np.array([10], dtype=np.float32),
                             high=np.array([self.max_speed], dtype=np.float32),
                             init_value=np.array([10.0], dtype=np.float32),
@@ -159,19 +156,19 @@ class TwoRoomEnv(gym.Env):
                         'speed',
                     ],
                 ),
-                'goal': swm.spaces.Dict(
+                'target': swm_spaces.Dict(
                     {
-                        'color': swm.spaces.RGBBox(
+                        'color': swm_spaces.RGBBox(
                             init_value=np.array([0, 255, 0], dtype=np.uint8)
                         ),
-                        'radius': swm.spaces.Box(
+                        'radius': swm_spaces.Box(
                             low=np.array([15], dtype=np.float32),
                             high=np.array([30], dtype=np.float32),
                             init_value=np.array([15], dtype=np.float32),
                             shape=(1,),
                             dtype=np.float32,
                         ),
-                        'position': swm.spaces.Box(
+                        'position': swm_spaces.Box(
                             low=np.array([bs, bs], dtype=np.float32),
                             high=np.array(
                                 [self.size + bs, self.size + bs],
@@ -183,27 +180,27 @@ class TwoRoomEnv(gym.Env):
                                 [450.0, 450.0], dtype=np.float32
                             ),
                             constrain_fn=lambda x: (
-                                not self.check_collide(x, entity='goal')
+                                not self.check_collide(x, entity='target')
                                 and self.check_other_room(x)
                             ),
                         ),
                     },
                     sampling_order=['color', 'radius', 'position'],
                 ),
-                'wall': swm.spaces.Dict(
+                'wall': swm_spaces.Dict(
                     {
-                        'color': swm.spaces.RGBBox(
+                        'color': swm_spaces.RGBBox(
                             init_value=np.array(
                                 [115, 127, 145], dtype=np.uint8
                             )
                         ),
-                        'thickness': swm.spaces.Discrete(
+                        'thickness': swm_spaces.Discrete(
                             25, start=9, init_value=19
                         ),
-                        'axis': swm.spaces.Discrete(
+                        'axis': swm_spaces.Discrete(
                             2, init_value=1
                         ),  # 0: horizontal, 1: vertical
-                        'border_color': swm.spaces.RGBBox(
+                        'border_color': swm_spaces.RGBBox(
                             init_value=np.array(
                                 [180, 189, 204], dtype=np.uint8
                             )
@@ -216,32 +213,32 @@ class TwoRoomEnv(gym.Env):
                         'axis',
                     ],
                 ),
-                'door': swm.spaces.Dict(
+                'door': swm_spaces.Dict(
                     {
-                        'color': swm.spaces.RGBBox(
+                        'color': swm_spaces.RGBBox(
                             init_value=np.array(
                                 [255, 255, 255], dtype=np.uint8
                             )
                         ),
-                        'number': swm.spaces.Discrete(
+                        'number': swm_spaces.Discrete(
                             self.max_door, start=1, init_value=1
                         ),
-                        'size': swm.spaces.MultiDiscrete(
+                        'size': swm_spaces.MultiDiscrete(
                             nvec=[90] * self.max_door,
                             start=[10] * self.max_door,
                             init_value=[75] * self.max_door,
                             constrain_fn=self.check_one_door_fit,
                         ),
-                        'position': swm.spaces.MultiDiscrete(
+                        'position': swm_spaces.MultiDiscrete(
                             nvec=[self.size] * self.max_door,
                             init_value=[self.size // 2] * self.max_door,
                         ),
                     },
                     sampling_order=['color', 'number', 'size', 'position'],
                 ),
-                'background': swm.spaces.Dict(
+                'background': swm_spaces.Dict(
                     {
-                        'color': swm.spaces.RGBBox(
+                        'color': swm_spaces.RGBBox(
                             init_value=np.array(
                                 [255, 255, 255], dtype=np.uint8
                             )
@@ -249,7 +246,7 @@ class TwoRoomEnv(gym.Env):
                     }
                 ),
             },
-            sampling_order=['background', 'wall', 'agent', 'door', 'goal'],
+            sampling_order=['background', 'wall', 'agent', 'door', 'target'],
         )
 
         if init_value is not None:
@@ -261,55 +258,39 @@ class TwoRoomEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
-
-        if hasattr(self, 'variation_space'):
-            self.variation_space.seed(seed)
-
         options = options or {}
-        self.variation_space.reset()
-
-        # Sample variations
-        variations = options.get('variation', DEFAULT_VARIATIONS)
-        if not isinstance(variations, Sequence):
-            raise ValueError(
-                'variation option must be a Sequence containing variation names'
-            )
-
-        self.variation_space.update(variations)
-
-        if 'variation_values' in options:
-            self.variation_space.set_value(options['variation_values'])
-
-        assert self.variation_space.check(debug=True), (
-            'Variation values must be within variation space!'
+        swm_spaces.reset_variation_space(
+            self.variation_space,
+            seed,
+            options,
+            DEFAULT_VARIATIONS,
         )
 
         # Initialize physics world
         self._setup()
 
-        # Generate goal image
-        goal_pos = options.get(
-            'goal_state', self.variation_space['goal']['position'].value
+        # Generate target image
+        state = self._get_obs()
+        state[:2] = options.get(
+            'target_state', self.variation_space['target']['position'].value
         )
-        self._set_position(goal_pos, goal_pos)
-        self._goal = self.render()
+        self._set_state(state)
+        self._target = self.render()
 
         # Set initial positions
-        agent_pos = options.get(
+        state = self._get_obs()
+        state[:2] = options.get(
             'state', self.variation_space['agent']['position'].value
         )
-        goal_pos = options.get(
-            'goal_state', self.variation_space['goal']['position'].value
+        state[2:4] = options.get(
+            'target_state', self.variation_space['target']['position'].value
         )
-        self._set_position(agent_pos, goal_pos)
-
-        # Build observation
-        state = self._get_obs()
+        self._set_state(state)
         proprio = np.array(state[:2])
         observation = {'proprio': proprio, 'state': state}
 
         info = self._get_info()
-        info['fraction_of_goal'] = 0.0
+        info['fraction_of_target'] = 0.0
         info['fraction_of_agent'] = 0.0
 
         return observation, info
@@ -343,22 +324,22 @@ class TwoRoomEnv(gym.Env):
         proprio = np.array(state[:2])
         observation = {'proprio': proprio, 'state': state}
 
-        # Calculate goal overlap
-        goal_geom = pymunk_to_shapely(self.goal, self.goal.shapes)
+        # Calculate target overlap
+        target_geom = pymunk_to_shapely(self.target, self.target.shapes)
         agent_geom = pymunk_to_shapely(self.agent, self.agent.shapes)
 
-        intersection_area = goal_geom.intersection(agent_geom).area
-        goal_area = goal_geom.area
+        intersection_area = target_geom.intersection(agent_geom).area
+        target_area = target_geom.area
         agent_area = agent_geom.area
 
-        fraction_of_goal = intersection_area / goal_area
+        fraction_of_target = intersection_area / target_area
         fraction_of_agent = intersection_area / agent_area
 
         info = self._get_info()
-        info['fraction_of_goal'] = fraction_of_goal
+        info['fraction_of_target'] = fraction_of_target
         info['fraction_of_agent'] = fraction_of_agent
 
-        terminated = (fraction_of_goal >= 0.5) or (fraction_of_agent >= 0.5)
+        terminated = (fraction_of_target >= 0.5) or (fraction_of_agent >= 0.5)
         truncated = self.energy <= 0
         reward = 1.0 if terminated else -0.01
 
@@ -381,10 +362,12 @@ class TwoRoomEnv(gym.Env):
         agent_radius = self.variation_space['agent']['radius'].value.item()
         self.agent = self._add_circle(agent_pos, agent_radius, is_sensor=False)
 
-        # Create goal
-        goal_pos = self.variation_space['goal']['position'].value.tolist()
-        goal_radius = self.variation_space['goal']['radius'].value.item()
-        self.goal = self._add_circle(goal_pos, goal_radius, is_sensor=True)
+        # Create target
+        target_pos = self.variation_space['target']['position'].value.tolist()
+        target_radius = self.variation_space['target']['radius'].value.item()
+        self.target = self._add_circle(
+            target_pos, target_radius, is_sensor=True
+        )
 
         # Set energy
         self.energy = self.variation_space['agent']['max_energy'].value
@@ -551,21 +534,37 @@ class TwoRoomEnv(gym.Env):
 
         return body
 
-    def _set_position(self, agent_position, goal_position):
-        """Set agent and goal positions."""
+    def _set_state(self, state):
+        """Set agent and target positions."""
+
+        agent_pos = state[:2]
+        target_pos = state[2:4]
+
         agent_pos = (
-            agent_position.tolist()
-            if isinstance(agent_position, np.ndarray)
-            else agent_position
-        )
-        goal_pos = (
-            goal_position.tolist()
-            if isinstance(goal_position, np.ndarray)
-            else goal_position
+            agent_pos.tolist()
+            if isinstance(agent_pos, np.ndarray)
+            else agent_pos
         )
 
+        target_pos = (
+            target_pos.tolist()
+            if isinstance(target_pos, np.ndarray)
+            else target_pos
+        )
+        self.energy = state[4]
+
         self.agent.position = agent_pos
-        self.goal.position = goal_pos
+        self.target.position = target_pos
+        self.space.step(self.dt)
+
+    def _set_target_state(self, target_state):
+        """Set only the target position."""
+        target_pos = (
+            target_state.tolist()
+            if isinstance(target_state, np.ndarray)
+            else target_state
+        )
+        self.target.position = target_pos[2:4]
         self.space.step(self.dt)
 
     def _get_obs(self):
@@ -573,7 +572,7 @@ class TwoRoomEnv(gym.Env):
         speed = self.variation_space['agent']['speed'].value.item()
         obs = (
             tuple(self.agent.position)
-            + tuple(self.goal.position)
+            + tuple(self.target.position)
             + (self.energy, speed)
         )
 
@@ -587,10 +586,10 @@ class TwoRoomEnv(gym.Env):
         )
         return {
             'pos_agent': np.array(self.agent.position),
-            'pos_goal': np.array(self.goal.position),
+            'pos_target': np.array(self.target.position),
             'n_contacts': n_contact_points_per_step,
-            'goal_pos': self.variation_space['goal']['position'].value,
-            'goal': self._goal,
+            'target_pos': self.variation_space['target']['position'].value,
+            'target': self._target,
             'energy': self.energy,
             'max_energy': self.variation_space['agent']['max_energy'].value,
         }
@@ -621,9 +620,9 @@ class TwoRoomEnv(gym.Env):
         bg_color = self.variation_space['background']['color'].value.tolist()
         canvas.fill(bg_color)
 
-        # Layer 2: Goal (below walls, can be partially hidden)
-        goal_color = self.variation_space['goal']['color'].value.tolist()
-        self._draw_circle(canvas, self.goal, goal_color)
+        # Layer 2: target (below walls, can be partially hidden)
+        target_color = self.variation_space['target']['color'].value.tolist()
+        self._draw_circle(canvas, self.target, target_color)
 
         # Layer 3: Walls, doors, and borders
         for segment in self.wall_segments:
@@ -749,7 +748,7 @@ class TwoRoomEnv(gym.Env):
 
     def check_collide(self, x, entity='agent'):
         """Check if position collides with walls or borders."""
-        assert entity in ['agent', 'goal']
+        assert entity in ['agent', 'target']
         cx, cy = x
         r = self.variation_space.value[entity]['radius']
 

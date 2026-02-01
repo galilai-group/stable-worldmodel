@@ -24,8 +24,14 @@ class WeakPolicy(BasePolicy):
 
     def set_env(self, env):
         self.env = env
-        self.discrete = "Discrete" in self.env.spec.id
-        assert "swm/PushT" in self.env.spec.id, "PushTCollectionPolicy can only be used with the PushT environment."
+        # Get spec from vectorized env or its sub-environments
+        spec = getattr(self.env, 'spec', None)
+        if spec is None:
+            envs = getattr(self.env, 'envs', None)
+            if envs and len(envs) > 0:
+                spec = envs[0].spec
+        assert spec is not None and "swm/PushT" in spec.id, "PushTCollectionPolicy can only be used with the PushT environment."
+        self.discrete = "Discrete" in spec.id
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, "env"), "Environment not set for the policy"

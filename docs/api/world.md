@@ -99,7 +99,36 @@ print(f"Success Rate: {results['success_rate']}%")
 ///
 
 !!! tip "Performance"
-    The `World` class uses `gymnasium.vector.SyncVectorEnv` for synchronized execution, ensuring deterministic and batched stepping across multiple environments.
+    The `World` class uses a custom `SyncWorld` vectorized environment for synchronized execution, ensuring deterministic and batched stepping across multiple environments.
+
+/// tab | Per-Environment Options
+The `World` class supports passing different options to each environment during reset, enabling per-environment variations and configurations:
+
+```python
+from stable_worldmodel import World
+
+world = World(
+    env_name="swm/PushT-v1",
+    num_envs=3,
+    image_shape=(64, 64)
+)
+
+# Different variations for each environment
+per_env_options = [
+    {"variation": ["agent.color"], "variation_values": {"agent.color": [255, 0, 0]}},
+    {"variation": ["agent.color"], "variation_values": {"agent.color": [0, 255, 0]}},
+    {"variation": ["agent.color"], "variation_values": {"agent.color": [0, 0, 255]}},
+]
+
+world.reset(options=per_env_options)
+```
+
+This is useful for:
+
+- **Domain randomization**: Different visual variations per environment
+- **Curriculum learning**: Different difficulty levels per environment
+- **Parallel evaluation**: Testing multiple configurations simultaneously
+///
 
 ::: stable_worldmodel.World
     options:

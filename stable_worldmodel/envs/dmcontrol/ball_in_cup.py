@@ -19,26 +19,30 @@ class BallInCupDMControlWrapper(DMControlWrapper):
     def __init__(self, seed=None, environment_kwargs=None):
         xml, assets = ball_in_cup.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
-        suite_dir = os.path.dirname(ball_in_cup.__file__)  # .../dm_control/suite
+        suite_dir = os.path.dirname(
+            ball_in_cup.__file__
+        )  # .../dm_control/suite
         self._mjcf_model = mjcf.from_xml_string(
             xml,
             model_dir=suite_dir,
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, "ball_in_cup")
+        super().__init__(self.env, 'ball_in_cup')
         self.variation_space = swm_space.Dict(
             {
-                "agent": swm_space.Dict(
+                'agent': swm_space.Dict(
                     {  # cup
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
+                            init_value=np.array(
+                                [0.7, 0.5, 0.3], dtype=np.float64
+                            ),
                         ),
-                        "density": swm_space.Box(
+                        'density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
@@ -47,23 +51,25 @@ class BallInCupDMControlWrapper(DMControlWrapper):
                         ),
                     }
                 ),
-                "ball": swm_space.Dict(
+                'ball': swm_space.Dict(
                     {  # ball
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
+                            init_value=np.array(
+                                [0.7, 0.5, 0.3], dtype=np.float64
+                            ),
                         ),
-                        "density": swm_space.Box(
+                        'density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        "size": swm_space.Box(
+                        'size': swm_space.Box(
                             low=0.01,
                             high=0.05,
                             shape=(1,),
@@ -72,32 +78,39 @@ class BallInCupDMControlWrapper(DMControlWrapper):
                         ),
                     }
                 ),
-                "floor": swm_space.Dict(
+                'floor': swm_space.Dict(
                     {
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(2, 3),
                             dtype=np.float64,
-                            init_value=np.array([[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]], dtype=np.float64),
+                            init_value=np.array(
+                                [[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]],
+                                dtype=np.float64,
+                            ),
                         ),
                     }
                 ),
-                "target": swm_space.Dict(
+                'target': swm_space.Dict(
                     {
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.6, 0.3, 0.3], dtype=np.float64),
+                            init_value=np.array(
+                                [0.6, 0.3, 0.3], dtype=np.float64
+                            ),
                         ),
-                        "shape": swm_space.Discrete(2, init_value=1),  # 0: box, 1: sphere
+                        'shape': swm_space.Discrete(
+                            2, init_value=1
+                        ),  # 0: box, 1: sphere
                     }
                 ),
-                "light": swm_space.Dict(
+                'light': swm_space.Dict(
                     {
-                        "intensity": swm_space.Box(
+                        'intensity': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(1,),
@@ -111,19 +124,23 @@ class BallInCupDMControlWrapper(DMControlWrapper):
 
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
-        assert self._mjcf_model is not None, "No MJCF model to compile!"
+        assert self._mjcf_model is not None, 'No MJCF model to compile!'
         self._mjcf_tempdir = tempfile.TemporaryDirectory()
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name="ball_in_cup.xml",
+            out_file_name='ball_in_cup.xml',
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, "ball_in_cup.xml")
+        xml_path = os.path.join(self._mjcf_tempdir.name, 'ball_in_cup.xml')
         physics = ball_in_cup.Physics.from_xml_path(xml_path)
         task = ball_in_cup.BallInCup(random=seed)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
-            physics, task, control_timestep=_CONTROL_TIMESTEP, time_limit=_DEFAULT_TIME_LIMIT, **environment_kwargs
+            physics,
+            task,
+            control_timestep=_CONTROL_TIMESTEP,
+            time_limit=_DEFAULT_TIME_LIMIT,
+            **environment_kwargs,
         )
         env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
         self.env = env
@@ -147,40 +164,57 @@ class BallInCupDMControlWrapper(DMControlWrapper):
             - Some variations call self.mark_dirty() to trigger recompilation
         """
         # Modify floor color
-        grid_texture = mjcf_model.find("texture", "grid")
+        grid_texture = mjcf_model.find('texture', 'grid')
         texture_changed = grid_texture.rgb1 is None or not np.allclose(
-            grid_texture.rgb1, self.variation_space["floor"]["color"].value[0]
+            grid_texture.rgb1, self.variation_space['floor']['color'].value[0]
         )
         texture_changed = texture_changed or (
             grid_texture.rgb2 is None
-            or not np.allclose(grid_texture.rgb2, self.variation_space["floor"]["color"].value[1])
+            or not np.allclose(
+                grid_texture.rgb2,
+                self.variation_space['floor']['color'].value[1],
+            )
         )
-        grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
-        grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
+        grid_texture.rgb1 = self.variation_space['floor']['color'].value[0]
+        grid_texture.rgb2 = self.variation_space['floor']['color'].value[1]
 
         # Modify agent (cup) color via material
         agent_color_changed = False
 
-        desired_rgb = np.asarray(self.variation_space["agent"]["color"].value, dtype=np.float32).reshape(3)
-        desired_rgba = np.concatenate([desired_rgb, np.array([1.0], dtype=np.float32)], axis=0)
+        desired_rgb = np.asarray(
+            self.variation_space['agent']['color'].value, dtype=np.float32
+        ).reshape(3)
+        desired_rgba = np.concatenate(
+            [desired_rgb, np.array([1.0], dtype=np.float32)], axis=0
+        )
 
-        self_mat = mjcf_model.find("material", "self")
+        self_mat = mjcf_model.find('material', 'self')
         assert self_mat is not None, "Expected material named 'self'"
 
-        if self_mat.rgba is None or not np.allclose(np.asarray(self_mat.rgba, dtype=np.float32), desired_rgba):
+        if self_mat.rgba is None or not np.allclose(
+            np.asarray(self_mat.rgba, dtype=np.float32), desired_rgba
+        ):
             agent_color_changed = True
         self_mat.rgba = desired_rgba
 
         mass_changed = False
 
         # Modify cup density
-        cup_part_0_geom = mjcf_model.find("geom", "cup_part_0")
-        cup_part_1_geom = mjcf_model.find("geom", "cup_part_1")
-        cup_part_2_geom = mjcf_model.find("geom", "cup_part_2")
-        cup_part_3_geom = mjcf_model.find("geom", "cup_part_3")
-        cup_part_4_geom = mjcf_model.find("geom", "cup_part_4")
-        base = cup_part_0_geom.density if cup_part_0_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["density"].value).reshape(-1)[0])
+        cup_part_0_geom = mjcf_model.find('geom', 'cup_part_0')
+        cup_part_1_geom = mjcf_model.find('geom', 'cup_part_1')
+        cup_part_2_geom = mjcf_model.find('geom', 'cup_part_2')
+        cup_part_3_geom = mjcf_model.find('geom', 'cup_part_3')
+        cup_part_4_geom = mjcf_model.find('geom', 'cup_part_4')
+        base = (
+            cup_part_0_geom.density
+            if cup_part_0_geom.density is not None
+            else 1000.0
+        )
+        desired_density = float(
+            np.asarray(self.variation_space['agent']['density'].value).reshape(
+                -1
+            )[0]
+        )
         if not np.allclose(base, desired_density):
             mass_changed = True
         cup_part_0_geom.density = desired_density
@@ -190,50 +224,66 @@ class BallInCupDMControlWrapper(DMControlWrapper):
         cup_part_4_geom.density = desired_density
 
         # Modify ball density
-        ball_geom = mjcf_model.find("geom", "ball")
+        ball_geom = mjcf_model.find('geom', 'ball')
         base = ball_geom.density if ball_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["ball"]["density"].value).reshape(-1)[0])
+        desired_density = float(
+            np.asarray(self.variation_space['ball']['density'].value).reshape(
+                -1
+            )[0]
+        )
         if not np.allclose(base, desired_density):
             mass_changed = True
         ball_geom.density = desired_density
 
         # Modify ball size
-        desired_size = float(np.asarray(self.variation_space["ball"]["size"].value).reshape(-1)[0])
+        desired_size = float(
+            np.asarray(self.variation_space['ball']['size'].value).reshape(-1)[
+                0
+            ]
+        )
         if not np.allclose(ball_geom.size[0], desired_size):
             mass_changed = True
         ball_geom.size = [desired_size]
 
         # Modify light intensity if a global light exists.
         light_changed = False
-        light = mjcf_model.find("light", "light")
-        desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
-        light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
+        light = mjcf_model.find('light', 'light')
+        desired_diffuse = self.variation_space['light']['intensity'].value[
+            0
+        ] * np.ones((3), dtype=np.float32)
+        light_changed = light.diffuse is None or not np.allclose(
+            light.diffuse, desired_diffuse
+        )
         light.diffuse = desired_diffuse
 
         # Modify target appearance (color, shape)
         target_changed = False
 
-        target_site = mjcf_model.find("site", "target")
+        target_site = mjcf_model.find('site', 'target')
 
         assert target_site is not None, "Expected site named 'target'"
 
         # ----- Color -----
-        desired_rgb = np.asarray(self.variation_space["target"]["color"].value, dtype=np.float32).reshape(3)
+        desired_rgb = np.asarray(
+            self.variation_space['target']['color'].value, dtype=np.float32
+        ).reshape(3)
         desired_rgba = np.concatenate([desired_rgb, [1.0]], axis=0)
 
-        if target_site.rgba is None or not np.allclose(target_site.rgba, desired_rgba):
+        if target_site.rgba is None or not np.allclose(
+            target_site.rgba, desired_rgba
+        ):
             target_changed = True
         target_site.rgba = desired_rgba
 
         # ----- Shape -----
         # 0 = box, 1 = sphere
-        shape_id = int(self.variation_space["target"]["shape"].value)
+        shape_id = int(self.variation_space['target']['shape'].value)
 
         if shape_id == 0:
-            desired_type = "box"
+            desired_type = 'box'
             desired_size = np.array([0.05, 0.006, 0.05], dtype=np.float32)
         else:
-            desired_type = "sphere"
+            desired_type = 'sphere'
             desired_size = np.array([0.05], dtype=np.float32)
 
         if target_site.type != desired_type:
@@ -242,14 +292,20 @@ class BallInCupDMControlWrapper(DMControlWrapper):
         target_site.size = desired_size
 
         # If any properties changed, mark the model as dirty.
-        if light_changed or texture_changed or mass_changed or target_changed or agent_color_changed:
+        if (
+            light_changed
+            or texture_changed
+            or mass_changed
+            or target_changed
+            or agent_color_changed
+        ):
             self.mark_dirty()
         return mjcf_model
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     env = BallInCupDMControlWrapper(seed=0)
     obs, info = env.reset()
-    print("obs shape:", obs.shape)
-    print("info:", info)
+    print('obs shape:', obs.shape)
+    print('info:', info)
     env.close()

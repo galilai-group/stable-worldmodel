@@ -8,17 +8,17 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Goal
 from minigrid.minigrid_env import MiniGridEnv
 
-import stable_worldmodel as swm
+from stable_worldmodel import spaces as swm_spaces
 from stable_worldmodel import spaces
 
 
 DEFAULT_VARIATIONS = (
-    "agent.position",
-    "agent.direction",
-    "goal.position",
-    "goal.agent.direction",
-    "maze.p_horizontal",
-    "maze.p_vertical",
+    'agent.position',
+    'agent.direction',
+    'goal.position',
+    'goal.agent.direction',
+    'maze.p_horizontal',
+    'maze.p_vertical',
 )
 
 
@@ -29,7 +29,7 @@ class SimpleNavigationEnv(MiniGridEnv):
     The agent can move in the maze by moving forward, turning left, or turning right.
     """
 
-    def __init__(self, size=9, render_mode="rgb_array", *args, **kwargs):
+    def __init__(self, size=9, render_mode='rgb_array', *args, **kwargs):
         """Initialize the Simple Navigation Environment
 
         Args:
@@ -53,13 +53,19 @@ class SimpleNavigationEnv(MiniGridEnv):
         self.observation_space = spaces.Dict(
             {
                 # proprio: [ax, ay, a_dir]
-                "proprio": spaces.MultiDiscrete(
+                'proprio': spaces.MultiDiscrete(
                     nvec=[inner_width, inner_height, num_dirs],
                     start=[1, 1, 0],
                 ),
                 # state: [ax, ay, a_dir, gx, gy]
-                "state": spaces.MultiDiscrete(
-                    nvec=[inner_width, inner_height, num_dirs, inner_width, inner_height],
+                'state': spaces.MultiDiscrete(
+                    nvec=[
+                        inner_width,
+                        inner_height,
+                        num_dirs,
+                        inner_width,
+                        inner_height,
+                    ],
                     start=[1, 1, 0, 1, 1],
                 ),
             }
@@ -68,34 +74,34 @@ class SimpleNavigationEnv(MiniGridEnv):
         # turn left, turn right, move forward
         self.action_space = spaces.Discrete(3)
 
-        self.variation_space = swm.spaces.Dict(
+        self.variation_space = swm_spaces.Dict(
             {
-                "agent": swm.spaces.Dict(
+                'agent': swm_spaces.Dict(
                     {
-                        "position": swm.spaces.MultiDiscrete(
+                        'position': swm_spaces.MultiDiscrete(
                             nvec=[inner_width, inner_height],
                             start=[1, 1],
                             init_value=[1, 1],
                             constrain_fn=self._valid_agent_pos,
                         ),
-                        "direction": swm.spaces.Discrete(
+                        'direction': swm_spaces.Discrete(
                             n=4,
                             start=0,
                             init_value=0,
                         ),
                     },
                 ),
-                "goal": swm.spaces.Dict(
+                'goal': swm_spaces.Dict(
                     {
-                        "position": swm.spaces.MultiDiscrete(
+                        'position': swm_spaces.MultiDiscrete(
                             nvec=[inner_width, inner_height],
                             start=[1, 1],
                             init_value=[inner_width - 2, inner_height - 2],
                             constrain_fn=self._valid_goal_pos,
                         ),
-                        "agent": swm.spaces.Dict(
+                        'agent': swm_spaces.Dict(
                             {
-                                "direction": swm.spaces.Discrete(
+                                'direction': swm_spaces.Discrete(
                                     n=4,
                                     start=0,
                                     init_value=0,
@@ -104,15 +110,15 @@ class SimpleNavigationEnv(MiniGridEnv):
                         ),
                     },
                 ),
-                "maze": swm.spaces.Dict(
+                'maze': swm_spaces.Dict(
                     {
-                        "p_horizontal": swm.spaces.Box(
+                        'p_horizontal': swm_spaces.Box(
                             low=0.0,
                             high=1.0,
                             init_value=0.5,
                             dtype=np.float32,
                         ),
-                        "p_vertical": swm.spaces.Box(
+                        'p_vertical': swm_spaces.Box(
                             low=0.0,
                             high=1.0,
                             init_value=0.5,
@@ -121,32 +127,27 @@ class SimpleNavigationEnv(MiniGridEnv):
                     }
                 ),
             },
-            sampling_order=["maze", "agent", "goal"],
+            sampling_order=['maze', 'agent', 'goal'],
         )
 
     def reset(self, seed=None, options=None):
         self._maze_seed = seed
         super().reset(seed=seed, options=options)
-        if hasattr(self, "variation_space"):
-            self.variation_space.seed(seed)
-
         options = options or {}
-        self.variation_space.reset()
-
-        variations = options.get("variation", DEFAULT_VARIATIONS)
-        if not isinstance(variations, Sequence):
-            raise ValueError("variation option must be a Sequence containing variations names to sample")
-
-        self.variation_space.update(variations)
-        assert self.variation_space.check(debug=True), "Variation values must be within variation space!"
+        swm_spaces.reset_variation_space(
+            self.variation_space,
+            seed,
+            options,
+            DEFAULT_VARIATIONS,
+        )
 
         # make goal state:
         # [gx, gy, a_dir, gx, gy] agent location is the same as goal location
         goal_state = np.concatenate(
             [
-                self.variation_space["goal"]["position"].value.tolist(),
-                [self.variation_space["goal"]["agent"]["direction"].value],
-                self.variation_space["goal"]["position"].value.tolist(),
+                self.variation_space['goal']['position'].value.tolist(),
+                [self.variation_space['goal']['agent']['direction'].value],
+                self.variation_space['goal']['position'].value.tolist(),
             ]
         )
         self._set_goal_state(goal_state)
@@ -156,9 +157,9 @@ class SimpleNavigationEnv(MiniGridEnv):
         # restore original state
         state = np.concatenate(
             [
-                self.variation_space["agent"]["position"].value.tolist(),
-                [self.variation_space["agent"]["direction"].value],
-                self.variation_space["goal"]["position"].value.tolist(),
+                self.variation_space['agent']['position'].value.tolist(),
+                [self.variation_space['agent']['direction'].value],
+                self.variation_space['goal']['position'].value.tolist(),
             ]
         )
         self._set_state(state)
@@ -167,7 +168,7 @@ class SimpleNavigationEnv(MiniGridEnv):
         state = self._get_obs()
         proprio = state[:3]
 
-        observation = {"proprio": proprio, "state": state}
+        observation = {'proprio': proprio, 'state': state}
         info = self._get_info()
         return observation, info
 
@@ -176,7 +177,7 @@ class SimpleNavigationEnv(MiniGridEnv):
 
         state = self._get_obs()
         proprio = state[:3]
-        observation = {"proprio": proprio, "state": state}
+        observation = {'proprio': proprio, 'state': state}
         info = self._get_info()
 
         terminated, distance = self.eval_state(self.goal_state, state)
@@ -187,7 +188,7 @@ class SimpleNavigationEnv(MiniGridEnv):
 
     @staticmethod
     def _gen_mission() -> str:
-        return "go to the goal square"
+        return 'go to the goal square'
 
     def _gen_grid(self, width, height):
         self.grid = Grid(width, height)
@@ -197,8 +198,8 @@ class SimpleNavigationEnv(MiniGridEnv):
             width,
             height,
             self._maze_seed,
-            self.variation_space["maze"]["p_horizontal"].value,
-            self.variation_space["maze"]["p_vertical"].value,
+            self.variation_space['maze']['p_horizontal'].value,
+            self.variation_space['maze']['p_vertical'].value,
         )
         for x, y in wall_coords:
             self.grid.wall_rect(x, y, 1, 1)
@@ -229,12 +230,12 @@ class SimpleNavigationEnv(MiniGridEnv):
     def _get_info(self):
         goal_proprio = self.goal_state[:3]
         return {
-            "pos_agent": np.array(self.agent_pos),
-            "dir_agent": np.array(self.agent_dir),
-            "pos_goal": np.array(self.goal_pos),
-            "goal_state": np.array(self.goal_state),
-            "goal_proprio": goal_proprio,
-            "goal": self._goal,
+            'pos_agent': np.array(self.agent_pos),
+            'dir_agent': np.array(self.agent_dir),
+            'pos_goal': np.array(self.goal_pos),
+            'goal_state': np.array(self.goal_state),
+            'goal_proprio': goal_proprio,
+            'goal': self._goal,
         }
 
     def _get_obs(self):
@@ -274,7 +275,7 @@ class SimpleNavigationEnv(MiniGridEnv):
         if not self._is_floor_cell(pos):
             return False
 
-        agent_pos = self.variation_space["agent"]["position"].value
+        agent_pos = self.variation_space['agent']['position'].value
         return not (int(agent_pos[0]) == x and int(agent_pos[1]) == y)
 
 

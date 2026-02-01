@@ -1813,3 +1813,199 @@ def test_stacked_wrapper_multiple_keys(minimal_env):
     assert info2["b"].shape == (2,)
     assert (info2["a"][0] == np.array([1])).all()
     assert info2["b"].tolist() == [10, 20]
+
+
+######################
+## test SyncWorld   ##
+######################
+
+
+def test_sync_world_reset_no_options():
+    """Test SyncWorld reset with no options or seed."""
+    import numpy as np
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+        env.reset.return_value = (np.array([0.1, 0.2, 0.3, 0.4]), {"info_key": "value"})
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    obs, infos = sync_world.reset()
+
+    assert obs.shape == (3, 4)
+    assert "info_key" in infos
+
+
+def test_sync_world_reset_with_single_seed():
+    """Test SyncWorld reset with a single integer seed."""
+    import numpy as np
+
+    seeds_received = []
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+
+        def mock_reset(seed=None, options=None):
+            seeds_received.append(seed)
+            return np.array([0.1, 0.2, 0.3, 0.4]), {}
+
+        env.reset = mock_reset
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    sync_world.reset(seed=42)
+
+    # Seeds should be [42, 43, 44]
+    assert seeds_received == [42, 43, 44]
+
+
+def test_sync_world_reset_with_seed_list():
+    """Test SyncWorld reset with a list of seeds."""
+    import numpy as np
+
+    seeds_received = []
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+
+        def mock_reset(seed=None, options=None):
+            seeds_received.append(seed)
+            return np.array([0.1, 0.2, 0.3, 0.4]), {}
+
+        env.reset = mock_reset
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    sync_world.reset(seed=[10, 20, 30])
+
+    assert seeds_received == [10, 20, 30]
+
+
+def test_sync_world_reset_with_single_options():
+    """Test SyncWorld reset with a single options dict applied to all envs."""
+    import numpy as np
+
+    options_received = []
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+
+        def mock_reset(seed=None, options=None):
+            options_received.append(options)
+            return np.array([0.1, 0.2, 0.3, 0.4]), {}
+
+        env.reset = mock_reset
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    sync_world.reset(options={"variation": ["color"]})
+
+    # Same options should be passed to all envs
+    assert all(opt == {"variation": ["color"]} for opt in options_received)
+
+
+def test_sync_world_reset_with_per_env_options():
+    """Test SyncWorld reset with different options for each environment."""
+    import numpy as np
+
+    options_received = []
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+
+        def mock_reset(seed=None, options=None):
+            options_received.append(options)
+            return np.array([0.1, 0.2, 0.3, 0.4]), {}
+
+        env.reset = mock_reset
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    per_env_options = [
+        {"variation": ["color"]},
+        {"variation": ["size"]},
+        None,
+    ]
+    sync_world.reset(options=per_env_options)
+
+    assert options_received[0] == {"variation": ["color"]}
+    assert options_received[1] == {"variation": ["size"]}
+    assert options_received[2] is None
+
+
+def test_sync_world_reset_options_list_length_mismatch():
+    """Test SyncWorld reset raises assertion when options list length doesn't match num_envs."""
+    import numpy as np
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+        env.reset.return_value = (np.array([0.1, 0.2, 0.3, 0.4]), {})
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+
+    with pytest.raises(AssertionError):
+        sync_world.reset(options=[{"opt": 1}, {"opt": 2}])  # Only 2, need 3
+
+
+def test_sync_world_reset_aggregates_info():
+    """Test SyncWorld reset properly aggregates info from all environments."""
+    import numpy as np
+
+    call_count = [0]
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+
+        def mock_reset(seed=None, options=None):
+            idx = call_count[0]
+            call_count[0] += 1
+            return np.array([0.1, 0.2, 0.3, 0.4]), {"env_idx": idx, "value": idx * 10}
+
+        env.reset = mock_reset
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    obs, infos = sync_world.reset()
+
+    # Infos should be batched
+    assert "env_idx" in infos
+    assert "value" in infos
+
+
+def test_sync_world_reset_with_none_seeds_in_list():
+    """Test SyncWorld reset with None values in seed list."""
+    import numpy as np
+
+    seeds_received = []
+
+    def make_env():
+        env = MagicMock(spec=gym.Env)
+        env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
+        env.action_space = gym.spaces.Box(low=0, high=1, shape=(2,))
+
+        def mock_reset(seed=None, options=None):
+            seeds_received.append(seed)
+            return np.array([0.1, 0.2, 0.3, 0.4]), {}
+
+        env.reset = mock_reset
+        return env
+
+    sync_world = wrapper.SyncWorld([make_env for _ in range(3)])
+    sync_world.reset(seed=[42, None, 100])
+
+    assert seeds_received == [42, None, 100]
