@@ -258,6 +258,7 @@ def get_gcbc_policy(cfg):
         return {
             'modules': str(module_name),
             'optimizer': {'type': 'AdamW', 'lr': lr},
+            'scheduler': {'type': 'LinearWarmupCosineAnnealingLR'},
         }
 
     gcbc_policy = spt.Module(
