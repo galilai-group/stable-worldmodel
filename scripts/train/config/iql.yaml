@@ -42,9 +42,9 @@ predictor:
   dropout: 0.1
   emb_dropout: 0.0
 
-predictor_lr: 5e-4
-proprio_encoder_lr: 5e-4
-action_encoder_lr: 5e-4
+predictor_lr: 3e-4
+proprio_encoder_lr: 3e-4
+action_encoder_lr: 3e-4
 
 # IQL hyperparameters
 discount: 0.99  # Discount factor (gamma) for value function
