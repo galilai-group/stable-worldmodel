@@ -50,7 +50,7 @@ def get_dataset(cfg, dataset_name):
     return dataset
 
 
-@hydra.main(version_base=None, config_path='.', config_name='config')
+@hydra.main(version_base=None, config_path='.', config_name='pusht')
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
     assert (
