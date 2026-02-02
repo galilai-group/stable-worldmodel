@@ -645,6 +645,37 @@ class MetricValuePredictor(nn.Module):
         return value
 
 
+class DoubleMetricValuePredictor(nn.Module):
+    """
+    Double value predictor for double Q-learning style training.
+
+    Wraps two independent MetricValuePredictor networks to enable:
+    - Minimum of target values for computing Q targets (reduces overestimation)
+    - Separate expectile losses for each network
+
+    Usage with TeacherStudentWrapper:
+        The wrapper will create EMA copies of both networks automatically.
+        forward_student() and forward_teacher() will return (v1, v2) tuples.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.v1 = MetricValuePredictor(**kwargs)
+        self.v2 = MetricValuePredictor(**kwargs)
+
+    def forward(self, x, g):
+        """
+        Compute values from both networks.
+
+        Args:
+            x: (B, T*P, dim) - observation embeddings
+            g: (B, P, dim) - goal embeddings
+        Returns:
+            (v1, v2): tuple of (B, T, 1) tensors
+        """
+        return self.v1(x, g), self.v2(x, g)
+
+
 class ExpectileLoss(nn.Module):
     def __init__(self, tau=0.9):
         super().__init__()
@@ -656,3 +687,45 @@ class ExpectileLoss(nn.Module):
         weight = torch.abs(self.tau - (residual < 0).float())
         loss = (weight * residual.pow(2)).mean()
         return loss
+
+
+class DoubleExpectileLoss(nn.Module):
+    """
+    Expectile loss for double value networks.
+
+    Computes the loss as done in https://github.com/seohongpark/HILP/blob/master/hilp_gcrl/src/agents/hilp.py
+        adv = q - v_target_avg
+        loss = expectile_loss(adv, q1 - v1) + expectile_loss(adv, q2 - v2)
+    """
+
+    def __init__(self, tau=0.9):
+        super().__init__()
+        self.tau = tau
+
+    def expectile_loss(self, adv, residual):
+        """Compute expectile loss with advantage-based weights."""
+        weight = torch.abs(self.tau - (adv < 0).float())
+        return (weight * residual.pow(2)).mean()
+
+    def forward(
+        self,
+        v1: torch.Tensor,
+        v2: torch.Tensor,
+        q1: torch.Tensor,
+        q2: torch.Tensor,
+        adv: torch.Tensor,
+    ):
+        """
+        Compute double expectile loss.
+
+        Args:
+            v1, v2: (B, T, 1) predicted values from student networks
+            q1, q2: (B, T, 1) target Q values
+            adv: (B, T, 1) advantage = q - v_target_avg
+
+        Returns:
+            total_loss, (loss1, loss2)
+        """
+        loss1 = self.expectile_loss(adv, q1 - v1)
+        loss2 = self.expectile_loss(adv, q2 - v2)
+        return loss1 + loss2, (loss1, loss2)
