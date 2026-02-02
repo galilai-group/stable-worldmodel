@@ -191,8 +191,17 @@ class PushT(gym.Env):
                         ),
                     }
                 ),
+                'rendering': swm_spaces.Dict(
+                    {'render_goal': swm_spaces.Discrete(2, init_value=1)}
+                ),
             },
-            sampling_order=['background', 'goal', 'block', 'agent'],
+            sampling_order=[
+                'background',
+                'goal',
+                'block',
+                'agent',
+                'rendering',
+            ],
         )
         if init_value is not None:
             self.variation_space.set_init_value(init_value)
@@ -406,34 +415,39 @@ class PushT(gym.Env):
 
         draw_options = DrawOptions(canvas)
 
-        # Draw goal pose.
-        goal_body = self._get_goal_pose_body(self.goal_pose)
-        for shape in self.block.shapes:
-            if isinstance(shape, pymunk.Circle):
-                center_pg = pymunk.pygame_util.to_pygame(
-                    goal_body.local_to_world(shape.offset),
-                    draw_options.surface,
-                )
-                pygame.draw.circle(
-                    canvas,
-                    self.variation_space['goal']['color'].value,
-                    (int(center_pg[0]), int(center_pg[1])),
-                    int(shape.radius),
-                )
-
-            else:
-                goal_points = [
-                    pymunk.pygame_util.to_pygame(
-                        goal_body.local_to_world(v), draw_options.surface
+        # Draw goal pose (optional).
+        render_goal = (
+            bool(self.variation_space['rendering']['render_goal'].value)
+            and self.with_target
+        )
+        if render_goal:
+            goal_body = self._get_goal_pose_body(self.goal_pose)
+            for shape in self.block.shapes:
+                if isinstance(shape, pymunk.Circle):
+                    center_pg = pymunk.pygame_util.to_pygame(
+                        goal_body.local_to_world(shape.offset),
+                        draw_options.surface,
                     )
-                    for v in shape.get_vertices()
-                ]
-                goal_points += [goal_points[0]]
-                pygame.draw.polygon(
-                    canvas,
-                    self.variation_space['goal']['color'].value,
-                    goal_points,
-                )
+                    pygame.draw.circle(
+                        canvas,
+                        self.variation_space['goal']['color'].value,
+                        (int(center_pg[0]), int(center_pg[1])),
+                        int(shape.radius),
+                    )
+
+                else:
+                    goal_points = [
+                        pymunk.pygame_util.to_pygame(
+                            goal_body.local_to_world(v), draw_options.surface
+                        )
+                        for v in shape.get_vertices()
+                    ]
+                    goal_points += [goal_points[0]]
+                    pygame.draw.polygon(
+                        canvas,
+                        self.variation_space['goal']['color'].value,
+                        goal_points,
+                    )
 
         # change agent color
         self._set_body_color(

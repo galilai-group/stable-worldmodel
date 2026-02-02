@@ -79,6 +79,7 @@ The environment supports extensive customization through the variation space:
 | `goal.angle` | Box(-2π, 2π) | Target rotation |
 | `goal.position` | Box([50, 50], [450, 450]) | Target position |
 | `background.color` | RGBBox | Background color (default: white) |
+| `rendering.render_goal` | Discrete(2) | Whether to render the goal overlay (default: 1) |
 
 ### Default Variations
 
