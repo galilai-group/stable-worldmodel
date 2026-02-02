@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 world:
-  env_name: swm/PushT-v1
+  env_name: swm/TwoRoom-v1
   num_envs: ${eval.num_eval}
   max_episode_steps: ??? # make sure it's >= eval_budget
   history_size: 1
@@ -22,7 +22,7 @@ eval:
   num_eval: 50
   goal_offset_steps: 25
   eval_budget: 50
-  dataset_name: pusht_expert_train
+  dataset_name: tworoom
   callables:
     # -- set state
     - method: _set_state
@@ -36,4 +36,4 @@ eval:
           value: goal_pos_agent
 
 output:
-  filename: pusht_results.txt
+  filename: tworoom_results.txt
