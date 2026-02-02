@@ -625,7 +625,7 @@ class MetricValuePredictor(nn.Module):
         """
         # Add positional embeddings
         x = x + self.pos_embedding[:, : x.shape[1]]
-        g = g + self.pos_embedding_goal[:, : g.shape[1]]
+        g = g + self.pos_embedding[:, : g.shape[1]]
         x = self.dropout(x)
         g = self.dropout(g)
 
