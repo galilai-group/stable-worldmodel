@@ -21,33 +21,37 @@ class ManipulatorDMControlWrapper(DMControlWrapper):
     def __init__(self, seed=None, environment_kwargs=None):
         xml, assets = manipulator.make_model(use_peg=False, insert=False)
         xml = xml.replace(b'file="./common/', b'file="common/')
-        suite_dir = os.path.dirname(manipulator.__file__)  # .../dm_control/suite
+        suite_dir = os.path.dirname(
+            manipulator.__file__
+        )  # .../dm_control/suite
         self._mjcf_model = mjcf.from_xml_string(
             xml,
             model_dir=suite_dir,
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, "manipulator")
+        super().__init__(self.env, 'manipulator')
         self.variation_space = swm_space.Dict(
             {
-                "agent": swm_space.Dict(
+                'agent': swm_space.Dict(
                     {
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
+                            init_value=np.array(
+                                [0.7, 0.5, 0.3], dtype=np.float64
+                            ),
                         ),
-                        "upper_arm_density": swm_space.Box(
+                        'upper_arm_density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        "hand_density": swm_space.Box(
+                        'hand_density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
@@ -55,7 +59,7 @@ class ManipulatorDMControlWrapper(DMControlWrapper):
                             init_value=np.array([1000], dtype=np.float32),
                         ),
                         # TODO should modify length of arm
-                        "upper_arm_length": swm_space.Box(
+                        'upper_arm_length': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
@@ -64,32 +68,42 @@ class ManipulatorDMControlWrapper(DMControlWrapper):
                         ),
                     }
                 ),
-                "floor": swm_space.Dict(
+                'floor': swm_space.Dict(
                     {
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(2, 3),
                             dtype=np.float64,
-                            init_value=np.array([[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]], dtype=np.float64),
+                            init_value=np.array(
+                                [[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]],
+                                dtype=np.float64,
+                            ),
                         ),
                     }
                 ),
-                "target": swm_space.Dict(
+                'target': swm_space.Dict(
                     {
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.6, 0.3, 0.3], dtype=np.float64),
+                            init_value=np.array(
+                                [0.6, 0.3, 0.3], dtype=np.float64
+                            ),
                         ),
-                        "shape": swm_space.Discrete(2, init_value=1),  # 0: box, 1: sphere
+                        'shape': swm_space.Discrete(
+                            2, init_value=1
+                        ),  # 0: box, 1: sphere
                     }
                 ),
-                "light": swm_space.Dict(
+                'rendering': swm_space.Dict(
+                    {'render_target': swm_space.Discrete(2, init_value=0)}
+                ),
+                'light': swm_space.Dict(
                     {
-                        "intensity": swm_space.Box(
+                        'intensity': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(1,),
@@ -103,19 +117,25 @@ class ManipulatorDMControlWrapper(DMControlWrapper):
 
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
-        assert self._mjcf_model is not None, "No MJCF model to compile!"
+        assert self._mjcf_model is not None, 'No MJCF model to compile!'
         self._mjcf_tempdir = tempfile.TemporaryDirectory()
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name="manipulator.xml",
+            out_file_name='manipulator.xml',
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, "manipulator.xml")
+        xml_path = os.path.join(self._mjcf_tempdir.name, 'manipulator.xml')
         physics = manipulator.Physics.from_xml_path(xml_path)
-        task = manipulator.Bring(use_peg=False, insert=False, fully_observable=True, random=seed)
+        task = manipulator.Bring(
+            use_peg=False, insert=False, fully_observable=True, random=seed
+        )
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
-            physics, task, time_limit=_TIME_LIMIT, control_timestep=_CONTROL_TIMESTEP, **environment_kwargs
+            physics,
+            task,
+            time_limit=_TIME_LIMIT,
+            control_timestep=_CONTROL_TIMESTEP,
+            **environment_kwargs,
         )
         env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
         self.env = env
@@ -139,81 +159,111 @@ class ManipulatorDMControlWrapper(DMControlWrapper):
             - Some variations call self.mark_dirty() to trigger recompilation
         """
         # Modify floor color
-        grid_texture = mjcf_model.find("texture", "grid")
+        grid_texture = mjcf_model.find('texture', 'grid')
         texture_changed = grid_texture.rgb1 is None or not np.allclose(
-            grid_texture.rgb1, self.variation_space["floor"]["color"].value[0]
+            grid_texture.rgb1, self.variation_space['floor']['color'].value[0]
         )
         texture_changed = texture_changed or (
             grid_texture.rgb2 is None
-            or not np.allclose(grid_texture.rgb2, self.variation_space["floor"]["color"].value[1])
+            or not np.allclose(
+                grid_texture.rgb2,
+                self.variation_space['floor']['color'].value[1],
+            )
         )
-        grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
-        grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
+        grid_texture.rgb1 = self.variation_space['floor']['color'].value[0]
+        grid_texture.rgb2 = self.variation_space['floor']['color'].value[1]
 
         # Modify agent (manipulator) color via material
         agent_color_changed = False
 
-        desired_rgb = np.asarray(self.variation_space["agent"]["color"].value, dtype=np.float32).reshape(3)
-        desired_rgba = np.concatenate([desired_rgb, np.array([1.0], dtype=np.float32)], axis=0)
+        desired_rgb = np.asarray(
+            self.variation_space['agent']['color'].value, dtype=np.float32
+        ).reshape(3)
+        desired_rgba = np.concatenate(
+            [desired_rgb, np.array([1.0], dtype=np.float32)], axis=0
+        )
 
-        self_mat = mjcf_model.find("material", "self")
+        self_mat = mjcf_model.find('material', 'self')
         assert self_mat is not None, "Expected material named 'self'"
 
-        if self_mat.rgba is None or not np.allclose(np.asarray(self_mat.rgba, dtype=np.float32), desired_rgba):
+        if self_mat.rgba is None or not np.allclose(
+            np.asarray(self_mat.rgba, dtype=np.float32), desired_rgba
+        ):
             agent_color_changed = True
         self_mat.rgba = desired_rgba
 
         mass_changed = False
 
         # Modify arm density
-        arm_geom = mjcf_model.find("geom", "upper_arm")
+        arm_geom = mjcf_model.find('geom', 'upper_arm')
         base = arm_geom.density if arm_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["upper_arm_density"].value).reshape(-1)[0])
+        desired_density = float(
+            np.asarray(
+                self.variation_space['agent']['upper_arm_density'].value
+            ).reshape(-1)[0]
+        )
         if not np.allclose(base, desired_density):
             mass_changed = True
         arm_geom.density = desired_density
 
         # Modify hand density
-        hand_geom = mjcf_model.find("geom", "hand")
+        hand_geom = mjcf_model.find('geom', 'hand')
         base = hand_geom.density if hand_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["hand_density"].value).reshape(-1)[0])
+        desired_density = float(
+            np.asarray(
+                self.variation_space['agent']['hand_density'].value
+            ).reshape(-1)[0]
+        )
         if not np.allclose(base, desired_density):
             mass_changed = True
         hand_geom.density = desired_density
 
         # Modify light intensity if a global light exists.
         light_changed = False
-        light = mjcf_model.find("light", "light")
-        desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
-        light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
+        light = mjcf_model.find('light', 'light')
+        desired_diffuse = self.variation_space['light']['intensity'].value[
+            0
+        ] * np.ones((3), dtype=np.float32)
+        light_changed = light.diffuse is None or not np.allclose(
+            light.diffuse, desired_diffuse
+        )
         light.diffuse = desired_diffuse
 
         # Modify target appearance (color, shape)
         target_changed = False
 
-        target_geom = mjcf_model.find("geom", "target_ball")
-        target_mat = mjcf_model.find("material", "target")
+        target_geom = mjcf_model.find('geom', 'target_ball')
+        target_mat = mjcf_model.find('material', 'target')
 
         assert target_geom is not None, "Expected geom named 'target_ball'"
         assert target_mat is not None, "Expected material named 'target'"
 
         # ----- Color -----
-        desired_rgb = np.asarray(self.variation_space["target"]["color"].value, dtype=np.float32).reshape(3)
+        desired_rgb = np.asarray(
+            self.variation_space['target']['color'].value, dtype=np.float32
+        ).reshape(3)
         desired_rgba = np.concatenate([desired_rgb, [1.0]], axis=0)
+        if self.variation_space['rendering']['render_target'].value == 0:
+            # If not rendering target, make it transparent
+            desired_rgba[3] = 0.0
 
-        if target_mat.rgba is None or not np.allclose(target_mat.rgba, desired_rgba):
+        if target_mat.rgba is None or not np.allclose(
+            target_mat.rgba, desired_rgba
+        ):
             target_changed = True
         target_mat.rgba = desired_rgba
 
         # ----- Shape -----
         # 0 = box, 1 = sphere
-        shape_id = int(self.variation_space["target"]["shape"].value)
+        shape_id = int(self.variation_space['target']['shape'].value)
 
         if shape_id == 0:
-            desired_type = "box"
-            desired_size = np.array([_SMALL_TARGET, _SMALL_TARGET, _SMALL_TARGET], dtype=np.float32)
+            desired_type = 'box'
+            desired_size = np.array(
+                [_SMALL_TARGET, _SMALL_TARGET, _SMALL_TARGET], dtype=np.float32
+            )
         else:
-            desired_type = "sphere"
+            desired_type = 'sphere'
             desired_size = np.array([_SMALL_TARGET], dtype=np.float32)
 
         if target_geom.type != desired_type:
@@ -222,14 +272,20 @@ class ManipulatorDMControlWrapper(DMControlWrapper):
         target_geom.size = desired_size
 
         # If any properties changed, mark the model as dirty.
-        if light_changed or texture_changed or mass_changed or target_changed or agent_color_changed:
+        if (
+            light_changed
+            or texture_changed
+            or mass_changed
+            or target_changed
+            or agent_color_changed
+        ):
             self.mark_dirty()
         return mjcf_model
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     env = ManipulatorDMControlWrapper(seed=0)
     obs, info = env.reset()
-    print("obs shape:", obs.shape)
-    print("info:", info)
+    print('obs shape:', obs.shape)
+    print('info:', info)
     env.close()
