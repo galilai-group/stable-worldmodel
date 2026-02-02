@@ -142,7 +142,7 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array(
                                 [164.0, 112.0], dtype=np.float32
                             ),
-                            constrain_fn=self._constrain_target_by_min_steps,
+                            # constrain_fn=self._constrain_target_by_min_steps,
                         ),
                     },
                     sampling_order=['color', 'radius', 'position'],
