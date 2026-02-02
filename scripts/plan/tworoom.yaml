@@ -30,9 +30,9 @@ eval:
         state:
           value: pos_agent
     # -- set goal state
-    - method: _set_target
+    - method: _set_goal_state
       args:
-        target_state:
+        goal_state:
           value: goal_pos_agent
 
 output:
