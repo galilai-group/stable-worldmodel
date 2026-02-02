@@ -340,9 +340,9 @@ class TwoRoomEnv(gym.Env):
 
     def _get_info(self):
         return {
-            'pos_agent': self.agent_position.detach().cpu().numpy(),
-            'pos_target': self.target_position.detach().cpu().numpy(),
             'proprio': self.agent_position.detach().cpu().numpy(),
+            'state': self.agent_position.detach().cpu().numpy(),
+            'goal_state': self.target_position.detach().cpu().numpy(),
         }
 
     # ---------------- Rendering ----------------
@@ -699,6 +699,9 @@ class TwoRoomEnv(gym.Env):
     def _set_state(self, state):
         self.agent_position = torch.tensor(state, dtype=torch.float32)
 
-    def _set_target(self, target):
-        self.target_position = torch.tensor(target, dtype=torch.float32)
+    def _set_goal_state(self, goal_state):
+        self.target_position = torch.tensor(goal_state, dtype=torch.float32)
+        self.variation_space['target']['position'].value = np.array(
+            goal_state, dtype=np.float32
+        )
         self._target_img = self._render_frame(agent_pos=self.target_position)
