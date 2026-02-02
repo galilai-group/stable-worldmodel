@@ -447,8 +447,8 @@ def get_gciql_value_model(cfg):
     wrapped_value_predictor = spt.TeacherStudentWrapper(
         value_predictor,
         warm_init=True,
-        base_ema_coefficient=0.995,
-        final_ema_coefficient=0.995,
+        base_ema_coefficient=1 - cfg.get('value_ema_tau', 0.005),
+        final_ema_coefficient=1 - cfg.get('value_ema_tau', 0.005),
     )
 
     # Build proprioception encoder
