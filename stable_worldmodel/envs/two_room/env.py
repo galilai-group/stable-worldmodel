@@ -701,7 +701,4 @@ class TwoRoomEnv(gym.Env):
 
     def _set_target(self, target):
         self.target_position = torch.tensor(target, dtype=torch.float32)
-        self.variation_space['target']['position'].value = np.array(
-            target, dtype=np.float32
-        )
         self._target_img = self._render_frame(agent_pos=self.target_position)
