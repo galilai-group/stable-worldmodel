@@ -46,6 +46,11 @@ predictor_lr: 5e-4
 proprio_encoder_lr: 5e-4
 action_encoder_lr: 5e-4
 
+# IQL hyperparameters
+discount: 0.99  # Discount factor (gamma) for value function
+expectile: 0.9  # Expectile tau for asymmetric value loss
+awr_alpha: 3.0  # Temperature for advantage weighting in actor loss
+
 # Goal sampling probabilities (random, geometric_future, uniform_future, current) - must sum to 1.0
 goal_probabilities:
   random: 0.375 #0.3

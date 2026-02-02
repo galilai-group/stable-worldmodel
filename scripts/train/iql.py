@@ -127,7 +127,9 @@ def get_data(cfg):
 def get_gciql_value_model(cfg):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
-    expectile_loss = swm.wm.iql.ExpectileLoss(tau=0.9)
+    double_expectile_loss = swm.wm.iql.DoubleExpectileLoss(
+        tau=cfg.get('expectile', 0.9)
+    )
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
@@ -189,14 +191,25 @@ def get_gciql_value_model(cfg):
             target_embedding, 'b t p d -> b (t p) d'
         )
 
-        value_pred = self.model.value_predictor.forward_student(
+        # Double value prediction: get (v1, v2) from student
+        (v1_pred, v2_pred) = self.model.value_predictor.forward_student(
             embedding_flat, goal_embedding_flat
         )
         with torch.no_grad():
-            gamma = 0.99
-            value_target = gamma * self.model.value_predictor.forward_teacher(
-                target_embedding_flat, goal_embedding_flat
+            gamma = cfg.get('discount', 0.99)
+            # Get target values for next observations
+            (next_v1_target, next_v2_target) = (
+                self.model.value_predictor.forward_teacher(
+                    target_embedding_flat, goal_embedding_flat
+                )
             )
+            # Get target values for current observations (for advantage)
+            (v1_target, v2_target) = (
+                self.model.value_predictor.forward_teacher(
+                    embedding_flat, goal_embedding_flat
+                )
+            )
+
             # Compare raw data instead of embeddings (embeddings differ due to GPU non-determinism)
             obs_pixels = batch['pixels'][
                 :, : cfg.dinowm.history_size
@@ -219,24 +232,43 @@ def get_gciql_value_model(cfg):
                 dim=2
             )  # (B, T)
             eq_mask = pixels_match & proprio_match  # (B, T)
-            reward = -(~eq_mask).float().unsqueeze(-1)
-            value_target += reward
+            # masks are 1 if non-terminal, 0 if terminal (at goal)
+            masks = (~eq_mask).float().unsqueeze(-1)
+            # rewards are -1 if non-terminal, 0 if terminal
+            reward = -masks
+
+            # Compute Q targets using minimum of target values (reduces overestimation)
+            next_v_min = torch.minimum(next_v1_target, next_v2_target)
+            q = reward + gamma * masks * next_v_min
+
+            # Compute advantage using average of current target values
+            v_target_avg = (v1_target + v2_target) / 2
+            adv = q - v_target_avg
+
+            # Compute individual Q targets for each value network
+            q1 = reward + gamma * masks * next_v1_target
+            q2 = reward + gamma * masks * next_v2_target
 
         # NaN detection after value prediction
-        if torch.isnan(value_pred).any():
+        value_pred = (v1_pred + v2_pred) / 2  # For logging
+        if torch.isnan(v1_pred).any() or torch.isnan(v2_pred).any():
             logging.warning(
-                f'NaN in value_pred! count={torch.isnan(value_pred).sum().item()}, '
-                f'min={value_pred[~torch.isnan(value_pred)].min().item() if not torch.isnan(value_pred).all() else "all_nan"}, '
-                f'max={value_pred[~torch.isnan(value_pred)].max().item() if not torch.isnan(value_pred).all() else "all_nan"}'
+                f'NaN in value_pred! v1_count={torch.isnan(v1_pred).sum().item()}, '
+                f'v2_count={torch.isnan(v2_pred).sum().item()}'
             )
-        if torch.isnan(value_target).any():
+        if torch.isnan(q).any():
             logging.warning(
-                f'NaN in value_target! count={torch.isnan(value_target).sum().item()}'
+                f'NaN in q target! count={torch.isnan(q).sum().item()}'
             )
 
-        # Compute value loss
-        value_loss = expectile_loss(value_pred, value_target.detach())
+        # Compute double expectile loss
+        value_loss, (value_loss1, value_loss2) = double_expectile_loss(
+            v1_pred, v2_pred, q1.detach(), q2.detach(), adv.detach()
+        )
+        value_target = q  # For logging compatibility
         batch['value_loss'] = value_loss
+        batch['value_loss1'] = value_loss1
+        batch['value_loss2'] = value_loss2
         batch['loss'] = value_loss
 
         # NaN detection after loss computation
@@ -340,9 +372,20 @@ def get_gciql_value_model(cfg):
                 f'{prefix}value_pred_std': value_pred.std(),
                 f'{prefix}value_pred_min': value_pred.min(),
                 f'{prefix}value_pred_max': value_pred.max(),
+                # Individual value network stats
+                f'{prefix}v1_pred_mean': v1_pred.mean(),
+                f'{prefix}v2_pred_mean': v2_pred.mean(),
+                f'{prefix}v1_pred_std': v1_pred.std(),
+                f'{prefix}v2_pred_std': v2_pred.std(),
                 # Value target stats
                 f'{prefix}value_target_mean': value_target.mean(),
                 f'{prefix}value_target_std': value_target.std(),
+                # Advantage stats
+                f'{prefix}adv_mean': adv.mean(),
+                f'{prefix}adv_std': adv.std(),
+                f'{prefix}adv_min': adv.min(),
+                f'{prefix}adv_max': adv.max(),
+                f'{prefix}accept_prob': (adv >= 0).float().mean(),
                 # Reward stats - mean ≈ -1 means reward too sparse
                 f'{prefix}reward_mean': reward.mean(),
                 f'{prefix}goal_match_rate': eq_mask.float().mean(),
@@ -392,8 +435,9 @@ def get_gciql_value_model(cfg):
     #     **cfg.predictor,
     # )
 
-    # Metric-based value function: V(s, g) = -||φ(s) - φ(g)||
-    value_predictor = swm.wm.iql.MetricValuePredictor(
+    # Double metric-based value function: V(s, g) = -||φ(s) - φ(g)||
+    # Uses two independent value networks for double Q-learning style training
+    value_predictor = swm.wm.iql.DoubleMetricValuePredictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
@@ -497,46 +541,32 @@ def get_gciql_action_model(cfg, trained_value_model):
             target_embedding_flat = rearrange(
                 target_embedding, 'b t p d -> b (t p) d'
             )
-            gamma = 0.99
-            value = self.model.value_predictor(
+            # Double value predictor returns (v1, v2) tuple
+            (v1, v2) = self.model.value_predictor(
                 embedding_flat, goal_embedding_flat
             )
-            value_target = self.model.value_predictor(
+            value = (v1 + v2) / 2  # Use average
+
+            (nv1, nv2) = self.model.value_predictor(
                 target_embedding_flat, goal_embedding_flat
             )
-            # Compare raw data instead of embeddings (embeddings differ due to GPU non-determinism)
-            obs_pixels = batch['pixels'][
-                :, : cfg.dinowm.history_size
-            ]  # (B, T, C, H, W)
-            goal_pixels_repeated = repeat(
-                batch['goal_pixels'],
-                'b 1 c h w -> b t c h w',
-                t=obs_pixels.shape[1],
-            )
-            obs_proprio = batch['proprio'][
-                :, : cfg.dinowm.history_size
-            ]  # (B, T, D)
-            goal_proprio_repeated = repeat(
-                batch['goal_proprio'], 'b 1 d -> b t d', t=obs_proprio.shape[1]
-            )
-            pixels_match = (obs_pixels == goal_pixels_repeated).all(
-                dim=(2, 3, 4)
-            )  # (B, T)
-            proprio_match = (obs_proprio == goal_proprio_repeated).all(
-                dim=2
-            )  # (B, T)
-            eq_mask = pixels_match & proprio_match  # (B, T)
-            reward = -(~eq_mask).float().unsqueeze(-1)
-            advantage = reward + gamma * value_target - value  # (B, T, 1)
+            next_value = (nv1 + nv2) / 2
+
+            # Advantage is next_value - current_value
+            advantage = next_value - value  # (B, T, 1)
 
         action_pred = self.model.action_predictor(
             embedding_flat.detach(), goal_embedding_flat.detach()
         )
 
-        # policy is extracted via AWR
-        beta = 3.0
-        # TODO how to compute std?
-        action_loss = torch.exp(advantage.detach() * beta) * F.mse_loss(
+        # Policy is extracted via AWR (Advantage Weighted Regression)
+        alpha = cfg.get('awr_alpha', 3.0)
+        exp_adv = torch.exp(advantage.detach() * alpha)
+        exp_adv = torch.minimum(
+            exp_adv, torch.tensor(100.0, device=exp_adv.device)
+        )
+
+        action_loss = exp_adv * F.mse_loss(
             action_pred,
             batch['action'][:, : cfg.dinowm.history_size],
             reduction='none',
