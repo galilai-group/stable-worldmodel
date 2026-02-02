@@ -174,6 +174,7 @@ world = swm.World('swm/ReacherDMControl-v0', num_envs=4)
 | `agent.finger_locked` | Discrete(2) | Whether the finger joint is locked |
 | `target.color` | Box(0, 1, shape=(3,)) | Target RGB color |
 | `target.shape` | Discrete(2) | Target shape (0: box, 1: sphere) |
+| `rendering.render_target` | Discrete(2) | Whether to render the target (0: hidden, 1: visible) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
@@ -388,6 +389,7 @@ world = swm.World('swm/BallInCupDMControl-v0', num_envs=4)
 | `ball.size` | Box(0.01, 0.05, shape=(1,)) | Ball radius |
 | `target.color` | Box(0, 1, shape=(3,)) | Target RGB color |
 | `target.shape` | Discrete(2) | Target shape (0: box, 1: sphere) |
+| `rendering.render_target` | Discrete(2) | Whether to render the target (0: hidden, 1: visible) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
@@ -425,6 +427,7 @@ world = swm.World('swm/FingerDMControl-v0', num_envs=4)
 | `spinner.friction` | Box(0, 1, shape=(1,)) | Spinner hinge friction loss |
 | `target.color` | Box(0, 1, shape=(3,)) | Target RGB color |
 | `target.shape` | Discrete(2) | Target shape (0: box, 1: sphere) |
+| `rendering.render_target` | Discrete(2) | Whether to render the target (0: hidden, 1: visible) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
@@ -460,5 +463,6 @@ world = swm.World('swm/ManipulatorDMControl-v0', num_envs=4)
 | `agent.upper_arm_length` | Box(500, 1500, shape=(1,)) | Upper arm length |
 | `target.color` | Box(0, 1, shape=(3,)) | Target RGB color |
 | `target.shape` | Discrete(2) | Target shape (0: box, 1: sphere) |
+| `rendering.render_target` | Discrete(2) | Whether to render the target (0: hidden, 1: visible) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |

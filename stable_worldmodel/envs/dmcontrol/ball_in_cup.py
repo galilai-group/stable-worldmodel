@@ -108,6 +108,9 @@ class BallInCupDMControlWrapper(DMControlWrapper):
                         ),  # 0: box, 1: sphere
                     }
                 ),
+                'rendering': swm_space.Dict(
+                    {'render_target': swm_space.Discrete(2, init_value=0)}
+                ),
                 'light': swm_space.Dict(
                     {
                         'intensity': swm_space.Box(
@@ -268,6 +271,9 @@ class BallInCupDMControlWrapper(DMControlWrapper):
             self.variation_space['target']['color'].value, dtype=np.float32
         ).reshape(3)
         desired_rgba = np.concatenate([desired_rgb, [1.0]], axis=0)
+        if self.variation_space['rendering']['render_target'].value == 0:
+            # If not rendering target, make it transparent
+            desired_rgba[3] = 0.0
 
         if target_site.rgba is None or not np.allclose(
             target_site.rgba, desired_rgba
