@@ -348,10 +348,16 @@ def get_gciql_value_model(cfg):
                     .abs()
                     .max()
                 )
+                # Log value prediction specifically when goal matches current state
+                # value_pred has shape (B, T, 1), take last timestep
+                value_pred_at_goal = value_pred[:, -1, 0][both_match].mean()
             else:
                 pixel_embed_diff = torch.tensor(-1.0, device=embedding.device)
                 proprio_embed_diff = torch.tensor(
                     -1.0, device=embedding.device
+                )
+                value_pred_at_goal = torch.tensor(
+                    float('nan'), device=embedding.device
                 )
 
             self.log_dict(
@@ -361,6 +367,7 @@ def get_gciql_value_model(cfg):
                     f'{prefix}debug_both_match_rate': both_match.float().mean(),
                     f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
                     f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
+                    f'{prefix}debug_value_pred_at_goal': value_pred_at_goal,
                 },
                 on_step=True,
                 sync_dist=True,
