@@ -1,7 +1,8 @@
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
+from collections.abc import Callable
 
 import numpy as np
 import torch
@@ -450,7 +451,7 @@ def _load_model_with_attribute(run_name, attribute_name, cache_dir=None):
     else:
         path = Path(f'{run_path}_object.ckpt')
         assert path.exists(), (
-            'Checkpoint path does not exist: {path}. Launch pretraining first.'
+            f'Checkpoint path does not exist: {path}. Launch pretraining first.'
         )
 
     spt_module = torch.load(path, weights_only=False, map_location='cpu')
