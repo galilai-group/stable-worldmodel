@@ -155,6 +155,13 @@ def get_gciql_value_model(cfg):
             prefix='goal_',
         )
 
+        # Detach encoder outputs if encoder is frozen
+        if not encoder_trainable:
+            batch['embed'] = batch['embed'].detach()
+            batch['goal_embed'] = batch['goal_embed'].detach()
+            batch['pixels_embed'] = batch['pixels_embed'].detach()
+            batch['pixels_goal_embed'] = batch['pixels_goal_embed'].detach()
+
         # NaN detection after encoding
         nan_checks = {
             'proprio': batch.get('proprio'),
@@ -644,10 +651,14 @@ def get_gciql_action_model(cfg, trained_value_model):
 
     # Assemble policy
     trained_value_model.model.extra_encoders.eval()
+    # Get underlying encoder (handle both EvalOnly wrapper and raw encoder cases)
+    encoder_backbone = (
+        trained_value_model.model.encoder.backbone
+        if hasattr(trained_value_model.model.encoder, 'backbone')
+        else trained_value_model.model.encoder
+    )
     gciql_model = swm.wm.iql.GCIQL(
-        encoder=spt.backbone.EvalOnly(
-            trained_value_model.model.encoder.backbone
-        ),
+        encoder=spt.backbone.EvalOnly(encoder_backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(
             trained_value_model.model.value_predictor.student
