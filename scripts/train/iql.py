@@ -434,7 +434,8 @@ def get_gciql_value_model(cfg):
         'Image size must be multiple of patch size'
     )
     num_patches = (cfg.image_size // cfg.patch_size) ** 2
-    embedding_dim += cfg.dinowm.proprio_embed_dim  # Total embedding size
+    if cfg.dinowm.get('use_proprio_encoder', True):
+        embedding_dim += cfg.dinowm.proprio_embed_dim  # Total embedding size
 
     logging.info(f'Patches: {num_patches}, Embedding dim: {embedding_dim}')
 
