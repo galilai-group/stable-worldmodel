@@ -325,10 +325,14 @@ def get_gciql_value_model(cfg):
             pixels_embed_goal = batch['pixels_goal_embed'][
                 :, 0
             ]  # (B, P, D_pixels)
-            proprio_embed_obs = batch['proprio_embed'][:, -1]  # (B, D_proprio)
-            proprio_embed_goal = batch['proprio_goal_embed'][
-                :, 0
-            ]  # (B, D_proprio)
+            has_proprio_embed = 'proprio_embed' in batch
+            if has_proprio_embed:
+                proprio_embed_obs = batch['proprio_embed'][
+                    :, -1
+                ]  # (B, D_proprio)
+                proprio_embed_goal = batch['proprio_goal_embed'][
+                    :, 0
+                ]  # (B, D_proprio)
 
             if both_match.any():
                 pixel_embed_diff = (
@@ -339,14 +343,19 @@ def get_gciql_value_model(cfg):
                     .abs()
                     .max()
                 )
-                proprio_embed_diff = (
-                    (
-                        proprio_embed_obs[both_match]
-                        - proprio_embed_goal[both_match]
+                if has_proprio_embed:
+                    proprio_embed_diff = (
+                        (
+                            proprio_embed_obs[both_match]
+                            - proprio_embed_goal[both_match]
+                        )
+                        .abs()
+                        .max()
                     )
-                    .abs()
-                    .max()
-                )
+                else:
+                    proprio_embed_diff = torch.tensor(
+                        -1.0, device=embedding.device
+                    )
                 # Log value prediction specifically when goal matches current state
                 # value_pred has shape (B, T, 1), take last timestep
                 value_pred_at_goal = value_pred[:, -1, 0][both_match].mean()
