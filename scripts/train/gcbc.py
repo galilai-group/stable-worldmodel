@@ -173,8 +173,11 @@ def get_gcbc_policy(cfg):
         action_pred = self.model.predict(
             embedding, goal_embedding
         )  # (B, num_preds, action_dim)
+        # action_target = batch['action'][
+        #     :, cfg.dinowm.num_preds :, :
+        # ]  # (B, num_preds, action_dim)
         action_target = batch['action'][
-            :, cfg.dinowm.num_preds :, :
+            :, : cfg.dinowm.history_size, :
         ]  # (B, num_preds, action_dim)
 
         check_tensor('action_pred', action_pred)
