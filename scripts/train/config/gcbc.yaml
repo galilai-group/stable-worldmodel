@@ -22,7 +22,7 @@ seed: 42
 image_size: 224
 patch_size: 14
 
-n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size}'}
+n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size} - 1'}
 frameskip: 1
 
 dinowm:
