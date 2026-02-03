@@ -152,7 +152,6 @@ def get_gciql_value_model(cfg):
             batch,
             target='goal_embed',
             pixels_key='goal_pixels',
-            emb_keys=['proprio'],
             prefix='goal_',
         )
 
