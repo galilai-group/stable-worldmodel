@@ -407,9 +407,28 @@ def get_gciql_value_model(cfg):
 
         return batch
 
-    # Load frozen DINO encoder
-    encoder = AutoModel.from_pretrained('facebook/dinov2-small')
-    embedding_dim = encoder.config.hidden_size
+    # Load encoder based on config
+    encoder_type = cfg.get('encoder_type', 'dino')
+    if encoder_type == 'dino':
+        # Load frozen DINO encoder
+        encoder = AutoModel.from_pretrained('facebook/dinov2-small')
+        embedding_dim = encoder.config.hidden_size
+        encoder_trainable = False
+        logging.info('Using pretrained frozen DINO encoder')
+    elif encoder_type == 'vit_tiny':
+        # Load trainable ViT tiny from scratch
+        encoder = spt.backbone.utils.vit_hf(
+            'tiny',
+            patch_size=cfg.patch_size,
+            image_size=cfg.image_size,
+            pretrained=False,
+            use_mask_token=False,
+        )
+        embedding_dim = encoder.config.hidden_size
+        encoder_trainable = True
+        logging.info('Using trainable ViT tiny encoder (from scratch)')
+    else:
+        raise ValueError(f'Unknown encoder_type: {encoder_type}')
 
     # Calculate actual number of patches based on the actual image size used by DINO
     assert cfg.image_size % cfg.patch_size == 0, (
@@ -458,20 +477,27 @@ def get_gciql_value_model(cfg):
         final_ema_coefficient=1 - cfg.get('value_ema_tau', 0.005),
     )
 
-    # Build proprioception encoder
-    extra_encoders = OrderedDict()
-    extra_encoders['proprio'] = swm.wm.iql.Embedder(
-        in_chans=cfg.dinowm.proprio_dim, emb_dim=cfg.dinowm.proprio_embed_dim
-    )
-    extra_encoders = torch.nn.ModuleDict(extra_encoders)
+    # Build proprioception encoder (optional)
+    extra_encoders = None
+    if cfg.dinowm.get('use_proprio_encoder', True):
+        extra_encoders = OrderedDict()
+        extra_encoders['proprio'] = swm.wm.iql.Embedder(
+            in_chans=cfg.dinowm.proprio_dim,
+            emb_dim=cfg.dinowm.proprio_embed_dim,
+        )
+        extra_encoders = torch.nn.ModuleDict(extra_encoders)
 
     logging.info(
-        f'Action dim: {effective_act_dim}, Proprio dim: {cfg.dinowm.proprio_dim}'
+        f'Action dim: {effective_act_dim}, Proprio encoder: {extra_encoders is not None}'
     )
 
     # Assemble policy
+    # Wrap encoder in EvalOnly if frozen (DINO), otherwise keep trainable (ViT tiny)
+    wrapped_encoder = (
+        spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
+    )
     gciql_model = swm.wm.iql.GCIQL(
-        encoder=spt.backbone.EvalOnly(encoder),
+        encoder=wrapped_encoder,
         action_predictor=action_predictor,
         value_predictor=wrapped_value_predictor,
         extra_encoders=extra_encoders,
@@ -486,17 +512,28 @@ def get_gciql_value_model(cfg):
             'optimizer': {'type': 'AdamW', 'lr': lr},
         }
 
+    optim_config = {
+        'value_predictor_opt': add_opt(
+            'model.value_predictor', cfg.predictor_lr
+        ),
+    }
+
+    # Add proprio encoder optimizer if enabled
+    if extra_encoders is not None:
+        optim_config['proprio_opt'] = add_opt(
+            'model.extra_encoders.proprio', cfg.proprio_encoder_lr
+        )
+
+    # Add encoder optimizer if trainable (ViT tiny)
+    if encoder_trainable:
+        optim_config['encoder_opt'] = add_opt(
+            'model.encoder', cfg.get('encoder_lr', 3e-4)
+        )
+
     gciql_value_model = spt.Module(
         model=gciql_model,
         forward=forward,
-        optim={
-            'value_predictor_opt': add_opt(
-                'model.value_predictor', cfg.predictor_lr
-            ),
-            'proprio_opt': add_opt(
-                'model.extra_encoders.proprio', cfg.proprio_encoder_lr
-            ),
-        },
+        optim=optim_config,
     )
     return gciql_value_model
 
