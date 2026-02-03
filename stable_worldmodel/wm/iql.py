@@ -16,7 +16,6 @@ class GCIQL(torch.nn.Module):
         action_predictor,
         extra_encoders=None,
         history_size=3,
-        num_pred=1,
         interpolate_pos_encoding=True,
     ):
         super().__init__()
@@ -26,7 +25,6 @@ class GCIQL(torch.nn.Module):
         self.action_predictor = action_predictor
         self.extra_encoders = extra_encoders or {}
         self.history_size = history_size
-        self.num_pred = num_pred
 
         self.interpolate_pos_encoding = interpolate_pos_encoding
 

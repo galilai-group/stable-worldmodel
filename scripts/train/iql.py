@@ -186,7 +186,7 @@ def get_gciql_value_model(cfg):
             :, : cfg.dinowm.history_size, :, :
         ]  # (B, T, patches, dim)
         target_embedding = batch['embed'][
-            :, cfg.dinowm.num_preds :, :, :
+            :, cfg.dinowm.td_offset :, :, :
         ]  # (B, T, patches, dim)
         goal_embedding = batch['goal_embed']  # (B, 1, patches, dim)
 
@@ -310,10 +310,13 @@ def get_gciql_value_model(cfg):
             )
 
             # Check per-sample pixel AND proprio match
-            # Compare last frame of clip (goal is sampled from last frame or later)
-            last_frame_pixels = batch['pixels'][:, -1]  # (B, C, H, W)
+            # Compare last frame of history window (what the value network sees)
+            last_hist_idx = cfg.dinowm.history_size - 1
+            last_frame_pixels = batch['pixels'][
+                :, last_hist_idx
+            ]  # (B, C, H, W)
             goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
-            last_frame_proprio = batch['proprio'][:, -1]  # (B, D)
+            last_frame_proprio = batch['proprio'][:, last_hist_idx]  # (B, D)
             goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
 
             # Per-sample checks
@@ -327,15 +330,17 @@ def get_gciql_value_model(cfg):
 
             # Check embedding components separately
             # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
-            # Compare last frame of clip (goal is sampled from last frame or later)
-            pixels_embed_obs = batch['pixels_embed'][:, -1]  # (B, P, D_pixels)
+            # Compare last frame of history window (what the value network sees)
+            pixels_embed_obs = batch['pixels_embed'][
+                :, last_hist_idx
+            ]  # (B, P, D_pixels)
             pixels_embed_goal = batch['pixels_goal_embed'][
                 :, 0
             ]  # (B, P, D_pixels)
             has_proprio_embed = 'proprio_embed' in batch
             if has_proprio_embed:
                 proprio_embed_obs = batch['proprio_embed'][
-                    :, -1
+                    :, last_hist_idx
                 ]  # (B, D_proprio)
                 proprio_embed_goal = batch['proprio_goal_embed'][
                     :, 0
@@ -518,7 +523,6 @@ def get_gciql_value_model(cfg):
         value_predictor=wrapped_value_predictor,
         extra_encoders=extra_encoders,
         history_size=cfg.dinowm.history_size,
-        num_pred=cfg.dinowm.num_preds,
     )
 
     # Wrap in stable_spt Module with separate optimizers for each component
@@ -589,7 +593,7 @@ def get_gciql_action_model(cfg, trained_value_model):
                 :, : cfg.dinowm.history_size, :, :
             ]  # (B, T, patches, dim)
             target_embedding = batch['embed'][
-                :, cfg.dinowm.num_preds :, :, :
+                :, cfg.dinowm.td_offset :, :, :
             ]  # (B, T, patches, dim)
             goal_embedding = batch['goal_embed']  # (B, 1, patches, dim)
 
@@ -665,7 +669,6 @@ def get_gciql_action_model(cfg, trained_value_model):
         ),
         extra_encoders=trained_value_model.model.extra_encoders,
         history_size=cfg.dinowm.history_size,
-        num_pred=cfg.dinowm.num_preds,
     )
 
     # Wrap in stable_spt Module with separate optimizers for each component

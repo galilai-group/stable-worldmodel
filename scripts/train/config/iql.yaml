@@ -23,12 +23,12 @@ seed: 42
 image_size: 224
 patch_size: 14
 
-n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size}'}
+n_steps: ${eval:'${dinowm.td_offset} + ${dinowm.history_size}'}
 frameskip: 1
 
 dinowm:
   history_size: 3
-  num_preds: 1
+  td_offset: 1
   use_proprio_encoder: false  # Set to false to disable proprioception encoder
   proprio_dim: 4
   proprio_embed_dim: 10
