@@ -319,7 +319,12 @@ def get_gciql_value_model(cfg):
             last_frame_proprio = batch['proprio'][:, last_hist_idx]  # (B, D)
             goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
 
-            # Per-sample checks
+            # Compare last frame of target (last frame of clip) with goal
+            # This is what value_target is computed from
+            last_target_pixels = batch['pixels'][:, -1]  # (B, C, H, W)
+            last_target_proprio = batch['proprio'][:, -1]  # (B, D)
+
+            # Per-sample checks (last frame of history)
             pixels_match_per_sample = (
                 last_frame_pixels == goal_pixels_squeezed
             ).all(dim=(1, 2, 3))  # (B,)
@@ -327,6 +332,15 @@ def get_gciql_value_model(cfg):
                 last_frame_proprio == goal_proprio_squeezed
             ).all(dim=1)  # (B,)
             both_match = pixels_match_per_sample & proprio_match_per_sample
+
+            # Per-sample checks (last frame of target/clip)
+            target_pixels_match = (
+                last_target_pixels == goal_pixels_squeezed
+            ).all(dim=(1, 2, 3))  # (B,)
+            target_proprio_match = (
+                last_target_proprio == goal_proprio_squeezed
+            ).all(dim=1)  # (B,)
+            target_both_match = target_pixels_match & target_proprio_match
 
             # Check embedding components separately
             # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
@@ -380,14 +394,28 @@ def get_gciql_value_model(cfg):
                     float('nan'), device=embedding.device
                 )
 
+            # Log value target when goal matches last frame of target/clip
+            # When goal matches target, value_target should be close to 0
+            if target_both_match.any():
+                # value_target has shape (B, T, 1), take last timestep
+                value_target_at_goal = value_target[:, -1, 0][
+                    target_both_match
+                ].mean()
+            else:
+                value_target_at_goal = torch.tensor(
+                    float('nan'), device=embedding.device
+                )
+
             self.log_dict(
                 {
                     f'{prefix}debug_pixels_match_rate': pixels_match_per_sample.float().mean(),
                     f'{prefix}debug_proprio_match_rate': proprio_match_per_sample.float().mean(),
                     f'{prefix}debug_both_match_rate': both_match.float().mean(),
+                    f'{prefix}debug_target_match_rate': target_both_match.float().mean(),
                     f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
                     f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
                     f'{prefix}debug_value_pred_at_goal': value_pred_at_goal,
+                    f'{prefix}debug_value_target_at_goal': value_target_at_goal,
                 },
                 on_step=True,
                 sync_dist=True,
