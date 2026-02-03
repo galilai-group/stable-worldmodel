@@ -306,6 +306,10 @@ def collect_embeddings_and_values(
                     batch_values = model.predict_values(
                         batch_embeddings, batch_ref
                     )
+                    # Handle tuple output from DoubleMetricValuePredictor
+                    if isinstance(batch_values, tuple):
+                        v1, v2 = batch_values
+                        batch_values = (v1 + v2) / 2
                     values.append(batch_values.cpu())
 
             values = torch.cat(values, dim=0)  # (N, T, 1)
