@@ -159,14 +159,11 @@ class GCIQL(torch.nn.Module):
     def get_action(self, info):
         """Get action given observation and goal (uses last frame's prediction)."""
         # first encode observation
-        info = self.encode(
-            info, pixels_key='pixels', emb_keys=['proprio'], target='embed'
-        )
+        info = self.encode(info, pixels_key='pixels', target='embed')
         # encode goal
         info = self.encode(
             info,
             pixels_key='goal',
-            emb_keys=['proprio'],
             prefix='goal_',
             target='goal_embed',
         )
