@@ -682,7 +682,8 @@ def get_gciql_action_model(cfg, trained_value_model):
         return batch
 
     # Assemble policy
-    trained_value_model.model.extra_encoders.eval()
+    for encoder in trained_value_model.model.extra_encoders.values():
+        encoder.eval()
     # Get underlying encoder (handle both EvalOnly wrapper and raw encoder cases)
     encoder_backbone = (
         trained_value_model.model.encoder.backbone
