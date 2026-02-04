@@ -612,7 +612,9 @@ def get_gciql_action_model(cfg, trained_value_model):
                 batch,
                 target='goal_embed',
                 pixels_key='goal_pixels',
-                emb_keys=['proprio'],
+                emb_keys=['proprio']
+                if 'proprio' in self.model.extra_encoders
+                else [],
                 prefix='goal_',
             )
 
