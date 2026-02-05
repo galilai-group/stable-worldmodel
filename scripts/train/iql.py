@@ -656,15 +656,18 @@ def get_gciql_action_model(cfg, trained_value_model):
         # Policy is extracted via AWR (Advantage Weighted Regression)
         alpha = cfg.get('awr_alpha', 3.0)
         exp_adv = torch.exp(advantage.detach() * alpha)
-        # exp_adv = torch.minimum(
-        #     exp_adv, torch.tensor(100.0, device=exp_adv.device)
-        # )
+        exp_adv = torch.minimum(
+            exp_adv, torch.tensor(100.0, device=exp_adv.device)
+        )
 
-        action_loss = exp_adv * F.mse_loss(
+        # Compute raw MSE loss before weighting
+        raw_mse_loss = F.mse_loss(
             action_pred,
             batch['action'][:, : cfg.dinowm.history_size],
             reduction='none',
         )
+
+        action_loss = exp_adv * raw_mse_loss
         action_loss = action_loss.mean()
         batch['awr_loss'] = action_loss
         batch['loss'] = action_loss
@@ -677,6 +680,39 @@ def get_gciql_action_model(cfg, trained_value_model):
             if '_loss' in k
         }
         losses_dict[f'{prefix}actor_loss'] = batch['loss'].detach()
+
+        # Debug logging for exploding loss investigation
+        losses_dict[f'{prefix}debug/value_mean'] = value.mean().detach()
+        losses_dict[f'{prefix}debug/value_min'] = value.min().detach()
+        losses_dict[f'{prefix}debug/value_max'] = value.max().detach()
+        losses_dict[f'{prefix}debug/next_value_mean'] = (
+            next_value.mean().detach()
+        )
+        losses_dict[f'{prefix}debug/next_value_min'] = (
+            next_value.min().detach()
+        )
+        losses_dict[f'{prefix}debug/next_value_max'] = (
+            next_value.max().detach()
+        )
+        losses_dict[f'{prefix}debug/advantage_mean'] = (
+            advantage.mean().detach()
+        )
+        losses_dict[f'{prefix}debug/advantage_min'] = advantage.min().detach()
+        losses_dict[f'{prefix}debug/advantage_max'] = advantage.max().detach()
+        losses_dict[f'{prefix}debug/exp_adv_mean'] = exp_adv.mean().detach()
+        losses_dict[f'{prefix}debug/exp_adv_min'] = exp_adv.min().detach()
+        losses_dict[f'{prefix}debug/exp_adv_max'] = exp_adv.max().detach()
+        losses_dict[f'{prefix}debug/raw_mse_mean'] = (
+            raw_mse_loss.mean().detach()
+        )
+        losses_dict[f'{prefix}debug/raw_mse_max'] = raw_mse_loss.max().detach()
+        losses_dict[f'{prefix}debug/action_pred_mean'] = (
+            action_pred.mean().detach()
+        )
+        losses_dict[f'{prefix}debug/action_pred_std'] = (
+            action_pred.std().detach()
+        )
+
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
         )  # , on_epoch=True, sync_dist=True)
