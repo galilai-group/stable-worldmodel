@@ -656,9 +656,9 @@ def get_gciql_action_model(cfg, trained_value_model):
         # Policy is extracted via AWR (Advantage Weighted Regression)
         alpha = cfg.get('awr_alpha', 3.0)
         exp_adv = torch.exp(advantage.detach() * alpha)
-        exp_adv = torch.minimum(
-            exp_adv, torch.tensor(100.0, device=exp_adv.device)
-        )
+        # exp_adv = torch.minimum(
+        #     exp_adv, torch.tensor(100.0, device=exp_adv.device)
+        # )
 
         action_loss = exp_adv * F.mse_loss(
             action_pred,
@@ -666,7 +666,7 @@ def get_gciql_action_model(cfg, trained_value_model):
             reduction='none',
         )
         action_loss = action_loss.mean()
-        batch['actor_loss'] = action_loss
+        batch['awr_loss'] = action_loss
         batch['loss'] = action_loss
 
         # Log all losses
@@ -676,7 +676,7 @@ def get_gciql_action_model(cfg, trained_value_model):
             for k, v in batch.items()
             if '_loss' in k
         }
-        losses_dict[f'{prefix}loss'] = batch['loss'].detach()
+        losses_dict[f'{prefix}actor_loss'] = batch['loss'].detach()
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
         )  # , on_epoch=True, sync_dist=True)
