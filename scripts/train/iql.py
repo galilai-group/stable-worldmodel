@@ -816,9 +816,10 @@ def run(cfg):
     wandb_logger_policy = setup_pl_logger(cfg, postfix='_policy')
 
     # load value function weights
-    gciql_value_model.load_from_checkpoint(
+    checkpoint = torch.load(
         f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
     )
+    gciql_value_model.load_state_dict(checkpoint['state_dict'])
 
     gciql_action_model = get_gciql_action_model(cfg, gciql_value_model)
 
