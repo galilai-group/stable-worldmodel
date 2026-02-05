@@ -787,28 +787,30 @@ def run(cfg):
     gciql_value_model = get_gciql_value_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir()
-    dump_object_callback = ModelObjectCallBack(
-        dirpath=cache_dir,
-        filename=f'{cfg.output_model_name}_value',
-        epoch_interval=3,
-    )
-    # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
-    trainer = pl.Trainer(
-        **cfg.trainer,
-        callbacks=[dump_object_callback],
-        num_sanity_val_steps=1,
-        logger=wandb_logger_value,
-        enable_checkpointing=True,
-    )
+    if cfg.get('train_value', True):
+        dump_object_callback = ModelObjectCallBack(
+            dirpath=cache_dir,
+            filename=f'{cfg.output_model_name}_value',
+            epoch_interval=3,
+        )
+        # checkpoint_callback = ModelCheckpoint(dirpath=cache_dir, filename=f"{cfg.output_model_name}_weights")
 
-    manager = spt.Manager(
-        trainer=trainer,
-        module=gciql_value_model,
-        data=data,
-        ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
-    )
-    manager()
+        trainer = pl.Trainer(
+            **cfg.trainer,
+            callbacks=[dump_object_callback],
+            num_sanity_val_steps=1,
+            logger=wandb_logger_value,
+            enable_checkpointing=True,
+        )
+
+        manager = spt.Manager(
+            trainer=trainer,
+            module=gciql_value_model,
+            data=data,
+            ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
+        )
+        manager()
 
     # Extract policy from trained value function
     wandb_logger_policy = setup_pl_logger(cfg, postfix='_policy')
