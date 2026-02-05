@@ -812,6 +812,12 @@ def run(cfg):
 
     # Extract policy from trained value function
     wandb_logger_policy = setup_pl_logger(cfg, postfix='_policy')
+
+    # load value function weights
+    gciql_value_model.load_from_checkpoint(
+        f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
+    )
+
     gciql_action_model = get_gciql_action_model(cfg, gciql_value_model)
 
     dump_object_callback = ModelObjectCallBack(
