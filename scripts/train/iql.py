@@ -11,7 +11,6 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf
-from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import AutoModel
 
@@ -649,8 +648,8 @@ def get_gciql_action_model(cfg, trained_value_model):
             # Advantage is next_value - current_value
             advantage = next_value - value  # (B, T, 1)
 
-        action_pred = self.model.action_predictor(
-            embedding_flat.detach(), goal_embedding_flat.detach()
+        action_pred, action_stds = self.model.predict_actions(
+            embedding.detach(), goal_embedding.detach()
         )
 
         # Policy is extracted via AWR (Advantage Weighted Regression)
@@ -660,14 +659,18 @@ def get_gciql_action_model(cfg, trained_value_model):
             exp_adv, torch.tensor(100.0, device=exp_adv.device)
         )
 
-        # Compute raw MSE loss before weighting
-        raw_mse_loss = F.mse_loss(
-            action_pred,
-            batch['action'][:, : cfg.dinowm.history_size],
-            reduction='none',
+        # Compute negative log-likelihood loss for Gaussian policy
+        # -log N(a | μ, σ) = log(σ) + 0.5 * ((a - μ) / σ)²
+        target_actions = batch['action'][:, : cfg.dinowm.history_size]
+        log_stds = torch.clamp(
+            self.model.log_stds, self.model.log_std_min, self.model.log_std_max
+        )
+        var = torch.exp(2 * log_stds)
+        raw_nll_loss = (
+            log_stds + 0.5 * ((target_actions - action_pred) ** 2) / var
         )
 
-        action_loss = exp_adv * raw_mse_loss
+        action_loss = exp_adv * raw_nll_loss
         action_loss = action_loss.mean()
         batch['awr_loss'] = action_loss
         batch['loss'] = action_loss
@@ -702,16 +705,20 @@ def get_gciql_action_model(cfg, trained_value_model):
         losses_dict[f'{prefix}debug/exp_adv_mean'] = exp_adv.mean().detach()
         losses_dict[f'{prefix}debug/exp_adv_min'] = exp_adv.min().detach()
         losses_dict[f'{prefix}debug/exp_adv_max'] = exp_adv.max().detach()
-        losses_dict[f'{prefix}debug/raw_mse_mean'] = (
-            raw_mse_loss.mean().detach()
+        losses_dict[f'{prefix}debug/raw_nll_mean'] = (
+            raw_nll_loss.mean().detach()
         )
-        losses_dict[f'{prefix}debug/raw_mse_max'] = raw_mse_loss.max().detach()
+        losses_dict[f'{prefix}debug/raw_nll_max'] = raw_nll_loss.max().detach()
         losses_dict[f'{prefix}debug/action_pred_mean'] = (
             action_pred.mean().detach()
         )
         losses_dict[f'{prefix}debug/action_pred_std'] = (
             action_pred.std().detach()
         )
+        losses_dict[f'{prefix}debug/action_log_stds'] = (
+            log_stds.mean().detach()
+        )
+        losses_dict[f'{prefix}debug/action_stds'] = action_stds.mean().detach()
 
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
@@ -752,6 +759,7 @@ def get_gciql_action_model(cfg, trained_value_model):
             'action_predictor_opt': add_opt(
                 'model.action_predictor', cfg.predictor_lr
             ),
+            'log_stds_opt': add_opt('model.log_stds', cfg.predictor_lr),
         },
     )
     return gciql_action_model
