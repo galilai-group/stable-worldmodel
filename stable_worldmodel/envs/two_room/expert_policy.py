@@ -30,11 +30,9 @@ class ExpertPolicy(BasePolicy):
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
-        assert 'pos_agent' in info_dict, (
-            "'pos_agent' must be provided in info_dict"
-        )
-        assert 'pos_target' in info_dict, (
-            "'pos_target' must be provided in info_dict"
+        assert 'state' in info_dict, "'state' must be provided in info_dict"
+        assert 'goal_state' in info_dict, (
+            "'goal_state' must be provided in info_dict"
         )
 
         base_env = self.env.unwrapped
@@ -50,17 +48,17 @@ class ExpertPolicy(BasePolicy):
         for i, env in enumerate(envs):
             if is_vectorized:
                 agent_pos = np.asarray(
-                    info_dict['pos_agent'][i], dtype=np.float32
+                    info_dict['state'][i], dtype=np.float32
                 ).squeeze()
-                pos_target = np.asarray(
-                    info_dict['pos_target'][i], dtype=np.float32
+                goal_pos = np.asarray(
+                    info_dict['goal_state'][i], dtype=np.float32
                 ).squeeze()
             else:
                 agent_pos = np.asarray(
-                    info_dict['pos_agent'], dtype=np.float32
+                    info_dict['state'], dtype=np.float32
                 ).squeeze()
-                pos_target = np.asarray(
-                    info_dict['pos_target'], dtype=np.float32
+                goal_pos = np.asarray(
+                    info_dict['goal_state'], dtype=np.float32
                 ).squeeze()
 
             # --- environment params (avoid env.variation_space.value; use .value fields) ---
@@ -73,7 +71,7 @@ class ExpertPolicy(BasePolicy):
             room_idx = 0 if wall_axis == 1 else 1
 
             agent_side = agent_pos[room_idx] > wall_pos
-            target_side = pos_target[room_idx] > wall_pos
+            target_side = goal_pos[room_idx] > wall_pos
             target_other_room = agent_side != target_side
 
             waypoint = None
@@ -123,11 +121,11 @@ class ExpertPolicy(BasePolicy):
                     # Fallback: go to the wall aligned with target (still better than nothing)
                     if wall_axis == 1:
                         waypoint = np.array(
-                            [wall_pos, pos_target[1]], dtype=np.float32
+                            [wall_pos, goal_pos[1]], dtype=np.float32
                         )
                     else:
                         waypoint = np.array(
-                            [pos_target[0], wall_pos], dtype=np.float32
+                            [goal_pos[0], wall_pos], dtype=np.float32
                         )
                 else:
                     # Two-stage: go to door center first; once close, go to target
@@ -139,9 +137,9 @@ class ExpertPolicy(BasePolicy):
                     if np.linalg.norm(best - agent_pos) > tol:
                         waypoint = best
                     else:
-                        waypoint = pos_target
+                        waypoint = goal_pos
             else:
-                waypoint = pos_target
+                waypoint = goal_pos
 
             # --- convert waypoint to action direction (unit vector) ---
             direction = waypoint - agent_pos
