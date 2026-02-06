@@ -17,6 +17,8 @@ class GCIQL(torch.nn.Module):
         extra_encoders=None,
         history_size=3,
         interpolate_pos_encoding=True,
+        log_std_min=-5.0,
+        log_std_max=2.0,
     ):
         super().__init__()
 
@@ -27,6 +29,12 @@ class GCIQL(torch.nn.Module):
         self.history_size = history_size
 
         self.interpolate_pos_encoding = interpolate_pos_encoding
+
+        # Learnable log_stds for action distribution (state-independent)
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
+        action_dim = action_predictor.out_proj.out_features
+        self.log_stds = nn.Parameter(torch.zeros(action_dim))
 
     def encode(
         self,
@@ -126,20 +134,28 @@ class GCIQL(torch.nn.Module):
 
         return pixels_embed
 
-    def predict_actions(self, embedding, embedding_goal):
-        """predict actions per frame
+    def predict_actions(self, embedding, embedding_goal, temperature=1.0):
+        """predict action distribution per frame
         Args:
             embedding: (B, T, P, d)
             embedding_goal: (B, 1, P, d)
+            temperature: scaling factor for the standard deviation
         Returns:
-            preds: (B, T, action_dim)
+            means: (B, T, action_dim) - action means
+            stds: (action_dim,) - action standard deviations (broadcasted)
         """
 
         embedding = rearrange(embedding, 'b t p d -> b (t p) d')
         embedding_goal = rearrange(embedding_goal, 'b t p d -> b (t p) d')
-        preds = self.action_predictor(embedding, embedding_goal)
+        means = self.action_predictor(embedding, embedding_goal)
 
-        return preds
+        # Clip log_stds and compute scale
+        log_stds = torch.clamp(
+            self.log_stds, self.log_std_min, self.log_std_max
+        )
+        stds = torch.exp(log_stds) * temperature
+
+        return means, stds
 
     def predict_values(self, embedding, embedding_goal):
         """predict values per frame
@@ -156,8 +172,16 @@ class GCIQL(torch.nn.Module):
 
         return preds
 
-    def get_action(self, info):
-        """Get action given observation and goal (uses last frame's prediction)."""
+    def get_action(self, info, sample=False, temperature=1.0):
+        """Get action given observation and goal (uses last frame's prediction).
+
+        Args:
+            info: dict containing 'pixels' and 'goal' keys
+            sample: if True, sample from distribution; if False, return mean
+            temperature: scaling factor for std when sampling
+        Returns:
+            actions: (B, action_dim)
+        """
         # first encode observation
         info = self.encode(info, pixels_key='pixels', target='embed')
         # encode goal
@@ -167,10 +191,19 @@ class GCIQL(torch.nn.Module):
             prefix='goal_',
             target='goal_embed',
         )
-        # then predict action
-        actions = self.predict_actions(info['embed'], info['goal_embed'])
-        # return last frame's action prediction
-        actions = actions[:, -1, :]
+        # then predict action distribution
+        means, stds = self.predict_actions(
+            info['embed'], info['goal_embed'], temperature=temperature
+        )
+        # get last frame's action prediction
+        means = means[:, -1, :]
+
+        if sample:
+            # Sample from Normal distribution
+            actions = means + stds * torch.randn_like(means)
+        else:
+            actions = means
+
         return actions
 
 
