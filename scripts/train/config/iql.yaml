@@ -58,7 +58,7 @@ encoder_lr: 3e-4
 discount: 0.99  # Discount factor (gamma) for value function
 expectile: 0.7  # Expectile tau for asymmetric value loss
 awr_alpha: 10.0  # Temperature for advantage weighting in actor loss
-value_ema_tau: 0.005  # EMA tau for target value network updates
+value_ema_tau: 0.995  # EMA coefficient for target value network updates
 
 # Goal sampling probabilities (random, geometric_future, uniform_future, current) - must sum to 1.0
 goal_probabilities:
