@@ -44,7 +44,7 @@ class Dataset:
             (ep, start)
             for ep, length in enumerate(lengths)
             if length >= self.span
-            for start in np.linspace(0, length - self.span, dtype=int)
+            for start in range(length - self.span + 1)
         ]
 
     @property
