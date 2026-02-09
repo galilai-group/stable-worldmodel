@@ -126,7 +126,7 @@ def get_data(cfg):
 def get_gciql_value_model(cfg):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
-    double_expectile_loss = swm.wm.iql.DoubleExpectileLoss(
+    double_expectile_loss = swm.wm.gcivl.DoubleExpectileLoss(
         tau=cfg.get('expectile', 0.9)
     )
 
@@ -491,7 +491,7 @@ def get_gciql_value_model(cfg):
     effective_act_dim = (
         cfg.frameskip * cfg.dinowm.action_dim
     )  # NOTE: 'frameskip' > 1 is used to predict action chunks
-    action_predictor = swm.wm.iql.Predictor(
+    action_predictor = swm.wm.gcivl.Predictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
@@ -499,19 +499,9 @@ def get_gciql_value_model(cfg):
         **cfg.predictor,
     )
 
-    # Original Predictor-based value function (uses cross-attention)
-    # value_predictor = swm.wm.iql.Predictor(
-    #     num_patches=num_patches,
-    #     num_frames=cfg.dinowm.history_size,
-    #     dim=embedding_dim,
-    #     out_dim=1,
-    #     non_positive_output=True,
-    #     **cfg.predictor,
-    # )
-
     # Double metric-based value function: V(s, g) = -||φ(s) - φ(g)||
     # Uses two independent value networks for double Q-learning style training
-    value_predictor = swm.wm.iql.DoubleMetricValuePredictor(
+    value_predictor = swm.wm.gcivl.DoubleMetricValuePredictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
@@ -529,7 +519,7 @@ def get_gciql_value_model(cfg):
     extra_encoders = None
     if cfg.dinowm.get('use_proprio_encoder', True):
         extra_encoders = OrderedDict()
-        extra_encoders['proprio'] = swm.wm.iql.Embedder(
+        extra_encoders['proprio'] = swm.wm.gcivl.Embedder(
             in_chans=cfg.dinowm.proprio_dim,
             emb_dim=cfg.dinowm.proprio_embed_dim,
         )
@@ -544,7 +534,7 @@ def get_gciql_value_model(cfg):
     wrapped_encoder = (
         spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
     )
-    gciql_model = swm.wm.iql.GCIQL(
+    gciql_model = swm.wm.gcivl.GCIQL(
         encoder=wrapped_encoder,
         action_predictor=action_predictor,
         value_predictor=wrapped_value_predictor,
@@ -735,7 +725,7 @@ def get_gciql_action_model(cfg, trained_value_model):
         if hasattr(trained_value_model.model.encoder, 'backbone')
         else trained_value_model.model.encoder
     )
-    gciql_model = swm.wm.iql.GCIQL(
+    gciql_model = swm.wm.gcivl.GCIQL(
         encoder=spt.backbone.EvalOnly(encoder_backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(
