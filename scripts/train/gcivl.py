@@ -811,7 +811,7 @@ class ModelObjectCallBack(Callback):
 # ============================================================================
 # Main Entry Point
 # ============================================================================
-@hydra.main(version_base=None, config_path='./config', config_name='iql')
+@hydra.main(version_base=None, config_path='./config', config_name='gcivl')
 def run(cfg):
     """Run training of IQL goal-conditioned policy."""
 

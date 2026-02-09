@@ -1,0 +1,71 @@
+#output_dir: ./outputs
+
+defaults:
+  - launcher: local
+  - _self_
+
+
+output_model_name: dinohilp
+
+trainer:
+  max_epochs: 100
+  strategy: auto #ddp
+  devices: 1
+  accelerator: gpu
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+
+batch_size: 32
+num_workers: ${cpus_per_task}
+train_split: 0.9
+seed: 42
+
+image_size: 224
+patch_size: 14
+
+n_steps: ${eval:'${dinowm.td_offset} + ${dinowm.history_size}'}
+frameskip: 1
+
+dinowm:
+  history_size: 3
+  td_offset: 1
+  use_proprio_encoder: false  # Set to false to disable proprioception encoder
+  proprio_dim: 4
+  proprio_embed_dim: 10
+  action_dim: 2
+  action_embed_dim: 10
+
+predictor:
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.0
+  emb_dropout: 0.0
+
+# Encoder configuration
+# Options: 'dino' (pretrained frozen DINO) or 'vit_tiny' (trainable ViT tiny from scratch)
+encoder_type: vit_tiny
+
+train_value: true
+
+predictor_lr: 3e-4
+proprio_encoder_lr: 3e-4
+action_encoder_lr: 3e-4
+encoder_lr: 3e-4
+
+# IQL hyperparameters
+discount: 0.99  # Discount factor (gamma) for value function
+expectile: 0.7  # Expectile tau for asymmetric value loss
+awr_alpha: 10.0  # Temperature for advantage weighting in actor loss
+value_ema_tau: 0.995  # EMA coefficient for target value network updates
+
+# Goal sampling probabilities (random, geometric_future, uniform_future, current) - must sum to 1.0
+goal_probabilities:
+  random: 0.375 #0.3
+  geometric_future: 0.625 #0.5
+  uniform_future: 0.0
+  current: 0.0 #0.2
+goal_gamma: 0.99  # Discount factor for geometric distribution when sampling future goals
+
+dump_object: True

@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 
-output_model_name: dinoiql
+output_model_name: dinoivl
 
 trainer:
   max_epochs: 100
