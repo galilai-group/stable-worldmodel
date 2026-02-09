@@ -123,7 +123,7 @@ def get_data(cfg):
 # ============================================================================
 # Model Architecture
 # ============================================================================
-def get_gciql_value_model(cfg):
+def get_gcivl_value_model(cfg):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
     double_expectile_loss = swm.wm.gcrl.DoubleExpectileLoss(
@@ -536,7 +536,7 @@ def get_gciql_value_model(cfg):
     wrapped_encoder = (
         spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
     )
-    gciql_model = swm.wm.gcrl.GCRL(
+    gcivl_model = swm.wm.gcrl.GCRL(
         encoder=wrapped_encoder,
         action_predictor=action_predictor,
         value_predictor=wrapped_value_predictor,
@@ -569,15 +569,15 @@ def get_gciql_value_model(cfg):
             'model.encoder', cfg.get('encoder_lr', 3e-4)
         )
 
-    gciql_value_model = spt.Module(
-        model=gciql_model,
+    gcivl_value_model = spt.Module(
+        model=gcivl_model,
         forward=forward,
         optim=optim_config,
     )
-    return gciql_value_model
+    return gcivl_value_model
 
 
-def get_gciql_action_model(cfg, trained_value_model):
+def get_gcivl_actor_model(cfg, trained_value_model):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
     def forward(self, batch, stage):
@@ -727,7 +727,7 @@ def get_gciql_action_model(cfg, trained_value_model):
         if hasattr(trained_value_model.model.encoder, 'backbone')
         else trained_value_model.model.encoder
     )
-    gciql_model = swm.wm.gcrl.GCRL(
+    gcivl_model = swm.wm.gcrl.GCRL(
         encoder=spt.backbone.EvalOnly(encoder_backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(
@@ -744,8 +744,8 @@ def get_gciql_action_model(cfg, trained_value_model):
             'optimizer': {'type': 'AdamW', 'lr': lr},
         }
 
-    gciql_action_model = spt.Module(
-        model=gciql_model,
+    gcivl_actor_model = spt.Module(
+        model=gcivl_model,
         forward=forward,
         optim={
             'action_predictor_opt': add_opt(
@@ -754,7 +754,7 @@ def get_gciql_action_model(cfg, trained_value_model):
             'log_stds_opt': add_opt('model.log_stds', cfg.predictor_lr),
         },
     )
-    return gciql_action_model
+    return gcivl_actor_model
 
 
 # ============================================================================
@@ -766,7 +766,7 @@ def setup_pl_logger(cfg, postfix=''):
 
     wandb_run_id = cfg.wandb.get('run_id', None)
     wandb_logger = WandbLogger(
-        name=f'dino_gciql{postfix}',
+        name=f'dino_gcivl{postfix}',
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,
         resume='allow' if wandb_run_id else None,
@@ -820,7 +820,7 @@ def run(cfg):
     data = get_data(cfg)
 
     # First train value function
-    gciql_value_model = get_gciql_value_model(cfg)
+    gcivl_value_model = get_gcivl_value_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir()
 
@@ -842,7 +842,7 @@ def run(cfg):
 
         manager = spt.Manager(
             trainer=trainer,
-            module=gciql_value_model,
+            module=gcivl_value_model,
             data=data,
             ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
         )
@@ -855,9 +855,9 @@ def run(cfg):
     checkpoint = torch.load(
         f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
     )
-    gciql_value_model.load_state_dict(checkpoint['state_dict'])
+    gcivl_value_model.load_state_dict(checkpoint['state_dict'])
 
-    gciql_action_model = get_gciql_action_model(cfg, gciql_value_model)
+    gcivl_actor_model = get_gcivl_actor_model(cfg, gcivl_value_model)
 
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
@@ -875,7 +875,7 @@ def run(cfg):
 
     manager = spt.Manager(
         trainer=trainer,
-        module=gciql_action_model,
+        module=gcivl_actor_model,
         data=data,
         ckpt_path=f'{cache_dir}/{cfg.output_model_name}_policy_weights.ckpt',
     )
