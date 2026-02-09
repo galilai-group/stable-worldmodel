@@ -708,6 +708,149 @@ class DoubleValuePredictor(nn.Module):
         return self.v1(x, g), self.v2(x, g)
 
 
+class QPredictor(nn.Module):
+    """
+    Goal-conditioned Q function: Q(s, a, g).
+
+    Uses a transformer to encode state and goal (similar to Predictor),
+    then concatenates action at the output layer to produce Q values.
+    This follows the standard IQL architecture where action is added
+    after state-goal encoding.
+
+    Args:
+        num_patches: Number of patches per frame
+        num_frames: Number of frames in history
+        dim: Embedding dimension
+        depth: Number of transformer layers
+        heads: Number of attention heads
+        mlp_dim: MLP hidden dimension in transformer
+        action_dim: Dimension of action space
+        q_hidden_dim: Hidden dimension for Q-value MLP head
+        dim_head: Dimension per attention head
+        dropout: Dropout rate
+        emb_dropout: Embedding dropout rate
+        causal: Whether to use causal masking
+        non_positive_output: If True, output is constrained to be <= 0
+    """
+
+    def __init__(
+        self,
+        *,
+        num_patches,
+        num_frames,
+        dim,
+        depth,
+        heads,
+        mlp_dim,
+        action_dim,
+        q_hidden_dim=256,
+        dim_head=64,
+        dropout=0.0,
+        emb_dropout=0.0,
+        causal=True,
+        non_positive_output=False,
+    ):
+        super().__init__()
+
+        self.num_patches = num_patches
+        self.num_frames = num_frames
+        self.non_positive_output = non_positive_output
+
+        # Positional embeddings (same as Predictor)
+        self.pos_embedding = nn.Parameter(
+            torch.randn(1, num_frames * num_patches, dim)
+        )
+        self.pos_embedding_goal = nn.Parameter(
+            torch.randn(1, num_patches, dim)
+        )
+        self.dropout = nn.Dropout(emb_dropout)
+
+        # Transformer for state-goal encoding
+        self.transformer = Transformer(
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            num_patches,
+            num_frames,
+            causal=causal,
+        )
+
+        # MLP head: [frame_embed, action] -> Q value
+        # frame_embed comes from transformer output (dim), action is action_dim
+        self.q_head = nn.Sequential(
+            nn.Linear(dim + action_dim, q_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(q_hidden_dim, q_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(q_hidden_dim, 1),
+        )
+
+    def forward(self, x, a, g):
+        """
+        Compute Q(s, a, g).
+
+        Args:
+            x: (B, T*P, dim) - observation embeddings (patch-level)
+            a: (B, T, action_dim) - actions per frame
+            g: (B, P, dim) - goal embeddings (patch-level)
+        Returns:
+            q: (B, T, 1) - Q values per frame
+        """
+        # Add positional embeddings (same as Predictor)
+        x = x + self.pos_embedding[:, : x.shape[1]]
+        g = g + self.pos_embedding_goal[:, : g.shape[1]]
+        x = self.dropout(x)
+
+        # Transform state-goal to get frame-level embeddings
+        frame_embed = self.transformer(x, g)  # (B, T, dim)
+
+        # Concatenate action with frame embeddings
+        x = torch.cat([frame_embed, a], dim=-1)  # (B, T, dim + action_dim)
+
+        # Compute Q values
+        q = self.q_head(x)  # (B, T, 1)
+
+        # Apply non-positive constraint for value functions (rewards <= 0)
+        if self.non_positive_output:
+            q = -F.softplus(q)
+
+        return q
+
+
+class DoubleQPredictor(nn.Module):
+    """
+    Double Q predictor for double Q-learning style training.
+
+    Wraps two independent QPredictor networks to enable:
+    - Minimum of Q values for computing targets (reduces overestimation)
+    - Separate losses for each network
+
+    Args:
+        **kwargs: Arguments passed to both QPredictor instances
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.q1 = QPredictor(**kwargs)
+        self.q2 = QPredictor(**kwargs)
+
+    def forward(self, x, a, g):
+        """
+        Compute Q values from both networks.
+
+        Args:
+            x: (B, T*P, dim) - observation embeddings (patch-level)
+            a: (B, T, action_dim) - actions per frame
+            g: (B, P, dim) - goal embeddings (patch-level)
+        Returns:
+            (q1, q2): tuple of Q value tensors from each network
+        """
+        return self.q1(x, a, g), self.q2(x, a, g)
+
+
 class ExpectileLoss(nn.Module):
     def __init__(self, tau=0.9):
         super().__init__()

@@ -4,8 +4,7 @@ from einops import rearrange, repeat
 from torch import nn
 
 
-# TODO encode is very similar to the one in prejepa.py - consider refactoring
-# TODO models are very similar to the ones in prejepa.py - consider refactoring
+# TODO this is very similar to what is in gcrl.py and we should probably only use gcrl.py
 
 
 class GCBC(torch.nn.Module):
@@ -158,7 +157,7 @@ class GCBC(torch.nn.Module):
             target='goal_embed',
         )
         # then predict action
-        actions = self.predict(info["embed"], info["goal_embed"])
+        actions = self.predict(info['embed'], info['goal_embed'])
         # return last frame's action prediction
         actions = actions[:, -1, :]
         return actions
@@ -219,7 +218,15 @@ class Predictor(nn.Module):
         )  # dim for the pos encodings of goal (assumed single image)
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(
-            dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, num_frames, causal=causal
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            num_patches,
+            num_frames,
+            causal=causal,
         )
         self.out_proj = nn.Linear(dim, out_dim)
 
@@ -260,12 +267,22 @@ class FeedForward(nn.Module):
 
 class Attention(nn.Module):
     def __init__(
-        self, dim, heads=8, dim_head=64, dropout=0.0, num_patches=1, num_frames=1, att_type="self", causal=False
+        self,
+        dim,
+        heads=8,
+        dim_head=64,
+        dropout=0.0,
+        num_patches=1,
+        num_frames=1,
+        att_type='self',
+        causal=False,
     ):
         super().__init__()
-        assert att_type in {"self", "cross", "frame_agg"}, "attention type must be self, cross, or frame_agg"
+        assert att_type in {'self', 'cross', 'frame_agg'}, (
+            'attention type must be self, cross, or frame_agg'
+        )
         self.att_type = att_type
-        self.causal = causal and att_type in {"self", "frame_agg"}
+        self.causal = causal and att_type in {'self', 'frame_agg'}
         self.num_patches = num_patches
         self.num_frames = num_frames
 
@@ -280,19 +297,27 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
+        self.to_out = (
+            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
+            if project_out
+            else nn.Identity()
+        )
 
         # Frame aggregation: one learnable query token per frame
-        if self.att_type == "frame_agg":
-            self.frame_tokens = nn.Parameter(0.02 * torch.randn(1, num_frames, dim))
+        if self.att_type == 'frame_agg':
+            self.frame_tokens = nn.Parameter(
+                0.02 * torch.randn(1, num_frames, dim)
+            )
 
         # Register causal mask buffer
         if self.causal:
-            if self.att_type == "self":
+            if self.att_type == 'self':
                 mask = self._generate_causal_mask(num_patches, num_frames)
-            elif self.att_type == "frame_agg":
-                mask = self._generate_frame_agg_causal_mask(num_patches, num_frames)
-            self.register_buffer("causal_mask", mask)
+            elif self.att_type == 'frame_agg':
+                mask = self._generate_frame_agg_causal_mask(
+                    num_patches, num_frames
+                )
+            self.register_buffer('causal_mask', mask)
 
     def _generate_causal_mask(self, num_patches, num_frames):
         """Generate block-causal mask: tokens in frame t can attend to frames 0..t."""
@@ -302,14 +327,18 @@ class Attention(nn.Module):
         for t in range(num_frames):
             row_start = t * num_patches
             row_end = (t + 1) * num_patches
-            col_end = (t + 1) * num_patches  # Can attend up to and including frame t
+            col_end = (
+                t + 1
+            ) * num_patches  # Can attend up to and including frame t
             mask[row_start:row_end, :col_end] = True
 
         return mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T*P, T*P)
 
     def _generate_frame_agg_causal_mask(self, num_patches, num_frames):
         """Generate causal mask for frame aggregation: query t attends to patches from frames 0..t."""
-        mask = torch.zeros(num_frames, num_frames * num_patches, dtype=torch.bool)
+        mask = torch.zeros(
+            num_frames, num_frames * num_patches, dtype=torch.bool
+        )
 
         for t in range(num_frames):
             col_end = (t + 1) * num_patches
@@ -324,10 +353,12 @@ class Attention(nn.Module):
             c = self.norm_c(c)
             q_in = x
             kv_in = c
-        elif self.att_type == "frame_agg":
+        elif self.att_type == 'frame_agg':
             # Compute actual number of frames from input (supports variable-length sequences)
             actual_frames = N // self.num_patches
-            q_in = self.frame_tokens[:, :actual_frames, :].expand(B, -1, -1)  # (B, actual_frames, dim)
+            q_in = self.frame_tokens[:, :actual_frames, :].expand(
+                B, -1, -1
+            )  # (B, actual_frames, dim)
             kv_in = x  # (B, actual_frames*P, dim)
         else:  # self.att_type == "self"
             q_in = x
@@ -344,9 +375,9 @@ class Attention(nn.Module):
         # Apply causal mask if enabled
         if self.causal:
             attn_mask = self.causal_mask
-            if self.att_type == "self":
+            if self.att_type == 'self':
                 attn_mask = attn_mask[:, :, :N, :N]
-            elif self.att_type == "frame_agg":
+            elif self.att_type == 'frame_agg':
                 actual_frames = N // self.num_patches
                 attn_mask = attn_mask[:, :, :actual_frames, :N]
         else:
@@ -389,7 +420,7 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([])
         for i in range(depth):
             if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
-                att_type = "frame_agg"
+                att_type = 'frame_agg'
             elif i % 2 == 0:
                 att_type = 'self'
             else:
@@ -421,7 +452,9 @@ class Transformer(nn.Module):
             out: (B, T, dim) - one embedding per frame
         """
         for i, (attn, ff) in enumerate(self.layers):
-            if i == len(self.layers) - 1:  # frame aggregation layer - no residual (dimension changes)
+            if (
+                i == len(self.layers) - 1
+            ):  # frame aggregation layer - no residual (dimension changes)
                 x = attn(x)
                 x = ff(x)
             elif i % 2 == 0:  # self-attention with causal masking
