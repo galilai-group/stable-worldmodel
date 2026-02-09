@@ -124,7 +124,7 @@ def get_data(cfg):
 # Model Architecture
 # ============================================================================
 def get_gcivl_value_model(cfg):
-    """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
+    """Build goal-conditioned IVL model for training value function."""
 
     expectile_loss = swm.wm.gcrl.ExpectileLoss(tau=cfg.get('expectile', 0.9))
 
@@ -576,7 +576,7 @@ def get_gcivl_value_model(cfg):
 
 
 def get_gcivl_actor_model(cfg, trained_value_model):
-    """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
+    """Build goal-conditioned IVL model for extracting policy via AWR from a trained value function."""
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""

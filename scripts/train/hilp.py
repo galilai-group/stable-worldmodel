@@ -124,7 +124,7 @@ def get_data(cfg):
 # Model Architecture
 # ============================================================================
 def get_hilp_value_model(cfg):
-    """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
+    """Build HILP model for training value and Q functions."""
 
     expectile_loss = swm.wm.gcrl.ExpectileLoss(tau=cfg.get('expectile', 0.9))
 
@@ -575,7 +575,7 @@ def get_hilp_value_model(cfg):
 
 
 def get_hilp_actor_model(cfg, trained_value_model):
-    """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
+    """Build HILP model for extracting policy via AWR from a trained value function."""
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""

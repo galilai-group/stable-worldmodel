@@ -117,7 +117,7 @@ def get_data(cfg):
 # Model Architecture
 # ============================================================================
 def get_gcbc_policy(cfg):
-    """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
+    """Build goal-conditioned behavioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
