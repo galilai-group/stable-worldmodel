@@ -126,9 +126,7 @@ def get_data(cfg):
 def get_gcivl_value_model(cfg):
     """Build goal-conditioned behavvioral cloning policy: frozen encoder (e.g. DINO) + trainable action predictor."""
 
-    double_expectile_loss = swm.wm.gcrl.DoubleExpectileLoss(
-        tau=cfg.get('expectile', 0.9)
-    )
+    expectile_loss = swm.wm.gcrl.ExpectileLoss(tau=cfg.get('expectile', 0.9))
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
@@ -266,10 +264,10 @@ def get_gcivl_value_model(cfg):
                 f'NaN in q target! count={torch.isnan(q).sum().item()}'
             )
 
-        # Compute double expectile loss
-        value_loss, (value_loss1, value_loss2) = double_expectile_loss(
-            v1_pred, v2_pred, q1.detach(), q2.detach(), adv.detach()
-        )
+        # Compute expectile loss for both value networks
+        value_loss1 = expectile_loss(v1_pred, q1.detach(), adv.detach())
+        value_loss2 = expectile_loss(v2_pred, q2.detach(), adv.detach())
+        value_loss = value_loss1 + value_loss2
         value_target = q  # For logging compatibility
         batch['value_loss'] = value_loss
         batch['value_loss1'] = value_loss1
