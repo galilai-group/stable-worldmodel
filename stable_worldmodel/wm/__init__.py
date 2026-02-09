@@ -1,6 +1,6 @@
-from . import gcivl, prejepa, gcbc
+from . import gcrl, prejepa, gcbc
 from .prejepa import PreJEPA
 from .gcbc import GCBC
-from .gcivl import GCIQL
+from .gcrl import GCRL
 
-__all__ = ['prejepa', 'PreJEPA', 'gcbc', 'GCBC', 'gcivl', 'GCIQL']
+__all__ = ['prejepa', 'PreJEPA', 'gcbc', 'GCBC', 'gcrl', 'GCRL']

@@ -8,12 +8,13 @@ from torch import nn
 # TODO models are very similar to the ones in pyro.py - consider refactoring
 
 
-class GCIQL(torch.nn.Module):
+class GCRL(torch.nn.Module):
     def __init__(
         self,
         encoder,
-        value_predictor,
         action_predictor,
+        value_predictor,
+        critic_predictor=None,
         extra_encoders=None,
         history_size=3,
         interpolate_pos_encoding=True,
@@ -25,6 +26,7 @@ class GCIQL(torch.nn.Module):
         self.encoder = encoder
         self.value_predictor = value_predictor
         self.action_predictor = action_predictor
+        self.critic_predictor = critic_predictor
         self.extra_encoders = extra_encoders or {}
         self.history_size = history_size
 
@@ -698,6 +700,41 @@ class DoubleMetricValuePredictor(nn.Module):
             g: (B, P, dim) - goal embeddings
         Returns:
             (v1, v2): tuple of (B, T, 1) tensors
+        """
+        return self.v1(x, g), self.v2(x, g)
+
+
+class DoubleValuePredictor(nn.Module):
+    """
+    General double value predictor wrapper for double Q-learning style training.
+
+    Wraps two independent copies of any value predictor network to enable:
+    - Minimum of target values for computing Q targets (reduces overestimation)
+    - Separate expectile losses for each network
+
+    Usage with TeacherStudentWrapper:
+        The wrapper will create EMA copies of both networks automatically.
+        forward_student() and forward_teacher() will return (v1, v2) tuples.
+
+    Args:
+        value_predictor_cls: The class of the value predictor to wrap (e.g., Predictor)
+        **kwargs: Arguments passed to both value predictor instances
+    """
+
+    def __init__(self, value_predictor_cls, **kwargs):
+        super().__init__()
+        self.v1 = value_predictor_cls(**kwargs)
+        self.v2 = value_predictor_cls(**kwargs)
+
+    def forward(self, x, g):
+        """
+        Compute values from both networks.
+
+        Args:
+            x: (B, T*P, dim) - observation embeddings
+            g: (B, P, dim) - goal embeddings
+        Returns:
+            (v1, v2): tuple of value tensors from each network
         """
         return self.v1(x, g), self.v2(x, g)
 
