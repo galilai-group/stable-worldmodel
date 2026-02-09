@@ -673,37 +673,6 @@ class MetricValuePredictor(nn.Module):
         return value
 
 
-class DoubleMetricValuePredictor(nn.Module):
-    """
-    Double value predictor for double Q-learning style training.
-
-    Wraps two independent MetricValuePredictor networks to enable:
-    - Minimum of target values for computing Q targets (reduces overestimation)
-    - Separate expectile losses for each network
-
-    Usage with TeacherStudentWrapper:
-        The wrapper will create EMA copies of both networks automatically.
-        forward_student() and forward_teacher() will return (v1, v2) tuples.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.v1 = MetricValuePredictor(**kwargs)
-        self.v2 = MetricValuePredictor(**kwargs)
-
-    def forward(self, x, g):
-        """
-        Compute values from both networks.
-
-        Args:
-            x: (B, T*P, dim) - observation embeddings
-            g: (B, P, dim) - goal embeddings
-        Returns:
-            (v1, v2): tuple of (B, T, 1) tensors
-        """
-        return self.v1(x, g), self.v2(x, g)
-
-
 class DoubleValuePredictor(nn.Module):
     """
     General double value predictor wrapper for double Q-learning style training.

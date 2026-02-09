@@ -306,7 +306,7 @@ def collect_embeddings_and_values(
                     batch_values = model.predict_values(
                         batch_embeddings, batch_ref
                     )
-                    # Handle tuple output from DoubleMetricValuePredictor
+                    # Handle tuple output from DoubleValuePredictor
                     if isinstance(batch_values, tuple):
                         v1, v2 = batch_values
                         batch_values = (v1 + v2) / 2
