@@ -683,39 +683,36 @@ class MetricValuePredictor(nn.Module):
         return value
 
 
-class DoubleValuePredictor(nn.Module):
+class DoublePredictorWrapper(nn.Module):
     """
-    General double value predictor wrapper for double Q-learning style training.
+    Generic double predictor wrapper for double Q-learning style training.
 
-    Wraps two independent copies of any value predictor network to enable:
-    - Minimum of target values for computing Q targets (reduces overestimation)
-    - Separate expectile losses for each network
+    Wraps two independent copies of any predictor network to enable:
+    - Minimum of target values for computing targets (reduces overestimation)
+    - Separate losses for each network
 
     Usage with TeacherStudentWrapper:
         The wrapper will create EMA copies of both networks automatically.
         forward_student() and forward_teacher() will return (v1, v2) tuples.
 
     Args:
-        value_predictor_cls: The class of the value predictor to wrap (e.g., Predictor)
-        **kwargs: Arguments passed to both value predictor instances
+        predictor_cls: The class of the predictor to wrap (e.g., Predictor, QPredictor)
+        **kwargs: Arguments passed to both predictor instances
     """
 
-    def __init__(self, value_predictor_cls, **kwargs):
+    def __init__(self, predictor_cls, **kwargs):
         super().__init__()
-        self.v1 = value_predictor_cls(**kwargs)
-        self.v2 = value_predictor_cls(**kwargs)
+        self.v1 = predictor_cls(**kwargs)
+        self.v2 = predictor_cls(**kwargs)
 
-    def forward(self, x, g):
+    def forward(self, *args, **kwargs):
         """
         Compute values from both networks.
 
-        Args:
-            x: (B, T*P, dim) - observation embeddings
-            g: (B, P, dim) - goal embeddings
         Returns:
             (v1, v2): tuple of value tensors from each network
         """
-        return self.v1(x, g), self.v2(x, g)
+        return self.v1(*args, **kwargs), self.v2(*args, **kwargs)
 
 
 class QPredictor(nn.Module):
@@ -828,37 +825,6 @@ class QPredictor(nn.Module):
             q = -F.softplus(q)
 
         return q
-
-
-class DoubleQPredictor(nn.Module):
-    """
-    Double Q predictor for double Q-learning style training.
-
-    Wraps two independent QPredictor networks to enable:
-    - Minimum of Q values for computing targets (reduces overestimation)
-    - Separate losses for each network
-
-    Args:
-        **kwargs: Arguments passed to both QPredictor instances
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.q1 = QPredictor(**kwargs)
-        self.q2 = QPredictor(**kwargs)
-
-    def forward(self, x, a, g):
-        """
-        Compute Q values from both networks.
-
-        Args:
-            x: (B, T*P, dim) - observation embeddings (patch-level)
-            a: (B, T, action_dim) - actions per frame
-            g: (B, P, dim) - goal embeddings (patch-level)
-        Returns:
-            (q1, q2): tuple of Q value tensors from each network
-        """
-        return self.q1(x, a, g), self.q2(x, a, g)
 
 
 class ExpectileLoss(nn.Module):

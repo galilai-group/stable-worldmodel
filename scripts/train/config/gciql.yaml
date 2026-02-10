@@ -62,10 +62,10 @@ value_ema_tau: 0.995  # EMA coefficient for target value network updates
 
 # Goal sampling probabilities (random, geometric_future, uniform_future, current) - must sum to 1.0
 goal_probabilities:
-  random: 0.375 #0.3
-  geometric_future: 0.625 #0.5
+  random: 0.3 #0.3
+  geometric_future: 0.5
   uniform_future: 0.0
-  current: 0.0 #0.2
+  current: 0.2
 goal_gamma: 0.99  # Discount factor for geometric distribution when sampling future goals
 
 dump_object: True

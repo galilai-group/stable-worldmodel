@@ -238,10 +238,9 @@ def get_gciql_critics_model(cfg):
             q = torch.minimum(q1, q2)
 
         # Get V(s, g) from value network (student, trainable)
-        (v1, v2) = self.model.value_predictor.forward_student(
+        v = self.model.value_predictor.forward_student(
             embedding_flat, goal_embedding_flat
         )
-        v = torch.minimum(v1, v2)
 
         # Compute IQL value loss with expectile regression
         # expectile_loss(preds, targets, adv) computes: weight(adv) * (targets - preds)^2
@@ -251,10 +250,9 @@ def get_gciql_critics_model(cfg):
         # ===== Critic Loss (IQL style) =====
         # Get V(s', g) for next observations from target value network
         with torch.no_grad():
-            (next_v1, next_v2) = self.model.value_predictor.forward_teacher(
+            next_v = self.model.value_predictor.forward_teacher(
                 target_embedding_flat, goal_embedding_flat
             )
-            next_v = torch.minimum(next_v1, next_v2)
             # Compute Q target using V for bootstrapping: Q(s,a,g) = r + γ * V(s',g)
             q_target = reward + gamma * masks * next_v
 
@@ -270,15 +268,14 @@ def get_gciql_critics_model(cfg):
         total_loss = value_loss + critic_loss
 
         # For logging compatibility
-        value_pred = (v1 + v2) / 2
+        value_pred = v
         value_target = q
         adv = q - v
 
         # NaN detection after value prediction
-        if torch.isnan(v1).any() or torch.isnan(v2).any():
+        if torch.isnan(v).any():
             logging.warning(
-                f'NaN in value_pred! v1_count={torch.isnan(v1).sum().item()}, '
-                f'v2_count={torch.isnan(v2).sum().item()}'
+                f'NaN in value_pred! count={torch.isnan(v).sum().item()}'
             )
         if torch.isnan(q).any():
             logging.warning(
@@ -439,11 +436,6 @@ def get_gciql_critics_model(cfg):
                 f'{prefix}value_pred_std': value_pred.std(),
                 f'{prefix}value_pred_min': value_pred.min(),
                 f'{prefix}value_pred_max': value_pred.max(),
-                # Individual value network stats
-                f'{prefix}v1_mean': v1.mean(),
-                f'{prefix}v2_mean': v2.mean(),
-                f'{prefix}v1_std': v1.std(),
-                f'{prefix}v2_std': v2.std(),
                 # Value target stats
                 f'{prefix}value_target_mean': value_target.mean(),
                 f'{prefix}value_target_std': value_target.std(),
@@ -512,9 +504,8 @@ def get_gciql_critics_model(cfg):
         **cfg.predictor,
     )
 
-    # Double value predictor for V(s, g) - expectile regression target
-    value_predictor = swm.wm.gcrl.DoubleValuePredictor(
-        value_predictor_cls=swm.wm.gcrl.Predictor,
+    # Single value predictor for V(s, g) - expectile regression target
+    value_predictor = swm.wm.gcrl.Predictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
@@ -531,7 +522,8 @@ def get_gciql_critics_model(cfg):
     )
 
     # Double Q predictor for Q(s, a, g) - TD learning with action input
-    critic_predictor = swm.wm.gcrl.DoubleQPredictor(
+    critic_predictor = swm.wm.gcrl.DoublePredictorWrapper(
+        swm.wm.gcrl.QPredictor,
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
@@ -660,16 +652,14 @@ def get_gciql_actor_model(cfg, trained_critics_model):
             target_embedding_flat = rearrange(
                 target_embedding, 'b t p d -> b (t p) d'
             )
-            # Double value predictor returns (v1, v2) tuple
-            (v1, v2) = self.model.value_predictor(
+            # Single value predictor returns V(s, g)
+            value = self.model.value_predictor(
                 embedding_flat, goal_embedding_flat
             )
-            value = (v1 + v2) / 2  # Use average
 
-            (nv1, nv2) = self.model.value_predictor(
+            next_value = self.model.value_predictor(
                 target_embedding_flat, goal_embedding_flat
             )
-            next_value = (nv1 + nv2) / 2
 
             # Advantage is next_value - current_value
             advantage = next_value - value  # (B, T, 1)

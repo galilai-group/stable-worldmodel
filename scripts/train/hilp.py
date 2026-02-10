@@ -499,8 +499,8 @@ def get_hilp_value_model(cfg):
 
     # Double metric-based value function: V(s, g) = -||φ(s) - φ(g)||
     # Uses two independent value networks for double Q-learning style training
-    value_predictor = swm.wm.gcrl.DoubleValuePredictor(
-        value_predictor_cls=swm.wm.gcrl.MetricValuePredictor,
+    value_predictor = swm.wm.gcrl.DoublePredictorWrapper(
+        swm.wm.gcrl.MetricValuePredictor,
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,

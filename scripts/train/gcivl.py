@@ -498,8 +498,8 @@ def get_gcivl_value_model(cfg):
     )
 
     # Double value predictor for double Q-learning (wraps two Predictor networks)
-    value_predictor = swm.wm.gcrl.DoubleValuePredictor(
-        value_predictor_cls=swm.wm.gcrl.Predictor,
+    value_predictor = swm.wm.gcrl.DoublePredictorWrapper(
+        swm.wm.gcrl.Predictor,
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
