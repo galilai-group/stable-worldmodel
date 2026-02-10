@@ -171,9 +171,12 @@ def get_gcbc_policy(cfg):
             :, : cfg.dinowm.history_size, :, :
         ]  # (B, T-1, patches, dim)
         goal_embedding = batch['goal_embed']  # (B, 1, patches, dim)
-        action_pred, _ = self.model.predict_actions(
+        # action_pred, _ = self.model.predict_actions(
+        #     embedding, goal_embedding
+        # )  # (B, num_preds, action_dim)  # GCRL version
+        action_pred = self.model.predict(
             embedding, goal_embedding
-        )  # (B, num_preds, action_dim)
+        )  # (B, num_preds, action_dim)  # GCBC version
         # action_target = batch['action'][
         #     :, cfg.dinowm.num_preds :, :
         # ]  # (B, num_preds, action_dim)
@@ -249,22 +252,33 @@ def get_gcbc_policy(cfg):
     effective_act_dim = (
         cfg.frameskip * cfg.dinowm.action_dim
     )  # NOTE: 'frameskip' > 1 is used to predict action chunks
-    predictor = swm.wm.gcrl.Predictor(
+    # predictor = swm.wm.gcrl.Predictor(
+    #     num_patches=num_patches,
+    #     num_frames=cfg.dinowm.history_size,
+    #     dim=embedding_dim,
+    #     out_dim=effective_act_dim,
+    #     **cfg.predictor,
+    # )  # GCRL version
+    predictor = swm.wm.gcbc.Predictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=effective_act_dim,
         **cfg.predictor,
-    )
+    )  # GCBC version
 
     # Build proprioception encoder (optional)
     extra_encoders = None
     if cfg.dinowm.get('use_proprio_encoder', True):
         extra_encoders = OrderedDict()
-        extra_encoders['proprio'] = swm.wm.gcrl.Embedder(
+        # extra_encoders['proprio'] = swm.wm.gcrl.Embedder(
+        #     in_chans=cfg.dinowm.proprio_dim,
+        #     emb_dim=cfg.dinowm.proprio_embed_dim,
+        # )  # GCRL version
+        extra_encoders['proprio'] = swm.wm.gcbc.Embedder(
             in_chans=cfg.dinowm.proprio_dim,
             emb_dim=cfg.dinowm.proprio_embed_dim,
-        )
+        )  # GCBC version
         extra_encoders = torch.nn.ModuleDict(extra_encoders)
 
     logging.info(
@@ -276,12 +290,18 @@ def get_gcbc_policy(cfg):
     wrapped_encoder = (
         spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
     )
-    gcbc_policy = swm.wm.gcrl.GCRL(
+    # gcbc_policy = swm.wm.gcrl.GCRL(
+    #     encoder=wrapped_encoder,
+    #     action_predictor=predictor,
+    #     extra_encoders=extra_encoders,
+    #     history_size=cfg.dinowm.history_size,
+    # )  # GCRL version
+    gcbc_policy = swm.wm.gcbc.GCBC(
         encoder=wrapped_encoder,
-        action_predictor=predictor,
+        predictor=predictor,
         extra_encoders=extra_encoders,
         history_size=cfg.dinowm.history_size,
-    )
+    )  # GCBC version
 
     # Wrap in stable_spt Module with separate optimizers for each component
     def add_opt(module_name, lr):
@@ -303,9 +323,12 @@ def get_gcbc_policy(cfg):
 
     # Add encoder optimizer if trainable (ViT tiny)
     if encoder_trainable:
+        # optim_config['encoder_opt'] = add_opt(
+        #     'model.encoder', cfg.get('encoder_lr', 1e-4)
+        # )  # GCRL version (uses self.encoder)
         optim_config['encoder_opt'] = add_opt(
-            'model.encoder', cfg.get('encoder_lr', 1e-4)
-        )
+            'model.backbone', cfg.get('encoder_lr', 1e-4)
+        )  # GCBC version (uses self.backbone)
 
     gcbc_policy = spt.Module(
         model=gcbc_policy,
