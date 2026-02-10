@@ -160,7 +160,6 @@ def get_gcbc_policy(cfg):
             batch,
             target='goal_embed',
             pixels_key='goal_pixels',
-            emb_keys=['proprio'],
             prefix='goal_',
         )
         check_tensor('goal_embed', batch['goal_embed'])
@@ -177,9 +176,6 @@ def get_gcbc_policy(cfg):
         action_pred = self.model.predict(
             embedding, goal_embedding
         )  # (B, num_preds, action_dim)  # GCBC version
-        # action_target = batch['action'][
-        #     :, cfg.dinowm.num_preds :, :
-        # ]  # (B, num_preds, action_dim)
         action_target = batch['action'][
             :, : cfg.dinowm.history_size, :
         ]  # (B, num_preds, action_dim)
