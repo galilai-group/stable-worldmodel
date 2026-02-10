@@ -55,7 +55,7 @@ uv sync --all-extras --group dev
 
 ## Questions
 
-If you have a question, please [file an issue](https://github.com/lucas-maes/swm/issues).
+If you have a question, please [file an issue](https://github.com/galilai-group/stable-worldmodel/issues).
 
 
 ## Citation
