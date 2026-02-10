@@ -88,9 +88,7 @@ class GCBC(torch.nn.Module):
                 1
             )  # (B*T, 1, emb_dim)
 
-        pixels_embed = rearrange(
-            pixels_embed.detach(), '(b t) p d -> b t p d', b=B
-        )
+        pixels_embed = rearrange(pixels_embed, '(b t) p d -> b t p d', b=B)
 
         return pixels_embed
 

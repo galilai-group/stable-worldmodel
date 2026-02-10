@@ -165,6 +165,11 @@ def get_gcbc_policy(cfg):
         )
         check_tensor('goal_embed', batch['goal_embed'])
 
+        # Detach encoder outputs if encoder is frozen
+        if not encoder_trainable:
+            batch['embed'] = batch['embed'].detach()
+            batch['goal_embed'] = batch['goal_embed'].detach()
+
         # Use history to predict next actions
         # TODO check this slicing is correct
         embedding = batch['embed'][
