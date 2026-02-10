@@ -63,7 +63,9 @@ If you have a question, please [file an issue](https://github.com/lucas-maes/swm
 ```bibtex
 @misc{maes_lelidec2026swm-1,
       title={stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation}, 
-      author={Lucas Maes and Quentin Le Lidec and Dan Haramati and Nassim Massaudi and Damien Scieur and Yann LeCun and Randall Balestriero},
+      author = {Lucas Maes and Quentin Le Lidec and Dan Haramati and
+                Nassim Massaudi and Damien Scieur and Yann LeCun and
+                Randall Balestriero},
       year={2026},
       eprint={2602.08968},
       archivePrefix={arXiv},
