@@ -1,4 +1,8 @@
+[![Documentation](https://img.shields.io/badge/Docs-blue.svg)](https://galilai-group.github.io/stable-worldmodel/)
+![Tests](https://img.shields.io/github/actions/workflow/status/galilai-group/stable-worldmodel/tests.yaml?label=Tests)
 [![PyPI](https://img.shields.io/pypi/v/stable-worldmodel.svg)](https://pypi.python.org/pypi/stable-worldmodel/#history)
+[![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 # stable-worldmodel
 
@@ -57,10 +61,13 @@ If you have a question, please [file an issue](https://github.com/lucas-maes/swm
 ## Citation
 
 ```bibtex
-@article{swm_maes2026,
-  title={stable-world model},
-  author={},
-  booktitle={stable-worldmodel: World Model Research Made Simple},
-  year={2026},
+@misc{maes_lelidec2026swm-1,
+      title={stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation}, 
+      author={Lucas Maes and Quentin Le Lidec and Dan Haramati and Nassim Massaudi and Damien Scieur and Yann LeCun and Randall Balestriero},
+      year={2026},
+      eprint={2602.08968},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2602.08968}, 
 }
 ```
