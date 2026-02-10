@@ -13,7 +13,7 @@ class GCRL(torch.nn.Module):
         self,
         encoder,
         action_predictor,
-        value_predictor,
+        value_predictor=None,
         critic_predictor=None,
         extra_encoders=None,
         history_size=3,

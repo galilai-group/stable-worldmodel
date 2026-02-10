@@ -171,7 +171,7 @@ def get_gcbc_policy(cfg):
             :, : cfg.dinowm.history_size, :, :
         ]  # (B, T-1, patches, dim)
         goal_embedding = batch['goal_embed']  # (B, 1, patches, dim)
-        action_pred = self.model.predict(
+        action_pred, _ = self.model.predict_actions(
             embedding, goal_embedding
         )  # (B, num_preds, action_dim)
         # action_target = batch['action'][
@@ -212,16 +212,36 @@ def get_gcbc_policy(cfg):
 
         return batch
 
-    # Load frozen DINO encoder
-    encoder = AutoModel.from_pretrained('facebook/dinov2-small')
-    embedding_dim = encoder.config.hidden_size
+    # Load encoder based on config
+    encoder_type = cfg.get('encoder_type', 'dino')
+    if encoder_type == 'dino':
+        # Load frozen DINO encoder
+        encoder = AutoModel.from_pretrained('facebook/dinov2-small')
+        embedding_dim = encoder.config.hidden_size
+        encoder_trainable = False
+        logging.info('Using pretrained frozen DINO encoder')
+    elif encoder_type == 'vit_tiny':
+        # Load trainable ViT tiny from scratch
+        encoder = spt.backbone.utils.vit_hf(
+            'tiny',
+            patch_size=cfg.patch_size,
+            image_size=cfg.image_size,
+            pretrained=False,
+            use_mask_token=False,
+        )
+        embedding_dim = encoder.config.hidden_size
+        encoder_trainable = True
+        logging.info('Using trainable ViT tiny encoder (from scratch)')
+    else:
+        raise ValueError(f'Unknown encoder_type: {encoder_type}')
 
     # Calculate actual number of patches based on the actual image size used by DINO
     assert cfg.image_size % cfg.patch_size == 0, (
         'Image size must be multiple of patch size'
     )
     num_patches = (cfg.image_size // cfg.patch_size) ** 2
-    embedding_dim += cfg.dinowm.proprio_embed_dim  # Total embedding size
+    if cfg.dinowm.get('use_proprio_encoder', True):
+        embedding_dim += cfg.dinowm.proprio_embed_dim  # Total embedding size
 
     logging.info(f'Patches: {num_patches}, Embedding dim: {embedding_dim}')
 
@@ -229,7 +249,7 @@ def get_gcbc_policy(cfg):
     effective_act_dim = (
         cfg.frameskip * cfg.dinowm.action_dim
     )  # NOTE: 'frameskip' > 1 is used to predict action chunks
-    predictor = swm.wm.gcbc.Predictor(
+    predictor = swm.wm.gcrl.Predictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
@@ -237,24 +257,30 @@ def get_gcbc_policy(cfg):
         **cfg.predictor,
     )
 
-    # Build proprioception encoder
-    extra_encoders = OrderedDict()
-    extra_encoders['proprio'] = swm.wm.gcbc.Embedder(
-        in_chans=cfg.dinowm.proprio_dim, emb_dim=cfg.dinowm.proprio_embed_dim
-    )
-    extra_encoders = torch.nn.ModuleDict(extra_encoders)
+    # Build proprioception encoder (optional)
+    extra_encoders = None
+    if cfg.dinowm.get('use_proprio_encoder', True):
+        extra_encoders = OrderedDict()
+        extra_encoders['proprio'] = swm.wm.gcrl.Embedder(
+            in_chans=cfg.dinowm.proprio_dim,
+            emb_dim=cfg.dinowm.proprio_embed_dim,
+        )
+        extra_encoders = torch.nn.ModuleDict(extra_encoders)
 
     logging.info(
-        f'Action dim: {effective_act_dim}, Proprio dim: {cfg.dinowm.proprio_dim}'
+        f'Action dim: {effective_act_dim}, Proprio encoder: {extra_encoders is not None}'
     )
 
     # Assemble policy
-    gcbc_policy = swm.wm.gcbc.GCBC(
-        encoder=spt.backbone.EvalOnly(encoder),
-        predictor=predictor,
+    # Wrap encoder in EvalOnly if frozen (DINO), otherwise keep trainable (ViT tiny)
+    wrapped_encoder = (
+        spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
+    )
+    gcbc_policy = swm.wm.gcrl.GCRL(
+        encoder=wrapped_encoder,
+        action_predictor=predictor,
         extra_encoders=extra_encoders,
         history_size=cfg.dinowm.history_size,
-        num_pred=cfg.dinowm.num_preds,
     )
 
     # Wrap in stable_spt Module with separate optimizers for each component
@@ -265,15 +291,26 @@ def get_gcbc_policy(cfg):
             'scheduler': {'type': 'LinearWarmupCosineAnnealingLR'},
         }
 
+    optim_config = {
+        'predictor_opt': add_opt('model.predictor', cfg.predictor_lr),
+    }
+
+    # Add proprio encoder optimizer if enabled
+    if extra_encoders is not None:
+        optim_config['proprio_opt'] = add_opt(
+            'model.extra_encoders.proprio', cfg.proprio_encoder_lr
+        )
+
+    # Add encoder optimizer if trainable (ViT tiny)
+    if encoder_trainable:
+        optim_config['encoder_opt'] = add_opt(
+            'model.encoder', cfg.get('encoder_lr', 1e-4)
+        )
+
     gcbc_policy = spt.Module(
         model=gcbc_policy,
         forward=forward,
-        optim={
-            'predictor_opt': add_opt('model.predictor', cfg.predictor_lr),
-            'proprio_opt': add_opt(
-                'model.extra_encoders.proprio', cfg.proprio_encoder_lr
-            ),
-        },
+        optim=optim_config,
     )
     return gcbc_policy
 

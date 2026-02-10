@@ -28,6 +28,7 @@ frameskip: 1
 dinowm:
   history_size: 3
   num_preds: 1
+  use_proprio_encoder: true  # Set to false to disable proprioception encoder
   proprio_dim: 4
   proprio_embed_dim: 10
   action_dim: 2
@@ -41,7 +42,12 @@ predictor:
   dropout: 0.1
   emb_dropout: 0.0
 
+# Encoder configuration
+# Options: 'dino' (pretrained frozen DINO) or 'vit_tiny' (trainable ViT tiny from scratch)
+encoder_type: dino
+
 predictor_lr: 1e-4
 proprio_encoder_lr: 1e-4
+encoder_lr: 1e-4
 
 dump_object: True
