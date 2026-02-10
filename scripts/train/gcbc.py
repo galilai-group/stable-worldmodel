@@ -307,6 +307,10 @@ def get_gcbc_policy(cfg):
             'scheduler': {'type': 'LinearWarmupCosineAnnealingLR'},
         }
 
+    # optim_config = {
+    #     'action_predictor_opt': add_opt('model.action_predictor', cfg.predictor_lr),
+    # } # GCRL version (uses self.action_predictor)
+
     optim_config = {
         'predictor_opt': add_opt('model.predictor', cfg.predictor_lr),
     }
