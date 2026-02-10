@@ -595,8 +595,36 @@ class GoalDataset:
                 goal_keys['proprio'] = 'goal_proprio'
         self.goal_keys = goal_keys
 
+        # Build clip_indices with stricter constraint to ensure at least one future frame
+        # for geometric/uniform future goal sampling (only if these modes are used)
+        _, p_geometric_future, p_uniform_future, _ = goal_probabilities
+        needs_future_filtering = p_geometric_future > 0 or p_uniform_future > 0
+
+        if needs_future_filtering:
+            frameskip = dataset.frameskip
+            current_end_offset = (self.current_goal_offset - 1) * frameskip
+
+            self._clip_indices = []
+            self._index_mapping = []  # Maps our indices to wrapped dataset indices
+
+            for wrapped_idx, (ep, start) in enumerate(dataset.clip_indices):
+                current_end = start + current_end_offset
+                # Need at least one frame after current_end (i.e., current_end + frameskip < length)
+                if current_end + frameskip < self.episode_lengths[ep]:
+                    self._clip_indices.append((ep, start))
+                    self._index_mapping.append(wrapped_idx)
+        else:
+            # No future goal sampling, use wrapped dataset's indices directly
+            self._clip_indices = list(dataset.clip_indices)
+            self._index_mapping = list(range(len(dataset.clip_indices)))
+
+    @property
+    def clip_indices(self):
+        """Clip indices filtered to ensure at least one future frame is available."""
+        return self._clip_indices
+
     def __len__(self):
-        return len(self.dataset)
+        return len(self._clip_indices)
 
     @property
     def column_names(self):
@@ -637,8 +665,8 @@ class GoalDataset:
         max_steps = (
             self.episode_lengths[ep_idx] - 1 - current_end
         ) // frameskip
-        if max_steps <= 0:
-            return ep_idx, current_end
+        # clip_indices filtering guarantees max_steps >= 1
+        assert max_steps >= 1, f'No future frames available: {max_steps=}'
 
         p = max(1.0 - self.gamma, 1e-6)
         k = int(self.rng.geometric(p))
@@ -656,16 +684,16 @@ class GoalDataset:
         max_steps = (
             self.episode_lengths[ep_idx] - 1 - current_end
         ) // frameskip
-        if max_steps <= 0:
-            return ep_idx, current_end
+        # clip_indices filtering guarantees max_steps >= 1
+        assert max_steps >= 1, f'No future frames available: {max_steps=}'
 
         k = int(self.rng.integers(1, max_steps + 1))
         local_idx = current_end + k * frameskip
         return ep_idx, local_idx
 
     def _get_clip_info(self, idx: int) -> tuple[int, int]:
-        """Returns (episode_idx, local_start) for a given dataset index."""
-        return self.dataset.clip_indices[idx]
+        """Returns (episode_idx, local_start) for a given GoalDataset index."""
+        return self._clip_indices[idx]
 
     def _load_single_step(
         self, ep_idx: int, local_idx: int
@@ -674,8 +702,9 @@ class GoalDataset:
         return self.dataset._load_slice(ep_idx, local_idx, local_idx + 1)
 
     def __getitem__(self, idx: int):
-        # Get base sample from wrapped dataset
-        steps = self.dataset[idx]
+        # Get base sample from wrapped dataset using index mapping
+        wrapped_idx = self._index_mapping[idx]
+        steps = self.dataset[wrapped_idx]
 
         if not self.goal_keys:
             return steps
