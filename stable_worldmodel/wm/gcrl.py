@@ -641,6 +641,27 @@ class MetricValuePredictor(nn.Module):
         # Project to learned embedding space
         self.embed_proj = nn.Linear(dim, embed_dim)
 
+    def encode(self, x):
+        """
+        Encode input into embedding space.
+
+        Args:
+            x: (B, T*P, dim) - input embeddings (observations or goal)
+        Returns:
+            x_embed: (B, T, embed_dim) - projected embeddings
+        """
+        # Add positional embeddings
+        x = x + self.pos_embedding[:, : x.shape[1]]
+        x = self.dropout(x)
+
+        # Embed through transformer
+        x_embed = self.transformer(x)
+
+        # Project to learned embedding space
+        x_embed = self.embed_proj(x_embed)
+
+        return x_embed
+
     def forward(self, x, g):
         """
         Compute value as negative L2 distance in embedding space.
@@ -651,19 +672,8 @@ class MetricValuePredictor(nn.Module):
         Returns:
             value: (B, T, 1) - negative L2 distance per frame
         """
-        # Add positional embeddings
-        x = x + self.pos_embedding[:, : x.shape[1]]
-        g = g + self.pos_embedding[:, : g.shape[1]]
-        x = self.dropout(x)
-        g = self.dropout(g)
-
-        # Embed state and goal separately through transformer
-        x_embed = self.transformer(x)  # (B, T, dim)
-        g_embed = self.transformer(g)  # (B, 1, dim)
-
-        # Project to learned embedding space
-        x_embed = self.embed_proj(x_embed)  # (B, T, embed_dim)
-        g_embed = self.embed_proj(g_embed)  # (B, 1, embed_dim)
+        x_embed = self.encode(x)  # (B, T, embed_dim)
+        g_embed = self.encode(g)  # (B, 1, embed_dim)
 
         # Compute negative L2 distance: V(s, g) = -||φ(s) - φ(g)||
         diff = x_embed - g_embed
