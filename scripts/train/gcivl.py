@@ -87,6 +87,7 @@ def get_data(cfg):
         dataset=dataset,
         goal_probabilities=goal_probs,
         gamma=cfg.goal_gamma,
+        current_goal_offset=cfg.dinowm.history_size,
         goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
         seed=cfg.seed,
     )

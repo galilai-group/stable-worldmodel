@@ -543,6 +543,7 @@ class GoalDataset:
             0.2,
         ),
         gamma: float = 0.99,
+        current_goal_offset: int | None = None,
         goal_keys: dict[str, str] | None = None,
         seed: int | None = None,
     ):
@@ -551,10 +552,18 @@ class GoalDataset:
             dataset: Base dataset to wrap.
             goal_probabilities: Tuple of (p_random, p_geometric_future, p_uniform_future, p_current) for goal sampling.
             gamma: Discount factor for geometric future goal sampling.
+            current_goal_offset: Number of frames from clip start for "current" goal sampling.
+                If None, defaults to num_steps, i.e., last frame of clip.
+                When training with history, set this to history_size so "current" means last frame of history.
             goal_keys: Mapping of source observation keys to goal observation keys. If None, defaults to {"pixels": "goal", "proprio": "goal_proprio"}.
             seed: Random seed for goal sampling.
         """
         self.dataset = dataset
+        self.current_goal_offset = (
+            current_goal_offset
+            if current_goal_offset is not None
+            else dataset.num_steps
+        )
 
         if len(goal_probabilities) != 4:
             raise ValueError(
@@ -623,17 +632,18 @@ class GoalDataset:
     ) -> tuple[int, int]:
         """Sample future (ep_idx, local_idx) from same episode using geometric distribution."""
         frameskip = self.dataset.frameskip
-        num_steps = self.dataset.num_steps
-        # The minimum goal index should be the last frame of the clip
-        clip_end = local_start + (num_steps - 1) * frameskip
-        max_steps = (self.episode_lengths[ep_idx] - 1 - clip_end) // frameskip
+        # The minimum goal index should be the last frame of the history (current state)
+        current_end = local_start + (self.current_goal_offset - 1) * frameskip
+        max_steps = (
+            self.episode_lengths[ep_idx] - 1 - current_end
+        ) // frameskip
         if max_steps <= 0:
-            return ep_idx, clip_end
+            return ep_idx, current_end
 
         p = max(1.0 - self.gamma, 1e-6)
         k = int(self.rng.geometric(p))
         k = min(k, max_steps)
-        local_idx = clip_end + k * frameskip
+        local_idx = current_end + k * frameskip
         return ep_idx, local_idx
 
     def _sample_uniform_future_step(
@@ -641,15 +651,16 @@ class GoalDataset:
     ) -> tuple[int, int]:
         """Sample future (ep_idx, local_idx) from same episode using uniform distribution."""
         frameskip = self.dataset.frameskip
-        num_steps = self.dataset.num_steps
-        # The minimum goal index should be the last frame of the clip
-        clip_end = local_start + (num_steps - 1) * frameskip
-        max_steps = (self.episode_lengths[ep_idx] - 1 - clip_end) // frameskip
+        # The minimum goal index should be the last frame of the history (current state)
+        current_end = local_start + (self.current_goal_offset - 1) * frameskip
+        max_steps = (
+            self.episode_lengths[ep_idx] - 1 - current_end
+        ) // frameskip
         if max_steps <= 0:
-            return ep_idx, clip_end
+            return ep_idx, current_end
 
         k = int(self.rng.integers(1, max_steps + 1))
-        local_idx = clip_end + k * frameskip
+        local_idx = current_end + k * frameskip
         return ep_idx, local_idx
 
     def _get_clip_info(self, idx: int) -> tuple[int, int]:
@@ -685,10 +696,11 @@ class GoalDataset:
                 ep_idx, local_start
             )
         else:  # current
-            # Use the last frame of the clip, not the first
+            # Use current_goal_offset to determine the "current" frame
             frameskip = self.dataset.frameskip
-            num_steps = self.dataset.num_steps
-            goal_local_idx = local_start + (num_steps - 1) * frameskip
+            goal_local_idx = (
+                local_start + (self.current_goal_offset - 1) * frameskip
+            )
             goal_ep_idx = ep_idx
 
         # Load goal step
