@@ -20,7 +20,7 @@ import stable_worldmodel as swm
 # ============================================================================
 # Data Setup
 # ============================================================================
-def get_data(cfg):
+def get_data(cfg, goal_probabilities):
     """Setup dataset with image transforms and normalization."""
 
     def get_img_pipeline(key, target, img_size=224):
@@ -76,16 +76,9 @@ def get_data(cfg):
     )
 
     dataset.transform = transform
-
-    goal_probs = (
-        cfg.goal_probabilities.random,
-        cfg.goal_probabilities.geometric_future,
-        cfg.goal_probabilities.uniform_future,
-        cfg.goal_probabilities.current,
-    )
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=goal_probs,
+        goal_probabilities=goal_probabilities,
         gamma=cfg.goal_gamma,
         current_goal_offset=cfg.dinowm.history_size,
         goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
@@ -505,7 +498,7 @@ def get_gcivl_value_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=1,
-        non_positive_output=True,
+        non_positive_output=False,
         **cfg.predictor,
     )
 
@@ -816,7 +809,13 @@ def run(cfg):
     """Run training of IQL goal-conditioned policy."""
 
     wandb_logger_value = setup_pl_logger(cfg, postfix='_value')
-    data = get_data(cfg)
+    goal_probs = (
+        cfg.goal_probabilities.random,
+        cfg.goal_probabilities.geometric_future,
+        cfg.goal_probabilities.uniform_future,
+        cfg.goal_probabilities.current,
+    )
+    data = get_data(cfg, goal_probabilities=goal_probs)
 
     # First train value function
     gcivl_value_model = get_gcivl_value_model(cfg)
@@ -849,6 +848,13 @@ def run(cfg):
 
     # Extract policy from trained value function
     wandb_logger_policy = setup_pl_logger(cfg, postfix='_policy')
+    goal_probs = (
+        cfg.actor_goal_probabilities.random,
+        cfg.actor_goal_probabilities.geometric_future,
+        cfg.actor_goal_probabilities.uniform_future,
+        cfg.actor_goal_probabilities.current,
+    )
+    data = get_data(cfg, goal_probabilities=goal_probs)
 
     # load value function weights
     checkpoint = torch.load(

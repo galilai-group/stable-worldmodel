@@ -66,6 +66,11 @@ goal_probabilities:
   geometric_future: 0.5
   uniform_future: 0.0
   current: 0.2
+actor_goal_probabilities:
+  random: 0.5
+  geometric_future: 0.0
+  uniform_future: 0.5
+  current: 0.0
 goal_gamma: 0.99  # Discount factor for geometric distribution when sampling future goals
 
 dump_object: True
