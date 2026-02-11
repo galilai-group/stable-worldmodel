@@ -378,6 +378,8 @@ def get_gcivl_value_model(cfg):
                 # Log value prediction specifically when goal matches current state
                 # value_pred has shape (B, T, 1), take last timestep
                 value_pred_at_goal = value_pred[:, -1, 0][both_match]
+                v1_pred_at_goal = v1_pred[:, -1, 0][both_match]
+                v2_pred_at_goal = v2_pred[:, -1, 0][both_match]
                 # log q1 and q2 at goal for debugging
                 q1_at_goal = q1[:, -1, 0][both_match]
                 q2_at_goal = q2[:, -1, 0][both_match]
@@ -387,6 +389,12 @@ def get_gcivl_value_model(cfg):
                     -1.0, device=embedding.device
                 )
                 value_pred_at_goal = torch.tensor(
+                    float('nan'), device=embedding.device
+                )
+                v1_pred_at_goal = torch.tensor(
+                    float('nan'), device=embedding.device
+                )
+                v2_pred_at_goal = torch.tensor(
                     float('nan'), device=embedding.device
                 )
 
@@ -414,6 +422,14 @@ def get_gcivl_value_model(cfg):
                     f'{prefix}debug_value_pred_at_goal_max': value_pred_at_goal.max(),
                     f'{prefix}debug_value_pred_at_goal_min': value_pred_at_goal.min(),
                     f'{prefix}debug_value_pred_at_goal_std': value_pred_at_goal.std(),
+                    f'{prefix}debug_v1_pred_at_goal_mean': v1_pred_at_goal.mean(),
+                    f'{prefix}debug_v1_pred_at_goal_max': v1_pred_at_goal.max(),
+                    f'{prefix}debug_v1_pred_at_goal_min': v1_pred_at_goal.min(),
+                    f'{prefix}debug_v1_pred_at_goal_std': v1_pred_at_goal.std(),
+                    f'{prefix}debug_v2_pred_at_goal_mean': v2_pred_at_goal.mean(),
+                    f'{prefix}debug_v2_pred_at_goal_max': v2_pred_at_goal.max(),
+                    f'{prefix}debug_v2_pred_at_goal_min': v2_pred_at_goal.min(),
+                    f'{prefix}debug_v2_pred_at_goal_std': v2_pred_at_goal.std(),
                     f'{prefix}debug_q1_at_goal_mean': q1_at_goal.mean(),
                     f'{prefix}debug_q1_at_goal_max': q1_at_goal.max(),
                     f'{prefix}debug_q1_at_goal_min': q1_at_goal.min(),
@@ -436,9 +452,13 @@ def get_gcivl_value_model(cfg):
                 f'{prefix}value_pred_max': value_pred.max(),
                 # Individual value network stats
                 f'{prefix}v1_pred_mean': v1_pred.mean(),
-                f'{prefix}v2_pred_mean': v2_pred.mean(),
                 f'{prefix}v1_pred_std': v1_pred.std(),
+                f'{prefix}v1_pred_min': v1_pred.min(),
+                f'{prefix}v1_pred_max': v1_pred.max(),
+                f'{prefix}v2_pred_mean': v2_pred.mean(),
                 f'{prefix}v2_pred_std': v2_pred.std(),
+                f'{prefix}v2_pred_min': v2_pred.min(),
+                f'{prefix}v2_pred_max': v2_pred.max(),
                 # Value target stats
                 f'{prefix}value_target_mean': value_target.mean(),
                 f'{prefix}value_target_std': value_target.std(),
