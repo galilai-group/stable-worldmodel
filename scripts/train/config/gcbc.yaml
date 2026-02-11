@@ -39,7 +39,7 @@ predictor:
   heads: 16
   mlp_dim: 2048
   dim_head: 64
-  dropout: 0.1
+  dropout: 0.0
   emb_dropout: 0.0
 
 # Encoder configuration
