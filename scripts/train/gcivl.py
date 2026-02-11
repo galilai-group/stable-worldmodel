@@ -397,6 +397,12 @@ def get_gcivl_value_model(cfg):
                 v2_pred_at_goal = torch.tensor(
                     float('nan'), device=embedding.device
                 )
+                q1_at_goal = torch.tensor(
+                    float('nan'), device=embedding.device
+                )
+                q2_at_goal = torch.tensor(
+                    float('nan'), device=embedding.device
+                )
 
             # Log value target when goal matches last frame of target/clip
             # When goal matches target, value_target should be close to 0
