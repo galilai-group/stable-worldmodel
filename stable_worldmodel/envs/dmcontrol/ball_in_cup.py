@@ -287,11 +287,10 @@ class BallInCupDMControlWrapper(DMControlWrapper):
 
         if shape_id == 0:
             desired_type = 'box'
-            desired_size = np.array([0.05, 0.006, 0.05], dtype=np.float32)
         else:
             desired_type = 'sphere'
-            desired_size = np.array([0.05], dtype=np.float32)
 
+        desired_size = np.array([0.05, 0.006, 0.05], dtype=np.float32)
         if target_site.type != desired_type:
             target_changed = True
         target_site.type = desired_type
