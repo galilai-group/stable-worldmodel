@@ -44,6 +44,7 @@ env = [
     "minigrid",
     "gymnasium[all]",
     "opencv-python",
+    "stable_baselines3",
 ]
 
 [dependency-groups]
