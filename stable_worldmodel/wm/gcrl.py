@@ -250,13 +250,11 @@ class Predictor(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         causal=True,
-        non_positive_output=False,
     ):
         super().__init__()
 
         self.num_patches = num_patches
         self.num_frames = num_frames
-        self.non_positive_output = non_positive_output
 
         self.pos_embedding = nn.Parameter(
             torch.randn(1, num_frames * (num_patches), dim)
@@ -294,9 +292,6 @@ class Predictor(nn.Module):
         x = self.transformer(x, g)
         # project to output dimension
         x = self.out_proj(x)
-        # apply non-positive constraint for value functions (rewards <= 0)
-        if self.non_positive_output:
-            x = -F.softplus(x)
         return x
 
 
@@ -737,7 +732,6 @@ class QPredictor(nn.Module):
         dropout: Dropout rate
         emb_dropout: Embedding dropout rate
         causal: Whether to use causal masking
-        non_positive_output: If True, output is constrained to be <= 0
     """
 
     def __init__(
@@ -755,13 +749,11 @@ class QPredictor(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         causal=True,
-        non_positive_output=False,
     ):
         super().__init__()
 
         self.num_patches = num_patches
         self.num_frames = num_frames
-        self.non_positive_output = non_positive_output
 
         # Positional embeddings (same as Predictor)
         self.pos_embedding = nn.Parameter(
@@ -819,10 +811,6 @@ class QPredictor(nn.Module):
 
         # Compute Q values
         q = self.q_head(x)  # (B, T, 1)
-
-        # Apply non-positive constraint for value functions (rewards <= 0)
-        if self.non_positive_output:
-            q = -F.softplus(q)
 
         return q
 
