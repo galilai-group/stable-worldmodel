@@ -5192,6 +5192,24 @@ wheels = [
 ]
 
 [[package]]
+name = "stable-baselines3"
+version = "2.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cloudpickle" },
+    { name = "gymnasium" },
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pandas" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c9/42/f284c28272422262a99cdf35ecd2e283fded2f75327e6d5e82a9f6d6fe62/stable_baselines3-2.7.1.tar.gz", hash = "sha256:cd90d12d9ee0d9584053f12215c1682b313be4e3a8d8007739319799c3d2c071", size = 220719 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/cc/a3038d3833f329dcd03b2dce8b778e4b41044caff88b48429473b8629623/stable_baselines3-2.7.1-py3-none-any.whl", hash = "sha256:b017e76dfe5ca0ce6eabb29e79c42e8c7e125d5862bfcd43ce04ec19732348d0", size = 188039 },
+]
+
+[[package]]
 name = "stable-pretraining"
 version = "0.1.5"
 source = { registry = "https://pypi.org/simple" }
@@ -5242,6 +5260,7 @@ dependencies = [
     { name = "loguru" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "stable-baselines3" },
     { name = "tabulate" },
     { name = "torch" },
     { name = "torchvision" },
@@ -5257,6 +5276,7 @@ env = [
     { name = "pygame" },
     { name = "pymunk" },
     { name = "shapely" },
+    { name = "stable-baselines3" },
 ]
 train = [
     { name = "hydra-core" },
@@ -5284,7 +5304,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "einops" },
-    { name = "gdown", specifier = ">=5.2.1" },
+    { name = "gdown" },
     { name = "gymnasium" },
     { name = "gymnasium", extras = ["all"], marker = "extra == 'env'" },
     { name = "h5py" },
@@ -5299,6 +5319,8 @@ requires-dist = [
     { name = "pygame", marker = "extra == 'env'" },
     { name = "pymunk", marker = "extra == 'env'" },
     { name = "shapely", marker = "extra == 'env'" },
+    { name = "stable-baselines3", specifier = ">=2.7.1" },
+    { name = "stable-baselines3", marker = "extra == 'env'" },
     { name = "stable-pretraining", marker = "extra == 'train'" },
     { name = "tabulate" },
     { name = "torch" },

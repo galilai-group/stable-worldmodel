@@ -20,7 +20,7 @@ def get_obs_shape(env):
 class DMControlWrapper(gym.Env):
     def __init__(self, env, domain):
         self.env = env
-        self.camera_id = 2 if domain == 'quadruped' else 0
+        self.camera_id = 2 if domain == "quadruped" else 0
         obs_shape = get_obs_shape(env)
         action_shape = env.action_spec().shape
         self.observation_space = gym.spaces.Box(
@@ -50,16 +50,14 @@ class DMControlWrapper(gym.Env):
     @property
     def info(self):
         return {
-            'success': float('nan'),
-            'qpos': np.copy(self.env.physics.data.qpos),
-            'qvel': np.copy(self.env.physics.data.qvel),
-            'score': self._cumulative_reward / 1000,
+            "success": float("nan"),
+            "qpos": np.copy(self.env.physics.data.qpos),
+            "qvel": np.copy(self.env.physics.data.qvel),
+            "score": self._cumulative_reward / 1000,
         }
 
     def _obs_to_array(self, obs):
-        return np.concatenate(
-            [v.flatten() for v in obs.values()], dtype=np.float32
-        )
+        return np.concatenate([v.flatten() for v in obs.values()], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         options = options or {}
@@ -76,13 +74,13 @@ class DMControlWrapper(gym.Env):
         self._cumulative_reward = 0
         time_step = self.env.reset()
         obs = time_step.observation
-        if 'state' in options and options['state'] is not None:
-            state = np.asarray(options['state'])
-            assert state.ndim == 1, 'State option must be a 1D array!'
+        if "state" in options and options["state"] is not None:
+            state = np.asarray(options["state"])
+            assert state.ndim == 1, "State option must be a 1D array!"
             nq = self.env.physics.model.nq
             nv = self.env.physics.model.nv
             assert state.shape[0] == nq + nv, (
-                f'State option must have shape ({nq + nv},)!'
+                f"State option must have shape ({nq + nv},)!"
             )
             self.set_state(state[:nq], state[nq:])
             obs = self.env.task.get_observation(self.env.physics)
@@ -93,7 +91,7 @@ class DMControlWrapper(gym.Env):
         action = action.astype(self.action_spec_dtype)
         for _ in range(self.action_repeat):
             step = self.env.step(action)
-            reward += step.reward
+            reward += step.reward or 0
         self._cumulative_reward += reward
 
         return (
@@ -117,9 +115,7 @@ class DMControlWrapper(gym.Env):
         self.env.physics.forward()
 
     def render(self, width=224, height=224, camera_id=None):
-        return self.env.physics.render(
-            height, width, camera_id or self.camera_id
-        )
+        return self.env.physics.render(height, width, camera_id or self.camera_id)
 
     def close(self):
         self.env.close()
