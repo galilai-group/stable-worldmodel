@@ -1,8 +1,23 @@
 """Example demonstrating financial trading environment with backtesting.
 
-NOTE: This example requires a valid registered dataset.
+IMPORTANT: This example requires you to register a financial dataset BEFORE running.
+Without a registered dataset, you will get an error.
 
-You can set these in a .env file in the project root or export them in your shell.
+Example registration:
+    from stable_worldmodel.envs import register_financial_dataset
+    import pandas as pd
+
+    def my_data_loader(symbol, start_date, end_date, **kwargs):
+        # Load your data from CSV, database, API, etc.
+        # Must return DataFrame with columns: open, high, low, close
+        df = pd.read_csv(f'data/{symbol}.csv', parse_dates=['timestamp'])
+        df = df.set_index('timestamp')
+        mask = (df.index >= start_date) & (df.index <= end_date)
+        return df[mask]
+
+    register_financial_dataset(my_data_loader)
+
+See the financial environment documentation for more details on dataset registration.
 """
 
 if __name__ == "__main__":

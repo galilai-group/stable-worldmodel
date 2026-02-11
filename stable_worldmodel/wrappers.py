@@ -200,11 +200,15 @@ class EverythingToInfoWrapper(gym.Wrapper):
             raise NotImplementedError
         else:
             # Use appropriate sentinel value based on dtype
+            # Convert to numpy array if not already
+            action = info["action"]
+            if not isinstance(action, np.ndarray):
+                action = np.asarray(action)
             # For integer types, use -1; for float types, use np.nan
-            if np.issubdtype(info["action"].dtype, np.integer):
-                info["action"] = np.full_like(info["action"], -1)
+            if np.issubdtype(action.dtype, np.integer):
+                info["action"] = np.full_like(action, -1)
             else:
-                info["action"] = np.full_like(info["action"], np.nan)
+                info["action"] = np.full_like(action, np.nan)
         return obs, info
 
     def step(self, action):

@@ -10,10 +10,7 @@ from loguru import logger as logging
 from scipy import stats as scipy_stats
 
 import stable_worldmodel as swm
-from stable_worldmodel.envs.dataset_registry import (
-    _get_default_alpaca_loader,
-    get_registered_dataset,
-)
+from stable_worldmodel.envs.dataset_registry import get_registered_dataset
 
 
 def calculate_sharpe_ratio(
@@ -445,24 +442,27 @@ class FinancialEnvironment(gym.Env):
     def _load_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         """Load historical OHLCV data using registered dataset loader.
 
-        If a custom dataset has been registered via register_financial_dataset(),
-        that will be used. Otherwise, falls back to the default Alpaca API loader.
+        Requires a custom dataset to be registered via register_financial_dataset().
         """
         try:
             # Try to get a registered dataset loader
             loader = get_registered_dataset("default")
 
-            # If no custom loader is registered, use the default Alpaca loader
+            # If no loader is registered, raise an error
             if loader is None:
-                loader = _get_default_alpaca_loader()
-                logging.info("Using default Alpaca data loader (no custom dataset registered)")
-            else:
-                logging.info("Using custom registered dataset loader")
+                raise ValueError(
+                    "No financial dataset has been registered. Please register a dataset loader using:\n\n"
+                    "    from stable_worldmodel.envs import register_financial_dataset\n"
+                    "    register_financial_dataset(your_data_loader_function)\n\n"
+                    "Your data loader should return a pandas DataFrame with OHLCV data.\n"
+                )
 
-            # Set up HDF5 cache path for Alpaca loader (custom loaders can ignore this)
+            logging.info("Using registered dataset loader")
+
+            # Set up HDF5 cache path (loaders can ignore this if not needed)
             hdf_path = str(self.data_dir / "dataset.h5")
 
-            # Call the loader (custom or default)
+            # Call the loader
             df = loader(
                 symbol=symbol,
                 start_date=start_date,

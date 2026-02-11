@@ -124,17 +124,32 @@ def test_environment_uses_custom_dataset():
         unregister_financial_dataset("default")
 
 
-def test_default_alpaca_loader_fallback():
-    """Test that the environment can be created without requiring Alpaca API.
+def test_environment_requires_registered_dataset():
+    """Test that the environment requires a registered dataset.
 
-    This test demonstrates that users can register their own data sources
-    and the environment will use those instead of requiring Alpaca credentials.
+    This test verifies that without a registered dataset, the environment
+    will raise a clear error message telling the user to register one.
     """
     # Ensure no custom dataset is registered
     unregister_financial_dataset("default")
 
-    # Register a simple synthetic loader to demonstrate fallback behavior
-    # (In practice, users would either register their own data or have Alpaca configured)
+    # Environment should raise an error without a registered dataset
+    env = gym.make("swm/Financial-v0")
+
+    with pytest.raises(RuntimeError, match="Data load failed"):
+        env.reset()
+
+    env.close()
+
+
+def test_environment_works_with_registered_dataset():
+    """Test that the environment works when a dataset is properly registered.
+
+    This demonstrates the correct usage pattern - register a data source
+    before using the financial environment.
+    """
+
+    # Register a simple synthetic loader
     def simple_loader(symbol, start_date, end_date, **kwargs):
         timestamps = pd.date_range(start=start_date, periods=500, freq="1min")
         return pd.DataFrame(
@@ -143,7 +158,7 @@ def test_default_alpaca_loader_fallback():
                 "high": np.ones(500) * 101,
                 "low": np.ones(500) * 99,
                 "close": np.ones(500) * 100,
-                "volume": np.ones(500) * 1000,  # Add volume column
+                "volume": np.ones(500) * 1000,
             },
             index=timestamps,
         )
@@ -151,11 +166,11 @@ def test_default_alpaca_loader_fallback():
     register_financial_dataset(simple_loader, name="default")
 
     try:
-        # Environment should work without Alpaca API
+        # Environment should work with registered dataset
         env = gym.make("swm/Financial-v0")
         assert env is not None
 
-        # Verify it can actually be used (this would fail if Alpaca was required)
+        # Verify it can actually be used
         obs, info = env.reset()
         assert obs is not None
 
