@@ -246,6 +246,18 @@ def get_gcivl_value_model(cfg):
             q1 = reward + gamma * masks * next_v1_target
             q2 = reward + gamma * masks * next_v2_target
 
+        # Compute expectile loss for both value networks
+        value_loss1 = expectile_loss(v1_pred, q1.detach(), adv.detach())
+        value_loss2 = expectile_loss(v2_pred, q2.detach(), adv.detach())
+        value_loss = value_loss1 + value_loss2
+        batch['value_loss'] = value_loss
+        batch['value_loss1'] = value_loss1
+        batch['value_loss2'] = value_loss2
+        batch['loss'] = value_loss
+
+        # ====== Debug Logging =====
+
+        value_target = q  # For logging compatibility
         # NaN detection after value prediction
         value_pred = (v1_pred + v2_pred) / 2  # For logging
         if torch.isnan(v1_pred).any() or torch.isnan(v2_pred).any():
@@ -257,16 +269,6 @@ def get_gcivl_value_model(cfg):
             logging.warning(
                 f'NaN in q target! count={torch.isnan(q).sum().item()}'
             )
-
-        # Compute expectile loss for both value networks
-        value_loss1 = expectile_loss(v1_pred, q1.detach(), adv.detach())
-        value_loss2 = expectile_loss(v2_pred, q2.detach(), adv.detach())
-        value_loss = value_loss1 + value_loss2
-        value_target = q  # For logging compatibility
-        batch['value_loss'] = value_loss
-        batch['value_loss1'] = value_loss1
-        batch['value_loss2'] = value_loss2
-        batch['loss'] = value_loss
 
         # NaN detection after loss computation
         if torch.isnan(value_loss):
@@ -375,7 +377,10 @@ def get_gcivl_value_model(cfg):
                     )
                 # Log value prediction specifically when goal matches current state
                 # value_pred has shape (B, T, 1), take last timestep
-                value_pred_at_goal = value_pred[:, -1, 0][both_match].mean()
+                value_pred_at_goal = value_pred[:, -1, 0][both_match]
+                # log q1 and q2 at goal for debugging
+                q1_at_goal = q1[:, -1, 0][both_match]
+                q2_at_goal = q2[:, -1, 0][both_match]
             else:
                 pixel_embed_diff = torch.tensor(-1.0, device=embedding.device)
                 proprio_embed_diff = torch.tensor(
@@ -405,7 +410,18 @@ def get_gcivl_value_model(cfg):
                     f'{prefix}debug_target_match_rate': target_both_match.float().mean(),
                     f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
                     f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
-                    f'{prefix}debug_value_pred_at_goal': value_pred_at_goal,
+                    f'{prefix}debug_value_pred_at_goal_mean': value_pred_at_goal.mean(),
+                    f'{prefix}debug_value_pred_at_goal_max': value_pred_at_goal.max(),
+                    f'{prefix}debug_value_pred_at_goal_min': value_pred_at_goal.min(),
+                    f'{prefix}debug_value_pred_at_goal_std': value_pred_at_goal.std(),
+                    f'{prefix}debug_q1_at_goal_mean': q1_at_goal.mean(),
+                    f'{prefix}debug_q1_at_goal_max': q1_at_goal.max(),
+                    f'{prefix}debug_q1_at_goal_min': q1_at_goal.min(),
+                    f'{prefix}debug_q1_at_goal_std': q1_at_goal.std(),
+                    f'{prefix}debug_q2_at_goal_mean': q2_at_goal.mean(),
+                    f'{prefix}debug_q2_at_goal_max': q2_at_goal.max(),
+                    f'{prefix}debug_q2_at_goal_min': q2_at_goal.min(),
+                    f'{prefix}debug_q2_at_goal_std': q2_at_goal.std(),
                     f'{prefix}debug_value_target_at_goal': value_target_at_goal,
                 },
                 on_step=True,
@@ -432,6 +448,15 @@ def get_gcivl_value_model(cfg):
                 f'{prefix}adv_min': adv.min(),
                 f'{prefix}adv_max': adv.max(),
                 f'{prefix}accept_prob': (adv >= 0).float().mean(),
+                # Q-value stats
+                f'{prefix}q1_mean': q1.mean(),
+                f'{prefix}q1_std': q1.std(),
+                f'{prefix}q1_min': q1.min(),
+                f'{prefix}q1_max': q1.max(),
+                f'{prefix}q2_mean': q2.mean(),
+                f'{prefix}q2_std': q2.std(),
+                f'{prefix}q2_min': q2.min(),
+                f'{prefix}q2_max': q2.max(),
                 # Reward stats - mean ≈ -1 means reward too sparse
                 f'{prefix}reward_mean': reward.mean(),
                 f'{prefix}goal_match_rate': eq_mask.float().mean(),
