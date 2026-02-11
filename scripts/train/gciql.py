@@ -20,7 +20,7 @@ import stable_worldmodel as swm
 # ============================================================================
 # Data Setup
 # ============================================================================
-def get_data(cfg):
+def get_data(cfg, goal_probabilities):
     """Setup dataset with image transforms and normalization."""
 
     def get_img_pipeline(key, target, img_size=224):
@@ -77,15 +77,9 @@ def get_data(cfg):
 
     dataset.transform = transform
 
-    goal_probs = (
-        cfg.goal_probabilities.random,
-        cfg.goal_probabilities.geometric_future,
-        cfg.goal_probabilities.uniform_future,
-        cfg.goal_probabilities.current,
-    )
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=goal_probs,
+        goal_probabilities=goal_probabilities,
         gamma=cfg.goal_gamma,
         current_goal_offset=cfg.dinowm.history_size,
         goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
@@ -245,7 +239,7 @@ def get_gciql_critics_model(cfg):
 
         # Compute IQL value loss with expectile regression
         # expectile_loss(preds, targets, adv) computes: weight(adv) * (targets - preds)^2
-        # For IQL: we want weight(q - v) * (q - v)^2, so pass v as preds, q as targets
+        # For IQL: we want weight(q - v) * (q - v)^2, so v as preds, q as targets
         value_loss = expectile_loss(v, q.detach())
 
         # ===== Critic Loss (IQL style) =====
@@ -268,6 +262,12 @@ def get_gciql_critics_model(cfg):
         # ===== Total Loss =====
         total_loss = value_loss + critic_loss
 
+        batch['value_loss'] = value_loss
+        batch['critic_loss'] = critic_loss
+        batch['loss'] = total_loss
+
+        # ====== Debug Logging =====
+
         # For logging compatibility
         value_pred = v
         value_target = q
@@ -282,10 +282,6 @@ def get_gciql_critics_model(cfg):
             logging.warning(
                 f'NaN in q target! count={torch.isnan(q).sum().item()}'
             )
-
-        batch['value_loss'] = value_loss
-        batch['critic_loss'] = critic_loss
-        batch['loss'] = total_loss
 
         # NaN detection after loss computation
         if torch.isnan(value_loss):
@@ -511,7 +507,7 @@ def get_gciql_critics_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=1,
-        non_positive_output=True,
+        non_positive_output=False,
         **cfg.predictor,
     )
 
@@ -529,7 +525,7 @@ def get_gciql_critics_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         action_dim=effective_act_dim,
-        non_positive_output=True,
+        non_positive_output=False,
         **cfg.predictor,
     )
 
@@ -842,7 +838,13 @@ def run(cfg):
     """Run training of IQL goal-conditioned policy."""
 
     wandb_logger_value = setup_pl_logger(cfg, postfix='_value')
-    data = get_data(cfg)
+    goal_probs = (
+        cfg.goal_probabilities.random,
+        cfg.goal_probabilities.geometric_future,
+        cfg.goal_probabilities.uniform_future,
+        cfg.goal_probabilities.current,
+    )
+    data = get_data(cfg, goal_probabilities=goal_probs)
 
     # First train value function
     gciql_critics_model = get_gciql_critics_model(cfg)
@@ -875,6 +877,13 @@ def run(cfg):
 
     # Extract policy from trained value function
     wandb_logger_policy = setup_pl_logger(cfg, postfix='_policy')
+    goal_probs = (
+        cfg.actor_goal_probabilities.random,
+        cfg.actor_goal_probabilities.geometric_future,
+        cfg.actor_goal_probabilities.uniform_future,
+        cfg.actor_goal_probabilities.current,
+    )
+    data = get_data(cfg, goal_probabilities=goal_probs)
 
     # load value function weights
     checkpoint = torch.load(
