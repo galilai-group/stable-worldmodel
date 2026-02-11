@@ -2,8 +2,25 @@ __version__ = "0.0.1a0"
 
 from gymnasium.envs import registration
 
+from stable_worldmodel.envs.dataset_registry import (
+    get_registered_dataset,
+    list_registered_datasets,
+    register_financial_dataset,
+    unregister_financial_dataset,
+)
+
 
 WORLDS = set()
+
+
+__all__ = [
+    "register",
+    "WORLDS",
+    "register_financial_dataset",
+    "unregister_financial_dataset",
+    "get_registered_dataset",
+    "list_registered_datasets",
+]
 
 
 def register(id, entry_point):

@@ -10,7 +10,10 @@ from loguru import logger as logging
 from scipy import stats as scipy_stats
 
 import stable_worldmodel as swm
-from stable_worldmodel.finance_data.download import load_market_data
+from stable_worldmodel.envs.dataset_registry import (
+    _get_default_alpaca_loader,
+    get_registered_dataset,
+)
 
 
 def calculate_sharpe_ratio(
@@ -440,24 +443,36 @@ class FinancialEnvironment(gym.Env):
         }
 
     def _load_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """Load historical OHLCV data using Alpaca API (auto-downloads if needed)."""
+        """Load historical OHLCV data using registered dataset loader.
+
+        If a custom dataset has been registered via register_financial_dataset(),
+        that will be used. Otherwise, falls back to the default Alpaca API loader.
+        """
         try:
-            # Load market data using the download module - returns numpy array (T, num_stocks, features)
-            data_array = load_market_data(tickers=[symbol], start_time=start_date, end_time=end_date, freq="1min")
+            # Try to get a registered dataset loader
+            loader = get_registered_dataset("default")
 
-            # Convert numpy array back to DataFrame
-            # data_array shape: (T, 1, 7) where features are [open, high, low, close, volume, trade_count, vwap]
-            features = ["open", "high", "low", "close", "volume", "trade_count", "vwap"]
+            # If no custom loader is registered, use the default Alpaca loader
+            if loader is None:
+                loader = _get_default_alpaca_loader()
+                logging.info("Using default Alpaca data loader (no custom dataset registered)")
+            else:
+                logging.info("Using custom registered dataset loader")
 
-            # Squeeze out the stock dimension since we only have one stock
-            df_data = data_array[:, 0, :]  # Shape: (T, 7)
+            # Set up HDF5 cache path for Alpaca loader (custom loaders can ignore this)
+            hdf_path = str(self.data_dir / "dataset.h5")
 
-            # Create DataFrame with timestamp index
-            # Note: We need to reconstruct the timestamps based on the date range
-            start_ts = pd.Timestamp(start_date)
-            timestamps = pd.date_range(start=start_ts, periods=len(df_data), freq="1min")
+            # Call the loader (custom or default)
+            df = loader(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                hdf_path=hdf_path,
+            )
 
-            df = pd.DataFrame(df_data, columns=features, index=timestamps)
+            # Validate the returned data
+            if not isinstance(df, pd.DataFrame):
+                raise TypeError(f"Dataset loader must return pd.DataFrame, got {type(df).__name__}")
 
             # Remove NaN rows
             df = df.dropna()
@@ -467,7 +482,7 @@ class FinancialEnvironment(gym.Env):
 
             required_columns = ["open", "high", "low", "close"]
             if missing := set(required_columns) - set(df.columns):
-                raise ValueError(f"Missing columns: {missing}")
+                raise ValueError(f"Missing required columns: {missing}")
 
             df = df.sort_index()
             logging.info(f"Loaded {len(df)} bars for {symbol}")
@@ -543,13 +558,12 @@ class FinancialEnvironment(gym.Env):
         observation = self._get_observation()
         info = {
             "symbol": self.current_symbol,
-            "timestamp": self.start_time,
-            "market_data_length": len(self.market_data),
-            "backtest_config": {
-                "start_date": start_date,
-                "end_date": end_date,
-                "symbol": self.current_symbol,
-            },
+            "timestamp": str(self.start_time),  # Convert to string for serialization
+            "market_data_length": int(len(self.market_data)),
+            # Flatten backtest_config for easier serialization
+            "backtest_start_date": start_date,
+            "backtest_end_date": end_date,
+            "backtest_symbol": self.current_symbol,
             "goal": np.zeros((64, 64, 3), dtype=np.uint8),  # Dummy goal for wrapper compatibility
         }
 
@@ -656,29 +670,29 @@ class FinancialEnvironment(gym.Env):
 
         observation = self._get_observation()
         info = {
-            "timestamp": current_timestamp,
+            "timestamp": str(current_timestamp),  # Convert timestamp to string for serialization
             "symbol": self.current_symbol,
-            "portfolio_value": self.portfolio_value,
-            "balance": self.balance,
-            "position": self.position,
-            "shares_held": self.shares_held,
+            "portfolio_value": float(self.portfolio_value),
+            "balance": float(self.balance),
+            "position": float(self.position),
+            "shares_held": float(self.shares_held),
             "action_taken": action_taken,
-            "current_price": current_price,
-            "base_price": base_price,  # Original historical price
-            "cumulative_impact": self.cumulative_impact,  # Total price impact from our trades
-            "temporary_impact": self.temporary_impact,  # Temporary (decaying) component
-            "permanent_impact": self.permanent_impact,  # Permanent component
-            "portfolio_return": portfolio_return,
-            "benchmark_return": benchmark_return,
-            "total_return": (self.portfolio_value - self.initial_portfolio_value)
-            / max(self.initial_portfolio_value, 1e-8),
-            "sharpe_ratio": self._calculate_sharpe_ratio(),
-            "market_data_length": len(self.market_data),
-            "backtest_config": {
-                "start_date": self.market_data.index[0].strftime("%Y-%m-%d"),
-                "end_date": self.market_data.index[-1].strftime("%Y-%m-%d"),
-                "symbol": self.current_symbol,
-            },
+            "current_price": float(current_price),
+            "base_price": float(base_price),  # Original historical price
+            "cumulative_impact": float(self.cumulative_impact),  # Total price impact from our trades
+            "temporary_impact": float(self.temporary_impact),  # Temporary (decaying) component
+            "permanent_impact": float(self.permanent_impact),  # Permanent component
+            "portfolio_return": float(portfolio_return),
+            "benchmark_return": float(benchmark_return),
+            "total_return": float(
+                (self.portfolio_value - self.initial_portfolio_value) / max(self.initial_portfolio_value, 1e-8)
+            ),
+            "sharpe_ratio": float(self._calculate_sharpe_ratio()),
+            "market_data_length": int(len(self.market_data)),
+            # Flatten backtest_config for easier serialization
+            "backtest_start_date": self.market_data.index[0].strftime("%Y-%m-%d"),
+            "backtest_end_date": self.market_data.index[-1].strftime("%Y-%m-%d"),
+            "backtest_symbol": self.current_symbol,
             "goal": np.zeros((64, 64, 3), dtype=np.uint8),  # Dummy goal for wrapper compatibility
         }
 
@@ -1543,8 +1557,8 @@ class FinancialEnvironment(gym.Env):
 
         # Monthly/annual aggregation
         try:
-            monthly_returns = returns.resample("M").apply(lambda x: (1 + x).prod() - 1)
-            annual_returns = returns.resample("Y").apply(lambda x: (1 + x).prod() - 1)
+            monthly_returns = returns.resample("ME").apply(lambda x: (1 + x).prod() - 1)
+            annual_returns = returns.resample("YE").apply(lambda x: (1 + x).prod() - 1)
         except Exception:
             # If resampling fails, create empty series
             monthly_returns = pd.Series(dtype=float)

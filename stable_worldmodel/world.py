@@ -507,7 +507,9 @@ class World:
 
                 if isinstance(v, np.ndarray):
                     v = v.squeeze(1) if len(v.shape) > 1 and v.shape[1] == 1 else v
-                    v = v if v.dtype.type != np.object_ else np.concatenate(v).tolist()
+                    # Convert object arrays to list directly without concatenation
+                    if v.dtype.type == np.object_:
+                        v = v.tolist()
 
                 for i in env_idx:
                     buffer = episode_buffers[i]
@@ -586,7 +588,11 @@ class World:
         # Save dataset to disk #
         ########################
 
-        assert any(key.startswith("pixels") for key in records), "pixels key is required in records"
+        # Check if pixels key exists (required for vision-based environments, optional for state-based)
+        has_pixels = any(key.startswith("pixels") for key in records)
+        if not has_pixels:
+            logging.warning("No 'pixels' key found in records. This is a state-based environment.")
+
         assert "episode_idx" in records, "episode_idx key is required in records"
         assert "step_idx" in records, "step_idx key is required in records"
         assert "episode_len" in records, "episode_len key is required in records"
@@ -661,10 +667,56 @@ class World:
 
                 elif isinstance(first_elem, (np.generic)):
                     features[col_name] = Value(first_elem.dtype.name)
+                elif isinstance(first_elem, list):
+                    # Handle lists by inferring element type
+                    if len(first_elem) > 0:
+                        inner_type = type(first_elem[0]).__name__
+                        if isinstance(first_elem[0], int | np.integer):
+                            inner_type = "int64"
+                        elif isinstance(first_elem[0], float | np.floating):
+                            inner_type = "float64"
+                        elif isinstance(first_elem[0], str):
+                            inner_type = "string"
+                        features[col_name] = datasets.Sequence(feature=Value(inner_type))
+                    else:
+                        # Empty list, default to string
+                        features[col_name] = datasets.Sequence(feature=Value("string"))
+                elif isinstance(first_elem, str):
+                    features[col_name] = Value("string")
                 else:
-                    features[col_name] = Value(type(first_elem).__name__)
+                    # For other types, try to infer appropriate type
+                    type_name = type(first_elem).__name__
+                    if type_name in ["int", "int32", "int64"]:
+                        features[col_name] = Value("int64")
+                    elif type_name in ["float", "float32", "float64"]:
+                        features[col_name] = Value("float64")
+                    elif type_name in ["bool"]:
+                        features[col_name] = Value("bool")
+                    else:
+                        features[col_name] = Value("string")  # Default to string for unknown types
 
             return Features(features)
+
+        # Check and fix inconsistent column lengths
+        expected_length = len(records["episode_idx"])
+        for col_name, col_data in records.items():
+            actual_length = len(col_data)
+            if actual_length != expected_length:
+                logging.warning(
+                    f"Column '{col_name}' has length {actual_length}, expected {expected_length}. "
+                    f"Padding/truncating to match."
+                )
+                if actual_length < expected_length:
+                    # Pad with last value or appropriate default
+                    if actual_length > 0:
+                        pad_value = col_data[-1]
+                        records[col_name] = col_data + [pad_value] * (expected_length - actual_length)
+                    else:
+                        # Empty column, pad with None or appropriate default
+                        records[col_name] = [None] * expected_length
+                else:
+                    # Truncate to expected length
+                    records[col_name] = col_data[:expected_length]
 
         records_feat = determine_features(records)
         records_ds = Dataset.from_dict(records, features=records_feat)

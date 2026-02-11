@@ -190,12 +190,21 @@ class EverythingToInfoWrapper(gym.Wrapper):
             var_key = f"variation.{key}"
             assert var_key not in info
             subvar_space = get_in(self.env.unwrapped.variation_space, key.split("."))
-            info[var_key] = subvar_space.value
+            value = subvar_space.value
+            # Ensure value is at least 1D to avoid concatenation issues
+            if isinstance(value, np.ndarray) and value.ndim == 0:
+                value = np.array([value.item()])
+            info[var_key] = value
 
         if type(info["action"]) is dict:
             raise NotImplementedError
         else:
-            info["action"] = np.full_like(info["action"], np.nan)
+            # Use appropriate sentinel value based on dtype
+            # For integer types, use -1; for float types, use np.nan
+            if np.issubdtype(info["action"].dtype, np.integer):
+                info["action"] = np.full_like(info["action"], -1)
+            else:
+                info["action"] = np.full_like(info["action"], np.nan)
         return obs, info
 
     def step(self, action):

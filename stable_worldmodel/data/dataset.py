@@ -3,7 +3,7 @@ import numbers
 import os
 from pathlib import Path
 
-import decord
+# import decord
 import numpy as np
 import torch
 from datasets import concatenate_datasets, load_from_disk
@@ -240,7 +240,7 @@ class VideoDataset(Dataset):
         super().__init__(name, *args, obs_type="videos", **kwargs)
         self.device = device
         self.decode_columns = self.decode_columns or self.determine_video_columns(self.dataset[0])
-        decord.bridge.set_bridge("torch")
+        # decord.bridge.set_bridge("torch")
 
     def decode(self, data_dirs, col_data, start=0, end=-1):
         path = os.path.join(data_dirs[0], col_data[0])
