@@ -466,3 +466,67 @@ world = swm.World('swm/ManipulatorDMControl-v0', num_envs=4)
 | `rendering.render_target` | Discrete(2) | Whether to render the target (0: hidden, 1: visible) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
+
+---
+
+## Expert Policy
+
+An expert policy is available for all DMC environments. It can be used to collect high-quality demonstration datasets.
+
+### Training Details
+
+The expert policies were trained using the **Soft Actor-Critic (SAC)** algorithm from [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3). Each policy operates on the environment's **feature-based observations** (joint angles, velocities, etc.) and outputs continuous actions clipped to `[-1, 1]`.
+
+Observations are normalized at inference time using running statistics saved during training (`VecNormalize` from Stable-Baselines3). Each environment's expert comes as two files:
+
+| File | Description |
+|------|-------------|
+| `expert_policy.zip` | Stable-Baselines3 SAC model checkpoint |
+| `vec_normalize.pkl` | Observation normalization statistics (`VecNormalize`) |
+
+Pre-trained checkpoints for all environments are available for download [here](https://drive.google.com/drive/folders/1tiIvhEba8qHJrohWTeV9pDzgptZsSPz1?usp=sharing).
+
+### Installation
+
+The expert policy requires `stable-baselines3` as an additional dependency:
+
+```bash
+uv add stable-baselines3
+```
+
+### Usage
+
+```python
+import os
+
+os.environ['MUJOCO_GL'] = 'egl'
+
+import stable_worldmodel as swm
+from stable_worldmodel.envs.dmcontrol import ExpertPolicy
+
+world = swm.World(
+    'swm/CheetahDMControl-v0',
+    num_envs=3,
+    image_shape=(224, 224),
+    max_episode_steps=500,
+)
+world.set_policy(
+    ExpertPolicy(
+        ckpt_path='path/to/dmc/cheetah/expert_policy.zip',
+        vec_normalize_path='path/to/dmc/cheetah/vec_normalize.pkl',
+        device='cuda',
+    )
+)
+
+world.record_video('./', max_steps=500)
+```
+
+### API Reference
+
+::: stable_worldmodel.envs.dmcontrol.ExpertPolicy
+    options:
+        heading_level: 4
+        members: false
+        show_source: false
+
+::: stable_worldmodel.envs.dmcontrol.ExpertPolicy.get_action
