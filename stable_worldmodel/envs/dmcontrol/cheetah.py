@@ -94,6 +94,12 @@ class CheetahDMControlWrapper(DMControlWrapper):
             }
         )
 
+    @property
+    def info(self):
+        info = super().info
+        info['speed'] = self.env.physics.speed()
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'
