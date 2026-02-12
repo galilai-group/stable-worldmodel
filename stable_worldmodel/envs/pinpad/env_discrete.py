@@ -20,7 +20,6 @@ DEFAULT_VARIATIONS = (
 
 # TODO: Re-enable targets to be sequences of pads instead of single pads
 class PinPadDiscrete(gym.Env):
-
     def __init__(
         self,
         seed=None,
@@ -43,7 +42,7 @@ class PinPadDiscrete(gym.Env):
     def _build_variation_space(self):
         # Spawn locations don't include walls
         max_spawns = X_BOUND * Y_BOUND - 2 * (X_BOUND + Y_BOUND - 2)
-        
+
         return swm_spaces.Dict(
             {
                 'agent': swm_spaces.Dict(
@@ -80,13 +79,17 @@ class PinPadDiscrete(gym.Env):
 
     def _setup_layout(self, task):
         layout = LAYOUTS[task]
-        self.layout = np.array([list(line) for line in layout.split('\n')]).T  # Transposes so that actions are (dx, dy)
+        self.layout = np.array(
+            [list(line) for line in layout.split('\n')]
+        ).T  # Transposes so that actions are (dx, dy)
         assert self.layout.shape == (X_BOUND, Y_BOUND), (
-            f"Layout shape should be ({X_BOUND}, {Y_BOUND}), got {self.layout.shape}"
+            f'Layout shape should be ({X_BOUND}, {Y_BOUND}), got {self.layout.shape}'
         )
 
     def _setup_pads_and_spawns(self):
-        self.pads = sorted(list(set(self.layout.flatten().tolist()) - set('* #\n')))
+        self.pads = sorted(
+            list(set(self.layout.flatten().tolist()) - set('* #\n'))
+        )
         self.spawns = []
         for (x, y), char in np.ndenumerate(self.layout):
             if char != '#':
@@ -107,7 +110,7 @@ class PinPadDiscrete(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        
+
         # Reset variation space
         options = options or {}
         swm_spaces.reset_variation_space(
@@ -116,7 +119,7 @@ class PinPadDiscrete(gym.Env):
             options,
             DEFAULT_VARIATIONS,
         )
-        
+
         # Update task if it changed or if this is the first reset
         task_idx = int(self.variation_space['grid']['task'].value)
         new_task = TASK_NAMES[task_idx]
@@ -124,19 +127,21 @@ class PinPadDiscrete(gym.Env):
             self.task = new_task
             self._setup_layout(self.task)
             self._setup_pads_and_spawns()
-        
+
         # Set player position from variation space (index into spawns)
         spawn_idx = int(self.variation_space['agent']['spawn'].value)
         assert spawn_idx >= 0 and spawn_idx < len(self.spawns), (
-            f"Spawn index {spawn_idx} is out of range for {len(self.spawns)} spawns"
+            f'Spawn index {spawn_idx} is out of range for {len(self.spawns)} spawns'
         )
         self.player = self.spawns[spawn_idx]
-        
+
         # Set target pad from variation space using linear binning
-        target_pad_value = float(self.variation_space['agent']['target_pad'].value)
+        target_pad_value = float(
+            self.variation_space['agent']['target_pad'].value
+        )
         target_pad_idx = int(target_pad_value * len(self.pads))
         assert target_pad_idx >= 0 and target_pad_idx < len(self.pads), (
-            f"Target pad index {target_pad_idx} is out of range for {len(self.pads)} pads"
+            f'Target pad index {target_pad_idx} is out of range for {len(self.pads)} pads'
         )
         self.target_pad = self.pads[target_pad_idx]
         self.target_position = self._get_target_position(self.target_pad)
@@ -172,7 +177,9 @@ class PinPadDiscrete(gym.Env):
         target_cells = list(zip(*np.where(self.layout == target_pad)))
         center_cell = (X_BOUND // 2, Y_BOUND // 2)
         farthest_idx = np.argmax(
-            np.linalg.norm(np.array(target_cells) - np.array(center_cell), axis=1)
+            np.linalg.norm(
+                np.array(target_cells) - np.array(center_cell), axis=1
+            )
         )
         farthest_from_center = target_cells[farthest_idx]
         return farthest_from_center
@@ -199,7 +206,11 @@ class PinPadDiscrete(gym.Env):
                 grid[x, y] = (192, 192, 192)  # Gray
             elif char in self.pads:
                 color = np.array(COLORS[char])
-                color = color if char == current else (10 * color + 90 * white) / 100
+                color = (
+                    color
+                    if char == current
+                    else (10 * color + 90 * white) / 100
+                )
                 grid[x, y] = color
         grid[player_position] = (0, 0, 0)
 

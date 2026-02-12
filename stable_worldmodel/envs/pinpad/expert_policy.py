@@ -67,11 +67,15 @@ def get_action(info_dict, env, env_type, **kwargs):
             ).squeeze()
 
         if env_type == 'discrete':
-            actions.append(compute_action_discrete(agent_position, target_position))
+            actions.append(
+                compute_action_discrete(agent_position, target_position)
+            )
         elif env_type == 'continuous':
-            actions.append(compute_action_continuous(agent_position, target_position))
+            actions.append(
+                compute_action_continuous(agent_position, target_position)
+            )
         else:
-            raise ValueError(f"Invalid environment type: {env_type}")
+            raise ValueError(f'Invalid environment type: {env_type}')
 
     actions = np.array(actions)
     return actions if is_vectorized else actions[0]
@@ -86,8 +90,12 @@ class ExpertPolicyDiscrete(BasePolicy):
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
-        assert 'agent_position' in info_dict, 'Agent position must be provided in info_dict'
-        assert 'target_position' in info_dict, 'Target position must be provided in info_dict'
+        assert 'agent_position' in info_dict, (
+            'Agent position must be provided in info_dict'
+        )
+        assert 'target_position' in info_dict, (
+            'Target position must be provided in info_dict'
+        )
 
         return get_action(info_dict, self.env, 'discrete', **kwargs)
 
@@ -101,7 +109,11 @@ class ExpertPolicy(BasePolicy):
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
-        assert 'agent_position' in info_dict, 'Agent position must be provided in info_dict'
-        assert 'target_position' in info_dict, 'Target position must be provided in info_dict'
+        assert 'agent_position' in info_dict, (
+            'Agent position must be provided in info_dict'
+        )
+        assert 'target_position' in info_dict, (
+            'Target position must be provided in info_dict'
+        )
 
         return get_action(info_dict, self.env, 'continuous', **kwargs)

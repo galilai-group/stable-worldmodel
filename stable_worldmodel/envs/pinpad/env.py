@@ -21,7 +21,6 @@ DEFAULT_VARIATIONS = (
 
 # TODO: Re-enable targets to be sequences of pads instead of single pads
 class PinPad(gym.Env):
-
     def __init__(
         self,
         seed=None,
@@ -40,15 +39,20 @@ class PinPad(gym.Env):
         self.player = None
         self.target_pad = None
 
-    def _build_variation_space(self):        
+    def _build_variation_space(self):
         return swm_spaces.Dict(
             {
                 'agent': swm_spaces.Dict(
                     {
                         'spawn': swm_spaces.Box(
                             low=np.array([1.5, 1.5], dtype=np.float64),
-                            high=np.array([X_BOUND - 1.5, Y_BOUND - 1.5], dtype=np.float64),
-                            init_value=np.array([X_BOUND / 2, Y_BOUND / 2], dtype=np.float64),
+                            high=np.array(
+                                [X_BOUND - 1.5, Y_BOUND - 1.5],
+                                dtype=np.float64,
+                            ),
+                            init_value=np.array(
+                                [X_BOUND / 2, Y_BOUND / 2], dtype=np.float64
+                            ),
                             shape=(2,),
                             dtype=np.float64,
                         ),
@@ -79,13 +83,17 @@ class PinPad(gym.Env):
 
     def _setup_layout(self, task):
         layout = LAYOUTS[task]
-        self.layout = np.array([list(line) for line in layout.split('\n')]).T  # Transposes so that actions are (dx, dy)
+        self.layout = np.array(
+            [list(line) for line in layout.split('\n')]
+        ).T  # Transposes so that actions are (dx, dy)
         assert self.layout.shape == (X_BOUND, Y_BOUND), (
-            f"Layout shape should be ({X_BOUND}, {Y_BOUND}), got {self.layout.shape}"
+            f'Layout shape should be ({X_BOUND}, {Y_BOUND}), got {self.layout.shape}'
         )
 
     def _setup_pads(self):
-        self.pads = sorted(list(set(self.layout.flatten().tolist()) - set('* #\n')))
+        self.pads = sorted(
+            list(set(self.layout.flatten().tolist()) - set('* #\n'))
+        )
 
     @property
     def action_space(self):
@@ -107,7 +115,7 @@ class PinPad(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        
+
         # Reset variation space
         options = options or {}
         swm_spaces.reset_variation_space(
@@ -116,7 +124,7 @@ class PinPad(gym.Env):
             options,
             DEFAULT_VARIATIONS,
         )
-        
+
         # Update task if it changed or if this is the first reset
         task_idx = int(self.variation_space['grid']['task'].value)
         new_task = TASK_NAMES[task_idx]
@@ -124,16 +132,18 @@ class PinPad(gym.Env):
             self.task = new_task
             self._setup_layout(self.task)
             self._setup_pads()
-        
+
         # Set player position directly from variation space
         spawn_position = self.variation_space['agent']['spawn'].value
         self.player = tuple(spawn_position)
-        
+
         # Set target pad from variation space using linear binning
-        target_pad_value = float(self.variation_space['agent']['target_pad'].value)
+        target_pad_value = float(
+            self.variation_space['agent']['target_pad'].value
+        )
         target_pad_idx = int(target_pad_value * len(self.pads))
         assert target_pad_idx >= 0 and target_pad_idx < len(self.pads), (
-            f"Target pad index {target_pad_idx} is out of range for {len(self.pads)} pads"
+            f'Target pad index {target_pad_idx} is out of range for {len(self.pads)} pads'
         )
         self.target_pad = self.pads[target_pad_idx]
         self.target_position = self._get_target_position(self.target_pad)
@@ -149,11 +159,15 @@ class PinPad(gym.Env):
         x = np.clip(self.player[0] + action[0], 1.5, X_BOUND - 1.5)
         y = np.clip(self.player[1] + action[1], 1.5, Y_BOUND - 1.5)
         tile = self.layout[int(x)][int(y)]
-        if tile != '#':  # TODO: Add linear interpolation in case of wall collision
+        if (
+            tile != '#'
+        ):  # TODO: Add linear interpolation in case of wall collision
             self.player = (float(x), float(y))
-        
+
         # Makes observation
-        agent_in_target_pad = self._agent_in_target_pad(self.player, self.target_pad)
+        agent_in_target_pad = self._agent_in_target_pad(
+            self.player, self.target_pad
+        )
         obs = self.render()
         reward = 10.0 if agent_in_target_pad else 0.0
         terminated = agent_in_target_pad  # TODO: Maybe always set to false?
@@ -162,7 +176,9 @@ class PinPad(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def _get_target_position(self, target_pad):
-        target_cells = np.array(list(zip(*np.where(self.layout == target_pad))), dtype=np.float64)
+        target_cells = np.array(
+            list(zip(*np.where(self.layout == target_pad))), dtype=np.float64
+        )
         target_cell_centers = target_cells + 0.5
         center_cell = np.array([X_BOUND / 2, Y_BOUND / 2], dtype=np.float64)
         farthest_idx = np.argmax(
@@ -173,17 +189,25 @@ class PinPad(gym.Env):
 
     def _agent_in_target_pad(self, player, target_pad):
         # Gets all cells that overlap with the agent
-        corner_deltas = np.array([
-            (-0.5, -0.5),
-            (-0.5, 0.5),
-            (0.5, -0.5),
-            (0.5, 0.5),
-        ], dtype=np.float64)
+        corner_deltas = np.array(
+            [
+                (-0.5, -0.5),
+                (-0.5, 0.5),
+                (0.5, -0.5),
+                (0.5, 0.5),
+            ],
+            dtype=np.float64,
+        )
         corner_positions = player + corner_deltas
-        distinct_corner_positions = [tuple(pos) for pos in np.unique(corner_positions.astype(int), axis=0)]
+        distinct_corner_positions = [
+            tuple(pos)
+            for pos in np.unique(corner_positions.astype(int), axis=0)
+        ]
 
         # Gets all cells from the target pad
-        target_cells = np.array(list(zip(*np.where(self.layout == target_pad))), dtype=np.float64)
+        target_cells = np.array(
+            list(zip(*np.where(self.layout == target_pad))), dtype=np.float64
+        )
         target_cells = [tuple(pos) for pos in target_cells.astype(int)]
 
         # Checks that the agent is entirely within the target pad
@@ -213,7 +237,11 @@ class PinPad(gym.Env):
                 grid[x, y] = (192, 192, 192)  # Gray
             elif char in self.pads:
                 color = np.array(COLORS[char])
-                color = color if self._agent_in_target_pad(player_position, char) else (10 * color + 90 * white) / 100
+                color = (
+                    color
+                    if self._agent_in_target_pad(player_position, char)
+                    else (10 * color + 90 * white) / 100
+                )
                 grid[x, y] = color
 
         # Scales up and transposes grid
