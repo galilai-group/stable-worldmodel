@@ -316,33 +316,3 @@ LAYOUT_EIGHT = """
 #666  7777  222#
 ################
 """.strip('\n')
-
-
-if __name__ == '__main__':
-    import imageio
-    from pathlib import Path
-    from tqdm import tqdm
-    
-    env = PinPadDiscrete()
-    logging.info("Made env")
-
-    obs, info = env.reset()
-    logging.info(f"Called reset(), and got obs.shape: {obs.shape}")
-    logging.info(f"Task: {env.task}, target pad: {env.target_pad}, player position: {env.player}")
-    frames = [obs]
-    
-    for i in tqdm(range(3000), desc="Collecting data"):
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        frames.append(obs)
-        
-        # if terminated or truncated:
-        #     logging.info(f"Episode ended at step {i+1}")
-        #     break
-    
-    # Save video
-    video_dir = Path('../stable-worldmodel/videos')
-    video_dir.mkdir(exist_ok=True)
-    video_path = video_dir / 'pinpad_episode.mp4'
-    imageio.mimsave(video_path, frames, fps=30)
-    logging.info(f"Saved video with {len(frames)} frames to {video_path}")
