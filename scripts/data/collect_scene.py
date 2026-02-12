@@ -1,7 +1,7 @@
 import os
 
 
-os.environ["MUJOCO_GL"] = "egl"
+os.environ['MUJOCO_GL'] = 'egl'
 
 import concurrent.futures
 
@@ -21,26 +21,28 @@ def collect_shard(shard_id, seed, cfg):
     """
     try:
         world = swm.World(
-            "swm/OGBScene-v0",
+            'swm/OGBScene-v0',
             **cfg.world,
-            env_type="single",
-            ob_type="pixels",
+            env_type='single',
+            ob_type='pixels',
             multiview=False,
             width=224,
             height=224,
             visualize_info=False,
             terminate_at_goal=False,
-            mode="data_collection",
+            mode='data_collection',
         )
-        world.set_policy(ExpertPolicy(policy_type="plan_oracle"))
+        world.set_policy(ExpertPolicy(policy_type='plan_oracle'))
 
-        options = cfg.get("options")
+        options = cfg.get('options')
         traj_per_shard = cfg.num_traj // cfg.num_shards
 
-        logging.info(f"Process {shard_id}: Started collecting {traj_per_shard} trajectories...")
+        logging.info(
+            f'Process {shard_id}: Started collecting {traj_per_shard} trajectories...'
+        )
 
         world.record_dataset(
-            f"ogb_scene_oracle/shard_{shard_id}",
+            f'ogb_scene_oracle/shard_{shard_id}',
             episodes=traj_per_shard,
             seed=seed,
             cache_dir=cfg.cache_dir,
@@ -49,28 +51,32 @@ def collect_shard(shard_id, seed, cfg):
         )
 
         world.close()
-        return f"Shard {shard_id} success"
+        return f'Shard {shard_id} success'
 
     except Exception as e:
-        logging.error(f"Shard {shard_id} failed: {e}")
+        logging.error(f'Shard {shard_id} failed: {e}')
         raise e
 
 
-@hydra.main(version_base=None, config_path="./", config_name="config")
+@hydra.main(version_base=None, config_path='./config', config_name='default')
 def run(cfg: DictConfig):
     """Run parallel data collection script"""
 
     # Configuration for parallelism
-    max_workers = cfg.get("num_workers", 4)
+    max_workers = cfg.get('num_workers', 4)
 
-    logging.info(f"🚀 Starting data collection with {max_workers} parallel workers")
+    logging.info(
+        f'🚀 Starting data collection with {max_workers} parallel workers'
+    )
 
     # Generate distinct seeds for each shard upfront
     rng = np.random.default_rng(cfg.seed)
     seeds = [rng.integers(0, 1_000_000).item() for _ in range(cfg.num_shards)]
 
     # Use ProcessPoolExecutor to bypass the GIL
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=max_workers
+    ) as executor:
         futures = []
 
         for i in range(cfg.num_shards):
@@ -81,12 +87,12 @@ def run(cfg: DictConfig):
         for future in concurrent.futures.as_completed(futures):
             try:
                 result = future.result()
-                logging.success(f"✅ {result}")
+                logging.success(f'✅ {result}')
             except Exception as e:
-                logging.error(f"❌ Worker failed with error: {e}")
+                logging.error(f'❌ Worker failed with error: {e}')
 
-    logging.success("🎉🎉🎉 Completed data collection for all shards 🎉🎉🎉")
+    logging.success('🎉🎉🎉 Completed data collection for all shards 🎉🎉🎉')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run()
