@@ -8,14 +8,38 @@ from dm_control.suite import cheetah
 from dm_control.suite.wrappers import action_scale
 
 from stable_worldmodel import spaces as swm_space
+from stable_worldmodel.envs.dmcontrol.custom_tasks.cheetah import (
+    CustomCheetah,
+    Physics,
+)
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 
 _DEFAULT_TIME_LIMIT = 25
 
+_TASK_MOVE_SPEEDS = {
+    'run': 10,
+    'run-backward': 10,
+    'stand-front': 0,
+    'stand-back': 0,
+    'jump': 0,
+    'run-front': 5,
+    'run-back': 5,
+    'lie-down': 0,
+    'legs-up': 0,
+    'flip': 0,
+    'flip-backward': 0,
+}
+
 
 class CheetahDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, task='run', seed=None, environment_kwargs=None):
+        if task not in _TASK_MOVE_SPEEDS:
+            raise ValueError(
+                f"Unknown task '{task}'. Must be one of {list(_TASK_MOVE_SPEEDS.keys())}"
+            )
+        self._task = task
+        self._move_speed = _TASK_MOVE_SPEEDS[task]
         xml, assets = cheetah.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(cheetah.__file__)  # .../dm_control/suite
@@ -97,7 +121,17 @@ class CheetahDMControlWrapper(DMControlWrapper):
     @property
     def info(self):
         info = super().info
-        info['speed'] = self.env.physics.speed()
+        info['speed'] = float(self.env.physics.speed())
+        info['torso_height'] = float(
+            self.env.physics.named.data.xpos['torso', 'z']
+        )
+        info['bfoot_height'] = float(
+            self.env.physics.named.data.xpos['bfoot', 'z']
+        )
+        info['ffoot_height'] = float(
+            self.env.physics.named.data.xpos['ffoot', 'z']
+        )
+        info['angmomentum'] = float(self.env.physics.angmomentum())
         return info
 
     def compile_model(self, seed=None, environment_kwargs=None):
@@ -110,8 +144,10 @@ class CheetahDMControlWrapper(DMControlWrapper):
             out_file_name='cheetah.xml',
         )
         xml_path = os.path.join(self._mjcf_tempdir.name, 'cheetah.xml')
-        physics = cheetah.Physics.from_xml_path(xml_path)
-        task = cheetah.Cheetah(random=seed)
+        physics = Physics.from_xml_path(xml_path)
+        task = CustomCheetah(
+            goal=self._task, move_speed=self._move_speed, random=seed
+        )
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics, task, time_limit=_DEFAULT_TIME_LIMIT, **environment_kwargs

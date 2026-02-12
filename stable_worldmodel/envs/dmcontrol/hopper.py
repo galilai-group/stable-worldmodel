@@ -8,25 +8,26 @@ from dm_control.suite import hopper
 from dm_control.suite.wrappers import action_scale
 
 from stable_worldmodel import spaces as swm_space
+from stable_worldmodel.envs.dmcontrol.custom_tasks.hopper import (
+    CustomHopper,
+    Physics,
+)
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 
 _CONTROL_TIMESTEP = 0.02
 _DEFAULT_TIME_LIMIT = 20
 
-_TASK_HOPPING = {
-    'stand': False,
-    'hop': True,
-}
+_TASKS = ('stand', 'hop', 'hop-backward', 'flip', 'flip-backward')
 
 
 class HopperDMControlWrapper(DMControlWrapper):
     def __init__(self, task='hop', seed=None, environment_kwargs=None):
-        if task not in _TASK_HOPPING:
+        if task not in _TASKS:
             raise ValueError(
-                f"Unknown task '{task}'. Must be one of {list(_TASK_HOPPING.keys())}"
+                f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
             )
-        self._hopping = _TASK_HOPPING[task]
+        self._task = task
         xml, assets = hopper.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(hopper.__file__)  # .../dm_control/suite
@@ -106,7 +107,9 @@ class HopperDMControlWrapper(DMControlWrapper):
     @property
     def info(self):
         info = super().info
-        info['speed'] = self.env.physics.speed()
+        info['speed'] = float(self.env.physics.speed())
+        info['height'] = float(self.env.physics.height())
+        info['angmomentum'] = float(self.env.physics.angmomentum())
         return info
 
     def compile_model(self, seed=None, environment_kwargs=None):
@@ -119,8 +122,8 @@ class HopperDMControlWrapper(DMControlWrapper):
             out_file_name='hopper.xml',
         )
         xml_path = os.path.join(self._mjcf_tempdir.name, 'hopper.xml')
-        physics = hopper.Physics.from_xml_path(xml_path)
-        task = hopper.Hopper(hopping=self._hopping, random=seed)
+        physics = Physics.from_xml_path(xml_path)
+        task = CustomHopper(goal=self._task, random=seed)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics,

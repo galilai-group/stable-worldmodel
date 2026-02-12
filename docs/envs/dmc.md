@@ -82,7 +82,21 @@ world = swm.World('swm/HumanoidDMControl-v0', num_envs=4)
 
 A planar biped (half-cheetah) that must learn to run forward as fast as possible. The task uses feature-based observations (joint angles and velocities).
 
-**Task**: Run forward (maximize forward velocity).
+**Default task**: Run forward.
+
+| Task | Description |
+|------|-------------|
+| `run` (default) | Run forward at 10 m/s |
+| `run-backward` | Run backward at 10 m/s |
+| `stand-front` | Stand on front foot |
+| `stand-back` | Stand on back foot |
+| `jump` | Jump (both feet off ground) |
+| `run-front` | Run forward while lifting back foot |
+| `run-back` | Run forward while lifting front foot |
+| `lie-down` | Lie down flat |
+| `legs-up` | Lie on back with legs up |
+| `flip` | Flip forward |
+| `flip-backward` | Flip backward |
 
 ```python
 world = swm.World('swm/CheetahDMControl-v0', num_envs=4)
@@ -120,12 +134,15 @@ world = swm.World('swm/CheetahDMControl-v0', num_envs=4)
 
 A planar one-legged hopper that must learn to hop forward. The task uses feature-based observations (joint angles, velocities, touch sensor).
 
-**Default task**: Hop forward (maximize forward velocity).
+**Default task**: Hop forward at 2 m/s.
 
 | Task | Description |
 |------|-------------|
 | `stand` | Balance upright without moving |
-| `hop` (default) | Hop forward |
+| `hop` (default) | Hop forward at 2 m/s|
+| `hop-backward` | Hop backward at 1 m/s|
+| `flip` | Flip forward |
+| `flip-backward` | Flip backward |
 
 ```python
 world = swm.World('swm/HopperDMControl-v0', num_envs=4)
@@ -215,6 +232,11 @@ A planar bipedal walker that must learn to walk forward at a target speed. The t
 | `stand` | Stand upright without moving |
 | `walk` (default) | Walk forward at 1 m/s |
 | `run` | Run forward at 8 m/s |
+| `walk-backward` | Walk backward at 1 m/s |
+| `arabesque` | Stand on one foot in arabesque pose |
+| `lie_down` | Lie down flat |
+| `legs_up` | Lie on back with legs up |
+| `flip` | Flip upside down |
 
 ```python
 world = swm.World('swm/WalkerDMControl-v0', num_envs=4)
