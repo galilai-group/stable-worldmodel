@@ -125,6 +125,16 @@ class BallInCupDMControlWrapper(DMControlWrapper):
             }
         )
 
+    def eval_state(self):
+        """Returns True if the ball is currently in the cup."""
+        return bool(self.env.physics.in_target())
+
+    @property
+    def info(self):
+        info = super().info
+        info['success'] = float(self.eval_state())
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'

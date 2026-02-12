@@ -14,11 +14,24 @@ from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 _CONTROL_TIMESTEP = 0.025
 _DEFAULT_TIME_LIMIT = 25
 
+_STAND_SPEED = 0
 _WALK_SPEED = 1
+_RUN_SPEED = 10
+
+_TASK_SPEEDS = {
+    'stand': _STAND_SPEED,
+    'walk': _WALK_SPEED,
+    'run': _RUN_SPEED,
+}
 
 
 class HumanoidDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, task='walk', seed=None, environment_kwargs=None):
+        if task not in _TASK_SPEEDS:
+            raise ValueError(
+                f"Unknown task '{task}'. Must be one of {list(_TASK_SPEEDS.keys())}"
+            )
+        self._move_speed = _TASK_SPEEDS[task]
         xml, assets = humanoid.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(humanoid.__file__)  # .../dm_control/suite
@@ -97,6 +110,17 @@ class HumanoidDMControlWrapper(DMControlWrapper):
             }
         )
 
+    @property
+    def info(self):
+        info = super().info
+        com_velocity = np.linalg.norm(
+            self.env.physics.center_of_mass_velocity()[[0, 1]]
+        )
+        info['speed'] = com_velocity
+        info['torso_upright'] = self.env.physics.torso_upright()
+        info['head_height'] = self.env.physics.head_height()
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'
@@ -109,7 +133,7 @@ class HumanoidDMControlWrapper(DMControlWrapper):
         xml_path = os.path.join(self._mjcf_tempdir.name, 'humanoid.xml')
         physics = humanoid.Physics.from_xml_path(xml_path)
         task = humanoid.Humanoid(
-            move_speed=_WALK_SPEED, pure_state=False, random=seed
+            move_speed=self._move_speed, pure_state=False, random=seed
         )
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(

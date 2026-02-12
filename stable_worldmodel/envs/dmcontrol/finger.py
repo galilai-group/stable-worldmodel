@@ -14,11 +14,23 @@ from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 _DEFAULT_TIME_LIMIT = 20
 _CONTROL_TIMESTEP = 0.02
 
+_EASY_TARGET_SIZE = 0.07
 _HARD_TARGET_SIZE = 0.03
+
+_TASKS = {'spin', 'turn_easy', 'turn_hard'}
 
 
 class FingerDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, task='turn_hard', seed=None, environment_kwargs=None):
+        if task not in _TASKS:
+            raise ValueError(
+                f"Unknown task '{task}'. Must be one of {sorted(_TASKS)}"
+            )
+        self._task_name = task
+        if task == 'turn_easy':
+            self._target_size = _EASY_TARGET_SIZE
+        else:
+            self._target_size = _HARD_TARGET_SIZE
         xml, assets = finger.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(finger.__file__)  # .../dm_control/suite
@@ -132,6 +144,14 @@ class FingerDMControlWrapper(DMControlWrapper):
             }
         )
 
+    @property
+    def info(self):
+        info = super().info
+        info['hinge_velocity'] = self.env.physics.hinge_velocity()
+        info['target_position'] = self.env.physics.target_position().copy()
+        info['tip_position'] = self.env.physics.tip_position().copy()
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'
@@ -143,7 +163,12 @@ class FingerDMControlWrapper(DMControlWrapper):
         )
         xml_path = os.path.join(self._mjcf_tempdir.name, 'finger.xml')
         physics = finger.Physics.from_xml_path(xml_path)
-        task = finger.Turn(target_radius=_HARD_TARGET_SIZE, random=seed)
+        if self._task_name == 'spin':
+            task = finger.Spin(random=seed)
+        elif self._task_name == 'turn_easy':
+            task = finger.Turn(target_radius=_EASY_TARGET_SIZE, random=seed)
+        else:
+            task = finger.Turn(target_radius=_HARD_TARGET_SIZE, random=seed)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics,
@@ -336,12 +361,12 @@ class FingerDMControlWrapper(DMControlWrapper):
         if shape_id == 0:
             desired_type = 'box'
             desired_size = np.array(
-                [_HARD_TARGET_SIZE, _HARD_TARGET_SIZE, _HARD_TARGET_SIZE],
+                [self._target_size, self._target_size, self._target_size],
                 dtype=np.float32,
             )
         else:
             desired_type = 'sphere'
-            desired_size = np.array([_HARD_TARGET_SIZE], dtype=np.float32)
+            desired_size = np.array([self._target_size], dtype=np.float32)
 
         if target_geom.type != desired_type:
             target_changed = True

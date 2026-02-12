@@ -15,12 +15,23 @@ _DEFAULT_TIME_LIMIT = 20
 _CONTROL_TIMESTEP = 0.02
 
 _WALK_SPEED = 0.5
+_RUN_SPEED = 5
+
+_TASK_SPEEDS = {
+    'walk': _WALK_SPEED,
+    'run': _RUN_SPEED,
+}
 
 
 class QuadrupedDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, task='walk', seed=None, environment_kwargs=None):
+        if task not in _TASK_SPEEDS:
+            raise ValueError(
+                f"Unknown task '{task}'. Must be one of {list(_TASK_SPEEDS.keys())}"
+            )
+        self._desired_speed = _TASK_SPEEDS[task]
         xml = quadruped.make_model(
-            floor_size=_DEFAULT_TIME_LIMIT * _WALK_SPEED
+            floor_size=_DEFAULT_TIME_LIMIT * self._desired_speed
         )
         assets = quadruped.common.ASSETS
         xml = xml.replace(b'file="./common/', b'file="common/')
@@ -100,6 +111,12 @@ class QuadrupedDMControlWrapper(DMControlWrapper):
             }
         )
 
+    @property
+    def info(self):
+        info = super().info
+        info['torso_velocity'] = self.env.physics.torso_velocity().copy()
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'
@@ -111,7 +128,7 @@ class QuadrupedDMControlWrapper(DMControlWrapper):
         )
         xml_path = os.path.join(self._mjcf_tempdir.name, 'quadruped.xml')
         physics = quadruped.Physics.from_xml_path(xml_path)
-        task = quadruped.Move(random=seed, desired_speed=_WALK_SPEED)
+        task = quadruped.Move(random=seed, desired_speed=self._desired_speed)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics,
