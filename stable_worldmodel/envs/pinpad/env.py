@@ -96,7 +96,7 @@ class PinPad(gym.Env):
         return gym.spaces.Box(
             low=0,
             high=255,
-            shape=(X_BOUND * RENDER_SCALE, Y_BOUND * RENDER_SCALE, 3),
+            shape=(Y_BOUND * RENDER_SCALE, X_BOUND * RENDER_SCALE, 3),
             dtype=np.uint8,
         )
 
