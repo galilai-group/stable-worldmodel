@@ -14,11 +14,24 @@ from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 _CONTROL_TIMESTEP = 0.025
 _DEFAULT_TIME_LIMIT = 25
 
+_STAND_SPEED = 0
 _WALK_SPEED = 1
+_RUN_SPEED = 8
+
+_TASK_SPEEDS = {
+    'stand': _STAND_SPEED,
+    'walk': _WALK_SPEED,
+    'run': _RUN_SPEED,
+}
 
 
 class WalkerDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, task='walk', seed=None, environment_kwargs=None):
+        if task not in _TASK_SPEEDS:
+            raise ValueError(
+                f"Unknown task '{task}'. Must be one of {list(_TASK_SPEEDS.keys())}"
+            )
+        self._move_speed = _TASK_SPEEDS[task]
         xml, assets = walker.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(walker.__file__)  # .../dm_control/suite
@@ -104,6 +117,13 @@ class WalkerDMControlWrapper(DMControlWrapper):
             }
         )
 
+    @property
+    def info(self):
+        info = super().info
+        info['speed'] = self.env.physics.horizontal_velocity()
+        info['torso_height'] = self.env.physics.torso_height()
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'
@@ -115,7 +135,7 @@ class WalkerDMControlWrapper(DMControlWrapper):
         )
         xml_path = os.path.join(self._mjcf_tempdir.name, 'walker.xml')
         physics = walker.Physics.from_xml_path(xml_path)
-        task = walker.PlanarWalker(move_speed=_WALK_SPEED, random=seed)
+        task = walker.PlanarWalker(move_speed=self._move_speed, random=seed)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics,

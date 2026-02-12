@@ -8,7 +8,7 @@ external_links:
 
 ## Description
 
-A collection of continuous control environments built on the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control). These environments cover a range of classic locomotion and manipulation tasks in the [MuJoCo](https://mujoco.org/) physics engine.
+A collection of continuous control environments built on the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control). These environments cover a range of classic locomotion and manipulation tasks in the [MuJoCo](https://mujoco.org/) physics engine. Some environments support multiple tasks via the `task` constructor argument. In general, the task only affects how the reward is computed.
 
 ```python
 import stable_worldmodel as swm
@@ -40,7 +40,13 @@ world = swm.World('swm/CheetahDMControl-v0', num_envs=4)
 
 A 21-DoF humanoid body that must learn to walk forward at a target speed. The task uses feature-based observations (joint angles, head height, extremities, torso orientation, center-of-mass velocity).
 
-**Task**: Walk forward at a speed of 1 m/s.
+**Default task**: Walk forward at a speed of 1 m/s.
+
+| Task | Description |
+|------|-------------|
+| `stand` | Stand upright without moving |
+| `walk` (default) | Walk forward at 1 m/s |
+| `run` | Run forward at 10 m/s |
 
 ```python
 world = swm.World('swm/HumanoidDMControl-v0', num_envs=4)
@@ -114,7 +120,12 @@ world = swm.World('swm/CheetahDMControl-v0', num_envs=4)
 
 A planar one-legged hopper that must learn to hop forward. The task uses feature-based observations (joint angles, velocities, touch sensor).
 
-**Task**: Hop forward (maximize forward velocity).
+**Default task**: Hop forward (maximize forward velocity).
+
+| Task | Description |
+|------|-------------|
+| `stand` | Balance upright without moving |
+| `hop` (default) | Hop forward |
 
 ```python
 world = swm.World('swm/HopperDMControl-v0', num_envs=4)
@@ -152,7 +163,12 @@ world = swm.World('swm/HopperDMControl-v0', num_envs=4)
 
 A planar two-link arm that must reach a small target. The task uses feature-based observations (joint angles, velocities, finger-to-target distance).
 
-**Task**: Move the fingertip to a randomly placed target (size 0.015).
+**Default task**: Move the fingertip to a randomly placed target (size 0.015).
+
+| Task | Description |
+|------|-------------|
+| `easy` | Reach a large target (radius 0.05) |
+| `hard` (default) | Reach a small target (radius 0.015) |
 
 ```python
 world = swm.World('swm/ReacherDMControl-v0', num_envs=4)
@@ -192,7 +208,13 @@ world = swm.World('swm/ReacherDMControl-v0', num_envs=4)
 
 A planar bipedal walker that must learn to walk forward at a target speed. The task uses feature-based observations (joint angles, velocities, body height, orientation).
 
-**Task**: Walk forward at a speed of 1 m/s.
+**Default task**: Walk forward at a speed of 1 m/s.
+
+| Task | Description |
+|------|-------------|
+| `stand` | Stand upright without moving |
+| `walk` (default) | Walk forward at 1 m/s |
+| `run` | Run forward at 8 m/s |
 
 ```python
 world = swm.World('swm/WalkerDMControl-v0', num_envs=4)
@@ -231,7 +253,12 @@ world = swm.World('swm/WalkerDMControl-v0', num_envs=4)
 
 A four-legged quadruped robot that must learn to walk forward. The task uses feature-based observations (joint angles, velocities, torso orientation, end effector positions).
 
-**Task**: Walk forward at a speed of 0.5 m/s.
+**Default task**: Walk forward at a speed of 0.5 m/s.
+
+| Task | Description |
+|------|-------------|
+| `walk` (default) | Walk forward at 0.5 m/s |
+| `run` | Run forward at 5 m/s |
 
 ```python
 world = swm.World('swm/QuadrupedDMControl-v0', num_envs=4)
@@ -421,7 +448,15 @@ world = swm.World('swm/BallInCupDMControl-v0', num_envs=4)
 
 A planar finger that must turn a spinner to reach a target angle. The task uses feature-based observations (finger joint angles, spinner angle, target position).
 
-**Task**: Turn the spinner so that a target on it reaches a goal position (target radius 0.03).
+**Default task**: Turn the spinner so that a target on it reaches a goal position (target radius 0.03).
+
+| Task | Description |
+|------|-------------|
+| `spin` | Spin the body as fast as possible (no target/tip in observations) |
+| `turn_easy` | Turn to a target angle (target radius 0.07) |
+| `turn_hard` (default) | Turn to a target angle (target radius 0.03) |
+
+Note: the `spin` task produces different observations than the `turn_*` tasks (no target position or distance-to-target).
 
 ```python
 world = swm.World('swm/FingerDMControl-v0', num_envs=4)

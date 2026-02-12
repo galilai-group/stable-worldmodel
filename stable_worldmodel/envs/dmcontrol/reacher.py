@@ -13,11 +13,22 @@ from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 _DEFAULT_TIME_LIMIT = 20
 
+_BIG_TARGET = 0.05
 _SMALL_TARGET = 0.015
+
+_TASK_TARGET_SIZES = {
+    'easy': _BIG_TARGET,
+    'hard': _SMALL_TARGET,
+}
 
 
 class ReacherDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, task='hard', seed=None, environment_kwargs=None):
+        if task not in _TASK_TARGET_SIZES:
+            raise ValueError(
+                f"Unknown task '{task}'. Must be one of {list(_TASK_TARGET_SIZES.keys())}"
+            )
+        self._target_size = _TASK_TARGET_SIZES[task]
         xml, assets = reacher.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(reacher.__file__)  # .../dm_control/suite
@@ -106,6 +117,17 @@ class ReacherDMControlWrapper(DMControlWrapper):
             }
         )
 
+    @property
+    def info(self):
+        info = super().info
+        info['target_pos'] = self.env.physics.named.data.geom_xpos[
+            'target', :2
+        ].copy()
+        info['finger_pos'] = self.env.physics.named.data.geom_xpos[
+            'finger', :2
+        ].copy()
+        return info
+
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
         assert self._mjcf_model is not None, 'No MJCF model to compile!'
@@ -117,7 +139,7 @@ class ReacherDMControlWrapper(DMControlWrapper):
         )
         xml_path = os.path.join(self._mjcf_tempdir.name, 'reacher.xml')
         physics = reacher.Physics.from_xml_path(xml_path)
-        task = reacher.Reacher(target_size=_SMALL_TARGET, random=seed)
+        task = reacher.Reacher(target_size=self._target_size, random=seed)
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
             physics, task, time_limit=_DEFAULT_TIME_LIMIT, **environment_kwargs
@@ -247,11 +269,12 @@ class ReacherDMControlWrapper(DMControlWrapper):
         if shape_id == 0:
             desired_type = 'box'
             desired_size = np.array(
-                [_SMALL_TARGET, _SMALL_TARGET, _SMALL_TARGET], dtype=np.float32
+                [self._target_size, self._target_size, self._target_size],
+                dtype=np.float32,
             )
         else:
             desired_type = 'sphere'
-            desired_size = np.array([_SMALL_TARGET], dtype=np.float32)
+            desired_size = np.array([self._target_size], dtype=np.float32)
 
         if target_geom.type != desired_type:
             target_changed = True
