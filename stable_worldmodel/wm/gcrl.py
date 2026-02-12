@@ -828,7 +828,7 @@ class ExpectileLoss(nn.Module):
     ):
         residual = targets - preds
         # expectile weights: use adv if provided, otherwise use residual
-        weight_source = adv if adv is not None else residual
+        weight_source = adv if adv is not None else residual.detach()
         weight = torch.abs(self.tau - (weight_source < 0).float())
         loss = (weight * residual.pow(2)).mean()
         return loss
