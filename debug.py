@@ -24,12 +24,9 @@ ENVS = {
     'swm/PendulumDMControl-v0': ('pendulum',),
 }
 
-for env_name, (expert_name,) in ENVS.items():
+for i, (env_name, (expert_name,)) in enumerate(ENVS.items()):
     world = swm.World(
-        env_name,
-        num_envs=3,
-        image_shape=(224, 224),
-        max_episode_steps=500,
+        env_name, num_envs=3, image_shape=(224, 224), max_episode_steps=500
     )
 
     option_names = [
@@ -43,16 +40,29 @@ for env_name, (expert_name,) in ENVS.items():
             ckpt_path=f'../stable-expert/models/sac_dmcontrol/{expert_name}/expert_policy.zip',
             vec_normalize_path=f'../stable-expert/models/sac_dmcontrol/{expert_name}/vec_normalize.pkl',
             noise_std=0.3,
+            seed=i,
             device='cuda',
         )
     )
 
     os.makedirs(f'./dmc/normal/{expert_name}_expert/', exist_ok=True)
+
     world.record_video(
         f'./dmc/normal/{expert_name}_expert/',
         max_steps=500,
         fps=24,
         extension='gif',
+        seed=i,
+    )
+
+    world.set_policy(
+        ExpertPolicy(
+            ckpt_path=f'../stable-expert/models/sac_dmcontrol/{expert_name}/expert_policy.zip',
+            vec_normalize_path=f'../stable-expert/models/sac_dmcontrol/{expert_name}/vec_normalize.pkl',
+            noise_std=0.3,
+            seed=i,
+            device='cuda',
+        )
     )
 
     os.makedirs(f'./dmc/var/{expert_name}_expert/', exist_ok=True)
@@ -62,4 +72,5 @@ for env_name, (expert_name,) in ENVS.items():
         fps=24,
         extension='gif',
         options={'variation': option_names},
+        seed=i,
     )

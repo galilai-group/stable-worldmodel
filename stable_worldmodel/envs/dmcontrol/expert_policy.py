@@ -34,6 +34,7 @@ class ExpertPolicy(BasePolicy):
         ckpt_path: str,
         vec_normalize_path: str,
         noise_std: float = 0.0,
+        seed: int = None,
         device: str = 'cpu',
         **kwargs,
     ):
@@ -45,6 +46,7 @@ class ExpertPolicy(BasePolicy):
             ckpt_path (str): Path to the stable_baselines3 .zip file of the trained policy.
             vec_normalize_path (str): Path to the .pkl file containing the normalization statistics.
             noise_std (float): Standard deviation of Gaussian noise added to actions.
+            seed (int): Random seed for action noise.
             device (str): Device to load the model on, e.g., 'cpu' or 'cuda'.
         """
         super().__init__(**kwargs)
@@ -59,8 +61,12 @@ class ExpertPolicy(BasePolicy):
 
         self.model = sb3.SAC.load(ckpt_path, device=device)
         self.normalizer = SB3Normalizer(vec_normalize_path)
+        self.rng = np.random.default_rng(seed)
         self.noise_std = noise_std
         self.type = 'expert'
+
+        if seed is not None:
+            self.model.set_random_seed(seed)
 
     def set_env(self, env):
         self.env = env
@@ -80,7 +86,7 @@ class ExpertPolicy(BasePolicy):
         normalized_obs = self.normalizer(obs)
         actions, _ = self.model.predict(normalized_obs, deterministic=False)
         if self.noise_std > 0:
-            noise = np.random.normal(0, self.noise_std, size=actions.shape)
+            noise = self.rng.normal(0, self.noise_std, size=actions.shape)
             actions = actions + noise
         return np.clip(actions, -1.0, 1.0).astype(np.float32)
 
