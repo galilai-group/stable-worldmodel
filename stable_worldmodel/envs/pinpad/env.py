@@ -202,7 +202,7 @@ class PinPad(gym.Env):
         if player_position is None:
             player_position = self.player
 
-        # Colors all cells except agent and scales up
+        # Colors all cells except agent
         for (x, y), char in np.ndenumerate(self.layout):
             if char == '#':
                 grid[x, y] = (192, 192, 192)  # Gray
@@ -210,21 +210,23 @@ class PinPad(gym.Env):
                 color = np.array(COLORS[char])
                 color = color if self._agent_in_target_pad(player_position, char) else (10 * color + 90 * white) / 100
                 grid[x, y] = color
+
+        # Scales up and transposes grid
         image = np.repeat(np.repeat(grid, RENDER_SCALE, 0), RENDER_SCALE, 1)
+        image = image.transpose((1, 0, 2))
 
         # Places agent with anti-aliasing
         image_pil = Image.fromarray(image, mode='RGB')
         draw = ImageDraw.Draw(image_pil)
+        x, y = player_position
         draw.rectangle(
             [
-                (player_position[0] - 0.5) * RENDER_SCALE,
-                (player_position[1] - 0.5) * RENDER_SCALE,
-                (player_position[0] + 0.5) * RENDER_SCALE,
-                (player_position[1] + 0.5) * RENDER_SCALE,
+                (x - 0.5) * RENDER_SCALE,
+                (y - 0.5) * RENDER_SCALE,
+                (x + 0.5) * RENDER_SCALE,
+                (y + 0.5) * RENDER_SCALE,
             ],
             fill=(0, 0, 0),  # Agent is black
         )
         image = np.asarray(image_pil)
-
-        # Scales up
-        return image.transpose((1, 0, 2))
+        return image
