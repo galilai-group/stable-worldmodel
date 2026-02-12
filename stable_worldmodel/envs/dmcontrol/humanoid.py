@@ -28,26 +28,28 @@ class HumanoidDMControlWrapper(DMControlWrapper):
             assets=assets or {},
         )
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
-        super().__init__(self.env, "humanoid")
+        super().__init__(self.env, 'humanoid')
         self.variation_space = swm_space.Dict(
             {
-                "agent": swm_space.Dict(
+                'agent': swm_space.Dict(
                     {
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(3,),
                             dtype=np.float64,
-                            init_value=np.array([0.7, 0.5, 0.3], dtype=np.float64),
+                            init_value=np.array(
+                                [0.7, 0.5, 0.3], dtype=np.float64
+                            ),
                         ),
-                        "torso_density": swm_space.Box(
+                        'torso_density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1000], dtype=np.float32),
                         ),
-                        "right_lower_arm_density": swm_space.Box(
+                        'right_lower_arm_density': swm_space.Box(
                             low=500,
                             high=1500,
                             shape=(1,),
@@ -55,30 +57,35 @@ class HumanoidDMControlWrapper(DMControlWrapper):
                             init_value=np.array([1000], dtype=np.float32),
                         ),
                         # TODO lock left_knee joint (by default it is unlocked 1)
-                        "left_knee_locked": swm_space.Discrete(2, init_value=1),
+                        'left_knee_locked': swm_space.Discrete(
+                            2, init_value=1
+                        ),
                     }
                 ),
-                "floor": swm_space.Dict(
+                'floor': swm_space.Dict(
                     {
-                        "friction": swm_space.Box(
+                        'friction': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(1,),
                             dtype=np.float32,
                             init_value=np.array([1.0], dtype=np.float32),
                         ),
-                        "color": swm_space.Box(
+                        'color': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(2, 3),
                             dtype=np.float64,
-                            init_value=np.array([[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]], dtype=np.float64),
+                            init_value=np.array(
+                                [[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]],
+                                dtype=np.float64,
+                            ),
                         ),
                     }
                 ),
-                "light": swm_space.Dict(
+                'light': swm_space.Dict(
                     {
-                        "intensity": swm_space.Box(
+                        'intensity': swm_space.Box(
                             low=0.0,
                             high=1.0,
                             shape=(1,),
@@ -92,19 +99,25 @@ class HumanoidDMControlWrapper(DMControlWrapper):
 
     def compile_model(self, seed=None, environment_kwargs=None):
         """Compile the MJCF model into DMControl env."""
-        assert self._mjcf_model is not None, "No MJCF model to compile!"
+        assert self._mjcf_model is not None, 'No MJCF model to compile!'
         self._mjcf_tempdir = tempfile.TemporaryDirectory()
         mjcf.export_with_assets(
             self._mjcf_model,
             self._mjcf_tempdir.name,
-            out_file_name="humanoid.xml",
+            out_file_name='humanoid.xml',
         )
-        xml_path = os.path.join(self._mjcf_tempdir.name, "humanoid.xml")
+        xml_path = os.path.join(self._mjcf_tempdir.name, 'humanoid.xml')
         physics = humanoid.Physics.from_xml_path(xml_path)
-        task = humanoid.Humanoid(move_speed=_WALK_SPEED, pure_state=False, random=seed)
+        task = humanoid.Humanoid(
+            move_speed=_WALK_SPEED, pure_state=False, random=seed
+        )
         environment_kwargs = environment_kwargs or {}
         env = control.Environment(
-            physics, task, time_limit=_DEFAULT_TIME_LIMIT, control_timestep=_CONTROL_TIMESTEP, **environment_kwargs
+            physics,
+            task,
+            time_limit=_DEFAULT_TIME_LIMIT,
+            control_timestep=_CONTROL_TIMESTEP,
+            **environment_kwargs,
         )
         env = action_scale.Wrapper(env, minimum=-1.0, maximum=1.0)
         self.env = env
@@ -128,42 +141,57 @@ class HumanoidDMControlWrapper(DMControlWrapper):
             - Some variations call self.mark_dirty() to trigger recompilation
         """
         # Modify floor color
-        grid_texture = mjcf_model.find("texture", "grid")
+        grid_texture = mjcf_model.find('texture', 'grid')
         texture_changed = grid_texture.rgb1 is None or not np.allclose(
-            grid_texture.rgb1, self.variation_space["floor"]["color"].value[0]
+            grid_texture.rgb1, self.variation_space['floor']['color'].value[0]
         )
         texture_changed = texture_changed or (
             grid_texture.rgb2 is None
-            or not np.allclose(grid_texture.rgb2, self.variation_space["floor"]["color"].value[1])
+            or not np.allclose(
+                grid_texture.rgb2,
+                self.variation_space['floor']['color'].value[1],
+            )
         )
-        grid_texture.rgb1 = self.variation_space["floor"]["color"].value[0]
-        grid_texture.rgb2 = self.variation_space["floor"]["color"].value[1]
+        grid_texture.rgb1 = self.variation_space['floor']['color'].value[0]
+        grid_texture.rgb2 = self.variation_space['floor']['color'].value[1]
 
         # Modify agent (humanoid) color via material
         agent_color_changed = False
 
-        desired_rgb = np.asarray(self.variation_space["agent"]["color"].value, dtype=np.float32).reshape(3)
-        desired_rgba = np.concatenate([desired_rgb, np.array([1.0], dtype=np.float32)], axis=0)
+        desired_rgb = np.asarray(
+            self.variation_space['agent']['color'].value, dtype=np.float32
+        ).reshape(3)
+        desired_rgba = np.concatenate(
+            [desired_rgb, np.array([1.0], dtype=np.float32)], axis=0
+        )
 
-        self_mat = mjcf_model.find("material", "self")
+        self_mat = mjcf_model.find('material', 'self')
         assert self_mat is not None, "Expected material named 'self'"
 
-        if self_mat.rgba is None or not np.allclose(np.asarray(self_mat.rgba, dtype=np.float32), desired_rgba):
+        if self_mat.rgba is None or not np.allclose(
+            np.asarray(self_mat.rgba, dtype=np.float32), desired_rgba
+        ):
             agent_color_changed = True
         self_mat.rgba = desired_rgba
 
         mass_changed = False
 
         # Modify floor friction
-        floor_geom = mjcf_model.find("geom", "floor")
-        desired_friction = float(np.asarray(self.variation_space["floor"]["friction"].value).reshape(-1)[0])
+        floor_geom = mjcf_model.find('geom', 'floor')
+        desired_friction = float(
+            np.asarray(
+                self.variation_space['floor']['friction'].value
+            ).reshape(-1)[0]
+        )
 
         # MJCF may store geom.friction as None if not specified in XML.
         # MuJoCo default is: [1, 0.005, 0.0001]
         if floor_geom.friction is None:
             current_friction = np.array([1.0, 0.005, 0.0001], dtype=np.float32)
         else:
-            current_friction = np.asarray(floor_geom.friction, dtype=np.float32).copy()
+            current_friction = np.asarray(
+                floor_geom.friction, dtype=np.float32
+            ).copy()
 
         new_friction = current_friction.copy()
         new_friction[0] = desired_friction
@@ -172,18 +200,24 @@ class HumanoidDMControlWrapper(DMControlWrapper):
         floor_geom.friction = new_friction
 
         # Modify torso density
-        torso_geom = mjcf_model.find("geom", "torso")
+        torso_geom = mjcf_model.find('geom', 'torso')
         base = torso_geom.density if torso_geom.density is not None else 1000.0
-        desired_density = float(np.asarray(self.variation_space["agent"]["torso_density"].value).reshape(-1)[0])
+        desired_density = float(
+            np.asarray(
+                self.variation_space['agent']['torso_density'].value
+            ).reshape(-1)[0]
+        )
         if not np.allclose(base, desired_density):
             mass_changed = True
         torso_geom.density = desired_density
 
         # Modify right lower arm density
-        rla_geom = mjcf_model.find("geom", "right_lower_arm")
+        rla_geom = mjcf_model.find('geom', 'right_lower_arm')
         base = rla_geom.density if rla_geom.density is not None else 1000.0
         desired_density = float(
-            np.asarray(self.variation_space["agent"]["right_lower_arm_density"].value).reshape(-1)[0]
+            np.asarray(
+                self.variation_space['agent']['right_lower_arm_density'].value
+            ).reshape(-1)[0]
         )
         if not np.allclose(base, desired_density):
             mass_changed = True
@@ -191,20 +225,30 @@ class HumanoidDMControlWrapper(DMControlWrapper):
 
         # Modify light intensity if a global light exists.
         light_changed = False
-        light = mjcf_model.find("light", "top")
-        desired_diffuse = self.variation_space["light"]["intensity"].value[0] * np.ones((3), dtype=np.float32)
-        light_changed = light.diffuse is None or not np.allclose(light.diffuse, desired_diffuse)
+        light = mjcf_model.find('light', 'top')
+        desired_diffuse = self.variation_space['light']['intensity'].value[
+            0
+        ] * np.ones((3), dtype=np.float32)
+        light_changed = light.diffuse is None or not np.allclose(
+            light.diffuse, desired_diffuse
+        )
         light.diffuse = desired_diffuse
 
         # If any properties changed, mark the model as dirty.
-        if light_changed or texture_changed or friction_changed or mass_changed or agent_color_changed:
+        if (
+            light_changed
+            or texture_changed
+            or friction_changed
+            or mass_changed
+            or agent_color_changed
+        ):
             self.mark_dirty()
         return mjcf_model
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     env = HumanoidDMControlWrapper(seed=0)
     obs, info = env.reset()
-    print("obs shape:", obs.shape)
-    print("info:", info)
+    print('obs shape:', obs.shape)
+    print('info:', info)
     env.close()
