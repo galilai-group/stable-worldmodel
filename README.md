@@ -43,6 +43,24 @@ results = world.evaluate(episodes=50)
 print(f"Success Rate: {results['success_rate']:.1f}%")
 ```
 
+## Supported Environments
+
+| Environment | Normal | Variations |
+|:-----------:|:------:|:----------:|
+| **Cheetah** | <img src="docs/assets/cheetah.gif" width="200"> | <img src="docs/assets/cheetah_var.gif" width="200"> |
+| **Hopper** | <img src="docs/assets/hopper.gif" width="200"> | <img src="docs/assets/hopper_var.gif" width="200"> |
+| **Walker** | <img src="docs/assets/walker.gif" width="200"> | <img src="docs/assets/walker_var.gif" width="200"> |
+| **Quadruped** | <img src="docs/assets/quadruped.gif" width="200"> | <img src="docs/assets/quadruped_var.gif" width="200"> |
+| **Reacher** | <img src="docs/assets/reacher.gif" width="200"> | <img src="docs/assets/reacher_var.gif" width="200"> |
+| **Pendulum** | <img src="docs/assets/pendulum.gif" width="200"> | <img src="docs/assets/pendulum_var.gif" width="200"> |
+| **Cartpole** | <img src="docs/assets/cartpole.gif" width="200"> | <img src="docs/assets/cartpole_var.gif" width="200"> |
+| **Ball in Cup** | <img src="docs/assets/ballincup.gif" width="200"> | <img src="docs/assets/ballincup_var.gif" width="200"> |
+| **Finger** | <img src="docs/assets/finger.gif" width="200"> | <img src="docs/assets/finger_var.gif" width="200"> |
+| **Push-T** | <img src="docs/assets/pusht.gif" width="200"> | <img src="docs/assets/pusht_fov.gif" width="200"> |
+| **Two-Room** | <img src="docs/assets/tworoom.gif" width="200"> | <img src="docs/assets/tworoom_fov.gif" width="200"> |
+| **OGB Cube** | <img src="docs/assets/cube.gif" width="200"> | <img src="docs/assets/cube_fov.gif" width="200"> |
+| **OGB Scene** | <img src="docs/assets/scene.gif" width="200"> | <img src="docs/assets/scene_fov.gif" width="200"> |
+
 ## Contributing
 
 Setup your codebase:

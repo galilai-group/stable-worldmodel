@@ -222,6 +222,7 @@ class World:
         fps: int = 30,
         viewname: str | list[str] = 'pixels',
         seed: int | None = None,
+        extension: str = 'mp4',
         options: dict | None = None,
     ) -> None:
         """Record rollout videos for each environment under the current policy.
@@ -232,14 +233,20 @@ class World:
             fps: Frames per second for the output video.
             viewname: Key(s) in `infos` containing image data to render.
             seed: Random seed for reset.
+            extension: Video file format ('mp4' or 'gif').
             options: Options for reset.
         """
+
+        assert extension in ['mp4', 'gif'], (
+            'Unsupported video format. Use "mp4" or "gif".'
+        )
+
         import imageio
 
         viewname = [viewname] if isinstance(viewname, str) else viewname
         out = [
             imageio.get_writer(
-                Path(video_path) / f'env_{i}.mp4',
+                Path(video_path) / f'env_{i}.{extension}',
                 fps=fps,
                 codec='libx264',
             )
