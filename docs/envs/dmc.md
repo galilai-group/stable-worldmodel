@@ -72,7 +72,7 @@ world = swm.World('swm/HumanoidDMControl-v0', num_envs=4)
 
 ## Cheetah
 
-![cheetah](../assets/cheetah_run.gif)
+![cheetah](../assets/cheetah.gif)
 
 A planar biped (half-cheetah) that must learn to run forward as fast as possible. The task uses feature-based observations (joint angles and velocities).
 
@@ -104,11 +104,13 @@ world = swm.World('swm/CheetahDMControl-v0', num_envs=4)
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
+![cheetah_var](../assets/cheetah_var.gif)
+
 ---
 
 ## Hopper
 
-![hopper](../assets/hooper_backward.gif)
+![hopper](../assets/hopper.gif)
 
 A planar one-legged hopper that must learn to hop forward. The task uses feature-based observations (joint angles, velocities, touch sensor).
 
@@ -139,6 +141,8 @@ world = swm.World('swm/HopperDMControl-v0', num_envs=4)
 | `floor.friction` | Box(0, 1, shape=(1,)) | Floor friction coefficient |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
+
+![hopper_var](../assets/hopper_var.gif)
 
 ---
 
@@ -178,9 +182,13 @@ world = swm.World('swm/ReacherDMControl-v0', num_envs=4)
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
+![reacher_var](../assets/reacher_var.gif)
+
 ---
 
 ## Walker
+
+![walker](../assets/walker.gif)
 
 A planar bipedal walker that must learn to walk forward at a target speed. The task uses feature-based observations (joint angles, velocities, body height, orientation).
 
@@ -213,9 +221,13 @@ world = swm.World('swm/WalkerDMControl-v0', num_envs=4)
 | `floor.rotation_y` | Box(-10, 10, shape=(1,)) | Floor rotation around Y axis (degrees) |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
+![walker_var](../assets/walker_var.gif)
+
 ---
 
 ## Quadruped
+
+![quadruped](../assets/quadruped.gif)
 
 A four-legged quadruped robot that must learn to walk forward. The task uses feature-based observations (joint angles, velocities, torso orientation, end effector positions).
 
@@ -246,6 +258,8 @@ world = swm.World('swm/QuadrupedDMControl-v0', num_envs=4)
 | `floor.friction` | Box(0, 1, shape=(1,)) | Floor friction coefficient |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
+
+![quadruped_var](../assets/quadruped_var.gif)
 
 ---
 
@@ -288,7 +302,7 @@ world = swm.World('swm/AcrobotDMControl-v0', num_envs=4)
 
 ## Pendulum
 
-![pendulum](../assets/swingup.gif)
+![pendulum](../assets/pendulum.gif)
 
 A single-link pendulum that must swing up and balance. The task uses feature-based observations (angle, angular velocity).
 
@@ -318,6 +332,8 @@ world = swm.World('swm/PendulumDMControl-v0', num_envs=4)
 | `agent.mass_shape` | Discrete(2) | Tip mass shape (0: box, 1: sphere) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
+
+![pendulum_var](../assets/pendulum_var.gif)
 
 ---
 
@@ -354,11 +370,13 @@ world = swm.World('swm/CartpoleDMControl-v0', num_envs=4)
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
+![cartpole_var](../assets/cartpole_var.gif)
+
 ---
 
 ## Ball in Cup
 
-![cup](../assets/cup_catch.gif)
+![ballincup](../assets/ballincup.gif)
 
 A planar ball-in-cup system where a cup must catch and hold a ball attached by a string. The task uses feature-based observations (cup position, ball position, velocities).
 
@@ -393,9 +411,13 @@ world = swm.World('swm/BallInCupDMControl-v0', num_envs=4)
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
 
+![ballincup_var](../assets/ballincup_var.gif)
+
 ---
 
 ## Finger
+
+![finger](../assets/finger.gif)
 
 A planar finger that must turn a spinner to reach a target angle. The task uses feature-based observations (finger joint angles, spinner angle, target position).
 
@@ -430,6 +452,8 @@ world = swm.World('swm/FingerDMControl-v0', num_envs=4)
 | `rendering.render_target` | Discrete(2) | Whether to render the target (0: hidden, 1: visible) |
 | `floor.color` | Box(0, 1, shape=(2, 3)) | Checkerboard floor colors |
 | `light.intensity` | Box(0, 1, shape=(1,)) | Scene lighting intensity |
+
+![finger_var](../assets/finger_var.gif)
 
 ---
 
