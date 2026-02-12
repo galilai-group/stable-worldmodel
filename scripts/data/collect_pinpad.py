@@ -9,12 +9,12 @@ import stable_worldmodel as swm
 def run(cfg):
     """Run data collection script"""
 
-    world = swm.World('swm/PinPad-Discrete-v0', **cfg.world)
-    world.set_policy(swm.envs.pinpad.ExpertPolicyDiscrete())
-    logging.info(f"Set world's policy to expert policy")
+    world = swm.World('swm/PinPad-v0', **cfg.world)
+    world.set_policy(swm.policy.RandomPolicy(seed=cfg.seed))
+    logging.info(f"Set world's policy to random policy with seed {cfg.seed}")
 
     logging.info(f'Collecting data for {cfg.num_traj} trajectories')
-    dataset_name = 'pinpad_discrete'
+    dataset_name = 'pinpad'
     world.record_dataset(
         dataset_name,
         episodes=cfg.num_traj,
@@ -30,7 +30,7 @@ def run(cfg):
     )
     logging.info(f'Loaded dataset from {dataset.h5_path}')
     swm.utils.record_video_from_dataset(
-        video_path='./videos/pinpad_discrete',
+        video_path='./videos/pinpad',
         dataset=dataset,
         episode_idx=[0, 1, 2, 3],
         max_steps=cfg.world.max_episode_steps,

@@ -1,12 +1,15 @@
-import collections
-
 import gymnasium as gym
 import numpy as np
 
-from loguru import logger as logging
-import cv2
-
 from stable_worldmodel import spaces as swm_spaces
+from stable_worldmodel.envs.pinpad.constants import (
+    COLORS,
+    X_BOUND,
+    Y_BOUND,
+    RENDER_SCALE,
+    TASK_NAMES,
+    LAYOUTS,
+)
 
 
 DEFAULT_VARIATIONS = (
@@ -18,24 +21,7 @@ DEFAULT_VARIATIONS = (
 # TODO: Re-enable targets to be sequences of pads instead of single pads
 class PinPadDiscrete(gym.Env):
 
-    COLORS = {
-        '1': (255,   0,   0),
-        '2': (  0, 255,   0),
-        '3': (  0,   0, 255),
-        '4': (255, 255,   0),
-        '5': (255,   0, 255),
-        '6': (  0, 255, 255),
-        '7': (128,   0, 128),
-        '8': (  0, 128, 128),
-    }
-    X_BOUND = 16
-    Y_BOUND = 16
-    RENDER_SCALE = 14
-
     def __init__(self, seed=None, init_value=None):
-        # Task mapping for Discrete space
-        self.task_names = ['three', 'four', 'five', 'six', 'seven', 'eight']
-        
         # Build variation space
         self.variation_space = self._build_variation_space()
         if init_value is not None:
@@ -51,7 +37,7 @@ class PinPadDiscrete(gym.Env):
 
     def _build_variation_space(self):
         # Spawn locations don't include walls
-        max_spawns = self.X_BOUND * self.Y_BOUND - 2 * (self.X_BOUND + self.Y_BOUND - 2)
+        max_spawns = X_BOUND * Y_BOUND - 2 * (X_BOUND + Y_BOUND - 2)
         
         return swm_spaces.Dict(
             {
@@ -70,14 +56,14 @@ class PinPadDiscrete(gym.Env):
                             high=1.0,
                             init_value=0.0,
                             shape=(),
-                            dtype=np.float32,
+                            dtype=np.float64,
                         ),
                     }
                 ),
                 'grid': swm_spaces.Dict(
                     {
                         'task': swm_spaces.Discrete(
-                            n=len(self.task_names),
+                            n=len(TASK_NAMES),
                             start=0,
                             init_value=0,  # 0 = 'three', 5 = 'eight'
                         ),
@@ -88,17 +74,10 @@ class PinPadDiscrete(gym.Env):
         )
 
     def _setup_layout(self, task):
-        layout = {
-            'three': LAYOUT_THREE,
-            'four': LAYOUT_FOUR,
-            'five': LAYOUT_FIVE,
-            'six': LAYOUT_SIX,
-            'seven': LAYOUT_SEVEN,
-            'eight': LAYOUT_EIGHT,
-        }[task]
+        layout = LAYOUTS[task]
         self.layout = np.array([list(line) for line in layout.split('\n')]).T  # Transposes so that actions are (dx, dy)
-        assert self.layout.shape == (self.X_BOUND, self.Y_BOUND), (
-            f"Layout shape should be ({self.X_BOUND}, {self.Y_BOUND}), got {self.layout.shape}"
+        assert self.layout.shape == (X_BOUND, Y_BOUND), (
+            f"Layout shape should be ({X_BOUND}, {Y_BOUND}), got {self.layout.shape}"
         )
 
     def _setup_pads_and_spawns(self):
@@ -117,7 +96,7 @@ class PinPadDiscrete(gym.Env):
         return gym.spaces.Box(
             low=0,
             high=255,
-            shape=(self.X_BOUND * self.RENDER_SCALE, self.Y_BOUND * self.RENDER_SCALE, 3),
+            shape=(X_BOUND * RENDER_SCALE, Y_BOUND * RENDER_SCALE, 3),
             dtype=np.uint8,
         )
 
@@ -135,7 +114,7 @@ class PinPadDiscrete(gym.Env):
         
         # Update task if it changed or if this is the first reset
         task_idx = int(self.variation_space['grid']['task'].value)
-        new_task = self.task_names[task_idx]
+        new_task = TASK_NAMES[task_idx]
         if new_task != self.task or self.task is None:
             self.task = new_task
             self._setup_layout(self.task)
@@ -166,8 +145,8 @@ class PinPadDiscrete(gym.Env):
     def step(self, action):
         # Moves player
         move = [(0, 0), (0, 1), (0, -1), (1, 0), (-1, 0)][action]
-        x = np.clip(self.player[0] + move[0], 0, self.X_BOUND - 1)
-        y = np.clip(self.player[1] + move[1], 0, self.Y_BOUND - 1)
+        x = np.clip(self.player[0] + move[0], 0, X_BOUND - 1)
+        y = np.clip(self.player[1] + move[1], 0, Y_BOUND - 1)
         tile = self.layout[x][y]
         if tile != '#':
             self.player = (x, y)
@@ -186,7 +165,7 @@ class PinPadDiscrete(gym.Env):
 
     def _get_target_position(self, target_pad):
         target_cells = list(zip(*np.where(self.layout == target_pad)))
-        center_cell = (self.X_BOUND // 2, self.Y_BOUND // 2)
+        center_cell = (X_BOUND // 2, Y_BOUND // 2)
         farthest_idx = np.argmax(
             np.linalg.norm(np.array(target_cells) - np.array(center_cell), axis=1)
         )
@@ -203,7 +182,7 @@ class PinPadDiscrete(gym.Env):
 
     def render(self, player_position=None):
         # Sets up grid
-        grid = np.zeros((self.X_BOUND, self.Y_BOUND, 3), np.uint8) + 255
+        grid = np.zeros((X_BOUND, Y_BOUND, 3), np.uint8) + 255
         white = np.array([255, 255, 255])
         if player_position is None:
             player_position = self.player
@@ -214,126 +193,11 @@ class PinPadDiscrete(gym.Env):
             if char == '#':
                 grid[x, y] = (192, 192, 192)  # Gray
             elif char in self.pads:
-                color = np.array(self.COLORS[char])
+                color = np.array(COLORS[char])
                 color = color if char == current else (10 * color + 90 * white) / 100
                 grid[x, y] = color
         grid[player_position] = (0, 0, 0)
 
         # Scales up
-        image = np.repeat(np.repeat(grid, self.RENDER_SCALE, 0), self.RENDER_SCALE, 1)
+        image = np.repeat(np.repeat(grid, RENDER_SCALE, 0), RENDER_SCALE, 1)
         return image.transpose((1, 0, 2))
-
-
-LAYOUT_THREE = """
-################
-#1111      3333#
-#1111      3333#
-#1111      3333#
-#1111      3333#
-#              #
-#              #
-#              #
-#              #
-#              #
-#              #
-#     2222     #
-#     2222     #
-#     2222     #
-#     2222     #
-################
-""".strip('\n')
-
-LAYOUT_FOUR = """
-################
-#1111      4444#
-#1111      4444#
-#1111      4444#
-#1111      4444#
-#              #
-#              #
-#              #
-#              #
-#              #
-#              #
-#3333      2222#
-#3333      2222#
-#3333      2222#
-#3333      2222#
-################
-""".strip('\n')
-
-LAYOUT_FIVE = """
-################
-#          4444#
-#          4444#
-#111       4444#
-#111           #
-#111           #
-#111        555#
-#           555#
-#           555#
-#333        555#
-#333           #
-#333           #
-#333       2222#
-#          2222#
-#          2222#
-################
-""".strip('\n')
-
-LAYOUT_SIX = """
-################
-#111        555#
-#111        555#
-#111        555#
-#              #
-#              #
-#33          66#
-#33          66#
-#33          66#
-#33          66#
-#              #
-#              #
-#444        222#
-#444        222#
-#444        222#
-################
-""".strip('\n')
-
-LAYOUT_SEVEN = """
-################
-#111        444#
-#111        444#
-#11          44#
-#              #
-#              #
-#33          55#
-#33          55#
-#33          55#
-#33          55#
-#              #
-#              #
-#66          22#
-#666  7777  222#
-#666  7777  222#
-################
-""".strip('\n')
-
-LAYOUT_EIGHT = """
-################
-#111  8888  444#
-#111  8888  444#
-#11          44#
-#              #
-#              #
-#33          55#
-#33          55#
-#33          55#
-#33          55#
-#              #
-#              #
-#66          22#
-#666  7777  222#
-#666  7777  222#
-################
-""".strip('\n')
