@@ -155,10 +155,11 @@ class PinPadDiscrete(gym.Env):
             f"Target pad index {target_pad_idx} is out of range for {len(self.pads)} pads"
         )
         self.target_pad = self.pads[target_pad_idx]
+        self.goal = self._get_goal(self.target_pad)
 
         # Gets return values
         obs = self.render()
-        info = {'agent_position': np.array(self.player)}
+        info = {'agent_position': np.array(self.player), 'goal': self.goal}
         return obs, info
 
     def step(self, action):
@@ -179,14 +180,25 @@ class PinPadDiscrete(gym.Env):
         obs = self.render()
         terminated = tile == self.target_pad
         truncated = False
-        info = {'agent_position': np.array(self.player)}
+        info = {'agent_position': np.array(self.player), 'goal': self.goal}
         return obs, reward, terminated, truncated, info
 
-    def render(self):
+    def _get_goal(self, target_pad):
+        target_cells = list(zip(*np.where(self.layout == target_pad)))
+        center_cell = (self.X_BOUND // 2, self.Y_BOUND // 2)
+        farthest_idx = np.argmax(
+            np.linalg.norm(np.array(target_cells) - np.array(center_cell), axis=1)
+        )
+        farthest_from_center = target_cells[farthest_idx]
+        return self.render(player_position=farthest_from_center)
+
+    def render(self, player_position=None):
         # Sets up grid
         grid = np.zeros((self.X_BOUND, self.Y_BOUND, 3), np.uint8) + 255
         white = np.array([255, 255, 255])
-        current = self.layout[self.player[0]][self.player[1]]
+        if player_position is None:
+            player_position = self.player
+        current = self.layout[player_position[0]][player_position[1]]
 
         # Colors all cells
         for (x, y), char in np.ndenumerate(self.layout):
@@ -196,7 +208,7 @@ class PinPadDiscrete(gym.Env):
                 color = np.array(self.COLORS[char])
                 color = color if char == current else (10 * color + 90 * white) / 100
                 grid[x, y] = color
-        grid[self.player] = (0, 0, 0)
+        grid[player_position] = (0, 0, 0)
 
         # Scales up
         image = np.repeat(np.repeat(grid, self.RENDER_SCALE, 0), self.RENDER_SCALE, 1)
