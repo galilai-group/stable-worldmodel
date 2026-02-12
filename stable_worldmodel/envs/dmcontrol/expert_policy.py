@@ -78,6 +78,9 @@ class ExpertPolicy(BasePolicy):
 
         obs = info_dict['observation'].squeeze()
 
+        if obs.ndim == 1:
+            obs = obs[None, :]
+
         if len(obs.shape) != 2:
             raise ValueError(
                 f'Expected observation shape (num_envs, obs_dim), got {obs.shape}'

@@ -6,7 +6,7 @@ import stable_worldmodel as swm
 from stable_worldmodel.envs.two_room import ExpertPolicy
 
 
-@hydra.main(version_base=None, config_path='./', config_name='config')
+@hydra.main(version_base=None, config_path='./config', config_name='default')
 def run(cfg):
     """Run data collection script"""
 
