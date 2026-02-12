@@ -15,6 +15,7 @@ _CONTROL_TIMESTEP = 0.025
 _DEFAULT_TIME_LIMIT = 25
 
 _WALK_SPEED = 1
+_RUN_SPEED = 10
 
 
 class HumanoidDMControlWrapper(DMControlWrapper):
