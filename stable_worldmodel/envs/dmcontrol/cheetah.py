@@ -17,6 +17,20 @@ from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
 _DEFAULT_TIME_LIMIT = 25
 
+_TASKS = (
+    'run',
+    'run-backward',
+    'stand-front',
+    'stand-back',
+    'jump',
+    'run-front',
+    'run-back',
+    'lie-down',
+    'legs-up',
+    'flip',
+    'flip-backward',
+)
+
 _TASK_MOVE_SPEEDS = {
     'run': 10,
     'run-backward': 10,
@@ -34,9 +48,9 @@ _TASK_MOVE_SPEEDS = {
 
 class CheetahDMControlWrapper(DMControlWrapper):
     def __init__(self, task='run', seed=None, environment_kwargs=None):
-        if task not in _TASK_MOVE_SPEEDS:
+        if task not in _TASKS:
             raise ValueError(
-                f"Unknown task '{task}'. Must be one of {list(_TASK_MOVE_SPEEDS.keys())}"
+                f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
             )
         self._task = task
         self._move_speed = _TASK_MOVE_SPEEDS[task]

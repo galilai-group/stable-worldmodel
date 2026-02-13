@@ -18,6 +18,8 @@ _STAND_SPEED = 0
 _WALK_SPEED = 1
 _RUN_SPEED = 10
 
+_TASKS = ('stand', 'walk', 'run')
+
 _TASK_SPEEDS = {
     'stand': _STAND_SPEED,
     'walk': _WALK_SPEED,
@@ -27,9 +29,9 @@ _TASK_SPEEDS = {
 
 class HumanoidDMControlWrapper(DMControlWrapper):
     def __init__(self, task='walk', seed=None, environment_kwargs=None):
-        if task not in _TASK_SPEEDS:
+        if task not in _TASKS:
             raise ValueError(
-                f"Unknown task '{task}'. Must be one of {list(_TASK_SPEEDS.keys())}"
+                f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
             )
         self._move_speed = _TASK_SPEEDS[task]
         xml, assets = humanoid.get_model_and_assets()

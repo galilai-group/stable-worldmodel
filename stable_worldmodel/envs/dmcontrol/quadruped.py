@@ -17,6 +17,8 @@ _CONTROL_TIMESTEP = 0.02
 _WALK_SPEED = 0.5
 _RUN_SPEED = 5
 
+_TASKS = ('walk', 'run')
+
 _TASK_SPEEDS = {
     'walk': _WALK_SPEED,
     'run': _RUN_SPEED,
@@ -25,9 +27,9 @@ _TASK_SPEEDS = {
 
 class QuadrupedDMControlWrapper(DMControlWrapper):
     def __init__(self, task='walk', seed=None, environment_kwargs=None):
-        if task not in _TASK_SPEEDS:
+        if task not in _TASKS:
             raise ValueError(
-                f"Unknown task '{task}'. Must be one of {list(_TASK_SPEEDS.keys())}"
+                f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
             )
         self._desired_speed = _TASK_SPEEDS[task]
         xml = quadruped.make_model(
