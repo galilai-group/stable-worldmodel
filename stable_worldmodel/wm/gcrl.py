@@ -805,15 +805,10 @@ class QPredictor(nn.Module):
 
 class DoublePredictorWrapper(nn.Module):
     """
-    Generic double predictor wrapper for double Q-learning style training.
+    Wraps two independent copies of any predictor network.
 
-    Wraps two independent copies of any predictor network to enable:
-    - Minimum of target values for computing targets (reduces overestimation)
-    - Separate losses for each network
-
-    Usage with TeacherStudentWrapper:
-        The wrapper will create EMA copies of both networks automatically.
-        forward_student() and forward_teacher() will return (v1, v2) tuples.
+    Enables double-estimation techniques (e.g., double Q-learning, double value
+    prediction) by maintaining two separate networks and returning both outputs.
 
     Args:
         predictor_cls: The class of the predictor to wrap (e.g., Predictor, QPredictor)
@@ -822,17 +817,15 @@ class DoublePredictorWrapper(nn.Module):
 
     def __init__(self, predictor_cls, **kwargs):
         super().__init__()
-        self.v1 = predictor_cls(**kwargs)
-        self.v2 = predictor_cls(**kwargs)
+        self.net1 = predictor_cls(**kwargs)
+        self.net2 = predictor_cls(**kwargs)
 
     def forward(self, *args, **kwargs):
         """
-        Compute values from both networks.
-
         Returns:
-            (v1, v2): tuple of value tensors from each network
+            Tuple of output tensors from each network.
         """
-        return self.v1(*args, **kwargs), self.v2(*args, **kwargs)
+        return self.net1(*args, **kwargs), self.net2(*args, **kwargs)
 
 
 class ExpectileLoss(nn.Module):
