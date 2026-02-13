@@ -20,7 +20,7 @@ import stable_worldmodel as swm
 # ============================================================================
 # Data Setup
 # ============================================================================
-def get_data(cfg, goal_probabilities):
+def get_data(cfg):
     """Setup dataset with image transforms and normalization."""
 
     def get_img_pipeline(key, target, img_size=224):
@@ -76,9 +76,16 @@ def get_data(cfg, goal_probabilities):
     )
 
     dataset.transform = transform
+
+    goal_probs = (
+        cfg.goal_probabilities.random,
+        cfg.goal_probabilities.geometric_future,
+        cfg.goal_probabilities.uniform_future,
+        cfg.goal_probabilities.current,
+    )
     dataset = swm.data.GoalDataset(
         dataset=dataset,
-        goal_probabilities=goal_probabilities,
+        goal_probabilities=goal_probs,
         gamma=cfg.goal_gamma,
         current_goal_offset=cfg.dinowm.history_size,
         goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
@@ -117,8 +124,8 @@ def get_data(cfg, goal_probabilities):
 # ============================================================================
 # Model Architecture
 # ============================================================================
-def get_gcivl_value_model(cfg):
-    """Build goal-conditioned IVL model for training value function."""
+def get_ivl_value_model(cfg):
+    """Build ivl model for training value and Q functions."""
 
     expectile_loss = swm.wm.gcrl.ExpectileLoss(tau=cfg.get('expectile', 0.9))
 
@@ -188,25 +195,16 @@ def get_gcivl_value_model(cfg):
             target_embedding, 'b t p d -> b (t p) d'
         )
 
-        # Double value prediction: get (v1, v2) from student
-        (v1_pred, v2_pred) = self.model.value_predictor.forward_student(
+        # Value prediction: get V(s, g) from student
+        v_pred = self.model.value_predictor.forward_student(
             embedding_flat, goal_embedding_flat
         )
         with torch.no_grad():
             gamma = cfg.get('discount', 0.99)
             # Get target values for next observations
-            (next_v1_target, next_v2_target) = (
-                self.model.value_predictor.forward_teacher(
-                    target_embedding_flat, goal_embedding_flat
-                )
+            next_v_target = self.model.value_predictor.forward_teacher(
+                target_embedding_flat, goal_embedding_flat
             )
-            # Get target values for current observations (for advantage)
-            (v1_target, v2_target) = (
-                self.model.value_predictor.forward_teacher(
-                    embedding_flat, goal_embedding_flat
-                )
-            )
-
             # Compare raw data instead of embeddings (embeddings differ due to GPU non-determinism)
             obs_pixels = batch['pixels'][
                 :, : cfg.dinowm.history_size
@@ -234,36 +232,22 @@ def get_gcivl_value_model(cfg):
             # rewards are -1 if non-terminal, 0 if terminal
             reward = -masks
 
-            # Compute Q targets using minimum of target values (reduces overestimation)
-            next_v_min = torch.minimum(next_v1_target, next_v2_target)
-            q = reward + gamma * masks * next_v_min
+            # Compute Q target
+            q = reward + gamma * masks * next_v_target
 
-            # Compute advantage using average of current target values
-            v_target_avg = (v1_target + v2_target) / 2
-            adv = q - v_target_avg
-
-            # Compute individual Q targets for each value network
-            q1 = reward + gamma * masks * next_v1_target
-            q2 = reward + gamma * masks * next_v2_target
-
-        # Compute expectile loss for both value networks
-        value_loss1 = expectile_loss(v1_pred, q1.detach(), adv.detach())
-        value_loss2 = expectile_loss(v2_pred, q2.detach(), adv.detach())
-        value_loss = value_loss1 + value_loss2
+        # Compute expectile loss for value network
+        value_loss = expectile_loss(v_pred, q.detach())
+        value_target = q  # For logging compatibility
         batch['value_loss'] = value_loss
-        batch['value_loss1'] = value_loss1
-        batch['value_loss2'] = value_loss2
         batch['loss'] = value_loss
 
-        # ====== Debug Logging =====
+        # =============== Debugging and Logging ===============
 
-        value_target = q  # For logging compatibility
         # NaN detection after value prediction
-        value_pred = (v1_pred + v2_pred) / 2  # For logging
-        if torch.isnan(v1_pred).any() or torch.isnan(v2_pred).any():
+        value_pred = v_pred
+        if torch.isnan(v_pred).any():
             logging.warning(
-                f'NaN in value_pred! v1_count={torch.isnan(v1_pred).sum().item()}, '
-                f'v2_count={torch.isnan(v2_pred).sum().item()}'
+                f'NaN in value_pred! count={torch.isnan(v_pred).sum().item()}'
             )
         if torch.isnan(q).any():
             logging.warning(
@@ -286,6 +270,7 @@ def get_gcivl_value_model(cfg):
             if '_loss' in k
         }
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
+        losses_dict[f'{prefix}value_epoch'] = float(self.current_epoch)
         self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
         # Log diagnostics for collapse detection
@@ -377,30 +362,13 @@ def get_gcivl_value_model(cfg):
                     )
                 # Log value prediction specifically when goal matches current state
                 # value_pred has shape (B, T, 1), take last timestep
-                value_pred_at_goal = value_pred[:, -1, 0][both_match]
-                v1_pred_at_goal = v1_pred[:, -1, 0][both_match]
-                v2_pred_at_goal = v2_pred[:, -1, 0][both_match]
-                # log q1 and q2 at goal for debugging
-                q1_at_goal = q1[:, -1, 0][both_match]
-                q2_at_goal = q2[:, -1, 0][both_match]
+                value_pred_at_goal = value_pred[:, -1, 0][both_match].mean()
             else:
                 pixel_embed_diff = torch.tensor(-1.0, device=embedding.device)
                 proprio_embed_diff = torch.tensor(
                     -1.0, device=embedding.device
                 )
                 value_pred_at_goal = torch.tensor(
-                    float('nan'), device=embedding.device
-                )
-                v1_pred_at_goal = torch.tensor(
-                    float('nan'), device=embedding.device
-                )
-                v2_pred_at_goal = torch.tensor(
-                    float('nan'), device=embedding.device
-                )
-                q1_at_goal = torch.tensor(
-                    float('nan'), device=embedding.device
-                )
-                q2_at_goal = torch.tensor(
                     float('nan'), device=embedding.device
                 )
 
@@ -424,31 +392,17 @@ def get_gcivl_value_model(cfg):
                     f'{prefix}debug_target_match_rate': target_both_match.float().mean(),
                     f'{prefix}debug_pixel_embed_diff': pixel_embed_diff,
                     f'{prefix}debug_proprio_embed_diff': proprio_embed_diff,
-                    f'{prefix}debug_value_pred_at_goal_mean': value_pred_at_goal.mean(),
-                    f'{prefix}debug_value_pred_at_goal_max': value_pred_at_goal.max(),
-                    f'{prefix}debug_value_pred_at_goal_min': value_pred_at_goal.min(),
-                    f'{prefix}debug_value_pred_at_goal_std': value_pred_at_goal.std(),
-                    f'{prefix}debug_v1_pred_at_goal_mean': v1_pred_at_goal.mean(),
-                    f'{prefix}debug_v1_pred_at_goal_max': v1_pred_at_goal.max(),
-                    f'{prefix}debug_v1_pred_at_goal_min': v1_pred_at_goal.min(),
-                    f'{prefix}debug_v1_pred_at_goal_std': v1_pred_at_goal.std(),
-                    f'{prefix}debug_v2_pred_at_goal_mean': v2_pred_at_goal.mean(),
-                    f'{prefix}debug_v2_pred_at_goal_max': v2_pred_at_goal.max(),
-                    f'{prefix}debug_v2_pred_at_goal_min': v2_pred_at_goal.min(),
-                    f'{prefix}debug_v2_pred_at_goal_std': v2_pred_at_goal.std(),
-                    f'{prefix}debug_q1_at_goal_mean': q1_at_goal.mean(),
-                    f'{prefix}debug_q1_at_goal_max': q1_at_goal.max(),
-                    f'{prefix}debug_q1_at_goal_min': q1_at_goal.min(),
-                    f'{prefix}debug_q1_at_goal_std': q1_at_goal.std(),
-                    f'{prefix}debug_q2_at_goal_mean': q2_at_goal.mean(),
-                    f'{prefix}debug_q2_at_goal_max': q2_at_goal.max(),
-                    f'{prefix}debug_q2_at_goal_min': q2_at_goal.min(),
-                    f'{prefix}debug_q2_at_goal_std': q2_at_goal.std(),
+                    f'{prefix}debug_value_pred_at_goal': value_pred_at_goal,
                     f'{prefix}debug_value_target_at_goal': value_target_at_goal,
                 },
                 on_step=True,
                 sync_dist=True,
             )
+
+            # print(f'{prefix}v_pred_mean: {v_pred.mean()}, ')
+            # print(f'{prefix}v_pred_std: {v_pred.std()}, ')
+            # print(f'{prefix}value_target_mean: {value_target.mean()}, ')
+            # print(f'{prefix}value_target_std: {value_target.std()}, ')
 
             collapse_diagnostics = {
                 # Value prediction stats - std ≈ 0 indicates collapse
@@ -456,33 +410,12 @@ def get_gcivl_value_model(cfg):
                 f'{prefix}value_pred_std': value_pred.std(),
                 f'{prefix}value_pred_min': value_pred.min(),
                 f'{prefix}value_pred_max': value_pred.max(),
-                # Individual value network stats
-                f'{prefix}v1_pred_mean': v1_pred.mean(),
-                f'{prefix}v1_pred_std': v1_pred.std(),
-                f'{prefix}v1_pred_min': v1_pred.min(),
-                f'{prefix}v1_pred_max': v1_pred.max(),
-                f'{prefix}v2_pred_mean': v2_pred.mean(),
-                f'{prefix}v2_pred_std': v2_pred.std(),
-                f'{prefix}v2_pred_min': v2_pred.min(),
-                f'{prefix}v2_pred_max': v2_pred.max(),
+                # Value network stats
+                f'{prefix}v_pred_mean': v_pred.mean(),
+                f'{prefix}v_pred_std': v_pred.std(),
                 # Value target stats
                 f'{prefix}value_target_mean': value_target.mean(),
                 f'{prefix}value_target_std': value_target.std(),
-                # Advantage stats
-                f'{prefix}adv_mean': adv.mean(),
-                f'{prefix}adv_std': adv.std(),
-                f'{prefix}adv_min': adv.min(),
-                f'{prefix}adv_max': adv.max(),
-                f'{prefix}accept_prob': (adv >= 0).float().mean(),
-                # Q-value stats
-                f'{prefix}q1_mean': q1.mean(),
-                f'{prefix}q1_std': q1.std(),
-                f'{prefix}q1_min': q1.min(),
-                f'{prefix}q1_max': q1.max(),
-                f'{prefix}q2_mean': q2.mean(),
-                f'{prefix}q2_std': q2.std(),
-                f'{prefix}q2_min': q2.min(),
-                f'{prefix}q2_max': q2.max(),
                 # Reward stats - mean ≈ -1 means reward too sparse
                 f'{prefix}reward_mean': reward.mean(),
                 f'{prefix}goal_match_rate': eq_mask.float().mean(),
@@ -542,13 +475,13 @@ def get_gcivl_value_model(cfg):
         **cfg.predictor,
     )
 
-    # Double value predictor for double Q-learning (wraps two Predictor networks)
-    value_predictor = swm.wm.gcrl.DoublePredictorWrapper(
-        swm.wm.gcrl.Predictor,
+    # value function
+    value_predictor = swm.wm.gcrl.Predictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=1,
+        pool_type='mean',
         **cfg.predictor,
     )
 
@@ -578,7 +511,8 @@ def get_gcivl_value_model(cfg):
     wrapped_encoder = (
         spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
     )
-    gcivl_model = swm.wm.gcrl.GCRL(
+    # model used to learn the Hilbert representation
+    hilbert_representation_model = swm.wm.gcrl.GCRL(
         encoder=wrapped_encoder,
         action_predictor=action_predictor,
         value_predictor=wrapped_value_predictor,
@@ -602,7 +536,8 @@ def get_gcivl_value_model(cfg):
     # Add proprio encoder optimizer if enabled
     if extra_encoders is not None:
         optim_config['proprio_opt'] = add_opt(
-            'model.extra_encoders.proprio', cfg.proprio_encoder_lr
+            'model.extra_encoders.proprio',
+            cfg.proprio_encoder_lr,
         )
 
     # Add encoder optimizer if trainable (ViT tiny)
@@ -611,16 +546,16 @@ def get_gcivl_value_model(cfg):
             'model.encoder', cfg.get('encoder_lr', 3e-4)
         )
 
-    gcivl_value_model = spt.Module(
-        model=gcivl_model,
+    ivl_value_model = spt.Module(
+        model=hilbert_representation_model,
         forward=forward,
         optim=optim_config,
     )
-    return gcivl_value_model
+    return ivl_value_model
 
 
-def get_gcivl_actor_model(cfg, trained_value_model):
-    """Build goal-conditioned IVL model for extracting policy via AWR from a trained value function."""
+def get_ivl_actor_model(cfg, trained_value_model):
+    """Build ivl model for extracting policy via AWR from a trained value function."""
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
@@ -668,16 +603,13 @@ def get_gcivl_actor_model(cfg, trained_value_model):
             target_embedding_flat = rearrange(
                 target_embedding, 'b t p d -> b (t p) d'
             )
-            # Double value predictor returns (v1, v2) tuple
-            (v1, v2) = self.model.value_predictor(
+            value = self.model.value_predictor(
                 embedding_flat, goal_embedding_flat
             )
-            value = (v1 + v2) / 2  # Use average
 
-            (nv1, nv2) = self.model.value_predictor(
+            next_value = self.model.value_predictor(
                 target_embedding_flat, goal_embedding_flat
             )
-            next_value = (nv1 + nv2) / 2
 
             # Advantage is next_value - current_value
             advantage = next_value - value  # (B, T, 1)
@@ -708,6 +640,8 @@ def get_gcivl_actor_model(cfg, trained_value_model):
         action_loss = action_loss.mean()
         batch['awr_loss'] = action_loss
         batch['loss'] = action_loss
+
+        # ==================== Debugging and Logging ====================
 
         # Log all losses
         prefix = 'train/' if self.training else 'val/'
@@ -754,6 +688,7 @@ def get_gcivl_actor_model(cfg, trained_value_model):
         )
         losses_dict[f'{prefix}debug/action_stds'] = action_stds.mean().detach()
 
+        losses_dict[f'{prefix}policy_epoch'] = float(self.current_epoch)
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
         )  # , on_epoch=True, sync_dist=True)
@@ -769,7 +704,7 @@ def get_gcivl_actor_model(cfg, trained_value_model):
         if hasattr(trained_value_model.model.encoder, 'backbone')
         else trained_value_model.model.encoder
     )
-    gcivl_model = swm.wm.gcrl.GCRL(
+    ivl_model = swm.wm.gcrl.GCRL(
         encoder=spt.backbone.EvalOnly(encoder_backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(
@@ -786,8 +721,8 @@ def get_gcivl_actor_model(cfg, trained_value_model):
             'optimizer': {'type': 'AdamW', 'lr': lr},
         }
 
-    gcivl_actor_model = spt.Module(
-        model=gcivl_model,
+    ivl_actor_model = spt.Module(
+        model=ivl_model,
         forward=forward,
         optim={
             'action_predictor_opt': add_opt(
@@ -796,7 +731,7 @@ def get_gcivl_actor_model(cfg, trained_value_model):
             'log_stds_opt': add_opt('model.log_stds', cfg.predictor_lr),
         },
     )
-    return gcivl_actor_model
+    return ivl_actor_model
 
 
 # ============================================================================
@@ -808,7 +743,7 @@ def setup_pl_logger(cfg, postfix=''):
 
     wandb_run_id = cfg.wandb.get('run_id', None)
     wandb_logger = WandbLogger(
-        name=f'dino_gcivl{postfix}',
+        name=f'dino_ivl{postfix}',
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,
         resume='allow' if wandb_run_id else None,
@@ -859,16 +794,10 @@ def run(cfg):
     """Run training of IQL goal-conditioned policy."""
 
     wandb_logger_value = setup_pl_logger(cfg, postfix='_value')
-    goal_probs = (
-        cfg.goal_probabilities.random,
-        cfg.goal_probabilities.geometric_future,
-        cfg.goal_probabilities.uniform_future,
-        cfg.goal_probabilities.current,
-    )
-    data = get_data(cfg, goal_probabilities=goal_probs)
+    data = get_data(cfg)
 
     # First train value function
-    gcivl_value_model = get_gcivl_value_model(cfg)
+    ivl_value_model = get_ivl_value_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir()
 
@@ -890,7 +819,7 @@ def run(cfg):
 
         manager = spt.Manager(
             trainer=trainer,
-            module=gcivl_value_model,
+            module=ivl_value_model,
             data=data,
             ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
         )
@@ -910,9 +839,9 @@ def run(cfg):
     checkpoint = torch.load(
         f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
     )
-    gcivl_value_model.load_state_dict(checkpoint['state_dict'])
+    ivl_value_model.load_state_dict(checkpoint['state_dict'])
 
-    gcivl_actor_model = get_gcivl_actor_model(cfg, gcivl_value_model)
+    ivl_actor_model = get_ivl_actor_model(cfg, ivl_value_model)
 
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
@@ -930,7 +859,7 @@ def run(cfg):
 
     manager = spt.Manager(
         trainer=trainer,
-        module=gcivl_actor_model,
+        module=ivl_actor_model,
         data=data,
         ckpt_path=f'{cache_dir}/{cfg.output_model_name}_policy_weights.ckpt',
     )

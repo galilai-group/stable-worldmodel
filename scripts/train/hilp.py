@@ -16,6 +16,9 @@ from transformers import AutoModel
 
 import stable_worldmodel as swm
 
+# TODO for now this is not HILP but GCIVL whose value function is a metric in a learned latent space.
+# The training of the Hilbert foundation policy still needs to be implemented.
+
 
 # ============================================================================
 # Data Setup
@@ -195,25 +198,16 @@ def get_hilp_value_model(cfg):
             target_embedding, 'b t p d -> b (t p) d'
         )
 
-        # Double value prediction: get (v1, v2) from student
-        (v1_pred, v2_pred) = self.model.value_predictor.forward_student(
+        # Value prediction: get V(s, g) from student
+        v_pred = self.model.value_predictor.forward_student(
             embedding_flat, goal_embedding_flat
         )
         with torch.no_grad():
             gamma = cfg.get('discount', 0.99)
             # Get target values for next observations
-            (next_v1_target, next_v2_target) = (
-                self.model.value_predictor.forward_teacher(
-                    target_embedding_flat, goal_embedding_flat
-                )
+            next_v_target = self.model.value_predictor.forward_teacher(
+                target_embedding_flat, goal_embedding_flat
             )
-            # Get target values for current observations (for advantage)
-            (v1_target, v2_target) = (
-                self.model.value_predictor.forward_teacher(
-                    embedding_flat, goal_embedding_flat
-                )
-            )
-
             # Compare raw data instead of embeddings (embeddings differ due to GPU non-determinism)
             obs_pixels = batch['pixels'][
                 :, : cfg.dinowm.history_size
@@ -241,39 +235,27 @@ def get_hilp_value_model(cfg):
             # rewards are -1 if non-terminal, 0 if terminal
             reward = -masks
 
-            # Compute Q targets using minimum of target values (reduces overestimation)
-            next_v_min = torch.minimum(next_v1_target, next_v2_target)
-            q = reward + gamma * masks * next_v_min
+            # Compute Q target
+            q = reward + gamma * masks * next_v_target
 
-            # Compute advantage using average of current target values
-            v_target_avg = (v1_target + v2_target) / 2
-            adv = q - v_target_avg
+        # Compute expectile loss for value network
+        value_loss = expectile_loss(v_pred, q.detach())
+        value_target = q  # For logging compatibility
+        batch['value_loss'] = value_loss
+        batch['loss'] = value_loss
 
-            # Compute individual Q targets for each value network
-            q1 = reward + gamma * masks * next_v1_target
-            q2 = reward + gamma * masks * next_v2_target
+        # ========== Debug logging for NaN detection and collapse diagnostics ==========
 
         # NaN detection after value prediction
-        value_pred = (v1_pred + v2_pred) / 2  # For logging
-        if torch.isnan(v1_pred).any() or torch.isnan(v2_pred).any():
+        value_pred = v_pred
+        if torch.isnan(v_pred).any():
             logging.warning(
-                f'NaN in value_pred! v1_count={torch.isnan(v1_pred).sum().item()}, '
-                f'v2_count={torch.isnan(v2_pred).sum().item()}'
+                f'NaN in value_pred! count={torch.isnan(v_pred).sum().item()}'
             )
         if torch.isnan(q).any():
             logging.warning(
                 f'NaN in q target! count={torch.isnan(q).sum().item()}'
             )
-
-        # Compute expectile loss for both value networks
-        value_loss1 = expectile_loss(v1_pred, q1.detach(), adv.detach())
-        value_loss2 = expectile_loss(v2_pred, q2.detach(), adv.detach())
-        value_loss = value_loss1 + value_loss2
-        value_target = q  # For logging compatibility
-        batch['value_loss'] = value_loss
-        batch['value_loss1'] = value_loss1
-        batch['value_loss2'] = value_loss2
-        batch['loss'] = value_loss
 
         # NaN detection after loss computation
         if torch.isnan(value_loss):
@@ -291,6 +273,7 @@ def get_hilp_value_model(cfg):
             if '_loss' in k
         }
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
+        losses_dict[f'{prefix}value_epoch'] = float(self.current_epoch)
         self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
         # Log diagnostics for collapse detection
@@ -425,20 +408,12 @@ def get_hilp_value_model(cfg):
                 f'{prefix}value_pred_std': value_pred.std(),
                 f'{prefix}value_pred_min': value_pred.min(),
                 f'{prefix}value_pred_max': value_pred.max(),
-                # Individual value network stats
-                f'{prefix}v1_pred_mean': v1_pred.mean(),
-                f'{prefix}v2_pred_mean': v2_pred.mean(),
-                f'{prefix}v1_pred_std': v1_pred.std(),
-                f'{prefix}v2_pred_std': v2_pred.std(),
+                # Value network stats
+                f'{prefix}v_pred_mean': v_pred.mean(),
+                f'{prefix}v_pred_std': v_pred.std(),
                 # Value target stats
                 f'{prefix}value_target_mean': value_target.mean(),
                 f'{prefix}value_target_std': value_target.std(),
-                # Advantage stats
-                f'{prefix}adv_mean': adv.mean(),
-                f'{prefix}adv_std': adv.std(),
-                f'{prefix}adv_min': adv.min(),
-                f'{prefix}adv_max': adv.max(),
-                f'{prefix}accept_prob': (adv >= 0).float().mean(),
                 # Reward stats - mean ≈ -1 means reward too sparse
                 f'{prefix}reward_mean': reward.mean(),
                 f'{prefix}goal_match_rate': eq_mask.float().mean(),
@@ -498,18 +473,16 @@ def get_hilp_value_model(cfg):
         **cfg.predictor,
     )
 
-    # Double metric-based value function: V(s, g) = -||φ(s) - φ(g)||
-    # Uses two independent value networks for double Q-learning style training
-    value_predictor = swm.wm.gcrl.DoublePredictorWrapper(
-        swm.wm.gcrl.MetricValuePredictor,
+    # Metric-based value function: V(s, g) = -||φ(s) - φ(g)||
+    metric_value_predictor = swm.wm.gcrl.MetricValuePredictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         embed_dim=cfg.get('value_embed_dim', 64),
         **cfg.predictor,
     )
-    wrapped_value_predictor = spt.TeacherStudentWrapper(
-        value_predictor,
+    wrapped_metric_value_predictor = spt.TeacherStudentWrapper(
+        metric_value_predictor,
         warm_init=True,
         base_ema_coefficient=cfg.get('value_ema_tau', 0.995),
         final_ema_coefficient=cfg.get('value_ema_tau', 0.995),
@@ -534,10 +507,11 @@ def get_hilp_value_model(cfg):
     wrapped_encoder = (
         spt.backbone.EvalOnly(encoder) if not encoder_trainable else encoder
     )
-    hilp_model = swm.wm.gcrl.GCRL(
+    # model used to learn the Hilbert representation
+    hilbert_representation_model = swm.wm.gcrl.GCRL(
         encoder=wrapped_encoder,
         action_predictor=action_predictor,
-        value_predictor=wrapped_value_predictor,
+        value_predictor=wrapped_metric_value_predictor,
         extra_encoders=extra_encoders,
         history_size=cfg.dinowm.history_size,
     )
@@ -558,7 +532,8 @@ def get_hilp_value_model(cfg):
     # Add proprio encoder optimizer if enabled
     if extra_encoders is not None:
         optim_config['proprio_opt'] = add_opt(
-            'model.extra_encoders.proprio', cfg.proprio_encoder_lr
+            'model.extra_encoders.proprio',
+            cfg.proprio_encoder_lr,
         )
 
     # Add encoder optimizer if trainable (ViT tiny)
@@ -568,7 +543,7 @@ def get_hilp_value_model(cfg):
         )
 
     hilp_value_model = spt.Module(
-        model=hilp_model,
+        model=hilbert_representation_model,
         forward=forward,
         optim=optim_config,
     )
@@ -624,16 +599,13 @@ def get_hilp_actor_model(cfg, trained_value_model):
             target_embedding_flat = rearrange(
                 target_embedding, 'b t p d -> b (t p) d'
             )
-            # Double value predictor returns (v1, v2) tuple
-            (v1, v2) = self.model.value_predictor(
+            value = self.model.value_predictor(
                 embedding_flat, goal_embedding_flat
             )
-            value = (v1 + v2) / 2  # Use average
 
-            (nv1, nv2) = self.model.value_predictor(
+            next_value = self.model.value_predictor(
                 target_embedding_flat, goal_embedding_flat
             )
-            next_value = (nv1 + nv2) / 2
 
             # Advantage is next_value - current_value
             advantage = next_value - value  # (B, T, 1)
@@ -664,6 +636,8 @@ def get_hilp_actor_model(cfg, trained_value_model):
         action_loss = action_loss.mean()
         batch['awr_loss'] = action_loss
         batch['loss'] = action_loss
+
+        # ============== Debug logging for NaN detection and training diagnostics ==============
 
         # Log all losses
         prefix = 'train/' if self.training else 'val/'
@@ -710,6 +684,7 @@ def get_hilp_actor_model(cfg, trained_value_model):
         )
         losses_dict[f'{prefix}debug/action_stds'] = action_stds.mean().detach()
 
+        losses_dict[f'{prefix}policy_epoch'] = float(self.current_epoch)
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
         )  # , on_epoch=True, sync_dist=True)

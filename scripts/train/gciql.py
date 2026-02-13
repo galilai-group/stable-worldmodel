@@ -16,6 +16,9 @@ from transformers import AutoModel
 
 import stable_worldmodel as swm
 
+# TODO for now we use AWR to extract a policy from the learned value function.
+# we should implement DDPG style training from the learnt critic as well.
+
 
 # ============================================================================
 # Data Setup
@@ -227,10 +230,9 @@ def get_gciql_critics_model(cfg):
         # ===== Value Loss (IQL style) =====
         # Get Q(s, a, g) from target critic (teacher network)
         with torch.no_grad():
-            (q1, q2) = self.model.critic_predictor.forward_teacher(
+            q = self.model.critic_predictor.forward_teacher(
                 embedding_flat, actions, goal_embedding_flat
             )
-            q = torch.minimum(q1, q2)
 
         # Get V(s, g) from value network (student, trainable)
         v = self.model.value_predictor.forward_student(
@@ -252,12 +254,10 @@ def get_gciql_critics_model(cfg):
             q_target = reward + gamma * masks * next_v
 
         # Get Q(s, a, g) predictions from critic (student network)
-        (q1_pred, q2_pred) = self.model.critic_predictor.forward_student(
+        q_pred = self.model.critic_predictor.forward_student(
             embedding_flat, actions, goal_embedding_flat
         )
-        critic_loss = (
-            (q1_pred - q_target) ** 2 + (q2_pred - q_target) ** 2
-        ).mean()
+        critic_loss = ((q_pred - q_target) ** 2).mean()
 
         # ===== Total Loss =====
         total_loss = value_loss + critic_loss
@@ -299,6 +299,8 @@ def get_gciql_critics_model(cfg):
             if '_loss' in k
         }
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
+        losses_dict[f'{prefix}critics_epoch'] = float(self.current_epoch)
+
         self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
         # Log diagnostics for collapse detection
@@ -507,6 +509,7 @@ def get_gciql_critics_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=1,
+        pool_type='mean',
         **cfg.predictor,
     )
 
@@ -517,13 +520,13 @@ def get_gciql_critics_model(cfg):
         final_ema_coefficient=cfg.get('value_ema_tau', 0.995),
     )
 
-    # Double Q predictor for Q(s, a, g) - TD learning with action input
-    critic_predictor = swm.wm.gcrl.DoublePredictorWrapper(
-        swm.wm.gcrl.QPredictor,
+    # Q predictor for Q(s, a, g) - TD learning with action input
+    critic_predictor = swm.wm.gcrl.QPredictor(
         num_patches=num_patches,
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         action_dim=effective_act_dim,
+        pool_type='mean',
         **cfg.predictor,
     )
 
@@ -686,6 +689,8 @@ def get_gciql_actor_model(cfg, trained_critics_model):
         batch['awr_loss'] = action_loss
         batch['loss'] = action_loss
 
+        # ============== Debug Logging ==============
+
         # Log all losses
         prefix = 'train/' if self.training else 'val/'
         losses_dict = {
@@ -730,6 +735,8 @@ def get_gciql_actor_model(cfg, trained_critics_model):
             log_stds.mean().detach()
         )
         losses_dict[f'{prefix}debug/action_stds'] = action_stds.mean().detach()
+
+        losses_dict[f'{prefix}policy_epoch'] = float(self.current_epoch)
 
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
