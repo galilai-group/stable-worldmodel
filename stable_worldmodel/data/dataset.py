@@ -527,32 +527,47 @@ class GoalDataset:
 
     Goals are sampled from:
       - random state (uniform over dataset steps)
-      - future state in same episode (Geom(1-gamma))
+      - geometric future state in same episode (Geom(1-gamma))
+      - uniform future state in same episode (uniform over future steps)
       - current state
-    with probabilities (0.3, 0.5, 0.2) by default.
+    with probabilities (0.3, 0.5, 0.0, 0.2) by default.
     """
 
     def __init__(
         self,
         dataset: Dataset,
-        goal_probabilities: tuple[float, float, float] = (0.3, 0.5, 0.2),
+        goal_probabilities: tuple[float, float, float, float] = (
+            0.3,
+            0.5,
+            0.0,
+            0.2,
+        ),
         gamma: float = 0.99,
+        current_goal_offset: int | None = None,
         goal_keys: dict[str, str] | None = None,
         seed: int | None = None,
     ):
         """
         Args:
             dataset: Base dataset to wrap.
-            goal_probabilities: Tuple of (p_random, p_future, p_current) for goal sampling.
-            gamma: Discount factor for future goal sampling.
+            goal_probabilities: Tuple of (p_random, p_geometric_future, p_uniform_future, p_current) for goal sampling.
+            gamma: Discount factor for geometric future goal sampling.
+            current_goal_offset: Number of frames from clip start for "current" goal sampling.
+                If None, defaults to num_steps, i.e., last frame of clip.
+                When training with history, set this to history_size so "current" means last frame of history.
             goal_keys: Mapping of source observation keys to goal observation keys. If None, defaults to {"pixels": "goal", "proprio": "goal_proprio"}.
             seed: Random seed for goal sampling.
         """
         self.dataset = dataset
+        self.current_goal_offset = (
+            current_goal_offset
+            if current_goal_offset is not None
+            else dataset.num_steps
+        )
 
-        if len(goal_probabilities) != 3:
+        if len(goal_probabilities) != 4:
             raise ValueError(
-                'goal_probabilities must be a 3-tuple (random, future, current)'
+                'goal_probabilities must be a 4-tuple (random, geometric_future, uniform_future, current)'
             )
         if not np.isclose(sum(goal_probabilities), 1.0):
             raise ValueError('goal_probabilities must sum to 1.0')
@@ -580,8 +595,36 @@ class GoalDataset:
                 goal_keys['proprio'] = 'goal_proprio'
         self.goal_keys = goal_keys
 
+        # Build clip_indices with stricter constraint to ensure at least one future frame
+        # for geometric/uniform future goal sampling (only if these modes are used)
+        _, p_geometric_future, p_uniform_future, _ = goal_probabilities
+        needs_future_filtering = p_geometric_future > 0 or p_uniform_future > 0
+
+        if needs_future_filtering:
+            frameskip = dataset.frameskip
+            current_end_offset = (self.current_goal_offset - 1) * frameskip
+
+            self._clip_indices = []
+            self._index_mapping = []  # Maps our indices to wrapped dataset indices
+
+            for wrapped_idx, (ep, start) in enumerate(dataset.clip_indices):
+                current_end = start + current_end_offset
+                # Need at least one frame after current_end (i.e., current_end + frameskip < length)
+                if current_end + frameskip < self.episode_lengths[ep]:
+                    self._clip_indices.append((ep, start))
+                    self._index_mapping.append(wrapped_idx)
+        else:
+            # No future goal sampling, use wrapped dataset's indices directly
+            self._clip_indices = list(dataset.clip_indices)
+            self._index_mapping = list(range(len(dataset.clip_indices)))
+
+    @property
+    def clip_indices(self):
+        """Clip indices filtered to ensure at least one future frame is available."""
+        return self._clip_indices
+
     def __len__(self):
-        return len(self.dataset)
+        return len(self._clip_indices)
 
     @property
     def column_names(self):
@@ -589,11 +632,15 @@ class GoalDataset:
 
     def _sample_goal_kind(self) -> str:
         r = self.rng.random()
-        p_random, p_future, _ = self.goal_probabilities
+        p_random, p_geometric_future, p_uniform_future, _ = (
+            self.goal_probabilities
+        )
         if r < p_random:
             return 'random'
-        if r < p_random + p_future:
-            return 'future'
+        if r < p_random + p_geometric_future:
+            return 'geometric_future'
+        if r < p_random + p_geometric_future + p_uniform_future:
+            return 'uniform_future'
         return 'current'
 
     def _sample_random_step(self) -> tuple[int, int]:
@@ -608,26 +655,45 @@ class GoalDataset:
         local_idx = flat_idx - prev
         return ep_idx, local_idx
 
-    def _sample_future_step(
+    def _sample_geometric_future_step(
         self, ep_idx: int, local_start: int
     ) -> tuple[int, int]:
         """Sample future (ep_idx, local_idx) from same episode using geometric distribution."""
         frameskip = self.dataset.frameskip
+        # The minimum goal index should be the last frame of the history (current state)
+        current_end = local_start + (self.current_goal_offset - 1) * frameskip
         max_steps = (
-            self.episode_lengths[ep_idx] - 1 - local_start
+            self.episode_lengths[ep_idx] - 1 - current_end
         ) // frameskip
-        if max_steps <= 0:
-            return ep_idx, local_start
+        # clip_indices filtering guarantees max_steps >= 1
+        assert max_steps >= 1, f'No future frames available: {max_steps=}'
 
         p = max(1.0 - self.gamma, 1e-6)
         k = int(self.rng.geometric(p))
         k = min(k, max_steps)
-        local_idx = local_start + k * frameskip
+        local_idx = current_end + k * frameskip
+        return ep_idx, local_idx
+
+    def _sample_uniform_future_step(
+        self, ep_idx: int, local_start: int
+    ) -> tuple[int, int]:
+        """Sample future (ep_idx, local_idx) from same episode using uniform distribution."""
+        frameskip = self.dataset.frameskip
+        # The minimum goal index should be the last frame of the history (current state)
+        current_end = local_start + (self.current_goal_offset - 1) * frameskip
+        max_steps = (
+            self.episode_lengths[ep_idx] - 1 - current_end
+        ) // frameskip
+        # clip_indices filtering guarantees max_steps >= 1
+        assert max_steps >= 1, f'No future frames available: {max_steps=}'
+
+        k = int(self.rng.integers(1, max_steps + 1))
+        local_idx = current_end + k * frameskip
         return ep_idx, local_idx
 
     def _get_clip_info(self, idx: int) -> tuple[int, int]:
-        """Returns (episode_idx, local_start) for a given dataset index."""
-        return self.dataset.clip_indices[idx]
+        """Returns (episode_idx, local_start) for a given GoalDataset index."""
+        return self._clip_indices[idx]
 
     def _load_single_step(
         self, ep_idx: int, local_idx: int
@@ -636,8 +702,9 @@ class GoalDataset:
         return self.dataset._load_slice(ep_idx, local_idx, local_idx + 1)
 
     def __getitem__(self, idx: int):
-        # Get base sample from wrapped dataset
-        steps = self.dataset[idx]
+        # Get base sample from wrapped dataset using index mapping
+        wrapped_idx = self._index_mapping[idx]
+        steps = self.dataset[wrapped_idx]
 
         if not self.goal_keys:
             return steps
@@ -649,12 +716,21 @@ class GoalDataset:
         goal_kind = self._sample_goal_kind()
         if goal_kind == 'random':
             goal_ep_idx, goal_local_idx = self._sample_random_step()
-        elif goal_kind == 'future':
-            goal_ep_idx, goal_local_idx = self._sample_future_step(
+        elif goal_kind == 'geometric_future':
+            goal_ep_idx, goal_local_idx = self._sample_geometric_future_step(
+                ep_idx, local_start
+            )
+        elif goal_kind == 'uniform_future':
+            goal_ep_idx, goal_local_idx = self._sample_uniform_future_step(
                 ep_idx, local_start
             )
         else:  # current
-            goal_ep_idx, goal_local_idx = ep_idx, local_start
+            # Use current_goal_offset to determine the "current" frame
+            frameskip = self.dataset.frameskip
+            goal_local_idx = (
+                local_start + (self.current_goal_offset - 1) * frameskip
+            )
+            goal_ep_idx = ep_idx
 
         # Load goal step
         goal_step = self._load_single_step(goal_ep_idx, goal_local_idx)
