@@ -290,6 +290,12 @@ class Predictor(nn.Module):
         x = self.dropout(x)
         # transformer forward - returns (B, T, dim), one embedding per frame
         x = self.transformer(x, g)
+        print(
+            f'transformer_out_std_across_batch: {x.std(dim=0).mean()}'
+        )  # inter-sample variance
+        print(
+            f'transformer_out_std_within_sample: {x.std(dim=-1).mean()}'
+        )  # intra-feature variance
         # project to output dimension
         x = self.out_proj(x)
         return x
