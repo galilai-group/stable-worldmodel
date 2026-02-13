@@ -255,6 +255,7 @@ class Predictor(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         causal=True,
+        pool_type='attention',
     ):
         super().__init__()
 
@@ -278,13 +279,9 @@ class Predictor(nn.Module):
             num_patches,
             num_frames,
             causal=causal,
+            pool_type=pool_type,
         )
-        # self.out_proj = nn.Linear(dim, out_dim)
-        self.out_proj = nn.Sequential(
-            nn.Linear(dim, mlp_dim),
-            nn.GELU(),
-            nn.Linear(mlp_dim, out_dim),
-        )
+        self.out_proj = nn.Linear(dim, out_dim)
 
     def forward(self, x, g):
         """
@@ -300,12 +297,6 @@ class Predictor(nn.Module):
         x = self.dropout(x)
         # transformer forward - returns (B, T, dim), one embedding per frame
         x = self.transformer(x, g)
-        print(
-            f'transformer_out_std_across_batch: {x.std(dim=0).mean()}'
-        )  # inter-sample variance
-        print(
-            f'transformer_out_std_within_sample: {x.std(dim=-1).mean()}'
-        )  # intra-feature variance
         # project to output dimension
         x = self.out_proj(x)
         return x
@@ -476,12 +467,18 @@ class Transformer(nn.Module):
         num_patches=1,
         num_frames=1,
         causal=True,
+        pool_type='attention',
     ):
         super().__init__()
+        assert pool_type in ('attention', 'mean'), (
+            f"pool_type must be 'attention' or 'mean', got '{pool_type}'"
+        )
+        self.pool_type = pool_type
+        self.num_patches = num_patches
         self.norm = nn.LayerNorm(dim)
         self.layers = nn.ModuleList([])
         for i in range(depth):
-            if i == depth - 1:  # last layer: frame-wise aggregation (T*P -> T)
+            if i == depth - 1 and pool_type == 'attention':
                 att_type = 'frame_agg'
             elif i % 2 == 0:
                 att_type = 'self'
@@ -515,7 +512,7 @@ class Transformer(nn.Module):
         """
         for i, (attn, ff) in enumerate(self.layers):
             if (
-                i == len(self.layers) - 1
+                i == len(self.layers) - 1 and self.pool_type == 'attention'
             ):  # frame aggregation layer - no residual (dimension changes)
                 x = attn(x)
                 x = ff(x)
@@ -525,6 +522,10 @@ class Transformer(nn.Module):
             else:  # cross-attention goal conditioning
                 x = attn(x, g) + x
                 x = ff(x) + x
+
+        if self.pool_type == 'mean':
+            x = rearrange(x, 'b (t p) d -> b t p d', p=self.num_patches)
+            x = x.mean(dim=2)  # (B, T, dim)
 
         return self.norm(x)
 

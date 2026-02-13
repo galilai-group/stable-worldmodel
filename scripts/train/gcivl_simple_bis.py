@@ -488,6 +488,7 @@ def get_ivl_value_model(cfg):
             num_frames=cfg.dinowm.history_size,
             dim=embedding_dim,
             out_dim=1,
+            pool_type='mean',
             **cfg.predictor,
         )
 
