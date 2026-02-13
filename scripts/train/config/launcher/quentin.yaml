@@ -1,0 +1,38 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+wandb:
+  enable: true
+  entity: quentin-lelidec-nyu
+  project: stable-wm
+
+dataset_name: pusht_expert_train
+cache_dir: /home/ql2867/vast/.stable_worldmodel
+cpus_per_task: 4
+
+local_cache_dir: False
+
+hydra:
+  mode: MULTIRUN
+
+  launcher:
+    # ===== SLURM resources =====
+    account: torch_pr_305_cds
+    timeout_min: 2880 # 2 days
+
+    gres: gpu:1
+    cpus_per_task: ${cpus_per_task}
+    mem_gb: 50
+    tasks_per_node: 1
+    nodes: 1
+    partition: null
+
+    # ===== environment setup =====
+    setup:
+      - module purge
+      - module load anaconda3/2025.06
+      - source /share/apps/anaconda3/2025.06/etc/profile.d/conda.sh
+      - conda activate stable-wm
+      - export STABLEWM_HOME=~/vast/.stable_worldmodel/

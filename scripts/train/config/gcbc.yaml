@@ -22,12 +22,13 @@ seed: 42
 image_size: 224
 patch_size: 14
 
-n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size}'}
+n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size} - 1'}
 frameskip: 1
 
 dinowm:
   history_size: 3
   num_preds: 1
+  use_proprio_encoder: true  # Set to false to disable proprioception encoder
   proprio_dim: 4
   proprio_embed_dim: 10
   action_dim: 2
@@ -38,11 +39,15 @@ predictor:
   heads: 16
   mlp_dim: 2048
   dim_head: 64
-  dropout: 0.1
+  dropout: 0.0
   emb_dropout: 0.0
 
-predictor_lr: 5e-4
-proprio_encoder_lr: 5e-4
-action_encoder_lr: 5e-4
+# Encoder configuration
+# Options: 'dino' (pretrained frozen DINO) or 'vit_tiny' (trainable ViT tiny from scratch)
+encoder_type: dino
+
+predictor_lr: 1e-4
+proprio_encoder_lr: 1e-4
+encoder_lr: 1e-4
 
 dump_object: True
