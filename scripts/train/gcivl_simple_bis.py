@@ -397,10 +397,10 @@ def get_ivl_value_model(cfg):
                 sync_dist=True,
             )
 
-            print(f'{prefix}v_pred_mean: {v_pred.mean()}, ')
-            print(f'{prefix}v_pred_std: {v_pred.std()}, ')
-            print(f'{prefix}value_target_mean: {value_target.mean()}, ')
-            print(f'{prefix}value_target_std: {value_target.std()}, ')
+            # print(f'{prefix}v_pred_mean: {v_pred.mean()}, ')
+            # print(f'{prefix}v_pred_std: {v_pred.std()}, ')
+            # print(f'{prefix}value_target_mean: {value_target.mean()}, ')
+            # print(f'{prefix}value_target_std: {value_target.std()}, ')
 
             collapse_diagnostics = {
                 # Value prediction stats - std ≈ 0 indicates collapse
