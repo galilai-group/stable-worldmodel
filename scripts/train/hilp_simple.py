@@ -268,6 +268,7 @@ def get_hilp_value_model(cfg):
             if '_loss' in k
         }
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
+        losses_dict[f'{prefix}value_epoch'] = float(self.current_epoch)
         self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
         # Log diagnostics for collapse detection
@@ -676,6 +677,7 @@ def get_hilp_actor_model(cfg, trained_value_model):
         )
         losses_dict[f'{prefix}debug/action_stds'] = action_stds.mean().detach()
 
+        losses_dict[f'{prefix}policy_epoch'] = float(self.current_epoch)
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
         )  # , on_epoch=True, sync_dist=True)
