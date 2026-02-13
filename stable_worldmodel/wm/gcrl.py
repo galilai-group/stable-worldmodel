@@ -35,7 +35,12 @@ class GCRL(torch.nn.Module):
         # Learnable log_stds for action distribution (state-independent)
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
-        action_dim = action_predictor.out_proj.out_features
+        # Support both nn.Linear and nn.Sequential for out_proj
+        out_proj = action_predictor.out_proj
+        if isinstance(out_proj, nn.Sequential):
+            action_dim = out_proj[-1].out_features
+        else:
+            action_dim = out_proj.out_features
         self.log_stds = nn.Parameter(torch.zeros(action_dim))
 
     def encode(
