@@ -65,7 +65,8 @@ where $s_t$ is the observation embedding, $g$ is the goal embedding, and $a_t$ i
 
 | Environment | Success Rate | Checkpoint |
 |-------------|--------------|------------|
-| Push-T | ~52% | NA |
+| TwoRoom | 100% | NA |
+| Push-T | ~60% | NA |
 
 
 ## Implicit Q-Learning
@@ -106,8 +107,12 @@ where $A(s_t, a_t, g) = r(s_t, g) + \gamma \, V(s_{t+1}, g) - V(s_t, g)$ is the 
 
 ### Benchmark
 
-| Environment | Success Rate | Checkpoint |
-|-------------|--------------|------------|
-| TwoRoom | ? | NA |
-| Push-T | ? | NA |
+| Environment | Variant | Success Rate | Checkpoint |
+|-------------|---------|--------------|------------|
+| TwoRoom | IQL | 100% | NA |
+| TwoRoom | IVL | 100% | NA |
+| TwoRoom | HILP | 100% | NA |
+| Push-T | IQL | ? | NA |
+| Push-T | IVL | ? | NA |
+| Push-T | HILP | ? | NA |
 
