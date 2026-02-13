@@ -17,6 +17,17 @@ from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 _CONTROL_TIMESTEP = 0.025
 _DEFAULT_TIME_LIMIT = 25
 
+_TASKS = (
+    'stand',
+    'walk',
+    'run',
+    'walk-backward',
+    'arabesque',
+    'lie_down',
+    'legs_up',
+    'flip',
+)
+
 _TASK_MOVE_SPEEDS = {
     'stand': 0,
     'walk': 1,
@@ -31,9 +42,9 @@ _TASK_MOVE_SPEEDS = {
 
 class WalkerDMControlWrapper(DMControlWrapper):
     def __init__(self, task='walk', seed=None, environment_kwargs=None):
-        if task not in _TASK_MOVE_SPEEDS:
+        if task not in _TASKS:
             raise ValueError(
-                f"Unknown task '{task}'. Must be one of {list(_TASK_MOVE_SPEEDS.keys())}"
+                f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
             )
         self._task = task
         self._move_speed = _TASK_MOVE_SPEEDS[task]
