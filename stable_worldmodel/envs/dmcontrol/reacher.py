@@ -16,6 +16,8 @@ _DEFAULT_TIME_LIMIT = 20
 _BIG_TARGET = 0.05
 _SMALL_TARGET = 0.015
 
+_TASKS = ('easy', 'hard')
+
 _TASK_TARGET_SIZES = {
     'easy': _BIG_TARGET,
     'hard': _SMALL_TARGET,
@@ -24,9 +26,9 @@ _TASK_TARGET_SIZES = {
 
 class ReacherDMControlWrapper(DMControlWrapper):
     def __init__(self, task='hard', seed=None, environment_kwargs=None):
-        if task not in _TASK_TARGET_SIZES:
+        if task not in _TASKS:
             raise ValueError(
-                f"Unknown task '{task}'. Must be one of {list(_TASK_TARGET_SIZES.keys())}"
+                f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
             )
         self._target_size = _TASK_TARGET_SIZES[task]
         xml, assets = reacher.get_model_and_assets()
