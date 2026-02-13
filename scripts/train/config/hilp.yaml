@@ -45,7 +45,7 @@ predictor:
 
 # Encoder configuration
 # Options: 'dino' (pretrained frozen DINO) or 'vit_tiny' (trainable ViT tiny from scratch)
-encoder_type: vit_tiny
+encoder_type: dino
 
 train_value: true
 

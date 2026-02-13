@@ -124,8 +124,8 @@ def get_data(cfg):
 # ============================================================================
 # Model Architecture
 # ============================================================================
-def get_hilp_value_model(cfg):
-    """Build HILP model for training value and Q functions."""
+def get_ivl_value_model(cfg):
+    """Build ivl model for training value and Q functions."""
 
     expectile_loss = swm.wm.gcrl.ExpectileLoss(tau=cfg.get('expectile', 0.9))
 
@@ -546,16 +546,16 @@ def get_hilp_value_model(cfg):
             'model.encoder', cfg.get('encoder_lr', 3e-4)
         )
 
-    hilp_value_model = spt.Module(
+    ivl_value_model = spt.Module(
         model=hilbert_representation_model,
         forward=forward,
         optim=optim_config,
     )
-    return hilp_value_model
+    return ivl_value_model
 
 
-def get_hilp_actor_model(cfg, trained_value_model):
-    """Build HILP model for extracting policy via AWR from a trained value function."""
+def get_ivl_actor_model(cfg, trained_value_model):
+    """Build ivl model for extracting policy via AWR from a trained value function."""
 
     def forward(self, batch, stage):
         """Forward: encode observations and goals, predict actions, compute losses."""
@@ -702,7 +702,7 @@ def get_hilp_actor_model(cfg, trained_value_model):
         if hasattr(trained_value_model.model.encoder, 'backbone')
         else trained_value_model.model.encoder
     )
-    hilp_model = swm.wm.gcrl.GCRL(
+    ivl_model = swm.wm.gcrl.GCRL(
         encoder=spt.backbone.EvalOnly(encoder_backbone),
         action_predictor=trained_value_model.model.action_predictor,
         value_predictor=spt.backbone.EvalOnly(
@@ -719,8 +719,8 @@ def get_hilp_actor_model(cfg, trained_value_model):
             'optimizer': {'type': 'AdamW', 'lr': lr},
         }
 
-    hilp_actor_model = spt.Module(
-        model=hilp_model,
+    ivl_actor_model = spt.Module(
+        model=ivl_model,
         forward=forward,
         optim={
             'action_predictor_opt': add_opt(
@@ -729,7 +729,7 @@ def get_hilp_actor_model(cfg, trained_value_model):
             'log_stds_opt': add_opt('model.log_stds', cfg.predictor_lr),
         },
     )
-    return hilp_actor_model
+    return ivl_actor_model
 
 
 # ============================================================================
@@ -741,7 +741,7 @@ def setup_pl_logger(cfg, postfix=''):
 
     wandb_run_id = cfg.wandb.get('run_id', None)
     wandb_logger = WandbLogger(
-        name=f'dino_hilp{postfix}',
+        name=f'dino_ivl{postfix}',
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,
         resume='allow' if wandb_run_id else None,
@@ -787,7 +787,7 @@ class ModelObjectCallBack(Callback):
 # ============================================================================
 # Main Entry Point
 # ============================================================================
-@hydra.main(version_base=None, config_path='./config', config_name='hilp')
+@hydra.main(version_base=None, config_path='./config', config_name='gcivl')
 def run(cfg):
     """Run training of IQL goal-conditioned policy."""
 
@@ -795,7 +795,7 @@ def run(cfg):
     data = get_data(cfg)
 
     # First train value function
-    hilp_value_model = get_hilp_value_model(cfg)
+    ivl_value_model = get_ivl_value_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir()
 
@@ -817,7 +817,7 @@ def run(cfg):
 
         manager = spt.Manager(
             trainer=trainer,
-            module=hilp_value_model,
+            module=ivl_value_model,
             data=data,
             ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
         )
@@ -830,9 +830,9 @@ def run(cfg):
     checkpoint = torch.load(
         f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
     )
-    hilp_value_model.load_state_dict(checkpoint['state_dict'])
+    ivl_value_model.load_state_dict(checkpoint['state_dict'])
 
-    hilp_actor_model = get_hilp_actor_model(cfg, hilp_value_model)
+    ivl_actor_model = get_ivl_actor_model(cfg, ivl_value_model)
 
     dump_object_callback = ModelObjectCallBack(
         dirpath=cache_dir,
@@ -850,7 +850,7 @@ def run(cfg):
 
     manager = spt.Manager(
         trainer=trainer,
-        module=hilp_actor_model,
+        module=ivl_actor_model,
         data=data,
         ckpt_path=f'{cache_dir}/{cfg.output_model_name}_policy_weights.ckpt',
     )
