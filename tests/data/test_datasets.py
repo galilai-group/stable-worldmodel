@@ -1113,7 +1113,7 @@ class TestGoalDataset:
         goal_dataset = GoalDataset(base_dataset, seed=42)
 
         assert goal_dataset.dataset is base_dataset
-        assert goal_dataset.goal_probabilities == (0.3, 0.5, 0.2)
+        assert goal_dataset.goal_probabilities == (0.3, 0.5, 0.0, 0.2)
         assert goal_dataset.gamma == 0.99
         assert len(goal_dataset.episode_lengths) == 2
         assert goal_dataset.episode_offsets is not None
@@ -1124,11 +1124,11 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.5, 0.3, 0.2),
+            goal_probabilities=(0.5, 0.3, 0.0, 0.2),
             seed=42,
         )
 
-        assert goal_dataset.goal_probabilities == (0.5, 0.3, 0.2)
+        assert goal_dataset.goal_probabilities == (0.5, 0.3, 0.0, 0.2)
 
     def test_init_custom_gamma(self, sample_hdf5_for_goal):
         """Test GoalDataset with custom gamma."""
@@ -1143,7 +1143,7 @@ class TestGoalDataset:
         cache_dir, name = sample_hdf5_for_goal
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-        with pytest.raises(ValueError, match='3-tuple'):
+        with pytest.raises(ValueError, match='4-tuple'):
             GoalDataset(base_dataset, goal_probabilities=(0.5, 0.5))
 
     def test_init_invalid_probabilities_sum(self, sample_hdf5_for_goal):
@@ -1152,7 +1152,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
         with pytest.raises(ValueError, match='sum to 1.0'):
-            GoalDataset(base_dataset, goal_probabilities=(0.3, 0.3, 0.3))
+            GoalDataset(base_dataset, goal_probabilities=(0.3, 0.3, 0.3, 0.2))
 
     def test_init_custom_goal_keys(self, sample_hdf5_for_goal):
         """Test GoalDataset with custom goal_keys mapping."""
@@ -1188,10 +1188,24 @@ class TestGoalDataset:
         assert goal_dataset.goal_keys == {}
 
     def test_len(self, sample_hdf5_for_goal):
-        """Test GoalDataset length matches base dataset."""
+        """Test GoalDataset length is <= base dataset (filtered for future goals)."""
         cache_dir, name = sample_hdf5_for_goal
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(base_dataset, seed=42)
+
+        # Default probabilities include future sampling, so some clips may be filtered out
+        assert len(goal_dataset) <= len(base_dataset)
+        assert len(goal_dataset) > 0
+
+    def test_len_no_future(self, sample_hdf5_for_goal):
+        """Test GoalDataset length matches base dataset when no future sampling."""
+        cache_dir, name = sample_hdf5_for_goal
+        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+        goal_dataset = GoalDataset(
+            base_dataset,
+            goal_probabilities=(0.5, 0.0, 0.0, 0.5),  # No future sampling
+            seed=42,
+        )
 
         assert len(goal_dataset) == len(base_dataset)
 
@@ -1242,7 +1256,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(1.0, 0.0, 0.0),  # Always random
+            goal_probabilities=(1.0, 0.0, 0.0, 0.0),  # Always random
             seed=42,
         )
 
@@ -1250,17 +1264,17 @@ class TestGoalDataset:
             assert goal_dataset._sample_goal_kind() == 'random'
 
     def test_sample_goal_kind_future(self, sample_hdf5_for_goal):
-        """Test _sample_goal_kind returns 'future' with high future probability."""
+        """Test _sample_goal_kind returns 'geometric_future' with high geometric future probability."""
         cache_dir, name = sample_hdf5_for_goal
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.0, 1.0, 0.0),  # Always future
+            goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
             seed=42,
         )
 
         for _ in range(10):
-            assert goal_dataset._sample_goal_kind() == 'future'
+            assert goal_dataset._sample_goal_kind() == 'geometric_future'
 
     def test_sample_goal_kind_current(self, sample_hdf5_for_goal):
         """Test _sample_goal_kind returns 'current' with high current probability."""
@@ -1268,7 +1282,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.0, 0.0, 1.0),  # Always current
+            goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
             seed=42,
         )
 
@@ -1304,8 +1318,8 @@ class TestGoalDataset:
         assert ep_idx == 0
         assert local_idx == 0
 
-    def test_sample_future_step(self, sample_hdf5_for_goal):
-        """Test _sample_future_step returns future step in same episode."""
+    def test_sample_geometric_future_step(self, sample_hdf5_for_goal):
+        """Test _sample_geometric_future_step returns future step in same episode."""
         cache_dir, name = sample_hdf5_for_goal
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(base_dataset, seed=42)
@@ -1313,43 +1327,48 @@ class TestGoalDataset:
         # Sample from episode 0, starting at step 5
         ep_idx = 0
         local_start = 5
-        future_ep_idx, future_local_idx = goal_dataset._sample_future_step(
-            ep_idx, local_start
+        future_ep_idx, future_local_idx = (
+            goal_dataset._sample_geometric_future_step(ep_idx, local_start)
         )
 
-        # Calculate clip_end (last frame of the clip)
+        # Calculate current_end (last frame of the history/current state)
         frameskip = base_dataset.frameskip
-        num_steps = base_dataset.num_steps
-        clip_end = local_start + (num_steps - 1) * frameskip
+        current_end = (
+            local_start + (goal_dataset.current_goal_offset - 1) * frameskip
+        )
 
         # Should be same episode
         assert future_ep_idx == ep_idx
-        # Should be >= clip_end (last frame of the clip)
-        assert future_local_idx >= clip_end
+        # Should be > current_end (strictly after the current state)
+        assert future_local_idx > current_end
         # Should be within episode bounds
         assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
 
-    def test_sample_future_step_at_end(self, sample_hdf5_for_goal):
-        """Test _sample_future_step when at end of episode returns clip_end."""
+    def test_sample_uniform_future_step(self, sample_hdf5_for_goal):
+        """Test _sample_uniform_future_step returns future step in same episode."""
         cache_dir, name = sample_hdf5_for_goal
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(base_dataset, seed=42)
 
+        # Sample from episode 0, starting at step 5
         ep_idx = 0
-        # Start at last step
-        local_start = goal_dataset.episode_lengths[ep_idx] - 1
-        future_ep_idx, future_local_idx = goal_dataset._sample_future_step(
-            ep_idx, local_start
+        local_start = 5
+        future_ep_idx, future_local_idx = (
+            goal_dataset._sample_uniform_future_step(ep_idx, local_start)
         )
 
-        # Calculate clip_end (last frame of the clip)
+        # Calculate current_end
         frameskip = base_dataset.frameskip
-        num_steps = base_dataset.num_steps
-        clip_end = local_start + (num_steps - 1) * frameskip
+        current_end = (
+            local_start + (goal_dataset.current_goal_offset - 1) * frameskip
+        )
 
-        # Should return clip_end (clamped to episode bounds)
+        # Should be same episode
         assert future_ep_idx == ep_idx
-        assert future_local_idx == clip_end
+        # Should be > current_end
+        assert future_local_idx > current_end
+        # Should be within episode bounds
+        assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
 
     def test_get_clip_info(self, sample_hdf5_for_goal):
         """Test _get_clip_info returns correct episode and local start."""
@@ -1383,7 +1402,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.0, 0.0, 1.0),  # Always current
+            goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
             seed=42,
         )
 
@@ -1399,7 +1418,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(1.0, 0.0, 0.0),  # Always random
+            goal_probabilities=(1.0, 0.0, 0.0, 0.0),  # Always random
             seed=42,
         )
 
@@ -1416,7 +1435,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.0, 1.0, 0.0),  # Always future
+            goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
             seed=42,
         )
 
@@ -1467,7 +1486,7 @@ class TestGoalDataset:
         )
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.0, 0.0, 1.0),  # Always current
+            goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
             seed=42,
         )
 
@@ -1530,7 +1549,7 @@ class TestGoalDataset:
         base_dataset = HDF5Dataset('future_goal_test', cache_dir=str(tmp_path))
         goal_dataset = GoalDataset(
             base_dataset,
-            goal_probabilities=(0.0, 1.0, 0.0),  # Always future
+            goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
             gamma=0.99,
             seed=42,
         )
