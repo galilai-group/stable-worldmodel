@@ -274,7 +274,12 @@ class Predictor(nn.Module):
             num_frames,
             causal=causal,
         )
-        self.out_proj = nn.Linear(dim, out_dim)
+        # self.out_proj = nn.Linear(dim, out_dim)
+        self.out_proj = nn.Sequential(
+            nn.Linear(dim, mlp_dim),
+            nn.GELU(),
+            nn.Linear(mlp_dim, out_dim),
+        )
 
     def forward(self, x, g):
         """
