@@ -15,7 +15,7 @@ trainer:
   precision: 16-mixed
   gradient_clip_val: 1.0
 
-batch_size: 32
+batch_size: 128
 num_workers: ${cpus_per_task}
 train_split: 0.9
 seed: 42
