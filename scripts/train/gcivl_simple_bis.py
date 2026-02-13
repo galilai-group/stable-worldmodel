@@ -397,6 +397,11 @@ def get_ivl_value_model(cfg):
                 sync_dist=True,
             )
 
+            print(f'{prefix}v_pred_mean: {v_pred.mean()}, ')
+            print(f'{prefix}v_pred_std: {v_pred.std()}, ')
+            print(f'{prefix}value_target_mean: {value_target.mean()}, ')
+            print(f'{prefix}value_target_std: {value_target.std()}, ')
+
             collapse_diagnostics = {
                 # Value prediction stats - std ≈ 0 indicates collapse
                 f'{prefix}value_pred_mean': value_pred.mean(),
@@ -469,21 +474,22 @@ def get_ivl_value_model(cfg):
     )
 
     # value function
-    # value_predictor = swm.wm.gcrl.MetricValuePredictor(
-    #     num_patches=num_patches,
-    #     num_frames=cfg.dinowm.history_size,
-    #     dim=embedding_dim,
-    #     embed_dim=cfg.get('value_embed_dim', 64),
-    #     **cfg.predictor,
-    # )
-
-    value_predictor = swm.wm.gcrl.Predictor(
-        num_patches=num_patches,
-        num_frames=cfg.dinowm.history_size,
-        dim=embedding_dim,
-        out_dim=1,
-        **cfg.predictor,
-    )
+    if cfg.get('metric_value', False):
+        value_predictor = swm.wm.gcrl.MetricValuePredictor(
+            num_patches=num_patches,
+            num_frames=cfg.dinowm.history_size,
+            dim=embedding_dim,
+            embed_dim=cfg.get('value_embed_dim', 64),
+            **cfg.predictor,
+        )
+    else:
+        value_predictor = swm.wm.gcrl.Predictor(
+            num_patches=num_patches,
+            num_frames=cfg.dinowm.history_size,
+            dim=embedding_dim,
+            out_dim=1,
+            **cfg.predictor,
+        )
 
     wrapped_value_predictor = spt.TeacherStudentWrapper(
         value_predictor,

@@ -74,3 +74,5 @@ actor_goal_probabilities:
 goal_gamma: 0.99  # Discount factor for geometric distribution when sampling future goals
 
 dump_object: True
+
+metric_value: false
