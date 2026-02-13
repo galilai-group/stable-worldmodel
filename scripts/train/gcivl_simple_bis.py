@@ -474,23 +474,14 @@ def get_ivl_value_model(cfg):
     )
 
     # value function
-    if cfg.get('metric_value', False):
-        value_predictor = swm.wm.gcrl.MetricValuePredictor(
-            num_patches=num_patches,
-            num_frames=cfg.dinowm.history_size,
-            dim=embedding_dim,
-            embed_dim=cfg.get('value_embed_dim', 64),
-            **cfg.predictor,
-        )
-    else:
-        value_predictor = swm.wm.gcrl.Predictor(
-            num_patches=num_patches,
-            num_frames=cfg.dinowm.history_size,
-            dim=embedding_dim,
-            out_dim=1,
-            pool_type='mean',
-            **cfg.predictor,
-        )
+    value_predictor = swm.wm.gcrl.Predictor(
+        num_patches=num_patches,
+        num_frames=cfg.dinowm.history_size,
+        dim=embedding_dim,
+        out_dim=1,
+        pool_type='mean',
+        **cfg.predictor,
+    )
 
     wrapped_value_predictor = spt.TeacherStudentWrapper(
         value_predictor,

@@ -504,6 +504,7 @@ def get_gciql_critics_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         out_dim=1,
+        pool_type='mean',
         **cfg.predictor,
     )
 
@@ -520,6 +521,7 @@ def get_gciql_critics_model(cfg):
         num_frames=cfg.dinowm.history_size,
         dim=embedding_dim,
         action_dim=effective_act_dim,
+        pool_type='mean',
         **cfg.predictor,
     )
 

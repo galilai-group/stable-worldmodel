@@ -717,6 +717,7 @@ class QPredictor(nn.Module):
         dropout: Dropout rate
         emb_dropout: Embedding dropout rate
         causal: Whether to use causal masking
+        pool_type: Frame aggregation method ('attention' or 'mean')
     """
 
     def __init__(
@@ -734,6 +735,7 @@ class QPredictor(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         causal=True,
+        pool_type='attention',
     ):
         super().__init__()
 
@@ -760,6 +762,7 @@ class QPredictor(nn.Module):
             num_patches,
             num_frames,
             causal=causal,
+            pool_type=pool_type,
         )
 
         # MLP head: [frame_embed, action] -> Q value
