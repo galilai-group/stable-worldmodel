@@ -19,6 +19,8 @@ DEFAULT_VARIATIONS = (
 
 
 # TODO: Re-enable targets to be sequences of pads instead of single pads
+# TODO: Add walls to the environment, with the number of walls controlled by
+# the variation space
 class PinPadDiscrete(gym.Env):
     def __init__(
         self,
@@ -32,20 +34,22 @@ class PinPadDiscrete(gym.Env):
             self.variation_space.set_init_value(init_value)
 
         # Other spaces
-        self.observation_space = gym.spaces.Dict({
-            'image': gym.spaces.Box(
-                low=0,
-                high=255,
-                shape=(Y_BOUND * RENDER_SCALE, X_BOUND * RENDER_SCALE, 3),
-                dtype=np.uint8,
-            ),
-            'agent_position': gym.spaces.Box(
-                low=np.array([0, 0], dtype=np.int64),
-                high=np.array([X_BOUND - 1, Y_BOUND - 1], dtype=np.int64),
-                shape=(2,),
-                dtype=np.int64,
-            ),
-        })
+        self.observation_space = gym.spaces.Dict(
+            {
+                'image': gym.spaces.Box(
+                    low=0,
+                    high=255,
+                    shape=(Y_BOUND * RENDER_SCALE, X_BOUND * RENDER_SCALE, 3),
+                    dtype=np.uint8,
+                ),
+                'agent_position': gym.spaces.Box(
+                    low=np.array([0, 0], dtype=np.int64),
+                    high=np.array([X_BOUND - 1, Y_BOUND - 1], dtype=np.int64),
+                    shape=(2,),
+                    dtype=np.int64,
+                ),
+            }
+        )
         self.action_space = gym.spaces.Discrete(5)  # [0, 5)
 
         # To be initialized in reset()
@@ -155,7 +159,7 @@ class PinPadDiscrete(gym.Env):
         obs = self._get_obs()
         info = self._get_info()
         return obs, info
-    
+
     def _get_obs(self):
         return {
             'image': self.render(),

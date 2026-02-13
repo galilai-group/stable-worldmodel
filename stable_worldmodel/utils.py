@@ -51,9 +51,7 @@ def pretraining(
     logging.info('🏁🏁🏁 Pretraining script finished 🏁🏁🏁')
 
 
-def flatten_dict(
-    d: dict, parent_key: str = '', sep: str = '.'
-) -> dict:
+def flatten_dict(d: dict, parent_key: str = '', sep: str = '.') -> dict:
     """Flatten a nested dictionary into a single-level dictionary.
 
     Args:
@@ -97,6 +95,7 @@ def record_video_from_dataset(
     max_steps: int = 500,
     fps: int = 30,
     viewname: str | list[str] = 'pixels',
+    suffix: str = '.gif',
 ) -> None:
     """Replay stored dataset episodes and export them as MP4 videos.
 
@@ -107,6 +106,7 @@ def record_video_from_dataset(
         max_steps: Maximum frames per video.
         fps: Frames per second for the output video.
         viewname: Key(s) in the dataset to use as video frames.
+        suffix: Suffix for the output video file.
     """
     import imageio
 
@@ -120,10 +120,14 @@ def record_video_from_dataset(
     )
 
     for ep_idx in episode_idx:
-        file_path = Path(video_path, f'episode_{ep_idx}.mp4')
+        file_path = Path(video_path, f'episode_{ep_idx}{suffix}')
         steps = dataset.load_episode(ep_idx)
         frames = np.concatenate([steps[v].numpy() for v in viewname], axis=2)
         frames = frames[:max_steps]
-        imageio.mimsave(file_path, frames.transpose(0, 2, 3, 1), fps=fps)
+        imageio.mimsave(
+            file_path.with_suffix(suffix),
+            frames.transpose(0, 2, 3, 1),
+            fps=fps,
+        )
 
     print(f'Video saved to {video_path}')

@@ -28,10 +28,12 @@ def compute_action_discrete(agent_position, goal_position):
     return action
 
 
-def compute_action_continuous(agent_position, goal_position, max_norm, add_noise):
+def compute_action_continuous(
+    agent_position, goal_position, max_norm, add_noise, rng
+):
     delta = goal_position - agent_position
     if add_noise:
-        delta = delta + np.random.normal(0, 1, delta.shape)
+        delta = delta + rng.normal(0, 1, delta.shape)
 
     if np.linalg.norm(delta) > max_norm:
         action = max_norm * delta / np.linalg.norm(delta)  # Clips norm
@@ -80,6 +82,7 @@ def get_action(info_dict, env, env_type, **kwargs):
                     goal_position,
                     kwargs['max_norm'],
                     kwargs['add_noise'],
+                    kwargs['rng'],
                 )
             )
         else:
@@ -111,11 +114,12 @@ class ExpertPolicyDiscrete(BasePolicy):
 class ExpertPolicy(BasePolicy):
     """Expert policy for the PinPad environment."""
 
-    def __init__(self, max_norm=1.0, add_noise=True, **kwargs):
+    def __init__(self, max_norm=1.0, add_noise=True, seed=None, **kwargs):
         super().__init__(**kwargs)
         self.type = 'expert'
         self.max_norm = max_norm
         self.add_noise = add_noise
+        self.rng = np.random.default_rng(seed)
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
@@ -128,4 +132,5 @@ class ExpertPolicy(BasePolicy):
 
         kwargs['max_norm'] = self.max_norm
         kwargs['add_noise'] = self.add_noise
+        kwargs['rng'] = self.rng
         return get_action(info_dict, self.env, 'continuous', **kwargs)
