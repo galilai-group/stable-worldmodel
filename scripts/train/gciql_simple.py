@@ -296,6 +296,8 @@ def get_gciql_critics_model(cfg):
             if '_loss' in k
         }
         losses_dict[f'{prefix}loss'] = batch['loss'].detach()
+        losses_dict[f'{prefix}critics_epoch'] = float(self.current_epoch)
+
         self.log_dict(losses_dict, on_step=True, sync_dist=True)
 
         # Log diagnostics for collapse detection
@@ -728,6 +730,8 @@ def get_gciql_actor_model(cfg, trained_critics_model):
             log_stds.mean().detach()
         )
         losses_dict[f'{prefix}debug/action_stds'] = action_stds.mean().detach()
+
+        losses_dict[f'{prefix}policy_epoch'] = float(self.current_epoch)
 
         self.log_dict(
             losses_dict, on_step=True, sync_dist=True
