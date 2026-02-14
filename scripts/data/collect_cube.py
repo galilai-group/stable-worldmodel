@@ -1,11 +1,6 @@
 import os
 
-
-# os.environ["PYOPENGL_PLATFORM"] = "egl"
 os.environ['MUJOCO_GL'] = 'egl'
-
-
-import concurrent.futures
 
 import hydra
 import numpy as np
