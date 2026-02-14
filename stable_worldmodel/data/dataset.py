@@ -84,6 +84,9 @@ class Dataset:
     def get_col_data(self, col: str) -> np.ndarray:
         raise NotImplementedError
 
+    def get_dim(self, col: str) -> int:
+        raise NotImplementedError
+
     def get_row_data(self, row_idx: int | list[int]) -> dict:
         raise NotImplementedError
 
@@ -166,6 +169,10 @@ class HDF5Dataset(Dataset):
         # but for optimal performance usually one by one or slicing is preferred
         # Here we rely on h5py's fancy indexing support
         return {col: self.h5_file[col][row_idx] for col in self._keys}
+
+    def get_dim(self, col: str) -> int:
+        data = self.get_col_data(col)
+        return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
 
 class FolderDataset(Dataset):
