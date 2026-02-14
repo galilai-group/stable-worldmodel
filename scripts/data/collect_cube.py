@@ -1,7 +1,6 @@
 import os
 
 os.environ['MUJOCO_GL'] = 'egl'
-
 import hydra
 import numpy as np
 from loguru import logger as logging
