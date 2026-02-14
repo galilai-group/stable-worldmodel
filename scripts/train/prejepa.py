@@ -1,16 +1,17 @@
-import os
 from collections import OrderedDict
+from functools import partial
 from pathlib import Path
 
 import hydra
 import lightning as pl
-import numpy as np
 import stable_pretraining as spt
+import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
+from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import (
@@ -19,195 +20,270 @@ from transformers import (
     AutoVideoProcessor,
 )
 
-import stable_worldmodel as swm
+# fmt: off
+ENCODER_CONFIGS = {
+    'resnet': {
+        'prefix': 'microsoft/resnet-',
+        'model_class': AutoModelForImageClassification,
+        'embedding_attr': lambda m: m.config.hidden_sizes[-1],
+        'post_init': lambda m: setattr(m.classifier, '1', nn.LayerNorm(m.config.hidden_sizes[-1])),
+        'interpolate_pos_encoding': False,
+    },
+    'vit':    {'prefix': 'google/vit-'},
+    'dino':   {'prefix': 'facebook/dino-'},
+    'dinov2':  {'prefix': 'facebook/dinov2-'},
+    'dinov3':  {'prefix': 'facebook/dinov3-'},
+    'webssl':  {'prefix': 'facebook/webssl-'},
+    'mae':    {'prefix': 'facebook/vit-mae-'},
+    'ijepa':  {'prefix': 'facebook/ijepa'},
+    'vjepa2':  {'prefix': 'facebook/vjepa2-vit'},
+    'siglip2': {'prefix': 'google/siglip2-'},
+}
+# fmt: on
 
 
 def get_encoder(cfg):
-    """Factory function to create encoder based on backbone type."""
-
-    # Define encoder configurations
-    ENCODER_CONFIGS = {
-        'resnet': {
-            'prefix': 'microsoft/resnet-',
-            'model_class': AutoModelForImageClassification,
-            'embedding_attr': lambda model: model.config.hidden_sizes[-1],
-            'post_init': lambda model: setattr(
-                model.classifier,
-                '1',
-                torch.nn.LayerNorm(model.config.hidden_sizes[-1]),
-            ),
-            'interpolate_pos_encoding': False,
-        },
-        'vit': {'prefix': 'google/vit-'},
-        'dino': {'prefix': 'facebook/dino-'},
-        'dinov2': {'prefix': 'facebook/dinov2-'},
-        'dinov3': {'prefix': 'facebook/dinov3-'},
-        'webssl': {'prefix': 'facebook/webssl-'},
-        'mae': {'prefix': 'facebook/vit-mae-'},
-        'ijepa': {'prefix': 'facebook/ijepa'},
-        'vjepa2': {'prefix': 'facebook/vjepa2-vit'},
-        'siglip2': {'prefix': 'google/siglip2-'},
-    }
-
-    # Find matching encoder
-    encoder_type = None
-    for name, config in ENCODER_CONFIGS.items():
-        if cfg.backbone.name.startswith(config['prefix']):
-            encoder_type = name
-            break
-
-    if encoder_type is None:
+    """Load a pretrained vision encoder and return (backbone, embed_dim, num_patches, interp_pos_enc)."""
+    encoder_cfg = next(
+        (
+            c
+            for c in ENCODER_CONFIGS.values()
+            if cfg.backbone.name.startswith(c['prefix'])
+        ),
+        None,
+    )
+    if encoder_cfg is None:
         raise ValueError(f'Unsupported backbone: {cfg.backbone.name}')
 
-    config = ENCODER_CONFIGS[encoder_type]
-
-    # Load model
-    backbone = config.get('model_class', AutoModel).from_pretrained(
+    backbone = encoder_cfg.get('model_class', AutoModel).from_pretrained(
         cfg.backbone.name
     )
-
-    # CLIP style model
-    if hasattr(backbone, 'vision_model'):
+    if hasattr(backbone, 'vision_model'):  # CLIP-style
         backbone = backbone.vision_model
+    if 'post_init' in encoder_cfg:
+        encoder_cfg['post_init'](backbone)
 
-    # Post-initialization if needed (e.g., ResNet)
-    if 'post_init' in config:
-        config['post_init'](backbone)
-
-    # Get embedding dimension
-    embedding_dim = config.get(
-        'embedding_attr', lambda model: model.config.hidden_size
+    embed_dim = encoder_cfg.get(
+        'embedding_attr', lambda m: m.config.hidden_size
     )(backbone)
-
-    # Determine number of patches
-    is_cnn = encoder_type == 'resnet'
+    is_cnn = cfg.backbone.name.startswith('microsoft/resnet-')
     num_patches = 1 if is_cnn else (cfg.image_size // cfg.patch_size) ** 2
+    interp_pos_enc = encoder_cfg.get('interpolate_pos_encoding', True)
 
-    interp_pos_enc = config.get('interpolate_pos_encoding', True)
-
-    return backbone, embedding_dim, num_patches, interp_pos_enc
-
-
-DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
+    return backbone, embed_dim, num_patches, interp_pos_enc
 
 
-# ============================================================================
-# Data Setup
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Data helpers
+# ---------------------------------------------------------------------------
+
+
+def get_img_preprocessor(source, target, img_size=224):
+    stats = spt.data.dataset_stats.ImageNet
+    return spt.data.transforms.Compose(
+        spt.data.transforms.ToImage(**stats, source=source, target=target),
+        spt.data.transforms.Resize(img_size, source=source, target=target),
+    )
+
+
+def get_column_normalizer(dataset, source, target):
+    data = torch.from_numpy(dataset.get_col_data(source)[:])
+    data = data[~torch.isnan(data).any(dim=1)]
+    mean, std = (
+        data.mean(0, keepdim=True).clone(),
+        data.std(0, keepdim=True).clone(),
+    )
+    return spt.data.transforms.WrapTorchTransform(
+        lambda x: ((x - mean) / std).float(),
+        source=source,
+        target=target,
+    )
 
 
 class VideoPipeline(spt.data.transforms.Transform):
-    def __init__(
-        self, processor, source: str = 'image', target: str = 'image'
-    ):
+    def __init__(self, processor, source='image', target='image'):
         super().__init__()
-        self.processor = processor
-        self.source = source
-        self.target = target
+        self.processor, self.source, self.target = processor, source, target
 
-    def __call__(self, x: dict):
+    def __call__(self, x):
         frames = self.nested_get(x, self.source)
-        processed = self.processor(frames, return_tensors='pt')[
-            'pixel_values_videos'
-        ].squeeze(0)
-        self.nested_set(x, processed, self.target)
+        self.nested_set(
+            x,
+            self.processor(frames, return_tensors='pt')[
+                'pixel_values_videos'
+            ].squeeze(0),
+            self.target,
+        )
         return x
 
 
-def get_data(cfg):
-    """Setup dataset with image transforms and normalization."""
+# ---------------------------------------------------------------------------
+# Callbacks
+# ---------------------------------------------------------------------------
 
-    def get_video_pipeline(key, target):
-        """Backwards-compatible helper: returns a VideoPipeline transform."""
-        processor = AutoVideoProcessor.from_pretrained(cfg.backbone.name)
-        return VideoPipeline(processor, source=key, target=target)
 
-    def get_img_pipeline(key, target, img_size=224):
-        return spt.data.transforms.Compose(
-            spt.data.transforms.ToImage(
-                **spt.data.dataset_stats.ImageNet, source=key, target=target
-            ),
-            spt.data.transforms.Resize(img_size, source=key, target=target),
-            spt.data.transforms.CenterCrop(
-                img_size, source=key, target=target
-            ),
+class ModelObjectCallBack(Callback):
+    """Save the model object periodically and at the final epoch."""
+
+    def __init__(self, dirpath, filename='model_object', epoch_interval=1):
+        super().__init__()
+        self.dirpath, self.filename, self.epoch_interval = (
+            Path(dirpath),
+            filename,
+            epoch_interval,
         )
 
-    def norm_col_transform(dataset, col='pixels'):
-        """Normalize column to zero mean, unit variance."""
-        data = dataset.get_col_data(col).squeeze()
-        mean = data.mean(0).unsqueeze(0)
-        std = data.std(0).unsqueeze(0)
-        std = std.clamp(min=1e-6)  # Prevent division by near-zero std
-        return lambda x: ((x - mean) / std).float()
+    def on_train_epoch_end(self, trainer, pl_module):
+        if not trainer.is_global_zero:
+            return
+        epoch = trainer.current_epoch + 1
+        if epoch % self.epoch_interval == 0:
+            path = self.dirpath / f'{self.filename}_epoch_{epoch}_object.ckpt'
+            torch.save(pl_module.model, path)
+            logging.info(f'Saved world model to {path}')
+        if epoch == trainer.max_epochs:
+            path = self.dirpath / f'{self.filename}_object.ckpt'
+            torch.save(pl_module.model, path)
+            logging.info(f'Saved final world model to {path}')
 
-    ds_config = {
-        'num_steps': cfg.n_steps,
-        'frameskip': cfg.frameskip,
-        'transform': None,
-        'cache_dir': cfg.get('cache_dir', None),
-        'subset_prop': cfg.subset_prop,
-    }
+
+# ---------------------------------------------------------------------------
+# Forward
+# ---------------------------------------------------------------------------
+
+
+def _strip_action_dims(tensor, action_range):
+    """Remove the action dimensions from the last axis."""
+    return torch.cat(
+        [tensor[..., : action_range[0]], tensor[..., action_range[1] :]],
+        dim=-1,
+    )
+
+
+def dinowm_forward(self, batch, stage, cfg):
+    """Encode observations, predict next states, compute losses."""
+    for key in self.model.extra_encoders:
+        batch[key] = torch.nan_to_num(batch[key], 0.0).squeeze()
+
+    batch = self.model.encode(
+        batch,
+        target='embed',
+        is_video=cfg.backbone.get('is_video_encoder', False),
+    )
+
+    embedding = batch['embed'][:, : cfg.wm.history_size, ...]
+    pred_embedding = self.model.predict(embedding)
+    target_embedding = batch['embed'][:, cfg.wm.num_preds :, ...].detach()
+
+    # Per-modality losses
+    pixels_dim = batch['pixels_embed'].size(-1)
+    batch['pixels_loss'] = F.mse_loss(
+        pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim]
+    )
+
+    start, action_range = pixels_dim, [0, 0]
+    for key in self.model.extra_encoders:
+        dim = batch[f'{key}_embed'].size(-1)
+        lo, hi = start, start + dim
+        if key == 'action':
+            action_range = [lo, hi]
+        else:
+            batch[f'{key}_loss'] = F.mse_loss(
+                pred_embedding[..., lo:hi],
+                target_embedding[..., lo:hi].detach(),
+            )
+        start = hi
+
+    # Actionless embeddings (for probes and total loss)
+    batch['actionless_embed'] = _strip_action_dims(
+        batch['embed'], action_range
+    )
+    batch['actionless_prev_embed'] = _strip_action_dims(
+        embedding, action_range
+    )
+    batch['actionless_pred_embed'] = _strip_action_dims(
+        pred_embedding, action_range
+    )
+    batch['actionless_target_embed'] = _strip_action_dims(
+        target_embedding, action_range
+    )
+
+    batch['loss'] = F.mse_loss(
+        batch['actionless_pred_embed'],
+        batch['actionless_target_embed'].detach(),
+    )
+
+    if batch['loss'].isnan():
+        raise ValueError('NaN loss encountered!')
+
+    self.log_dict(
+        {f'{stage}/{k}': v.detach() for k, v in batch.items() if '_loss' in k},
+        on_step=True,
+        sync_dist=True,
+    )
+    return batch
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+@hydra.main(version_base=None, config_path='./config', config_name='prejepa')
+def run(cfg):
+    # --- Dataset ---
+    encoding_keys = list(cfg.wm.get('encoding', {}).keys())
+    keys_to_load = ['pixels'] + encoding_keys
 
     dataset = swm.data.HDF5Dataset(
         cfg.dataset_name,
-        **ds_config,
+        num_steps=cfg.n_steps,
+        frameskip=cfg.frameskip,
+        transform=None,
+        cache_dir=cfg.get('cache_dir', None),
+        keys_to_load=keys_to_load,
+        keys_to_cache=encoding_keys,
     )
 
-    all_norm_transforms = []
-    for key in cfg.prejepa.get('encoding', {}):
-        trans_fn = norm_col_transform(dataset.dataset, key)
-        trans_fn = spt.data.transforms.WrapTorchTransform(
-            trans_fn, source=key, target=key
-        )
-        all_norm_transforms.append(trans_fn)
+    normalizers = [
+        get_column_normalizer(dataset, col, col)
+        for col in cfg.wm.get('encoding', {})
+    ]
 
-    # vjepa2
     if cfg.backbone.get('is_video_encoder', False):
-        img_size = cfg.image_size
+        processor = AutoVideoProcessor.from_pretrained(cfg.backbone.name)
         transform = spt.data.transforms.Compose(
-            get_video_pipeline('pixels', 'pixels'),
+            VideoPipeline(processor, source='pixels', target='pixels'),
             spt.data.transforms.Resize(
-                img_size, source='pixels', target='pixels'
+                cfg.image_size, source='pixels', target='pixels'
             ),
-            *all_norm_transforms,
+            *normalizers,
         )
     else:
-        # Image size must be multiple of DINO patch size (14)
-        img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
-        # Apply transforms to all steps
         transform = spt.data.transforms.Compose(
-            *[
-                get_img_pipeline(col, col, img_size)
-                for col in ['pixels']
-                for i in range(cfg.n_steps)
-            ],
-            *all_norm_transforms,
+            get_img_preprocessor('pixels', 'pixels', cfg.image_size),
+            *normalizers,
         )
-
     dataset.transform = transform
 
     with open_dict(cfg) as cfg:
         cfg.extra_dims = {}
-        for key in cfg.prejepa.get('encoding', {}):
+        for key in cfg.wm.get('encoding', {}):
             if key not in dataset.column_names:
                 raise ValueError(
                     f"Encoding key '{key}' not found in dataset columns."
                 )
-            inpt_dim = np.prod(dataset[0][key].shape[1:])
+            dim = dataset.get_dim(key)
             cfg.extra_dims[key] = (
-                inpt_dim if key != 'action' else inpt_dim * cfg.frameskip
+                dim if key != 'action' else dim * cfg.frameskip
             )
 
     rnd_gen = torch.Generator().manual_seed(cfg.seed)
     train_set, val_set = spt.data.random_split(
-        dataset,
-        lengths=[cfg.train_split, 1 - cfg.train_split],
-        generator=rnd_gen,
+        dataset, [cfg.train_split, 1 - cfg.train_split], generator=rnd_gen
     )
-    logging.info(f'Train: {len(train_set)}, Val: {len(val_set)}')
 
-    train = DataLoader(
+    train_loader = DataLoader(
         train_set,
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
@@ -217,268 +293,99 @@ def get_data(cfg):
         shuffle=True,
         generator=rnd_gen,
     )
-    val = DataLoader(
+    val_loader = DataLoader(
         val_set,
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         pin_memory=True,
     )
 
-    return spt.data.DataModule(train=train, val=val)
-
-
-# ============================================================================
-# Model Architecture
-# ============================================================================
-
-
-def get_world_model(cfg):
-    """Build world model: frozen DINO encoder + trainable causal predictor."""
-
-    def forward(self, batch, stage):
-        """Forward: encode observations, predict next states, compute losses."""
-
-        # Replace NaN values with 0 (occurs at sequence boundaries)
-        for key in self.model.extra_encoders.keys():
-            batch[key] = torch.nan_to_num(batch[key], 0.0).squeeze()
-
-        # Encode all timesteps into latent embeddings
-        batch = self.model.encode(
-            batch,
-            target='embed',
-            is_video=cfg.backbone.get('is_video_encoder', False),
-        )
-
-        # Use history to predict next states
-        embedding = batch['embed'][
-            :, : cfg.prejepa.history_size, :, :
-        ]  # (B, T-1, patches, dim)
-        pred_embedding = self.model.predict(embedding)
-        target_embedding = batch['embed'][
-            :, cfg.prejepa.num_preds :, :, :
-        ]  # (B, T-1, patches, dim)
-
-        # Compute pixel reconstruction loss
-        pixels_dim = batch['pixels_embed'].shape[-1]
-        pixels_loss = F.mse_loss(
-            pred_embedding[..., :pixels_dim],
-            target_embedding[..., :pixels_dim].detach(),
-        )
-        batch['pixels_loss'] = pixels_loss
-
-        start = pixels_dim
-        action_dim_range = [0, 0]
-
-        for key in self.model.extra_encoders.keys():
-            emb_dim = batch[f'{key}_embed'].shape[-1]
-            lo, hi = start, start + emb_dim
-
-            if key == 'action':
-                action_dim_range = [lo, hi]
-            else:
-                batch[f'{key}_loss'] = F.mse_loss(
-                    pred_embedding[..., lo:hi],
-                    target_embedding[..., lo:hi].detach(),
-                )
-
-            start = hi
-
-        # Total loss
-        actionless_pred = torch.cat(
-            [
-                pred_embedding[..., : action_dim_range[0]],
-                pred_embedding[..., action_dim_range[1] :],
-            ],
-            dim=-1,
-        )
-
-        actionless_target = torch.cat(
-            [
-                target_embedding[..., : action_dim_range[0]],
-                target_embedding[..., action_dim_range[1] :],
-            ],
-            dim=-1,
-        )
-
-        batch['loss'] = F.mse_loss(actionless_pred, actionless_target.detach())
-
-        if batch['loss'].isnan():
-            raise ValueError('Loss is NaN!')
-
-        # Log all losses
-        prefix = 'train/' if self.training else 'val/'
-        losses_dict = {
-            f'{prefix}{k}': v.detach()
-            for k, v in batch.items()
-            if '_loss' in k
-        }
-        self.log_dict(
-            losses_dict, on_step=True, sync_dist=True
-        )  # , on_epoch=True, sync_dist=True)
-
-        return batch
-
-    encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(cfg)
-    embedding_dim += sum(
-        emb_dim for emb_dim in cfg.prejepa.get('encoding', {}).values()
-    )  # add all extra dims
+    # --- Model ---
+    encoder, embed_dim, num_patches, interp_pos_enc = get_encoder(cfg)
+    embed_dim += sum(cfg.wm.get('encoding', {}).values())
 
     if cfg.backbone.get('is_video_encoder', False):
         num_patches += num_patches * (cfg.n_steps // 4)
 
-    logging.info(f'Patches: {num_patches}, Embedding dim: {embedding_dim}')
-
-    # Build causal predictor (transformer that predicts next latent states)
-
-    print('>>>> DIM PREDICTOR:', embedding_dim)
-
+    predictor_kwargs = {k: v for k, v in cfg.predictor.items() if k != 'size'}
     predictor = swm.wm.prejepa.CausalPredictor(
         num_patches=num_patches,
-        num_frames=cfg.prejepa.history_size,
-        dim=embedding_dim,
-        **cfg.predictor,
+        num_frames=cfg.wm.history_size,
+        dim=embed_dim,
+        **predictor_kwargs,
     )
 
-    # Build action and proprioception encoders
-    extra_encoders = OrderedDict()
-    for key, emb_dim in cfg.prejepa.get('encoding', {}).items():
-        inpt_dim = cfg.extra_dims[key]
-        extra_encoders[key] = swm.wm.prejepa.Embedder(
-            in_chans=inpt_dim, emb_dim=emb_dim
+    extra_encoders = nn.ModuleDict(
+        OrderedDict(
+            (
+                key,
+                swm.wm.prejepa.Embedder(
+                    in_chans=cfg.extra_dims[key], emb_dim=emb_dim
+                ),
+            )
+            for key, emb_dim in cfg.wm.get('encoding', {}).items()
         )
-        print(
-            f'Build encoder for {key} with input dim {inpt_dim} and emb dim {emb_dim}'
-        )
+    )
 
-    extra_encoders = torch.nn.ModuleDict(extra_encoders)
-
-    # Assemble world model
     world_model = swm.wm.PreJEPA(
         encoder=spt.backbone.EvalOnly(encoder),
         predictor=predictor,
         extra_encoders=extra_encoders,
-        history_size=cfg.prejepa.history_size,
-        num_pred=cfg.prejepa.num_preds,
+        history_size=cfg.wm.history_size,
+        num_pred=cfg.wm.num_preds,
         interpolate_pos_encoding=interp_pos_enc,
     )
 
-    # Wrap in stable_spt Module with separate optimizers for each component
-    def add_opt(module_name, lr):
-        return {
-            'modules': str(module_name),
-            'optimizer': {'type': 'AdamW', 'lr': lr},
-        }
-
-    optim_dict = {
-        'predictor_opt': add_opt('model.predictor', cfg.predictor_lr)
-    }
-    optim_dict.update(
-        {
-            f'{key}_opt': add_opt(
-                f'model.extra_encoders.{key}', cfg.encoding_lr
-            )
-            for key in extra_encoders
-        }
-    )
-
     world_model = spt.Module(
-        model=world_model, forward=forward, optim=optim_dict
-    )
-    return world_model
-
-
-# ============================================================================
-# Training Setup
-# ============================================================================
-def setup_pl_logger(cfg):
-    if not cfg.wandb.enable:
-        return None
-
-    wandb_run_id = cfg.get('subdir')
-    wandb_logger = WandbLogger(
-        name='dino_wm',
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        resume='allow' if wandb_run_id else None,
-        id=wandb_run_id,
-        log_model=False,
+        model=world_model,
+        forward=partial(dinowm_forward, cfg=cfg),
+        optim={
+            'model_opt': {'modules': 'model', 'optimizer': dict(cfg.optimizer)}
+        },
     )
 
-    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
-    return wandb_logger
-
-
-class ModelObjectCallBack(Callback):
-    """Callback to pickle model after each epoch."""
-
-    def __init__(
-        self, dirpath, filename='model_object', epoch_interval: int = 1
-    ):
-        super().__init__()
-        self.dirpath = Path(dirpath)
-        self.filename = filename
-        self.epoch_interval = epoch_interval
-
-    def on_train_epoch_end(
-        self, trainer: 'pl.Trainer', pl_module: 'pl.LightningModule'
-    ) -> None:
-        super().on_train_epoch_end(trainer, pl_module)
-
-        if trainer.is_global_zero:
-            if (trainer.current_epoch + 1) % self.epoch_interval == 0:
-                output_path = (
-                    self.dirpath
-                    / f'{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt'
-                )
-                torch.save(pl_module.model, output_path)
-                logging.info(f'Saved world model object to {output_path}')
-            # Additionally, save at final epoch
-            if (trainer.current_epoch + 1) == trainer.max_epochs:
-                final_path = self.dirpath / f'{self.filename}_object.ckpt'
-                torch.save(pl_module.model, final_path)
-                logging.info(f'Saved final world model object to {final_path}')
-
-
-# ============================================================================
-# Main Entry Point
-# ============================================================================
-@hydra.main(version_base=None, config_path='./config', config_name='prejepa')
-def run(cfg):
-    """Run training of predictor"""
-
+    # --- Training ---
     run_id = cfg.get('subdir') or ''
-    wandb_logger = setup_pl_logger(cfg)
-    data = get_data(cfg)
-    world_model = get_world_model(cfg)
-    run_dir = os.path.join(swm.data.utils.get_cache_dir(), run_id)
-    logging.info(f'🫆🫆🫆 Run ID: {run_id} 🫆🫆🫆')
+    run_dir = Path(swm.data.utils.get_cache_dir(), run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f'Run ID: {run_id}')
 
-    run_dir_path = Path(run_dir)
-    run_dir_path.mkdir(parents=True, exist_ok=True)
-    with open(run_dir_path / 'config.yaml', 'w') as f:
+    with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
 
-    dump_object_callback = ModelObjectCallBack(
-        dirpath=run_dir,
-        filename=cfg.output_model_name,
-        epoch_interval=20,
-    )
-
-    cpu_offload_callback = spt.callbacks.CPUOffloadCallback()
+    logger = None
+    if cfg.wandb.enable:
+        logger = WandbLogger(
+            name='dino_wm',
+            project=cfg.wandb.project,
+            entity=cfg.wandb.entity,
+            resume='allow' if run_id else None,
+            id=run_id or None,
+            log_model=False,
+        )
+        logger.log_hyperparams(OmegaConf.to_container(cfg))
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[dump_object_callback, cpu_offload_callback],
+        callbacks=[
+            spt.callbacks.CPUOffloadCallback(),
+            ModelObjectCallBack(
+                dirpath=run_dir,
+                filename=cfg.output_model_name,
+                epoch_interval=5,
+            ),
+            pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),
+        ],
         num_sanity_val_steps=1,
-        logger=wandb_logger,
+        logger=logger,
         enable_checkpointing=True,
     )
 
     manager = spt.Manager(
         trainer=trainer,
         module=world_model,
-        data=data,
-        ckpt_path=run_dir_path / f'{cfg.output_model_name}_weights.ckpt',
+        data=spt.data.DataModule(train=train_loader, val=val_loader),
+        ckpt_path=run_dir / f'{cfg.output_model_name}_weights.ckpt',
     )
     manager()
 

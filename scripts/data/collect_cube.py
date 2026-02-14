@@ -4,20 +4,20 @@ os.environ['MUJOCO_GL'] = 'egl'
 import hydra
 import numpy as np
 from loguru import logger as logging
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 import stable_worldmodel as swm
 from stable_worldmodel.envs.ogbench_manip import ExpertPolicy
 
 
-@hydra.main(version_base=None, config_path='./config', config_name='default')
+@hydra.main(version_base=None, config_path='./config', config_name='ogb')
 def run(cfg: DictConfig):
     """Run parallel data collection script"""
 
     world = swm.World(
         'swm/OGBCube-v0',
         **cfg.world,
-        env_type='single',
+        env_type='triple',
         ob_type='pixels',
         multiview=False,
         width=224,
@@ -28,11 +28,12 @@ def run(cfg: DictConfig):
     )
 
     options = cfg.get('options')
+    options = OmegaConf.to_object(options) if options is not None else None
     rng = np.random.default_rng(cfg.seed)
     world.set_policy(ExpertPolicy(policy_type='plan_oracle'))
 
     world.record_dataset(
-        'ogb_cube_single_expert',
+        'ogb_cube_triple_fov',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
         cache_dir=cfg.cache_dir,

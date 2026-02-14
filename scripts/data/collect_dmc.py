@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from omegaconf import OmegaConf
+
 os.environ['MUJOCO_GL'] = 'egl'
 
 import hydra
@@ -33,6 +35,8 @@ def run(cfg):
     world = swm.World(cfg.env_name, **cfg.world)
 
     options = cfg.get('options')
+    options = OmegaConf.to_object(options) if options is not None else None
+
     rng = np.random.default_rng(cfg.seed)
     ckpt_path = Path(cfg.expert_ckpt_path)
     name = ENVS[cfg.env_name][0]
