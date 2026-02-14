@@ -5,13 +5,13 @@ os.environ['MUJOCO_GL'] = 'egl'
 import hydra
 import numpy as np
 from loguru import logger as logging
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 import stable_worldmodel as swm
 from stable_worldmodel.envs.ogbench_manip import ExpertPolicy
 
 
-@hydra.main(version_base=None, config_path='./config', config_name='default')
+@hydra.main(version_base=None, config_path='./config', config_name='ogb')
 def run(cfg: DictConfig):
     """Run parallel data collection script"""
 
@@ -29,6 +29,8 @@ def run(cfg: DictConfig):
     )
 
     options = cfg.get('options')
+    options = OmegaConf.to_object(options) if options is not None else None
+
     rng = np.random.default_rng(cfg.seed)
     world.set_policy(ExpertPolicy(policy_type='plan_oracle'))
 

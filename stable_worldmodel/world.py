@@ -422,6 +422,8 @@ class World:
             if key in ['ep_len', 'ep_idx', 'policy']:
                 continue
 
+            key = key.replace('/', '_')  # sanitize keys for h5
+
             # determine array shape and dtype from sample data
             sample_data = np.array(data_list[0])
             shape = (0,) + sample_data.shape
@@ -439,7 +441,9 @@ class World:
                 compression = None
 
             dtype = sample_data.dtype
-            if np.issubdtype(dtype, np.str_) or np.issubdtype(dtype, np.bytes_):
+            if np.issubdtype(dtype, np.str_) or np.issubdtype(
+                dtype, np.bytes_
+            ):
                 dtype = h5py.string_dtype()
 
             f.create_dataset(
@@ -541,10 +545,11 @@ class World:
 
         # append data to each dataset
         for key in ep_data:
-            if key in ['ep_len', 'policy']:
+            h5_key = key.replace('/', '_')  # sanitize keys for h5
+            if h5_key in ['ep_len', 'policy']:
                 continue
 
-            ds = f[key]
+            ds = f[h5_key]
             curr_size = ds.shape[0]
             ds.resize(curr_size + ep_len, axis=0)
             ds[curr_size:] = np.array(ep_data[key])
