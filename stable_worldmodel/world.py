@@ -438,11 +438,15 @@ class World:
                 chunks = (1000,) + sample_data.shape
                 compression = None
 
+            dtype = sample_data.dtype
+            if np.issubdtype(dtype, np.str_) or np.issubdtype(dtype, np.bytes_):
+                dtype = h5py.string_dtype()
+
             f.create_dataset(
                 key,
                 shape=shape,
                 maxshape=maxshape,
-                dtype=sample_data.dtype,
+                dtype=dtype,
                 chunks=chunks,
                 compression=compression,
             )
@@ -536,8 +540,8 @@ class World:
         ep_len = len(ep_data['step_idx'])
 
         # append data to each dataset
-        for key in f.keys():
-            if key in ['ep_offset', 'ep_len']:
+        for key in ep_data:
+            if key in ['ep_len', 'policy']:
                 continue
 
             ds = f[key]

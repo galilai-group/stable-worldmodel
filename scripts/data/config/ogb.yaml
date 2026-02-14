@@ -1,0 +1,32 @@
+defaults:
+  - _self_
+  - override hydra/launcher: submitit_slurm
+
+hydra:
+  output_subdir: null
+  mode: MULTIRUN
+  launcher:
+    max_num_timeout: 999
+    gpus_per_node: 1
+    tasks_per_node: 1
+    cpus_per_task: 8
+    mem_gb: 48
+    timeout_min: 1440
+    partition: long 
+    signal_delay_s: 120
+  run:
+    dir: .
+
+cache_dir: null
+dataset_name: ogb
+
+world:
+  num_envs: 10
+  max_episode_steps: 200
+  image_shape: [224, 224]
+
+num_workers: 4
+seed: 3072
+num_traj: 10000
+
+options: null
