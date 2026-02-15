@@ -24,7 +24,7 @@ hydra:
 
     gres: gpu:1
     cpus_per_task: ${cpus_per_task}
-    mem_gb: 50
+    mem_gb: 100
     tasks_per_node: 1
     nodes: 1
     partition: null
