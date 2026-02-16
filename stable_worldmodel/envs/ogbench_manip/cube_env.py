@@ -39,6 +39,13 @@ from ogbench.manipspace.envs.manipspace_env import ManipSpaceEnv
 from stable_worldmodel import spaces as swm_spaces
 from stable_worldmodel.envs.utils import perturb_camera_angle
 
+DEFAULT_VARIATIONS = (
+    'cube.start_position',
+    'cube.start_yaw',
+    'cube.goal_position',
+    'cube.goal_yaw',
+)
+
 
 class CubeEnv(ManipSpaceEnv):
     """Robotic manipulation environment with cube objects and multiple task variants.
@@ -805,7 +812,10 @@ class CubeEnv(ManipSpaceEnv):
         options = options or {}
 
         swm_spaces.reset_variation_space(
-            self.variation_space, seed=None, options=options
+            self.variation_space,
+            seed=None,
+            options=options,
+            default_variations=DEFAULT_VARIATIONS,
         )
 
         ob, info = super().reset(options=options, *args, **kwargs)
