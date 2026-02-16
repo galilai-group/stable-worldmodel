@@ -154,9 +154,14 @@ class HDF5Dataset(Dataset):
             data = src[col][g_start:g_end]
             if col != 'action':
                 data = data[:: self.frameskip]
-            steps[col] = torch.from_numpy(data)
-            if data.ndim == 4 and data.shape[-1] in (1, 3):
-                steps[col] = steps[col].permute(0, 3, 1, 2)
+
+            if data.dtype == np.object_:
+                steps[col] = data.tolist()
+            else:
+                steps[col] = torch.from_numpy(data)
+                if data.ndim == 4 and data.shape[-1] in (1, 3):
+                    steps[col] = steps[col].permute(0, 3, 1, 2)
+
         return self.transform(steps) if self.transform else steps
 
     def get_col_data(self, col: str) -> np.ndarray:
@@ -253,9 +258,13 @@ class FolderDataset(Dataset):
                 data = self._cache[col][g_start:g_end]
                 if col != 'action':
                     data = data[:: self.frameskip]
-            steps[col] = torch.from_numpy(data)
-            if data.ndim == 4 and data.shape[-1] in (1, 3):
-                steps[col] = steps[col].permute(0, 3, 1, 2)
+
+            if data.dtype == np.object_:
+                steps[col] = data.tolist()
+            else:
+                steps[col] = torch.from_numpy(data)
+                if data.ndim == 4 and data.shape[-1] in (1, 3):
+                    steps[col] = steps[col].permute(0, 3, 1, 2)
         return self.transform(steps) if self.transform else steps
 
     def get_col_data(self, col: str) -> np.ndarray:
@@ -330,7 +339,12 @@ class VideoDataset(FolderDataset):
                 data = self._cache[col][g_start:g_end]
                 if col != 'action':
                     data = data[:: self.frameskip]
-                steps[col] = torch.from_numpy(data)
+
+                if data.dtype == np.object_:
+                    steps[col] = data.tolist()
+                else:
+                    steps[col] = torch.from_numpy(data)
+
         return self.transform(steps) if self.transform else steps
 
 
