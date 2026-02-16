@@ -74,6 +74,7 @@ class DMControlWrapper(gym.Env):
             self.compile_model(seed=seed, environment_kwargs={})
 
         self._cumulative_reward = 0
+        self.apply_runtime_variations()
 
         if seed is not None:
             self.env.task._random = np.random.RandomState(seed)
@@ -106,6 +107,24 @@ class DMControlWrapper(gym.Env):
             False,
             False,
             self.info,
+        )
+
+    def apply_runtime_variations(self):
+        """Apply runtime variations that don't require MJCF recompilation.
+
+        Subclasses should override this to apply physics-level changes
+        (e.g. gravity) directly on the compiled model.
+        """
+        pass
+
+    def set_gravity(self, gravity):
+        """Set the gravity vector of the environment.
+
+        Args:
+            gravity: array-like of shape (3,), e.g. [0, 0, -9.81].
+        """
+        self.env.physics.model.opt.gravity[:] = np.asarray(
+            gravity, dtype=np.float64
         )
 
     def set_state(self, qpos, qvel):

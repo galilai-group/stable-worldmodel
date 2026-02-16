@@ -78,6 +78,17 @@ class QuadrupedDMControlWrapper(DMControlWrapper):
                         ),
                     }
                 ),
+                'gravity': swm_space.Dict(
+                    {
+                        'z': swm_space.Box(
+                            low=-20.0,
+                            high=-1.0,
+                            shape=(1,),
+                            dtype=np.float64,
+                            init_value=np.array([-9.81], dtype=np.float64),
+                        ),
+                    }
+                ),
                 'floor': swm_space.Dict(
                     {
                         'friction': swm_space.Box(
@@ -112,6 +123,15 @@ class QuadrupedDMControlWrapper(DMControlWrapper):
                 ),
             }
         )
+
+    def apply_runtime_variations(self):
+        """Apply gravity variation directly on the compiled physics model."""
+        desired_gz = float(
+            np.asarray(self.variation_space['gravity']['z'].value).reshape(-1)[
+                0
+            ]
+        )
+        self.set_gravity([0, 0, desired_gz])
 
     @property
     def info(self):
