@@ -17,7 +17,7 @@ def run(cfg: DictConfig):
     world = swm.World(
         'swm/OGBCube-v0',
         **cfg.world,
-        env_type='triple',
+        env_type='single',
         ob_type='pixels',
         multiview=False,
         width=224,
@@ -33,7 +33,7 @@ def run(cfg: DictConfig):
     world.set_policy(ExpertPolicy(policy_type='plan_oracle'))
 
     world.record_dataset(
-        'ogb_cube_triple_fov',
+        'ogbench/cube_single_expert',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
         cache_dir=cfg.cache_dir,
