@@ -69,6 +69,31 @@ class HopperDMControlWrapper(DMControlWrapper):
                         'foot_locked': swm_space.Discrete(2, init_value=1),
                     }
                 ),
+                'gravity': swm_space.Dict(
+                    {
+                        'x': swm_space.Box(
+                            low=-5.0,
+                            high=5.0,
+                            shape=(1,),
+                            dtype=np.float64,
+                            init_value=np.array([0.0], dtype=np.float64),
+                        ),
+                        'y': swm_space.Box(
+                            low=-5.0,
+                            high=5.0,
+                            shape=(1,),
+                            dtype=np.float64,
+                            init_value=np.array([0.0], dtype=np.float64),
+                        ),
+                        'z': swm_space.Box(
+                            low=-20.0,
+                            high=0.0,
+                            shape=(1,),
+                            dtype=np.float64,
+                            init_value=np.array([-9.81], dtype=np.float64),
+                        ),
+                    }
+                ),
                 'floor': swm_space.Dict(
                     {
                         'friction': swm_space.Box(
@@ -103,6 +128,25 @@ class HopperDMControlWrapper(DMControlWrapper):
                 ),
             }
         )
+
+    def apply_runtime_variations(self):
+        """Apply gravity variation directly on the compiled physics model."""
+        desired_gx = float(
+            np.asarray(self.variation_space['gravity']['x'].value).reshape(-1)[
+                0
+            ]
+        )
+        desired_gy = float(
+            np.asarray(self.variation_space['gravity']['y'].value).reshape(-1)[
+                0
+            ]
+        )
+        desired_gz = float(
+            np.asarray(self.variation_space['gravity']['z'].value).reshape(-1)[
+                0
+            ]
+        )
+        self.set_gravity([desired_gx, desired_gy, desired_gz])
 
     @property
     def info(self):
