@@ -36,7 +36,7 @@ class PreJEPA(torch.nn.Module):
         is_video=False,
     ):
         assert target not in info, f'{target} key already in info_dict'
-        emb_keys = emb_keys or self.extra_encoders.keys()
+        emb_keys = self.extra_encoders.keys() if emb_keys is None else emb_keys
         prefix = prefix or ''
 
         encode_fn = self._encode_video if is_video else self._encode_image
