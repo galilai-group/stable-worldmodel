@@ -14,7 +14,7 @@ trainer:
   accelerator: gpu
   precision: 16-mixed
 
-batch_size: 32
+batch_size: 128
 num_workers: ${cpus_per_task}
 train_split: 0.9
 seed: 42
@@ -28,7 +28,7 @@ frameskip: 1
 dinowm:
   history_size: 3
   num_preds: 1
-  use_proprio_encoder: true  # Set to false to disable proprioception encoder
+  use_proprio_encoder: false  # Set to true to able proprioception encoder
   proprio_dim: 4
   proprio_embed_dim: 10
   action_dim: 2
