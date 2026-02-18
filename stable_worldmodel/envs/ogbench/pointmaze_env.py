@@ -300,7 +300,33 @@ class PointMazeEnv(gym.Wrapper):
 
         obs, info = self.env.reset(seed=seed, options=options)
         info.pop('goal', None)
+
+        if options.get('state') is not None:
+            state = options['state']
+            assert isinstance(state, np.ndarray), (
+                'State option must be a numpy ndarray!'
+            )
+            assert state.ndim == 1, 'State option must be a 1D array!'
+            nq, nv = self.env.model.nq, self.env.model.nv
+            assert state.shape[0] == nq + nv, (
+                f'State option must have shape ({nq + nv},)!'
+            )
+            self.set_state(state[:nq], state[nq:])
+            obs = self.env.get_ob()
+
         return obs, info
+
+    def set_state(self, qpos, qvel):
+        """Reset the environment to a specific (qpos, qvel) state.
+
+        Args:
+            qpos (np.ndarray): Joint positions, shape ``(nq,)``.
+            qvel (np.ndarray): Joint velocities, shape ``(nv,)``.
+        """
+        assert qpos.shape == (self.env.model.nq,) and qvel.shape == (
+            self.env.model.nv,
+        )
+        self.env.set_state(qpos, qvel)
 
     def modify_mjcf_model(self, mjcf_model):
         """Apply current variation values to the MJCF model.
