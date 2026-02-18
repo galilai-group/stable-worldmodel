@@ -53,27 +53,38 @@ def get_data(cfg):
     if not hasattr(cfg, 'local_cache_dir'):
         cache_dir = os.environ.get('SLURM_TMPDIR', None)
 
+    use_proprio = cfg.dinowm.get('use_proprio_encoder', True)
+    keys_to_load = ['pixels', 'action']
+    keys_to_cache = ['action']
+    if use_proprio:
+        keys_to_load.append('proprio')
+        keys_to_cache.append('proprio')
+
     dataset = swm.data.HDF5Dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,
         transform=None,
         cache_dir=cache_dir,
-        keys_to_load=['pixels', 'action', 'proprio'],
-        keys_to_cache=['action', 'proprio'],
+        keys_to_load=keys_to_load,
+        keys_to_cache=keys_to_cache,
     )
 
     norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
-    norm_proprio_transform = get_column_normalizer(
-        dataset, 'proprio', 'proprio'
-    )
-
-    # Apply transforms to all steps and goal observations
-    transform = spt.data.transforms.Compose(
+    transforms = [
         get_img_pipeline('pixels', 'pixels', cfg.image_size),
         norm_action_transform,
-        norm_proprio_transform,
-    )
+    ]
+    goal_keys = {'pixels': 'goal_pixels'}
+    if use_proprio:
+        norm_proprio_transform = get_column_normalizer(
+            dataset, 'proprio', 'proprio'
+        )
+        transforms.append(norm_proprio_transform)
+        goal_keys['proprio'] = 'goal_proprio'
+
+    # Apply transforms to all steps and goal observations
+    transform = spt.data.transforms.Compose(*transforms)
 
     dataset.transform = transform
 
@@ -81,7 +92,7 @@ def get_data(cfg):
         dataset=dataset,
         goal_probabilities=(0.0, 0.0, 1.0, 0.0),
         current_goal_offset=cfg.dinowm.history_size,
-        goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
+        goal_keys=goal_keys,
         seed=cfg.seed,
     )
 
