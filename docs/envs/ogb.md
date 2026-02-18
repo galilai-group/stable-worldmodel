@@ -10,12 +10,13 @@ external_links:
 
 ## Description
 
-A suite of 3D robotic manipulation environments built on [OGBench](https://github.com/seohongpark/ogbench) and [MuJoCo](https://mujoco.org/). The environments feature a UR5e robotic arm with a Robotiq gripper performing various manipulation tasks including pick-and-place, stacking, and complex scene interactions.
+A suite of 3D robotic environments built on [OGBench](https://github.com/seohongpark/ogbench) and [MuJoCo](https://mujoco.org/). The environments feature a UR5e robotic arm with a Robotiq gripper performing various manipulation tasks including pick-and-place, stacking, and complex scene interactions. It also includes a suite of navigation environments.
 
-Two environment families are available:
+Three environment families are available:
 
 - **Cube**: Pure cube manipulation tasks with 1-8 colored cubes
 - **Scene**: Complex scene with cubes, buttons, a drawer, and a window
+- **PointMaze**: 2D maze navigation with point-mass, ant, or humanoid agents
 
 ```python
 import stable_worldmodel as swm
@@ -25,6 +26,9 @@ world = swm.World('swm/OGBCube-v0', num_envs=4, env_type='single')
 
 # Scene environment (cube + drawer + window + buttons)
 world = swm.World('swm/OGBScene-v0', num_envs=4)
+
+# PointMaze environment - point agent in a large maze, pixel observations
+world = swm.World('swm/OGBPointMaze-v0', num_envs=4)
 ```
 
 ---
@@ -139,7 +143,7 @@ A complex manipulation scene with a single cube, two lock buttons, a drawer, and
 
 ## Multiview Mode
 
-Both environments support rendering from multiple camera angles simultaneously:
+The Cube and Scene environments support rendering from multiple camera angles simultaneously:
 
 ```python
 # Enable multiview rendering
@@ -151,14 +155,88 @@ obs = world.reset()
 
 ## Expert Policy
 
-Both environments include a built-in expert policy for data collection:
+The Cube and Scene environments include a built-in expert policy for data collection:
 
 ```python
-from stable_worldmodel.envs.ogbench_manip import ExpertPolicy
+from stable_worldmodel.envs.ogbench import ExpertPolicy
 
 policy = ExpertPolicy()
 world.set_policy(policy)
 ```
+
+---
+
+## PointMaze Environment
+
+2D maze navigation tasks where an agent must reach a goal position (or push a ball to a goal). Built on OGBench's `locomaze` suite, wrapping it with a `variation_space` for visual domain randomization.
+
+**Success criteria**: Agent (or ball) is within a threshold distance of the goal position.
+
+### Environment Specs
+
+| Property | Value |
+|----------|-------|
+| Action Space | Depends on agent: `Box(-1, 1, shape=(2,))` for point, `Box(-1, 1, shape=(8,))` for ant |
+| Observation Space | Pixels `(64, 64, 3)` or state vector |
+| Render Size | 64×64 (configurable) |
+| Environment ID | `swm/OGBPointMaze-v0` |
+| Physics | MuJoCo |
+
+### Configuration
+
+```python
+# Default: point agent, large maze, pixel observations
+world = swm.World('swm/OGBPointMaze-v0', num_envs=4)
+
+# Custom configuration
+world = swm.World(
+    'swm/OGBPointMaze-v0',
+    num_envs=4,
+    loco_env_type='point',   # 'point', 'ant', or 'humanoid'
+    maze_env_type='maze',    # 'maze' (navigate) or 'ball' (push ball to goal)
+    maze_type='large',       # 'arena', 'medium', 'large', 'giant', 'teleport'
+    ob_type='pixels',        # 'pixels' or 'states'
+)
+```
+
+### Agent Types
+
+| `loco_env_type` | Description |
+|-----------------|-------------|
+| `point` | Simple 2D point-mass agent |
+| `ant` | Quadruped ant |
+| `humanoid` | Humanoid |
+
+### Maze Layouts
+
+| `maze_type` | Description |
+|-------------|-------------|
+| `arena` | Open arena with no walls |
+| `medium` | Medium-sized maze |
+| `large` | Large maze (default) |
+| `giant` | Very large maze |
+| `teleport` | Maze with teleportation portals |
+
+### Maze Task Types
+
+| `maze_env_type` | Description |
+|-----------------|-------------|
+| `maze` | Navigate agent to goal position |
+| `ball` | Push a ball to the goal position |
+
+### Variation Space
+
+| Factor | Type | Description |
+|--------|------|-------------|
+| `agent.color` | Box(0, 1, shape=(3,)) | Agent sphere RGB color |
+| `wall.color` | Box(0, 1, shape=(3,)) | Maze wall material RGB color |
+| `floor.color` | Box(0, 1, shape=(2, 3)) | Checker floor texture colors (rgb1 / rgb2) |
+| `floor.pixel_encoding` | Discrete(2) | Toggle OGBench's position-encoding floor gradient (pixels mode only) |
+| `light.intensity` | Box(0, 1, shape=(1,)) | Global directional light diffuse intensity |
+
+> **Note**: In `ob_type='pixels'` mode, `floor.color` only takes effect when `floor.pixel_encoding=0`. When enabled (`=1`), OGBench overwrites the floor with a position-encoding gradient (R ← row, G ← column, B = 128) to help the agent infer its location.
+
+---
 
 ## Datasets
 

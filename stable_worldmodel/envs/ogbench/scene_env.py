@@ -1,5 +1,3 @@
-from collections.abc import Sequence
-
 import mujoco
 import numpy as np
 from dm_control import mjcf
