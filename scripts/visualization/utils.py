@@ -3,7 +3,7 @@
 import numpy as np
 from loguru import logger as logging
 
-from stable_worldmodel.envs.ogbench_manip.cube_env import CubeEnv
+from stable_worldmodel.envs.ogbench.cube_env import CubeEnv
 from stable_worldmodel.envs.pusht.env import PushT
 from stable_worldmodel.envs.two_room.env import TwoRoomEnv
 

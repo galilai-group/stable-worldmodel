@@ -8,7 +8,7 @@ from loguru import logger as logging
 from omegaconf import DictConfig, OmegaConf
 
 import stable_worldmodel as swm
-from stable_worldmodel.envs.ogbench_manip import ExpertPolicy
+from stable_worldmodel.envs.ogbench import ExpertPolicy
 
 
 @hydra.main(version_base=None, config_path='./config', config_name='ogb')
