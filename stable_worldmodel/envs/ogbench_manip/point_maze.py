@@ -253,6 +253,10 @@ class PointMazeEnv(gym.Wrapper):
                 ),
             }
         )
+        # EverythingToInfoWrapper reads `env.unwrapped.variation_space`.
+        # Since `unwrapped` skips this wrapper, mirror the same object onto
+        # the base OGBench MazeEnv instance.
+        self.env.unwrapped.variation_space = self.variation_space
 
     # ------------------------------------------------------------------
     # Core reset / variation interface
