@@ -108,6 +108,11 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
 )
 
+register(
+    id='swm/PinPad-v0',
+    entry_point='stable_worldmodel.envs.pinpad:PinPad',
+)
+
 
 ############
 # DISCRETE #
@@ -121,4 +126,9 @@ register(
 register(
     id='swm/PushT-Discrete-v1',
     entry_point='stable_worldmodel.envs.pusht:PushTDiscrete',
+)
+
+register(
+    id='swm/PinPad-Discrete-v0',
+    entry_point='stable_worldmodel.envs.pinpad:PinPadDiscrete',
 )
