@@ -34,7 +34,7 @@ Supported visual variations:
 
 Example::
 
-    from stable_worldmodel.envs.ogbench_manip.point_maze import PointMazeEnv
+    from stable_worldmodel.envs.ogbench.point_maze import PointMazeEnv
 
     env = PointMazeEnv(maze_type='large', ob_type='pixels')
 

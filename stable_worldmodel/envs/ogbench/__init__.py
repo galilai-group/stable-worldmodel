@@ -1,6 +1,6 @@
 from .cube_env import CubeEnv
 from .expert_policy import ExpertPolicy
-from .point_maze import PointMazeEnv
+from .pointmaze_env import PointMazeEnv
 from .scene_env import SceneEnv
 
 
