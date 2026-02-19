@@ -27,18 +27,18 @@ datasets:
             fields: null
             values: null
     world_model:
-      model_name: iql_tworoom_value_epoch_3
-  # pusht:
-  #   training_dataset: pusht_expert_train  # dataset used during training for preprocessing stats
-  #   env:
-  #     env_name: swm/PushT-v1
-  #     history_size: 3
-  #     frame_skip: 1
-  #     grid_size: 20
-  #     default_variation: ["agent.start_position"]
-  #     variations:
-  #       - variation:
-  #           fields: null
-  #           values: null
-  #   world_model:
-  #     model_name: iql10_policy_epoch_9
+      model_name: ivl_simplebis_tworoom_policy_epoch_9 #"iql_simplebis_tworoom_policy_epoch_9
+  pusht:
+    training_dataset: pusht_expert_train  # dataset used during training for preprocessing stats
+    env:
+      env_name: swm/PushT-v1
+      history_size: 3
+      frame_skip: 1
+      grid_size: 20
+      default_variation: ["agent.start_position"]
+      variations:
+        - variation:
+            fields: null
+            values: null
+    world_model:
+      model_name: ivl2_pusht_policy_epoch_9 # iql2_pusht_policy_epoch_9
