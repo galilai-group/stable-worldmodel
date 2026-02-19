@@ -18,8 +18,6 @@ def run(cfg: DictConfig):
     world = swm.World(
         'swm/OGBScene-v0',
         **cfg.world,
-        env_type='single',
-        ob_type='pixels',
         multiview=False,
         width=224,
         height=224,
@@ -32,7 +30,7 @@ def run(cfg: DictConfig):
     options = OmegaConf.to_object(options) if options is not None else None
 
     rng = np.random.default_rng(cfg.seed)
-    world.set_policy(ExpertPolicy(policy_type='plan_oracle'))
+    world.set_policy(ExpertPolicy())
 
     world.record_dataset(
         'ogb_scene_single_expert',
