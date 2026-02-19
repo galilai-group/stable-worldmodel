@@ -18,7 +18,6 @@ def run(cfg: DictConfig):
         'swm/OGBCube-v0',
         **cfg.world,
         env_type='single',
-        ob_type='pixels',
         multiview=False,
         width=224,
         height=224,
@@ -30,7 +29,7 @@ def run(cfg: DictConfig):
     options = cfg.get('options')
     options = OmegaConf.to_object(options) if options is not None else None
     rng = np.random.default_rng(cfg.seed)
-    world.set_policy(ExpertPolicy(policy_type='plan_oracle'))
+    world.set_policy(ExpertPolicy())
 
     world.record_dataset(
         'ogbench/cube_single_expert',

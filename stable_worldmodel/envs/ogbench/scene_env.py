@@ -22,7 +22,7 @@ class SceneEnv(ManipSpaceEnv):
     def __init__(
         self,
         env_type='scene',
-        ob_type='pixels',
+        ob_type='states',
         permute_blocks=True,
         multiview=False,
         *args,
@@ -63,6 +63,7 @@ class SceneEnv(ManipSpaceEnv):
         self._num_buttons = 2
         self._num_button_states = 2
         self._cur_button_states = np.array([0] * self._num_buttons)
+        self._prev_button_states = np.array([0] * self._num_buttons)
 
         # Target info.
         self._target_task = 'cube'
@@ -581,6 +582,10 @@ class SceneEnv(ManipSpaceEnv):
         return mjcf_model
 
     def initialize_episode(self):
+        if not hasattr(self, '_prev_qpos'):
+            self._prev_qpos = self._data.qpos.copy()
+            self._prev_qvel = self._data.qvel.copy()
+
         # Set cube colors.
         for i in range(self._num_cubes):
             for gid in self._cube_geom_ids_list[i]:
@@ -1075,13 +1080,13 @@ class SceneEnv(ManipSpaceEnv):
 
     def get_reset_info(self):
         reset_info = self.compute_ob_info()
-        reset_info['goal'] = self._cur_goal_ob
+        reset_info['target'] = self._cur_goal_ob
         reset_info['success'] = self._success
         return reset_info
 
     def get_step_info(self):
         ob_info = self.compute_ob_info()
-        ob_info['goal'] = self._cur_goal_ob
+        ob_info['target'] = self._cur_goal_ob
         ob_info['success'] = self._success
         return ob_info
 
