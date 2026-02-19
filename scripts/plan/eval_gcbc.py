@@ -91,14 +91,13 @@ def run(cfg: DictConfig):
     action_process = preprocessing.StandardScaler()
     action_process.fit(dataset.get_col_data('action'))
 
-    proprio_process = preprocessing.StandardScaler()
-    proprio_process.fit(dataset.get_col_data('proprio'))
+    process = {'action': action_process}
 
-    process = {
-        'action': action_process,
-        'proprio': proprio_process,
-        'goal_proprio': proprio_process,
-    }
+    if 'proprio' in dataset.column_names:
+        proprio_process = preprocessing.StandardScaler()
+        proprio_process.fit(dataset.get_col_data('proprio'))
+        process['proprio'] = proprio_process
+        process['goal_proprio'] = proprio_process
 
     # -- run evaluation
     policy = cfg.get('policy', 'random')
