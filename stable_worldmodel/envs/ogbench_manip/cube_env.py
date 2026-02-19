@@ -95,7 +95,7 @@ class CubeEnv(ManipSpaceEnv):
     def __init__(
         self,
         env_type='single',
-        ob_type='pixels',
+        ob_type='states',
         permute_blocks=True,
         multiview=False,
         height=224,
@@ -1079,6 +1079,13 @@ class CubeEnv(ManipSpaceEnv):
             - Small random perturbations (±0.01m) are added to initial positions
             - Random yaw rotations (0-2π) are applied to all cubes
         """
+        # Initialize prev state variables if not yet set (required by compute_ob_info).
+        # These are normally set by pre_step(), but compute_observation() may be called
+        # before the first pre_step() during initialization (e.g. in data_collection mode).
+        if not hasattr(self, '_prev_qpos'):
+            self._prev_qpos = self._data.qpos.copy()
+            self._prev_qvel = self._data.qvel.copy()
+
         # Set cube colors.
         for i in range(self._num_cubes):
             for gid in self._cube_geom_ids_list[i]:
@@ -1396,7 +1403,7 @@ class CubeEnv(ManipSpaceEnv):
             Called after initialize_episode() to provide initial state information.
         """
         reset_info = self.compute_ob_info()
-        reset_info['goal'] = self._cur_goal_ob
+        reset_info['target'] = self._cur_goal_ob
         reset_info['success'] = self._success
         return reset_info
 
@@ -1416,7 +1423,7 @@ class CubeEnv(ManipSpaceEnv):
             Called after each step to provide feedback about current state and progress.
         """
         ob_info = self.compute_ob_info()
-        ob_info['goal'] = self._cur_goal_ob
+        ob_info['target'] = self._cur_goal_ob
         ob_info['success'] = self._success
         return ob_info
 
