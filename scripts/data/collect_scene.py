@@ -33,7 +33,7 @@ def run(cfg: DictConfig):
     world.set_policy(ExpertPolicy())
 
     world.record_dataset(
-        'ogb_scene_single_expert',
+        'ogbench/scene_single_expert',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
         cache_dir=cfg.cache_dir,

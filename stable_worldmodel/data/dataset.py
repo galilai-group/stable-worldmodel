@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+import re
 from typing import Any
 
 import h5py
@@ -90,6 +91,14 @@ class Dataset:
     def get_row_data(self, row_idx: int | list[int]) -> dict:
         raise NotImplementedError
 
+    def merge_col(
+        self,
+        source: list[str] | str,
+        target: str,
+        dim: int = -1,
+    ) -> None:
+        raise NotImplementedError
+
 
 class HDF5Dataset(Dataset):
     """Dataset loading from HDF5 file.
@@ -115,6 +124,7 @@ class HDF5Dataset(Dataset):
         transform: Callable[[dict], dict] | None = None,
         keys_to_load: list[str] | None = None,
         keys_to_cache: list[str] | None = None,
+        keys_to_merge: dict[str, list[str] | str] | None = None,
         cache_dir: str | Path | None = None,
     ) -> None:
         self.h5_path = Path(cache_dir or get_cache_dir(), f'{name}.h5')
@@ -126,11 +136,16 @@ class HDF5Dataset(Dataset):
             self._keys = keys_to_load or [
                 k for k in f.keys() if k not in ('ep_len', 'ep_offset')
             ]
+
             for key in keys_to_cache or []:
                 self._cache[key] = f[key][:]
                 logging.info(f"Cached '{key}' from '{self.h5_path}'")
 
         super().__init__(lengths, offsets, frameskip, num_steps, transform)
+
+        if keys_to_merge:
+            for target, source in keys_to_merge.items():
+                self.merge_col(source, target)
 
     @property
     def column_names(self) -> list[str]:
@@ -164,16 +179,34 @@ class HDF5Dataset(Dataset):
 
         return self.transform(steps) if self.transform else steps
 
-    def get_col_data(self, col: str) -> np.ndarray:
+    def _get_col(self, col: str) -> np.ndarray:
+        if col in self._cache:
+            return self._cache[col]
         self._open()
         return self.h5_file[col][:]
 
+    def get_col_data(self, col: str) -> np.ndarray:
+        return self._get_col(col)
+
     def get_row_data(self, row_idx: int | list[int]) -> dict:
+        return {col: self._get_col(col)[row_idx] for col in self._keys}
+
+    def merge_col(
+        self,
+        source: list[str] | str,
+        target: str,
+        dim: int = -1,
+    ) -> None:
         self._open()
-        # h5py supports boolean masks or list of indices for selection
-        # but for optimal performance usually one by one or slicing is preferred
-        # Here we rely on h5py's fancy indexing support
-        return {col: self.h5_file[col][row_idx] for col in self._keys}
+
+        if isinstance(source, str):
+            source = [k for k in self.h5_file.keys() if re.match(source, k)]
+
+        merged = np.concatenate([self._get_col(s) for s in source], axis=dim)
+        self._cache[target] = merged
+        if target not in self._keys:
+            self._keys.append(target)
+        logging.info(f"Merged columns {source} into '{target}' and cached it")
 
     def get_dim(self, col: str) -> int:
         data = self.get_col_data(col)
