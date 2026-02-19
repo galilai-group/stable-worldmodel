@@ -12,7 +12,7 @@ trainer:
   strategy: auto #ddp
   devices: 1
   accelerator: gpu
-  precision: 16-mixed
+  precision: bf16-mixed
   gradient_clip_val: 1.0
 
 batch_size: 32
