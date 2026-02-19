@@ -274,7 +274,7 @@ def get_world_model(cfg, model_cfg):
         extra_encoders = torch.nn.ModuleDict(extra_encoders)
 
         # Assemble world model
-        model = swm.wm.prejepa(
+        model = swm.wm.prejepa.PreJEPA(
             encoder=spt.backbone.EvalOnly(encoder),
             predictor=predictor,
             extra_encoders=extra_encoders,
