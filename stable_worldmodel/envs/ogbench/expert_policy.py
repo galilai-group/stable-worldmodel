@@ -68,7 +68,7 @@ class ExpertPolicy(BasePolicy):
         self._agents = [None] * self.env.num_envs
 
     def _set_oracle_agents(self):
-        single_env = self.env.unwrapped.envs[1]
+        single_env = self.env.unwrapped.envs[0]
         if 'Cube' in single_env.spec.id:
             if self.type == 'markov_oracle':
                 # create one independent oracle instance per environment
