@@ -12,7 +12,7 @@ trainer:
   strategy: auto #ddp
   devices: 1
   accelerator: gpu
-  precision: 16-mixed
+  precision: bf16-mixed
 
 batch_size: 128
 num_workers: ${cpus_per_task}
