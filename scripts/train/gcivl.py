@@ -53,36 +53,44 @@ def get_data(cfg, goal_probabilities):
     if not hasattr(cfg, 'local_cache_dir'):
         cache_dir = os.environ.get('SLURM_TMPDIR', None)
 
+    use_proprio = cfg.dinowm.get('use_proprio_encoder', True)
+    keys_to_load = ['pixels', 'action'] + (['proprio'] if use_proprio else [])
+    keys_to_cache = ['action'] + (['proprio'] if use_proprio else [])
+
     dataset = swm.data.HDF5Dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,
         transform=None,
         cache_dir=cache_dir,
-        keys_to_load=['pixels', 'action', 'proprio'],
-        keys_to_cache=['action', 'proprio'],
+        keys_to_load=keys_to_load,
+        keys_to_cache=keys_to_cache,
     )
 
     norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
-    norm_proprio_transform = get_column_normalizer(
-        dataset, 'proprio', 'proprio'
-    )
 
-    # Apply transforms to all steps and goal observations
-    transform = spt.data.transforms.Compose(
+    transforms = [
         get_img_pipeline('pixels', 'pixels', cfg.image_size),
         norm_action_transform,
-        norm_proprio_transform,
-    )
+    ]
+    if use_proprio:
+        transforms.append(get_column_normalizer(dataset, 'proprio', 'proprio'))
+
+    # Apply transforms to all steps and goal observations
+    transform = spt.data.transforms.Compose(*transforms)
 
     dataset.transform = transform
+
+    goal_keys = {'pixels': 'goal_pixels'}
+    if use_proprio:
+        goal_keys['proprio'] = 'goal_proprio'
 
     dataset = swm.data.GoalDataset(
         dataset=dataset,
         goal_probabilities=goal_probabilities,
         gamma=cfg.goal_gamma,
         current_goal_offset=cfg.dinowm.history_size,
-        goal_keys={'pixels': 'goal_pixels', 'proprio': 'goal_proprio'},
+        goal_keys=goal_keys,
         seed=cfg.seed,
     )
 
@@ -208,19 +216,24 @@ def get_ivl_value_model(cfg):
                 'b 1 c h w -> b t c h w',
                 t=obs_pixels.shape[1],
             )
-            obs_proprio = batch['proprio'][
-                :, : cfg.dinowm.history_size
-            ]  # (B, T, D)
-            goal_proprio_repeated = repeat(
-                batch['goal_proprio'], 'b 1 d -> b t d', t=obs_proprio.shape[1]
-            )
             pixels_match = (obs_pixels == goal_pixels_repeated).all(
                 dim=(2, 3, 4)
             )  # (B, T)
-            proprio_match = (obs_proprio == goal_proprio_repeated).all(
-                dim=2
-            )  # (B, T)
-            eq_mask = pixels_match & proprio_match  # (B, T)
+            if 'proprio' in batch:
+                obs_proprio = batch['proprio'][
+                    :, : cfg.dinowm.history_size
+                ]  # (B, T, D)
+                goal_proprio_repeated = repeat(
+                    batch['goal_proprio'],
+                    'b 1 d -> b t d',
+                    t=obs_proprio.shape[1],
+                )
+                proprio_match = (obs_proprio == goal_proprio_repeated).all(
+                    dim=2
+                )  # (B, T)
+                eq_mask = pixels_match & proprio_match  # (B, T)
+            else:
+                eq_mask = pixels_match  # (B, T)
             # masks are 1 if non-terminal, 0 if terminal (at goal)
             masks = (~eq_mask).float().unsqueeze(-1)
             # rewards are -1 if non-terminal, 0 if terminal
@@ -288,31 +301,38 @@ def get_ivl_value_model(cfg):
                 :, last_hist_idx
             ]  # (B, C, H, W)
             goal_pixels_squeezed = batch['goal_pixels'][:, 0]  # (B, C, H, W)
-            last_frame_proprio = batch['proprio'][:, last_hist_idx]  # (B, D)
-            goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
-
-            # Compare last frame of target (last frame of clip) with goal
-            # This is what value_target is computed from
             last_target_pixels = batch['pixels'][:, -1]  # (B, C, H, W)
-            last_target_proprio = batch['proprio'][:, -1]  # (B, D)
 
             # Per-sample checks (last frame of history)
             pixels_match_per_sample = (
                 last_frame_pixels == goal_pixels_squeezed
             ).all(dim=(1, 2, 3))  # (B,)
-            proprio_match_per_sample = (
-                last_frame_proprio == goal_proprio_squeezed
-            ).all(dim=1)  # (B,)
-            both_match = pixels_match_per_sample & proprio_match_per_sample
 
             # Per-sample checks (last frame of target/clip)
             target_pixels_match = (
                 last_target_pixels == goal_pixels_squeezed
             ).all(dim=(1, 2, 3))  # (B,)
-            target_proprio_match = (
-                last_target_proprio == goal_proprio_squeezed
-            ).all(dim=1)  # (B,)
-            target_both_match = target_pixels_match & target_proprio_match
+
+            if 'proprio' in batch:
+                last_frame_proprio = batch['proprio'][
+                    :, last_hist_idx
+                ]  # (B, D)
+                goal_proprio_squeezed = batch['goal_proprio'][:, 0]  # (B, D)
+                last_target_proprio = batch['proprio'][:, -1]  # (B, D)
+                proprio_match_per_sample = (
+                    last_frame_proprio == goal_proprio_squeezed
+                ).all(dim=1)  # (B,)
+                target_proprio_match = (
+                    last_target_proprio == goal_proprio_squeezed
+                ).all(dim=1)  # (B,)
+                both_match = pixels_match_per_sample & proprio_match_per_sample
+                target_both_match = target_pixels_match & target_proprio_match
+            else:
+                both_match = pixels_match_per_sample
+                target_both_match = target_pixels_match
+                proprio_match_per_sample = (
+                    pixels_match_per_sample  # placeholder for logging
+                )
 
             # Check embedding components separately
             # batch['pixels_embed'] and batch['pixels_goal_embed'] are pixel-only embeddings
