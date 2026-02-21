@@ -309,10 +309,9 @@ class PreJEPA(torch.nn.Module):
         info['embed'] = self.replace_action_in_embedding(
             info['embed'], action_sequence[:, :, :n_obs]
         )
-        # action_dim = init_info_dict["action_embed"].shape[-1]
-        info['action_embed'] = action_sequence[
-            :, :, :n_obs
-        ]  # info["embed"][:, :, :n_obs, 0, -action_dim:]
+
+        action_dim = init_info_dict['action_embed'].shape[-1]
+        info['action_embed'] = info['embed'][:, :, :n_obs, 0, -action_dim:]
 
         # number of step to predict
         act_pred = action_sequence[:, :, n_obs:]
