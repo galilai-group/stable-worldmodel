@@ -189,7 +189,8 @@ class HDF5Dataset(Dataset):
         return self._get_col(col)
 
     def get_row_data(self, row_idx: int | list[int]) -> dict:
-        return {col: self._get_col(col)[row_idx] for col in self._keys}
+        self._open()
+        return {col: self.h5_file[col][row_idx] for col in self._keys}
 
     def merge_col(
         self,
