@@ -556,7 +556,7 @@ An expert policy is available for all DMC environments. It can be used to collec
 
 ### Training Details
 
-The expert policies were trained using the **Soft Actor-Critic (SAC)** algorithm from [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3). Each policy operates on the environment's **feature-based observations** (joint angles, velocities, etc.) and outputs continuous actions clipped to `[-1, 1]`.
+The expert policies were trained using the **Soft Actor-Critic (SAC)** algorithm from [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) via [`scripts/expert/train_policies.py`](../../scripts/expert/train_policies.py). Each policy operates on the environment's **feature-based observations** (joint angles, velocities, etc.) and outputs continuous actions clipped to `[-1, 1]`.
 
 Observations are normalized at inference time using running statistics saved during training (`VecNormalize` from Stable-Baselines3). Each environment's expert comes as two files:
 
