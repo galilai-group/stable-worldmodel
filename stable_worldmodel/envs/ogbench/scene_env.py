@@ -1277,9 +1277,9 @@ class SceneEnv(ManipSpaceEnv):
 
         return np.concatenate(ob)
 
-    def compute_reward(self):
+    def compute_reward(self, ob, action):
         if self._reward_task_id is None:
-            return super().compute_reward()
+            return super().compute_reward(ob, action)
 
         # Compute the reward based on the task.
         cube_successes, button_successes, drawer_success, window_success = (
