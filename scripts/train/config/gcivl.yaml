@@ -18,6 +18,7 @@ trainer:
 batch_size: 128
 num_workers: ${cpus_per_task}
 train_split: 0.9
+train_subset_fraction: 1.0  # Fraction of training set to use (e.g. 0.1 for 10%)
 seed: 42
 
 image_size: 224
