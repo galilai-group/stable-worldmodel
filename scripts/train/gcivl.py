@@ -100,6 +100,18 @@ def get_data(cfg, goal_probabilities):
         lengths=[cfg.train_split, 1 - cfg.train_split],
         generator=rnd_gen,
     )
+
+    train_subset_fraction = cfg.get('train_subset_fraction', 1.0)
+    if train_subset_fraction < 1.0:
+        train_set, _ = spt.data.random_split(
+            train_set,
+            lengths=[train_subset_fraction, 1 - train_subset_fraction],
+            generator=rnd_gen,
+        )
+        logging.info(
+            f'Using {train_subset_fraction:.1%} of training data: {len(train_set)} samples'
+        )
+
     logging.info(f'Train: {len(train_set)}, Val: {len(val_set)}')
 
     train = DataLoader(
