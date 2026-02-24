@@ -154,17 +154,6 @@ uv sync --all-extras --group dev
 > **Note:** All datasets and models will be saved in the `$STABLEWM_HOME` environment variable. By default this is `~/.stable-wm/`. Adapt this directory according to your storage needs.
 
 
-## Contributing
-
-We welcome contributions to stable-worldmodel.
-Setup your codebase:
-
-```bash
-uv venv --python=3.10
-source .venv/bin/activate
-uv sync --all-extras --group dev
-```
-
 ### Questions
 
 If you have a question, please [file an issue](https://github.com/galilai-group/stable-worldmodel/issues).
