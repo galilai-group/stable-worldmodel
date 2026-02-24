@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/mila/l/lucas.maes/scratch/stable-worldmodel/**)",
+      "Read(//network/scratch/l/lucas.maes/stable-worldmodel/**)"
+    ]
+  }
+}

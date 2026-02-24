@@ -47,8 +47,17 @@ print(f"Success Rate: {results['success_rate']:.1f}%")
 ```
 
 stable-worldmodel eases reproducibility by already implementing several baselines: [`scripts/train/prejepa.py`](scripts/train/prejepa.py) reproduces results from the [DINO-WM paper](https://arxiv.org/abs/2411.04983) and [`scripts/train/gcivl.py`](scripts/train/gcivl.py) implements several [goal-conditioned RL algorithms](https://arxiv.org/abs/2410.20092).
-Multiple dataset formats are supported: MP4 for easy inspection and HDF5 for efficient clip loading, reducing CPU bottlenecks and improving GPU utilization.
 To foster research in MPC for world models, several planning solvers are already implemented, including zeroth-order ([CEM](stable_worldmodel/solver/cem.py),[MPPI](stable_worldmodel/solver/mppi.py)), as well as [gradient-based](stable_worldmodel/solver/gd.py) approaches.
+
+### Efficiency
+
+We support multiple dataset formats to optimize efficiency: MP4 enables fast and convenient visualization, while HDF5 ensures high-performance data loading, reduces CPU bottlenecks, and improves overall GPU utilization.
+
+<p align="center">
+  <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">
+  <br>
+  <em>GPU utilization for DINO-WM trained on Push-T with a DINOv2-Small backbone.</em>
+</p>
 
 See the full documentation [here](https://galilai-group.github.io/stable-worldmodel/).
 
