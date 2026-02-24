@@ -261,7 +261,7 @@ def checkpoints(
     filter: Annotated[
         str | None,
         typer.Argument(
-            help='Optional substring to filter checkpoint names.',
+            help='Optional substring to filter by run or checkpoint name.',
             show_default=False,
         ),
     ] = None,
@@ -271,33 +271,65 @@ def checkpoints(
 
     cache_dir = get_cache_dir()
     table = Table(title=f'Checkpoints in {cache_dir}')
-    table.add_column('Name', justify='left', style='cyan', no_wrap=True)
-    table.add_column('Checkpoints', justify='right', style='yellow')
-    table.add_column('Latest', justify='left', style='magenta')
+    table.add_column('Run', justify='left', style='cyan', no_wrap=True)
+    table.add_column('Checkpoint', justify='left', style='magenta')
 
-    rows = []
+    def _ckpt_name(p):
+        return p.stem.removesuffix('_object')
 
+    def _by_mtime(p):
+        return p.stat().st_mtime
+
+    groups: list[tuple[str, list[str]]] = []
+
+    import re
+
+    pattern = re.compile(filter) if filter else None
+
+    def _matches(run: str, ckpt: str) -> bool:
+        if pattern is None:
+            return True
+        return bool(pattern.search(ckpt) or pattern.search(run))
+
+    # Root-level checkpoints (directly in cache_dir)
+    root_files = sorted(cache_dir.glob('*_object.ckpt'), key=_by_mtime)
+    if root_files:
+        names = [
+            _ckpt_name(p) for p in root_files if _matches('', _ckpt_name(p))
+        ]
+        if names:
+            groups.append(('', names))
+
+    # Per-directory checkpoints
     for folder in sorted(cache_dir.iterdir()):
         if not folder.is_dir():
             continue
-        ckpt_files = sorted(folder.glob('*_object.ckpt'))
+        ckpt_files = sorted(folder.glob('*_object.ckpt'), key=_by_mtime)
         if not ckpt_files:
             continue
-        name = folder.name
-        latest = max(ckpt_files, key=lambda p: p.stat().st_ctime)
-        latest_name = latest.stem.removesuffix('_object')
-        if filter and filter not in name and filter not in latest_name:
+        run_name = folder.name
+        names = [
+            _ckpt_name(p)
+            for p in ckpt_files
+            if _matches(run_name, _ckpt_name(p))
+        ]
+        if not names:
             continue
-        rows.append((name, str(len(ckpt_files)), latest_name))
+        groups.append((run_name, names))
 
-    if not rows:
+    if not groups:
         msg = f'No checkpoints found in {cache_dir}'
         if filter:
-            msg += f' matching [bold]{filter}[/bold]'
+            msg += f' matching pattern [bold]{filter}[/bold]'
         print(msg)
     else:
-        for row in rows:
-            table.add_row(*row)
+        first = True
+        for run_name, ckpt_names in groups:
+            if not first:
+                table.add_section()
+            first = False
+            for i, ckpt in enumerate(ckpt_names):
+                table.add_row(run_name if i == 0 else '', ckpt)
         print(table)
 
 
