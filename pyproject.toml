@@ -25,7 +25,12 @@ dependencies = [
   "hdf5plugin",
   "tqdm",
   "gdown",
+  "typer",
+  "rich",
 ]
+
+[project.scripts]
+swm = "stable_worldmodel.cli:app"
 
 [project.optional-dependencies]
 train = [

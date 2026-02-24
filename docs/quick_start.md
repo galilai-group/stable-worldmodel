@@ -36,6 +36,11 @@ See the [World API](api/world.md) for all available parameters and methods.
                                                                                                                             
         env = gym.make('swm/PushT-v1', render_mode='rgb_array')   
 
+Use the CLI to list all available environments:
+
+```bash
+swm envs
+```
 
 ### Factors of Variation (FoV)
 
@@ -63,6 +68,12 @@ block:
     ...
 background:
     color: Box(0, 255, (3,), uint8)
+```
+
+Use the CLI to inspect the factors of variation for a specific environment:
+
+```bash
+swm fovs swm/PushT-v1
 ```
 
 #### Controlling Variations at Reset
@@ -220,6 +231,13 @@ print(sample['action'].shape)   # (4, action_dim)
 ```
 
 The dataset is compatible with PyTorch `DataLoader` for batched training.
+
+Use the CLI to list all available datasets, or inspect a specific one:
+
+```bash
+swm datasets
+swm inspect pusht_expert_train
+```
 
 ### Recording Videos
 
