@@ -64,6 +64,26 @@ stable-worldmodel supports a large collection of environments from the [DeepMind
 
 Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
 
+| Environment ID               |  # FoV  |
+|------------------------------|---------|
+| swm/PushT-v1                 | 16      |
+| swm/TwoRoom-v1               | 17      |
+| swm/OGBCube-v0               | 11      |
+| swm/OGBScene-v0              | 12      |
+| swm/HumanoidDMControl-v0     | 7       |
+| swm/CheetahDMControl-v0      | 7       |
+| swm/HopperDMControl-v0       | 7       |
+| swm/ReacherDMControl-v0      | 8       |
+| swm/WalkerDMControl-v0       | 8       |
+| swm/AcrobotDMControl-v0      | 8       |
+| swm/PendulumDMControl-v0     | 6       |
+| swm/CartpoleDMControl-v0     | 6       |
+| swm/BallInCupDMControl-v0    | 9       |
+| swm/FingerDMControl-v0       | 10      |
+| swm/ManipulatorDMControl-v0  | 8       |
+| swm/QuadrupedDMControl-v0    | 7       |
+
+
 ## Installing stable-worldmodel
 
 stable-worldmodel is available on PyPI and can be installed with:
