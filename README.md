@@ -64,6 +64,10 @@ stable-worldmodel supports a large collection of environments from the [DeepMind
 
 Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
 
+<table>
+<tr>
+<td valign="top">
+
 | Environment ID               |  # FoV  |
 |------------------------------|---------|
 | swm/PushT-v1                 | 16      |
@@ -82,6 +86,23 @@ Each environment includes visual and physical factor variations to evaluate robu
 | swm/FingerDMControl-v0       | 10      |
 | swm/ManipulatorDMControl-v0  | 8       |
 | swm/QuadrupedDMControl-v0    | 7       |
+
+</td>
+<td valign="top">
+
+| [Solver](https://github.com/galilai-group/stable-worldmodel/tree/main/stable_worldmodel/solver) | Type |
+|----------|---|
+| Cross-Entropy Method (CEM)| Sampling |
+| Model Predictive Path Integral (MPPI) | Sampling |
+| Gradient Descent (SGD, Adam) | Gradient |
+| Projected Gradient Descent (PGD) | Gradient |
+
+</td>
+</tr>
+</table>
+
+
+
 
 
 ## Installing stable-worldmodel
