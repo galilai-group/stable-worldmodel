@@ -126,3 +126,10 @@ policy = FeedForwardPolicy(
     options:
         heading_level: 3
         show_source: false
+
+Use the CLI to list available model checkpoints:
+
+```bash
+swm checkpoints
+swm checkpoints pusht  # filter by name
+```
