@@ -139,6 +139,20 @@ pip install stable-worldmodel
 
 > **Note:** The library is still in active development.
 
+### Install from Source
+
+To set up a development environment from source:
+
+```bash
+git clone https://github.com/galilai-group/stable-worldmodel
+cd stable-worldmodel/
+uv venv --python=3.10
+source .venv/bin/activate
+uv sync --all-extras --group dev
+```
+
+> **Note:** All datasets and models will be saved in the `$STABLEWM_HOME` environment variable. By default this is `~/.stable-wm/`. Adapt this directory according to your storage needs.
+
 
 ## Contributing
 
