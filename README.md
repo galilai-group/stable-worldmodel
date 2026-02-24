@@ -64,11 +64,13 @@ stable-worldmodel supports a large collection of environments from the [DeepMind
 
 Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
 
+<div align="center">
+
 <table>
 <tr>
 <td valign="top">
 
-| Environment ID               |  # FoV  |
+| [Environment ID](https://github.com/galilai-group/stable-worldmodel/tree/main/stable_worldmodel/envs) |  # FoV  |
 |------------------------------|---------|
 | swm/PushT-v1                 | 16      |
 | swm/TwoRoom-v1               | 17      |
@@ -97,10 +99,23 @@ Each environment includes visual and physical factor variations to evaluate robu
 | Gradient Descent (SGD, Adam) | Gradient |
 | Projected Gradient Descent (PGD) | Gradient |
 
+<br>
+
+| [Baselines](https://github.com/galilai-group/stable-worldmodel/tree/main/scripts/train) | Type |
+|-------------------|----|
+| DINO-WM           |JEPA|
+| GCBC              |Behaviour Cloning|
+| HILP              |RL|
+| GCIVL             |RL|
+| GCIQL             |RL|
+
+</td>
+
 </td>
 </tr>
 </table>
 
+</div>
 
 
 
