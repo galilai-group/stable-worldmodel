@@ -16,6 +16,7 @@ class ExpertPolicy(BasePolicy):
         action_repeat_prob: float = 0.0,
         door_fit_margin: float = 1.10,
         door_reach_tol: float | None = None,
+        seed: int | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -24,6 +25,16 @@ class ExpertPolicy(BasePolicy):
         self.door_fit_margin = float(door_fit_margin)
         # If None, will default to ~3*scale per-env at runtime
         self.door_reach_tol = door_reach_tol
+        self.set_seed(seed)
+
+    def set_seed(self, seed: int | None) -> None:
+        """Set the random seed for action sampling.
+
+        Args:
+            seed: The seed value.
+        """
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
 
     def set_env(self, env):
         self.env = env
@@ -155,7 +166,7 @@ class ExpertPolicy(BasePolicy):
                 actions = direction.astype(np.float32)
 
         if self.action_noise > 0:
-            actions = actions + np.random.normal(
+            actions = actions + self.rng.normal(
                 0.0, self.action_noise, size=actions.shape
             ).astype(np.float32)
 
@@ -163,7 +174,7 @@ class ExpertPolicy(BasePolicy):
         self._last_action = getattr(self, '_last_action', None)
         if self._last_action is not None and self.action_repeat_prob > 0.0:
             repeat_mask = (
-                np.random.uniform(
+                self.rng.uniform(
                     0.0, 1.0, size=(actions.shape[0],) if is_vectorized else ()
                 )
                 < self.action_repeat_prob

@@ -9,6 +9,7 @@ class WeakPolicy(BasePolicy):
     def __init__(
         self,
         dist_constraint=100,
+        seed: int | None = None,
         **kwargs,
     ):
         """
@@ -20,7 +21,17 @@ class WeakPolicy(BasePolicy):
 
         self.dist_constraint = dist_constraint
         self.discrete = False
-        assert self.dist_constraint > 0, "dist_constraint must be positive."
+        assert self.dist_constraint > 0, 'dist_constraint must be positive.'
+        self.set_seed(seed)
+
+    def set_seed(self, seed: int | None) -> None:
+        """Set the random seed for action sampling.
+
+        Args:
+            seed: The seed value.
+        """
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
 
     def set_env(self, env):
         self.env = env
@@ -30,15 +41,17 @@ class WeakPolicy(BasePolicy):
             envs = getattr(self.env, 'envs', None)
             if envs and len(envs) > 0:
                 spec = envs[0].spec
-        assert spec is not None and "swm/PushT" in spec.id, "PushTCollectionPolicy can only be used with the PushT environment."
-        self.discrete = "Discrete" in spec.id
+        assert spec is not None and 'swm/PushT' in spec.id, (
+            'PushTCollectionPolicy can only be used with the PushT environment.'
+        )
+        self.discrete = 'Discrete' in spec.id
 
     def get_action(self, info_dict, **kwargs):
-        assert hasattr(self, "env"), "Environment not set for the policy"
+        assert hasattr(self, 'env'), 'Environment not set for the policy'
 
         # Handle vectorized envs (VecEnv-style) and single envs gracefully
         base_env = self.env.unwrapped
-        if hasattr(base_env, "envs"):
+        if hasattr(base_env, 'envs'):
             envs = [e.unwrapped for e in base_env.envs]
         else:
             envs = [base_env]
@@ -48,13 +61,17 @@ class WeakPolicy(BasePolicy):
 
         for i, env in enumerate(envs):
             # sample a random action
-            action = np.random.uniform(-1, 1, size=env.action_space.shape)
+            action = self.rng.uniform(-1, 1, size=env.action_space.shape)
             # scale action to environment position
             action = action * env.action_scale
             action = env.agent.position + action
             # constrain agent to be near the block to increase probability of interaction
             block_pos = np.array((env.block.position.x, env.block.position.y))
-            action = np.clip(action, block_pos - self.dist_constraint, block_pos + self.dist_constraint)
+            action = np.clip(
+                action,
+                block_pos - self.dist_constraint,
+                block_pos + self.dist_constraint,
+            )
             # rescale action back to action space
             action = (action - env.agent.position) / env.action_scale
             action = np.clip(action, -1, 1)

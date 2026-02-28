@@ -21,6 +21,7 @@ class ExpertPolicy(BasePolicy):
         p_random_action=0.0,
         noise_smoothing=0.5,
         min_norm=0.4,
+        seed: int | None = None,
         **kwargs,
     ):
         """
@@ -47,6 +48,16 @@ class ExpertPolicy(BasePolicy):
         self.p_random_action = p_random_action
         self.noise_smoothing = noise_smoothing
         self.min_norm = min_norm
+        self.set_seed(seed)
+
+    def set_seed(self, seed: int | None) -> None:
+        """Set the random seed for action sampling.
+
+        Args:
+            seed: The seed value.
+        """
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
 
     def set_env(self, env):
         self.env = env
@@ -194,13 +205,13 @@ class ExpertPolicy(BasePolicy):
         if env_type == 'single':
             p_stack = 0.0
         elif env_type == 'double':
-            p_stack = np.random.uniform(0.0, 0.25)
+            p_stack = self.rng.uniform(0.0, 0.25)
         elif env_type == 'triple':
-            p_stack = np.random.uniform(0.05, 0.35)
+            p_stack = self.rng.uniform(0.05, 0.35)
         elif env_type == 'quadruple':
-            p_stack = np.random.uniform(0.1, 0.5)
+            p_stack = self.rng.uniform(0.1, 0.5)
         elif env_type == 'octuple':
-            p_stack = np.random.uniform(0.0, 0.35)
+            p_stack = self.rng.uniform(0.0, 0.35)
         else:
             p_stack = 0.5
 
@@ -235,7 +246,7 @@ class ExpertPolicy(BasePolicy):
                 self._p_stack[i] = self._get_cube_stack_prob()
                 if self.type == 'markov_oracle':
                     # Set the action noise level for this episode.
-                    self._xi[i] = np.random.uniform(0, self.action_noise)
+                    self._xi[i] = self.rng.uniform(0, self.action_noise)
 
                 self._agents[i] = self._oracle_agents[
                     info['privileged/target_task']
@@ -243,7 +254,7 @@ class ExpertPolicy(BasePolicy):
                 self._agents[i].reset(None, info)
 
             # action logic
-            if np.random.rand() < self.p_random_action:
+            if self.rng.uniform(0, 1) < self.p_random_action:
                 # Sample a random action.
                 action = env.action_space.sample()
             else:
@@ -253,7 +264,7 @@ class ExpertPolicy(BasePolicy):
                 if self.type == 'markov_oracle':
                     # Add Gaussian noise to the action.
                     xi = self._xi[i]
-                    action = action + np.random.normal(
+                    action = action + self.rng.normal(
                         0, [xi, xi, xi, xi * 3, xi * 10], action.shape
                     )
             action = np.clip(action, -1, 1)
