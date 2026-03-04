@@ -788,7 +788,9 @@ class World:
 
         ep_idx_arr = np.array(episodes_idx)
         start_steps_arr = np.array(start_steps)
-        end_steps = start_steps_arr + goal_offset_steps
+        # We add +1 so that the last loaded frame will align with the last frame we encounter
+        # when stepping through the rollout.
+        end_steps = start_steps_arr + goal_offset_steps + 1
 
         if not (len(ep_idx_arr) == len(start_steps_arr)):
             raise ValueError(
