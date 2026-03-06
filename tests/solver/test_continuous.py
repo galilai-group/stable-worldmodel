@@ -8,6 +8,7 @@ from gymnasium import spaces as gym_spaces
 from stable_worldmodel.policy import PlanConfig
 from stable_worldmodel.solver.cem import CEMSolver
 from stable_worldmodel.solver.gd import GradientSolver
+from stable_worldmodel.solver.icem import ICEMSolver
 from stable_worldmodel.solver.mppi import MPPISolver
 
 
@@ -90,6 +91,83 @@ def test_cem_solver_call():
     """Test CEMSolver __call__ method."""
     model = DummyCostModel()
     solver = CEMSolver(model=model, n_steps=2, num_samples=50, batch_size=2, topk=10)
+    action_space = gym_spaces.Box(low=-1, high=1, shape=(2, 2), dtype=np.float32)
+    config = PlanConfig(horizon=3, receding_horizon=2)
+    solver.configure(action_space=action_space, n_envs=2, config=config)
+
+    info_dict = {"pixels": torch.randn(2, 1, 3, 64, 64)}
+    outputs = solver(info_dict)
+
+    assert "actions" in outputs
+    assert outputs["actions"].shape == (2, 3, 2)
+
+
+###########################
+## ICEMSolver Tests      ##
+###########################
+
+
+def test_icem_solver_init():
+    """Test ICEMSolver initialization."""
+    model = DummyCostModel()
+    solver = ICEMSolver(model=model, n_steps=10, num_samples=100, noise_beta=2.0)
+    assert solver.model is model
+    assert solver.n_steps == 10
+    assert solver.num_samples == 100
+    assert solver.noise_beta == 2.0
+    assert solver.alpha == 0.1
+    assert solver.n_elite_keep == 5
+
+
+def test_icem_solver_configure():
+    """Test ICEMSolver configuration."""
+    model = DummyCostModel()
+    solver = ICEMSolver(model=model, n_steps=10)
+    action_space = gym_spaces.Box(low=-1, high=1, shape=(4, 2), dtype=np.float32)
+    config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
+
+    solver.configure(action_space=action_space, n_envs=2, config=config)
+
+    assert solver._configured is True
+    assert solver.n_envs == 2
+    assert solver.action_dim == 2
+    assert solver.horizon == 5
+    assert solver._action_low is not None
+    assert solver._action_high is not None
+
+
+def test_icem_solver_init_action_distrib():
+    """Test ICEMSolver action distribution initialization."""
+    model = DummyCostModel()
+    solver = ICEMSolver(model=model, n_steps=10)
+    action_space = gym_spaces.Box(low=-1, high=1, shape=(2, 3), dtype=np.float32)
+    config = PlanConfig(horizon=5, receding_horizon=3)
+    solver.configure(action_space=action_space, n_envs=2, config=config)
+
+    mean, var = solver.init_action_distrib()
+    assert mean.shape == (2, 5, 3)
+    assert var.shape == (2, 5, 3)
+
+
+def test_icem_solver_call():
+    """Test ICEMSolver __call__ method."""
+    model = DummyCostModel()
+    solver = ICEMSolver(model=model, n_steps=2, num_samples=50, batch_size=2, topk=10)
+    action_space = gym_spaces.Box(low=-1, high=1, shape=(2, 2), dtype=np.float32)
+    config = PlanConfig(horizon=3, receding_horizon=2)
+    solver.configure(action_space=action_space, n_envs=2, config=config)
+
+    info_dict = {"pixels": torch.randn(2, 1, 3, 64, 64)}
+    outputs = solver(info_dict)
+
+    assert "actions" in outputs
+    assert outputs["actions"].shape == (2, 3, 2)
+
+
+def test_icem_solver_white_noise_fallback():
+    """Test ICEMSolver with beta=0 (white noise, equivalent to standard CEM)."""
+    model = DummyCostModel()
+    solver = ICEMSolver(model=model, n_steps=2, num_samples=50, batch_size=2, topk=10, noise_beta=0.0)
     action_space = gym_spaces.Box(low=-1, high=1, shape=(2, 2), dtype=np.float32)
     config = PlanConfig(horizon=3, receding_horizon=2)
     solver.configure(action_space=action_space, n_envs=2, config=config)

@@ -1,0 +1,13 @@
+_target_: stable_worldmodel.solver.ICEMSolver
+model: ???
+batch_size: 1
+num_samples: 100 # lower than CEM since ICEM is more sample efficient
+var_scale: 1.0
+n_steps: 30
+topk: 30
+noise_beta: 2.0
+alpha: 0.1
+n_elite_keep: 5
+return_mean: true
+device: "cuda"
+seed: ${seed}
