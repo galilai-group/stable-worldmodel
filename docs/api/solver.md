@@ -31,6 +31,16 @@ summary: Model-based planning solvers for action optimization
 
 ::: stable_worldmodel.solver.CEMSolver.solve
 
+::: stable_worldmodel.solver.ICEMSolver
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+::: stable_worldmodel.solver.ICEMSolver.configure
+
+::: stable_worldmodel.solver.ICEMSolver.solve
+
 ::: stable_worldmodel.solver.MPPISolver
     options:
         heading_level: 3
