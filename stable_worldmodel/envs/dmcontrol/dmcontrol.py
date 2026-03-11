@@ -93,18 +93,33 @@ class DMControlWrapper(gym.Env):
             obs = self.env.task.get_observation(self.env.physics)
         return self._obs_to_array(obs), self.info
 
+    def _is_terminated(self, step) -> bool:
+        """Return True if the current step should end the episode as a success.
+
+        Override in subclasses to implement custom termination conditions.
+        The base implementation always returns False (no early termination).
+
+        Args:
+            step: The dm_control TimeStep returned by the environment.
+        """
+        return False
+
     def step(self, action):
         reward = 0
         action = action.astype(self.action_spec_dtype)
+        terminated = False
         for _ in range(self.action_repeat):
             step = self.env.step(action)
             reward += step.reward or 0
+            if self._is_terminated(step):
+                terminated = True
+                break
         self._cumulative_reward += reward
 
         return (
             self._obs_to_array(step.observation),
             reward,
-            False,
+            terminated,
             False,
             self.info,
         )
