@@ -1,0 +1,77 @@
+defaults:
+  - _self_
+  - launcher: local
+
+hydra:
+  job:
+    chdir: true
+
+# --- Run ---
+output_model_name: tdmpc2_output
+subdir: null
+seed: 1
+
+# --- Data ---
+dataset_name: pusht_expert_train
+cache_dir: null
+n_steps: ${wm.horizon}
+frameskip: 1
+batch_size: 512
+num_workers: 16
+train_split: 0.9
+image_size: 64
+patch_size: 1
+
+# --- Planning / MPPI ---
+mpc: true
+iterations: 12
+num_samples: 1024
+num_elites: 64
+num_pi_trajs: 256
+min_std: 0.01
+max_std: 0.1
+temperature: 0.5
+
+# --- World Model ---
+wm:
+  horizon: 5
+  mlp_dim: 384
+  enc_dim: 256       # Hidden layer size for the state MLP encoder
+  simnorm_dim: 8
+  num_q: 5
+  rho: 0.5
+  tau: 0.01
+  consistency_coef: 20.0
+  reward_coef: 0.1
+  value_coef: 0.1
+  discount: 0.99
+
+  # Reward Scales
+  num_bins: 101
+  vmin: -10
+  vmax: 0
+
+  # --- DYNAMIC ENCODING ---
+  # Add modalities as needed (e.g., proprio, state, pixels etc.)
+  encoding:
+    state: 128
+
+# --- Optimizer ---
+optimizer:
+  type: AdamW
+  lr: 3e-4
+
+# --- Trainer ---
+trainer:
+  max_epochs: 250
+  strategy: auto
+  devices: 1
+  accelerator: gpu
+  precision: 16-mixed
+  gradient_clip_val: 20.0
+
+# --- Logging ---
+wandb:
+  enable: false
+  project: swm
+  entity: stable-worldmodel
