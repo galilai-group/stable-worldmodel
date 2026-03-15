@@ -144,13 +144,12 @@ def run(cfg):
     train = torch.utils.data.DataLoader(
         train_set,
         **cfg.loader,
-        shuffle=True,
-        drop_last=True,
         generator=rnd_gen,
     )
-    val = torch.utils.data.DataLoader(
-        val_set, **cfg.loader, shuffle=False, drop_last=False
-    )
+    val_cfg = {**cfg.loader}
+    val_cfg['shuffle'] = False
+    val_cfg['drop_last'] = False
+    val = torch.utils.data.DataLoader(val_set, **val_cfg)
 
     ##############################
     ##       model / optim      ##
