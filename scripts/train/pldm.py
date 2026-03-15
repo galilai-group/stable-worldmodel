@@ -92,8 +92,8 @@ def pldm_forward(self, batch, stage, cfg):
 
     output = self.model.encode(batch)
 
-    emb = output['embed_0']  # (B, T, D)
-    act_emb = output['action_0']
+    emb = output['emb']  # (B, T, D)
+    act_emb = output['act_emb']
 
     inpt_emb = emb[:, : cfg.wm.history_size]  # (B, T-1, D)
     inpt_act = act_emb[:, : cfg.wm.history_size]
