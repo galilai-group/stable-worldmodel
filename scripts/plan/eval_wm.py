@@ -1,3 +1,5 @@
+"""Script to evaluate a World Model using MPC on a dataset of episodes."""
+
 import os
 
 os.environ['MUJOCO_GL'] = 'egl'
@@ -12,9 +14,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
-
 import stable_worldmodel as swm
-import wandb
 
 
 def img_transform(cfg):
@@ -24,7 +24,6 @@ def img_transform(cfg):
             transforms.ToDtype(torch.float32, scale=True),
             transforms.Normalize(**spt.data.dataset_stats.ImageNet),
             transforms.Resize(size=cfg.eval.img_size),
-            # transforms.CenterCrop(size=cfg.eval.img_size),
         ]
     )
     return transform
@@ -53,21 +52,13 @@ def get_dataset(cfg, dataset_name):
     return dataset
 
 
-@hydra.main(version_base=None, config_path='./config', config_name='config')
+@hydra.main(version_base=None, config_path='./config', config_name='pusht')
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
     assert (
         cfg.plan_config.horizon * cfg.plan_config.action_block
         <= cfg.eval.eval_budget
     ), 'Planning horizon must be smaller than or equal to eval_budget'
-
-    if cfg.wandb.use_wandb:
-        # Initialize wandb
-        wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.entity,
-            config=dict(cfg),
-        )
 
     # create world environment
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
@@ -177,12 +168,6 @@ def run(cfg: DictConfig):
         video_path=results_path,
     )
     end_time = time.time()
-
-    if cfg.wandb.use_wandb:
-        # Log metrics to wandb
-        wandb.log(metrics)
-        # Finish wandb run
-        wandb.finish()
 
     print(metrics)
 
