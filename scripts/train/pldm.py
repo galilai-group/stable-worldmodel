@@ -263,21 +263,13 @@ def run(cfg):
     with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
 
-    cpu_offload_callback = spt.callbacks.CPUOffloadCallback()
-    lr_callback = pl.pytorch.callbacks.LearningRateMonitor(
-        logging_interval='step'
-    )
     object_dump_callback = ModelObjectCallBack(
         dirpath=run_dir, filename=cfg.output_model_name, epoch_interval=5
     )
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[
-            cpu_offload_callback,
-            object_dump_callback,
-            lr_callback,
-        ],
+        callbacks=[object_dump_callback],
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,
