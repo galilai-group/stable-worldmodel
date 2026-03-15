@@ -123,9 +123,7 @@ def pldm_forward(self, batch, stage, cfg):
     return output
 
 
-@hydra.main(
-    version_base=None, config_path='./config/train', config_name='pldm'
-)
+@hydra.main(version_base=None, config_path='./config', config_name='pldm')
 def run(cfg):
     #########################
     ##       dataset       ##
