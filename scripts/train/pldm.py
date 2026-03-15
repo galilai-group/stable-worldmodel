@@ -183,6 +183,7 @@ def run(cfg):
     embed_dim = cfg.wm.get('embed_dim', hidden_dim)
 
     predictor = ARPredictor(
+        num_frames=cfg.wm.history_size,
         input_dim=embed_dim,
         hidden_dim=hidden_dim,
         output_dim=hidden_dim,
