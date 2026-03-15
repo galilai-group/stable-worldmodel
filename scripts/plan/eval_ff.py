@@ -16,7 +16,6 @@ from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 
 import stable_worldmodel as swm
-import wandb
 
 
 def img_transform():
@@ -57,14 +56,6 @@ def run(cfg: DictConfig):
         cfg.plan_config.horizon * cfg.plan_config.action_block
         <= cfg.eval.eval_budget
     ), 'Planning horizon must be smaller than or equal to eval_budget'
-
-    if cfg.wandb.enable:
-        # Initialize wandb
-        wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.entity,
-            config=dict(cfg),
-        )
 
     # create world environment
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
@@ -172,12 +163,6 @@ def run(cfg: DictConfig):
         video_path=results_path,
     )
     end_time = time.time()
-
-    if cfg.wandb.enable:
-        # Log metrics to wandb
-        wandb.log(metrics)
-        # Finish wandb run
-        wandb.finish()
 
     print(metrics)
 
