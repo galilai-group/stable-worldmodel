@@ -1,0 +1,11 @@
+dataset:
+  num_steps: ${eval:'${wm.num_preds} + ${wm.history_size}'}
+  frameskip: 5
+  name: reacher
+  keys_to_load:
+    - pixels
+    - action
+    - observation
+  keys_to_cache:
+    - action
+    - observation

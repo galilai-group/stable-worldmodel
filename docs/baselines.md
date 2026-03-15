@@ -22,7 +22,10 @@ where $z_{t+1}$ represents the frozen DINOv2 features of the next observation.
 
 | Environment | Success Rate | Checkpoint |
 |-------------|--------------|------------|
-| [Push-T](envs/pusht.md) | ~86% | NA |
+| TwoRoom | 100% | NA |
+| Push-T | 74% | NA |
+| Reacher | 79% | NA |
+| OGB Cube | 86% | NA |
 
 ## Planning with Latent Dynamics Model
 
@@ -45,7 +48,32 @@ where $\alpha$, $\beta$, $\delta$, and $\omega$ are hyperparameters controlling 
 
 | Environment | Success Rate | Checkpoint |
 |-------------|--------------|------------|
-| ? | ? | NA |
+| TwoRoom | 97% | NA |
+| Push-T | 78% | NA |
+| Reacher | 78% | NA |
+| OGB Cube | 65% | NA |
+
+
+## LeWorldModel
+
+Similarly to PLDM, [LeWM](https://le-wm.github.io) learns the encoder and predictor in an end-to-end fashion using SIGReg to avoid representational collapse. SIGReg is a regularization enforcing a Gaussian distribution of the latent space; we refer to [LeJEPA](https://arxiv.org/abs/2511.08544) for details.
+
+### Training Objective
+
+The complete LeWM training objective combines a classical prediction loss $\mathcal{L}_{\text{pred}}$ with a regularization term:
+
+$$\mathcal{L}_{\text{LeWM}} = \mathcal{L}_{\text{pred}} + \lambda\,\mathcal{L}_{\text{SIGReg}}$$
+
+where $\lambda$ is the only hyperparameter.
+
+### Benchmark
+
+| Environment | Success Rate | Checkpoint |
+|-------------|--------------|------------|
+| TwoRoom | 87% | NA |
+| Push-T | 96% | NA |
+| Reacher | 86% | NA |
+| OGB Cube | 74% | NA |
 
 
 ## Goal-Conditioned Behavioural Cloning
@@ -66,7 +94,9 @@ where $s_t$ is the observation embedding, $g$ is the goal embedding, and $a_t$ i
 | Environment | Success Rate | Checkpoint |
 |-------------|--------------|------------|
 | TwoRoom | 100% | NA |
-| Push-T | ~60% | NA |
+| Push-T | 75% | NA |
+| Reacher | - | NA |
+| OGB Cube | 84% | NA |
 
 
 ## Implicit Q-Learning
@@ -111,8 +141,8 @@ where $A(s_t, a_t, g) = r(s_t, g) + \gamma \, V(s_{t+1}, g) - V(s_t, g)$ is the 
 |-------------|---------|--------------|------------|
 | TwoRoom | IQL | 100% | NA |
 | TwoRoom | IVL | 100% | NA |
-| TwoRoom | HILP | 100% | NA |
-| Push-T | IQL | ? | NA |
-| Push-T | IVL | ? | NA |
-| Push-T | HILP | ? | NA |
+| Push-T | IQL | 20% | NA |
+| Push-T | IVL | 33% | NA |
+| OGB Cube | IQL | 64% | NA |
+| OGB Cube | IVL | 56% | NA |
 
