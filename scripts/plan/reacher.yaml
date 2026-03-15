@@ -4,18 +4,12 @@ defaults:
   - _self_
 
 world:
-  env_name: swm/OGBCube-v0
+  env_name: swm/ReacherDMControl-v0
   num_envs: ${eval.num_eval}
   max_episode_steps: ??? # make sure it's >= eval_budget
   history_size: 1
   frame_skip: 1
-  env_type: single
-  ob_type: states
-  multiview: False
-  width: 224
-  height: 224
-  visualize_info: False
-  terminate_at_goal: True
+  task: qpos_match
 
 dataset:
   stats: ${eval.dataset_name}
@@ -36,7 +30,7 @@ eval:
   goal_offset_steps: 25
   eval_budget: 50
   img_size: 224
-  dataset_name: ogbench/cube_single_expert
+  dataset_name: dmc/reacher_random
   callables:
     # -- set state
     - method: set_state
@@ -45,16 +39,11 @@ eval:
           value: qpos
         qvel:
           value: qvel
-    # -- set target pos
-    - method: set_target_pos
+
+    - method: set_target_qpos
       args:
-        cube_id:
-          value: 0
-          in_dataset: False
-        target_pos:
-          value: goal_privileged_block_0_pos
-        target_quat:
-          value: goal_privileged_block_0_quat
+        target_qpos:
+          value: goal_qpos
 
 output:
-  filename: ogb_cube_results.txt
+  filename: dmc_results.txt

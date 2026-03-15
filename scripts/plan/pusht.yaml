@@ -1,5 +1,6 @@
 defaults:
   - launcher: local
+  - solver: cem
   - _self_
 
 world:
@@ -9,8 +10,15 @@ world:
   history_size: 1
   frame_skip: 1
 
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+    - action
+    - proprio
+    - state
+
 seed: 42
-policy: gcbc # ckpt name or random
+policy: random # ckpt name or random
 
 plan_config:
   horizon: 5
@@ -22,6 +30,7 @@ eval:
   num_eval: 50
   goal_offset_steps: 25
   eval_budget: 50
+  img_size: 224
   dataset_name: pusht_expert_train
   callables:
     # -- set state
