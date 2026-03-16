@@ -36,7 +36,7 @@ class GradientSolver(torch.nn.Module):
         var_scale: float = 1,
         num_samples: int = 1,
         action_noise: float = 0.0,
-        device: str | torch.device = "cpu",
+        device: str | torch.device = 'cpu',
         seed: int = 1234,
         optimizer_cls: type[torch.optim.Optimizer] = torch.optim.SGD,
         optimizer_kwargs: dict | None = None,
@@ -52,14 +52,18 @@ class GradientSolver(torch.nn.Module):
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
         self.optimizer_cls = optimizer_cls
-        self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {"lr": 1.0}
+        self.optimizer_kwargs = (
+            optimizer_kwargs if optimizer_kwargs is not None else {'lr': 1.0}
+        )
 
         self._configured = False
         self._n_envs = None
         self._action_dim = None
         self._config = None
 
-    def configure(self, *, action_space: gym.Space, n_envs: int, config: Any) -> None:
+    def configure(
+        self, *, action_space: gym.Space, n_envs: int, config: Any
+    ) -> None:
         """Configure the solver with environment specifications."""
         self._action_space = action_space
         self._n_envs = n_envs
@@ -69,7 +73,7 @@ class GradientSolver(torch.nn.Module):
 
         if not isinstance(action_space, Box):
             logging.warning(
-                f"Action space is discrete, got {type(action_space)}. GradientSolver may not work as expected."
+                f'Action space is discrete, got {type(action_space)}. GradientSolver may not work as expected.'
             )
 
     @property
@@ -103,16 +107,23 @@ class GradientSolver(torch.nn.Module):
             new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
-        actions = actions.unsqueeze(1).repeat_interleave(self.num_samples, dim=1)  # add sample dim
+        actions = actions.unsqueeze(1).repeat_interleave(
+            self.num_samples, dim=1
+        )  # add sample dim
         actions[:, 1:] += (
-            torch.randn(actions[:, 1:].shape, generator=self.torch_gen, device=self.device) * self.var_scale
+            torch.randn(
+                actions[:, 1:].shape,
+                generator=self.torch_gen,
+                device=self.device,
+            )
+            * self.var_scale
         )  # add small noise to all samples except the first one
 
         # reset actions
-        if hasattr(self, "init"):
+        if hasattr(self, 'init'):
             self.init.copy_(actions)
         else:
-            self.register_parameter("init", torch.nn.Parameter(actions))
+            self.register_parameter('init', torch.nn.Parameter(actions))
 
     def solve(
         self, info_dict: dict, init_action: torch.Tensor | None = None
@@ -120,15 +131,17 @@ class GradientSolver(torch.nn.Module):
         """Solve the planning problem using gradient descent."""
         start_time = time.time()
         outputs = {
-            "cost": [],  # Will store list of cost histories per batch
-            "actions": None,
+            'cost': [],  # Will store list of cost histories per batch
+            'actions': None,
         }
 
         with torch.no_grad():
             self.init_action(init_action)
 
         # Determine batch size (default to all envs if not specified which can cause memory issues)
-        batch_size = self.batch_size if self.batch_size is not None else self.n_envs
+        batch_size = (
+            self.batch_size if self.batch_size is not None else self.n_envs
+        )
         total_envs = self.n_envs
 
         # Lists to hold results from each batch to be concatenated later
@@ -154,10 +167,14 @@ class GradientSolver(torch.nn.Module):
                 if torch.is_tensor(v):
                     batch_v = v[start_idx:end_idx]
                     batch_v = batch_v.unsqueeze(1)
-                    batch_v = batch_v.expand(current_bs, self.num_samples, *batch_v.shape[2:])
+                    batch_v = batch_v.expand(
+                        current_bs, self.num_samples, *batch_v.shape[2:]
+                    )
                 elif isinstance(v, np.ndarray):
                     batch_v = v[start_idx:end_idx]
-                    batch_v = np.repeat(batch_v[:, None, ...], self.num_samples, axis=1)
+                    batch_v = np.repeat(
+                        batch_v[:, None, ...], self.num_samples, axis=1
+                    )
                 expanded_infos[k] = batch_v
 
             # Perform Gradient Descent for this batch
@@ -169,11 +186,19 @@ class GradientSolver(torch.nn.Module):
                 # Calculate cost using the batch parameter
                 costs = self.model.get_cost(current_info, batch_init)
 
-                assert isinstance(costs, torch.Tensor), f"Got {type(costs)} cost, expect torch.Tensor"
-                assert costs.ndim == 2 and costs.shape[0] == current_bs and costs.shape[1] == self.num_samples, (
-                    f"Cost should be of shape ({current_bs}, {self.num_samples}), got {costs.shape}"
+                assert isinstance(costs, torch.Tensor), (
+                    f'Got {type(costs)} cost, expect torch.Tensor'
                 )
-                assert costs.requires_grad, "Cost must requires_grad for GD solver."
+                assert (
+                    costs.ndim == 2
+                    and costs.shape[0] == current_bs
+                    and costs.shape[1] == self.num_samples
+                ), (
+                    f'Cost should be of shape ({current_bs}, {self.num_samples}), got {costs.shape}'
+                )
+                assert costs.requires_grad, (
+                    'Cost must requires_grad for GD solver.'
+                )
 
                 cost = costs.sum()  # Sum cost for this batch
                 cost.backward()
@@ -182,12 +207,15 @@ class GradientSolver(torch.nn.Module):
 
                 # Add noise
                 if self.action_noise > 0:
-                    batch_init.data += torch.randn(batch_init.shape, generator=self.torch_gen) * self.action_noise
+                    batch_init.data += (
+                        torch.randn(batch_init.shape, generator=self.torch_gen)
+                        * self.action_noise
+                    )
 
                 batch_cost_history.append(cost.item())
 
             # Store cost history for this batch
-            outputs["cost"].append(batch_cost_history)
+            outputs['cost'].append(batch_cost_history)
 
             # Update the global self.init with the optimized batch values
             with torch.no_grad():
@@ -200,8 +228,10 @@ class GradientSolver(torch.nn.Module):
             batch_top_actions_list.append(top_actions_batch.detach().cpu())
 
         # Concatenate all batch results
-        outputs["actions"] = torch.cat(batch_top_actions_list, dim=0)
+        outputs['actions'] = torch.cat(batch_top_actions_list, dim=0)
         end_time = time.time()
-        print(f"GradientSolver.solve completed in {end_time - start_time:.4f} seconds.")
+        print(
+            f'GradientSolver.solve completed in {end_time - start_time:.4f} seconds.'
+        )
 
         return outputs

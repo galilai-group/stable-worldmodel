@@ -1,7 +1,7 @@
 import numpy as np
 from dm_control.suite import reacher
 
-_DEFAULT_QPOS_THRESHOLD = 0.1
+_DEFAULT_QPOS_THRESHOLD = 0.05
 
 
 class ReacherQPosMatchTask(reacher.Reacher):
