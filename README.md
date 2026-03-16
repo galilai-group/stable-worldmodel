@@ -115,8 +115,9 @@ Each environment includes visual and physical factor variations to evaluate robu
 | [Baselines](https://github.com/galilai-group/stable-worldmodel/tree/main/scripts/train) | Type |
 |-------------------|----|
 | DINO-WM           |JEPA|
+| PLDM              |JEPA|
+| LeWM              |JEPA|
 | GCBC              |Behaviour Cloning|
-| HILP              |RL|
 | GCIVL             |RL|
 | GCIQL             |RL|
 
