@@ -182,6 +182,13 @@ uv sync --all-extras --group dev
 If you have a question, please [file an issue](https://github.com/galilai-group/stable-worldmodel/issues).
 
 
+## Works Based on stable-worldmodel
+
+The following research projects have been built on top of stable-worldmodel:
+
+- **[C-JEPA](https://hazel-heejeong-nam.github.io/cjepa/)**
+- **[LeWM](https://le-wm.github.io/)**
+
 ## Citation
 
 ```bibtex
