@@ -47,7 +47,7 @@ print(f"Success Rate: {results['success_rate']:.1f}%")
 ```
 
 stable-worldmodel eases reproducibility by already implementing several baselines: [`scripts/train/prejepa.py`](scripts/train/prejepa.py) reproduces results from the [DINO-WM paper](https://arxiv.org/abs/2411.04983) and [`scripts/train/gcivl.py`](scripts/train/gcivl.py) implements several [goal-conditioned RL algorithms](https://arxiv.org/abs/2410.20092).
-To foster research in MPC for world models, several planning solvers are already implemented, including zeroth-order ([CEM](stable_worldmodel/solver/cem.py),[MPPI](stable_worldmodel/solver/mppi.py)), as well as [gradient-based](stable_worldmodel/solver/gd.py) approaches.
+To foster research in MPC for world models, several planning solvers are already implemented, including zeroth-order ([CEM](stable_worldmodel/solver/cem.py), [MPPI](stable_worldmodel/solver/mppi.py)), gradient-based ([GradientSolver](stable_worldmodel/solver/gd.py), [PGD](stable_worldmodel/solver/discrete_solvers.py)), and constrained gradient approaches ([LagrangianSolver](stable_worldmodel/solver/lagrangian.py)).
 
 ### Efficiency
 
@@ -108,6 +108,7 @@ Each environment includes visual and physical factor variations to evaluate robu
 | Model Predictive Path Integral (MPPI) | Sampling |
 | Gradient Descent (SGD, Adam) | Gradient |
 | Projected Gradient Descent (PGD) | Gradient |
+| Augmented Lagrangian | Constrained Opt |
 
 <br>
 
