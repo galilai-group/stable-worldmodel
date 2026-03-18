@@ -578,7 +578,12 @@ class MockActionableCostableModel(torch.nn.Module):
         self.fill_value = fill_value
         self.get_action_calls: list[int] = []  # records horizon per call
 
-    def get_action(self, info_dict: dict, horizon: int = 1) -> torch.Tensor:
+    def get_action(
+        self,
+        info_dict: dict,
+        horizon: int = 1,
+        prefix_actions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         self.get_action_calls.append(horizon)
         n_envs = next(iter(info_dict.values())).shape[0]
         actions = torch.full(
