@@ -192,8 +192,14 @@ class PGDSolver(torch.nn.Module):
 
                 # Add noise
                 if self.action_noise > 0:
-                    batch_init.data += torch.randn(batch_init.shape, generator=self.torch_gen) * self.action_noise
-
+                    batch_init.data += (
+                        torch.randn(
+                            batch_init.shape,
+                            generator=self.torch_gen,
+                            device=batch_init.device,
+                        )
+                        * self.action_noise
+                    )
                 # projection onto simplex
                 with torch.no_grad():
                     batch_init.copy_(self._project_action_simplex(batch_init))
