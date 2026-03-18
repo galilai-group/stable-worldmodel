@@ -424,6 +424,167 @@ class WorldModelPolicy(BasePolicy):
         return action  # (num_envs, action_dim)
 
 
+class TDMPCPolicy(BasePolicy):
+    """Hybrid Policy using a world model, an actor network, and a planning solver.
+
+    Actions are selected by using the Actor network to generate a warm-start
+    guess, which is then refined by the MPC/CEM solver using the World Model.
+
+    Attributes:
+        model: Neural network world model with encoder, dynamics, pi, and get_cost.
+        solver: The planning solver to use.
+        cfg: MPC planning configuration.
+        process: Dictionary of data preprocessors for specific keys.
+        transform: Dictionary of tensor transformations (e.g., image transforms).
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        solver: Solver,
+        config: PlanConfig,
+        process: dict[str, Transformable] | None = None,
+        transform: dict[str, Callable[[torch.Tensor], torch.Tensor]]
+        | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.type = 'tdmpc'
+        self.model = model.eval()
+        self.cfg = config
+        self.solver = solver
+        self.process = process or {}
+        self.transform = transform or {}
+        self._action_buffer: deque[torch.Tensor] | None = None
+        self._next_init: torch.Tensor | None = None
+
+    @property
+    def flatten_receding_horizon(self) -> int:
+        """Receding horizon in environment steps (with frameskip)."""
+        return self.cfg.receding_horizon * self.cfg.action_block
+
+    def set_env(self, env: Any) -> None:
+        """Configure the policy and solver for the given environment.
+
+        Args:
+            env: The environment to associate with the policy.
+        """
+        self.env = env
+        self.solver.configure(
+            action_space=env.action_space,
+            n_envs=getattr(env, 'num_envs', 1),
+            config=self.cfg,
+        )
+        self._action_buffer = deque(maxlen=self.flatten_receding_horizon)
+        self._next_init = None
+        assert isinstance(self.solver, Solver), (
+            'Solver must implement the Solver protocol'
+        )
+
+    def reset(self) -> None:
+        """Clear stale plan state at the start of each episode."""
+        if self._action_buffer is not None:
+            self._action_buffer.clear()
+        self._next_init = None
+
+    def _encode(self, info_dict: dict, device: torch.device) -> torch.Tensor:
+        """Encode current observation and goal into latent state."""
+        obs_dict, goal_dict = {}, {}
+        for key in self.model.cfg.wm.get('encoding', {}).keys():
+            obs = info_dict[key].to(device)
+            goal_key = f'goal_{key}' if f'goal_{key}' in info_dict else 'goal'
+            goal = info_dict[goal_key].to(device)
+            if obs.ndim == 3 and key != 'pixels':
+                obs, goal = obs[:, -1, :], goal[:, -1, :]
+            obs_dict[key], goal_dict[key] = obs, goal
+        return self.model.encode(obs_dict, goal_dict)
+
+    def _actor_rollout(
+        self, z: torch.Tensor, steps: int, num_trajs: int
+    ) -> torch.Tensor:
+        """Sample actor trajectories and return their mean. Shape: (B, steps, A)."""
+        trajs = []
+        for _ in range(num_trajs):
+            curr_z, traj = z, []
+            for _ in range(steps):
+                mean_raw, log_std_raw = self.model.pi(curr_z).chunk(2, dim=-1)
+                act = torch.tanh(
+                    mean_raw
+                    + log_std_raw.clamp(-10, 2).exp()
+                    * torch.randn_like(mean_raw)
+                )
+                traj.append(act)
+                curr_z = self.model.dynamics(torch.cat([curr_z, act], dim=-1))
+            trajs.append(torch.stack(traj, dim=1))
+        return torch.stack(trajs).mean(0)
+
+    def _get_init_action(
+        self, z: torch.Tensor, device: torch.device
+    ) -> torch.Tensor:
+        """Build initial action sequence for the solver via warm-start and actor rollout."""
+        num_pi_trajs = getattr(self.cfg, 'num_pi_trajs', 24)
+        prev = (
+            self._next_init.to(device)
+            if (self._next_init is not None and self.cfg.warm_start)
+            else None
+        )
+        n_prev = prev.shape[1] if prev is not None else 0
+
+        curr_z = z
+        for t in range(n_prev):
+            curr_z = self.model.dynamics(
+                torch.cat([curr_z, prev[:, t]], dim=-1)
+            )
+
+        tail = self._actor_rollout(
+            curr_z, self.cfg.horizon - n_prev, num_pi_trajs
+        )
+        return torch.cat([prev, tail], dim=1) if prev is not None else tail
+
+    def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
+        """Get action via actor-guided planning with the world model.
+
+        Args:
+            info_dict: Current state information from the environment.
+            **kwargs: Additional parameters (unused).
+
+        Returns:
+            The selected action(s) as a numpy array.
+        """
+        assert hasattr(self, 'env'), 'Environment not set for the policy'
+
+        info_dict = self._prepare_info(info_dict)
+
+        if len(self._action_buffer) == 0:
+            device = next(self.model.parameters()).device
+            with torch.no_grad():
+                init_action = self._get_init_action(
+                    self._encode(info_dict, device), device
+                )
+
+            actions = self.solver(info_dict, init_action=init_action)[
+                'actions'
+            ]
+
+            keep = self.cfg.receding_horizon
+            self._next_init = (
+                actions[:, keep:] if self.cfg.warm_start else None
+            )
+
+            plan = actions[:, :keep].reshape(
+                self.env.num_envs, self.flatten_receding_horizon, -1
+            )
+            self._action_buffer.extend(plan.transpose(0, 1))
+
+        action = self._action_buffer.popleft()
+        action = action.reshape(*self.env.action_space.shape).numpy()
+
+        if 'action' in self.process:
+            action = self.process['action'].inverse_transform(action)
+
+        return action
+
+
 def _load_model_with_attribute(run_name, attribute_name, cache_dir=None):
     """Helper function to load a model checkpoint and find a module with the specified attribute.
 

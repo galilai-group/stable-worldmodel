@@ -1,4 +1,3 @@
-import os
 from functools import partial
 from pathlib import Path
 import random
@@ -9,13 +8,13 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+import numpy as np
 
-os.environ['STABLEWM_HOME'] = '/sonic_home/luizfacury/stable-worldmodel/eval'
-os.environ['MUJOCO_GL'] = 'egl'
 
 from stable_worldmodel.wm.tdmpc2 import (
     TDMPC2,
@@ -74,9 +73,8 @@ def tdmpc2_forward(self, batch, stage, cfg):
 
     for key in encoding_keys:
         obs = batch[key]
-        goal = batch[f'goal_{key}']  # GoalDataset maps 'state' to 'goal_state'
+        goal = batch[f'goal_{key}']
 
-        # Align Goal sequence length with Obs sequence
         if goal.ndim == obs.ndim and goal.shape[1] == 1:
             goal = goal.expand(-1, T_plus_1, *([-1] * (goal.ndim - 2)))
         elif goal.ndim == obs.ndim - 1:
@@ -113,7 +111,7 @@ def tdmpc2_forward(self, batch, stage, cfg):
         ).sum(-1).mean() * (cfg.wm.rho**t)
 
         with torch.no_grad():
-            next_z_for_q = next_z_pred.detach()
+            next_z_for_q = target_zs[:, t].detach()
             mean_raw, log_std_raw = self.model.pi(next_z_for_q).chunk(
                 2, dim=-1
             )
@@ -139,7 +137,6 @@ def tdmpc2_forward(self, batch, stage, cfg):
                 target_q_two_hot * F.log_softmax(q(z_a), dim=-1)
             ).sum(-1).mean() * (cfg.wm.rho**t)
 
-        # Actor Update
         z_detached = z.detach()
         mean_raw, log_std_raw = self.model.pi(z_detached).chunk(2, dim=-1)
         log_std_bounded = log_std(log_std_raw, low=-10, dif=12)
@@ -159,12 +156,12 @@ def tdmpc2_forward(self, batch, stage, cfg):
         )
 
         q_indices = random.sample(range(cfg.wm.num_q), 2)
-        q_pi_min = torch.min(qs_pi[q_indices[0]], qs_pi[q_indices[1]])
+        q_pi_avg = (qs_pi[q_indices[0]] + qs_pi[q_indices[1]]) / 2.0
         self.model.qs.requires_grad_(True)
 
         if t == 0:
-            self.model.scale.update(q_pi_min)
-        q_pi_normalized = self.model.scale(q_pi_min)
+            self.model.scale.update(q_pi_avg)
+        q_pi_normalized = self.model.scale(q_pi_avg)
 
         step_pi_loss = -(entropy_coef * scaled_entropy + q_pi_normalized)
         loss_pi += step_pi_loss.mean() * (cfg.wm.rho**t)
@@ -253,18 +250,6 @@ def get_img_preprocessor(source, target, img_size=64):
     )
 
 
-class ClampActionTransform(spt.data.transforms.Transform):
-    """
-    Data transform that hard-clips all continuous action arrays to the bounds [-1.0, 1.0].
-    Ensures safe bounded outputs for the actor's Tanh layers.
-    """
-
-    def __call__(self, batch):
-        if 'action' in batch:
-            batch['action'] = torch.clamp(batch['action'], -1.0, 1.0)
-        return batch
-
-
 @hydra.main(version_base=None, config_path='./config', config_name='tdmpc2')
 def run(cfg):
     """
@@ -292,8 +277,23 @@ def run(cfg):
         cfg.dataset_name,
         num_steps=cfg.wm.horizon + 1,
         keys_to_load=keys_to_load,
-        cache_dir=os.environ.get('STABLEWM_HOME', None),
+        cache_dir=cfg.get('cache_dir'),
     )
+
+    raw_actions = base_dataset.get_col_data('action')[:]
+    valid_actions = raw_actions[~np.isnan(raw_actions).any(axis=1)]
+    act_max = valid_actions.max()
+    act_min = valid_actions.min()
+
+    if act_max > 1.01 or act_min < -1.01:
+        logging.error(
+            f'Dataset actions fall outside the [-1, 1] range! (Min: {act_min:.2f}, Max: {act_max:.2f}).\n'
+            'TD-MPC2 uses a Tanh actor and strictly requires actions to be bounded between [-1, 1].\n'
+            'Please normalize your dataset actions.'
+        )
+        raise ValueError(
+            'Unnormalized actions detected in the dataset. Training aborted.'
+        )
 
     with open_dict(cfg):
         cfg.action_dim = base_dataset.get_dim('action')
@@ -302,8 +302,7 @@ def run(cfg):
         for key in extra_keys:
             cfg.extra_dims[key] = base_dataset.get_dim(key)
 
-    transforms = [ClampActionTransform()]
-
+    transforms = []
     if use_pixels:
         transforms.append(
             get_img_preprocessor('pixels', 'pixels', cfg.image_size)
@@ -317,10 +316,16 @@ def run(cfg):
     goal_keys = {key: f'goal_{key}' for key in encoding_keys}
     if use_pixels:
         goal_keys['pixels'] = 'goal_pixels'
+    goal_probs = (
+        cfg.goal_probabilities.random,
+        cfg.goal_probabilities.geometric_future,
+        cfg.goal_probabilities.uniform_future,
+        cfg.goal_probabilities.current,
+    )
 
     dataset = swm.data.GoalDataset(
         dataset=base_dataset,
-        goal_probabilities=(0.0, 1.0, 0.0, 0.0),
+        goal_probabilities=goal_probs,
         current_goal_offset=cfg.wm.horizon + 1,
         goal_keys=goal_keys,
         seed=cfg.seed,
@@ -352,20 +357,38 @@ def run(cfg):
         forward=partial(tdmpc2_forward, cfg=cfg),
         hparams=OmegaConf.to_container(cfg, resolve=True),
         optim={
+            'enc_opt': add_opt(
+                r'model\.(cnn|pixel_encoder|extra_encoders|sim_norm).*',
+                cfg.optimizer.lr * cfg.get('enc_lr_scale', 0.3),
+            ),
             'wm_opt': add_opt(
-                r'model\.(cnn|pixel_encoder|extra_encoders|dynamics|reward|qs).*',
+                r'model\.(dynamics|reward|qs).*',
                 cfg.optimizer.lr,
             ),
             'pi_opt': add_opt(r'model\.pi.*', cfg.optimizer.lr, eps=1e-5),
         },
     )
-
-    subdir = cfg.subdir if cfg.subdir is not None else 'tdmpc2_run'
+    subdir = cfg.subdir
     run_dir = Path(swm.data.utils.get_cache_dir(), subdir)
     run_dir.mkdir(parents=True, exist_ok=True)
+    with open(run_dir / 'config.yaml', 'w') as f:
+        OmegaConf.save(cfg, f)
+
+    logger = None
+    if cfg.wandb.enable:
+        logger = WandbLogger(
+            name='tdmpc2',
+            project=cfg.wandb.project,
+            entity=cfg.wandb.entity,
+            resume='allow' if subdir else None,
+            id=subdir or None,
+            log_model=False,
+        )
+        logger.log_hyperparams(OmegaConf.to_container(cfg))
 
     trainer = pl.Trainer(
         **cfg.trainer,
+        logger=logger,
         callbacks=[
             ModelObjectCallBack(
                 dirpath=run_dir, filename=cfg.output_model_name

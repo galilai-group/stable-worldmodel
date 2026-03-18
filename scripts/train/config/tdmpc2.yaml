@@ -14,15 +14,12 @@ seed: 1
 # --- Data ---
 dataset_name: pusht_expert_train
 cache_dir: null
-n_steps: ${wm.horizon}
-frameskip: 1
-batch_size: 512
+batch_size: 256
 num_workers: 16
 train_split: 0.9
 image_size: 64
-patch_size: 1
 
-# --- Planning / MPPI ---
+# --- Planning / MPPI parameters used only during evaluation ---
 mpc: true
 iterations: 12
 num_samples: 1024
@@ -36,7 +33,7 @@ temperature: 0.5
 wm:
   horizon: 5
   mlp_dim: 384
-  enc_dim: 256       # Hidden layer size for the state MLP encoder
+  enc_dim: 256
   simnorm_dim: 8
   num_q: 5
   rho: 0.5
@@ -45,6 +42,8 @@ wm:
   reward_coef: 0.1
   value_coef: 0.1
   discount: 0.99
+  uncertainty_penalty: 0.5
+  entropy_coef: 1e-4
 
   # Reward Scales
   num_bins: 101
@@ -60,6 +59,7 @@ wm:
 optimizer:
   type: AdamW
   lr: 3e-4
+enc_lr_scale: 0.3
 
 # --- Trainer ---
 trainer:
@@ -70,8 +70,16 @@ trainer:
   precision: 16-mixed
   gradient_clip_val: 20.0
 
+goal_gamma: 0.99
+
+goal_probabilities:
+  random: 0.2
+  geometric_future: 0.6
+  uniform_future: 0.1
+  current: 0.1
+
 # --- Logging ---
 wandb:
-  enable: false
+  enable: True
   project: swm
-  entity: stable-worldmodel
+  entity: swm

@@ -135,9 +135,9 @@ class TDMPC2(nn.Module):
     Assumptions:
         - Continuous Control: The algorithm assumes continuous action spaces.
         - Action Bounds: Actions are strictly assumed to be normalized to the range [-1.0, 1.0].
-          The actor network and MPPI planner enforce this bound via Tanh and clamping.
+            The actor network and MPPI planner enforce this bound via Tanh and clamping.
         - Reward Scaling: Environment rewards and Q-values should fall roughly within the
-          [vmin, vmax] range defined in the config, as they are discretized using two-hot encoding.
+            [vmin, vmax] range defined in the config, as they are discretized using two-hot encoding.
     """
 
     def __init__(self, cfg):
@@ -263,256 +263,9 @@ class TDMPC2(nn.Module):
         z_a = torch.cat([z, action], dim=-1)
         return self.dynamics(z_a), self.reward(z_a)
 
-    @torch.no_grad()
-    def _estimate_value(self, z, actions, task=None):
-        """
-        Estimates the total expected return of an action sequence using latent dynamics.
-        Implements Offline RL Test-Time Regularization (Appendix J) by applying an uncertainty penalty
-        based on the standard deviation of the Q-value ensemble to avoid out-of-distribution actions.
-
-        Args:
-            z (torch.Tensor): Initial latent state of shape (B, latent_dim).
-            actions (torch.Tensor): Sequence of actions of shape (B, horizon, action_dim).
-            task (Any, optional): Task identifier (unused in single-task).
-
-        Returns:
-            torch.Tensor: The conservative value estimate of shape (B,).
-        """
-        G, discount = 0, 1
-        horizon = actions.shape[1]
-        num_samples = actions.shape[0]
-
-        c = self.cfg.wm.get('uncertainty_penalty', 0.5)
-
-        termination = torch.zeros(
-            num_samples, 1, dtype=torch.float32, device=z.device
-        )
-        for t in range(horizon):
-            z_a = torch.cat([z, actions[:, t]], dim=-1)
-            reward = two_hot_inv(self.reward(z_a), self.cfg)
-            z = self.dynamics(z_a)
-            G = G + discount * (1 - termination) * reward
-            discount = discount * self.cfg.wm.get('discount', 0.99)
-
-        mu = self.pi(z).chunk(2, dim=-1)[0]
-        action = torch.tanh(mu)
-        z_a_term = torch.cat([z, action], dim=-1)
-
-        q_logits = torch.stack([q(z_a_term) for q in self.qs])
-        q_values = torch.stack(
-            [two_hot_inv(logits, self.cfg) for logits in q_logits]
-        )
-
-        q_mean = q_values.mean(dim=0)
-        q_std = q_values.std(dim=0)
-
-        penalty = c * q_mean.abs() * q_std
-        conservative_q = q_mean - penalty
-
-        return G + discount * (1 - termination) * conservative_q
-
-    @torch.no_grad()
-    def _plan(self, obs_dict, goal_dict, step_idxs, eval_mode=False):
-        """
-        Performs batched Policy-Guided Model Predictive Path Integral (MPPI) planning in the latent space.
-
-        Args:
-            obs_dict (dict): Dictionary of current observations.
-            goal_dict (dict): Dictionary of goal observations.
-            step_idxs (torch.Tensor): Tensor of shape (B,) indicating the current episode step for warm-start resets.
-            eval_mode (bool): Whether the agent is in evaluation mode.
-
-        Returns:
-            torch.Tensor: The optimal first action of the planned sequence, shape (B, action_dim).
-        """
-        z = self.encode(obs_dict, goal_dict)  # Shape: (B, latent_dim)
-        B = z.shape[0]
-        horizon = self.cfg.wm.horizon
-        action_dim = self.cfg.action_dim
-
-        num_pi_trajs = self.cfg.get('num_pi_trajs', 24)
-        num_samples = self.cfg.get('num_samples', 512)
-        num_elites = self.cfg.get('num_elites', 64)
-        max_std = self.cfg.get('max_std', 2.0)
-        min_std = self.cfg.get('min_std', 0.05)
-        iterations = self.cfg.get('iterations', 6)
-        temperature = self.cfg.get('temperature', 0.5)
-
-        # Batched Temporal Warm-Start Initialization
-        if not hasattr(self, '_prev_mean') or self._prev_mean.shape[0] != B:
-            self._prev_mean = torch.zeros(
-                B, horizon, action_dim, device=self.device
-            )
-
-        # Reset environments that just started an episode (t0)
-        is_first_step = step_idxs == 0
-        self._prev_mean[is_first_step] = 0.0
-
-        if num_pi_trajs > 0:
-            pi_actions = torch.empty(
-                B, horizon, num_pi_trajs, action_dim, device=self.device
-            )
-            _z = (
-                z.unsqueeze(1)
-                .repeat(1, num_pi_trajs, 1)
-                .view(B * num_pi_trajs, -1)
-            )
-            for t in range(horizon - 1):
-                mu = self.pi(_z).chunk(2, dim=-1)[0]
-                act = torch.tanh(mu)
-                pi_actions[:, t] = act.view(B, num_pi_trajs, action_dim)
-                _z = self.dynamics(torch.cat([_z, act], dim=-1))
-            mu = self.pi(_z).chunk(2, dim=-1)[0]
-            pi_actions[:, -1] = torch.tanh(mu).view(
-                B, num_pi_trajs, action_dim
-            )
-
-        mean = torch.zeros(B, horizon, action_dim, device=self.device)
-        mean[:, :-1] = self._prev_mean[:, 1:]  # Temporal shift
-        std = torch.full(
-            (B, horizon, action_dim),
-            max_std,
-            dtype=z.dtype,
-            device=self.device,
-        )
-
-        z_expanded = (
-            z.unsqueeze(1).repeat(1, num_samples, 1).view(B * num_samples, -1)
-        )
-        actions = torch.empty(
-            B, horizon, num_samples, action_dim, device=self.device
-        )
-
-        if num_pi_trajs > 0:
-            actions[:, :, :num_pi_trajs] = pi_actions
-
-        for _ in range(iterations):
-            # Sample noise
-            r = torch.randn(
-                B,
-                horizon,
-                num_samples - num_pi_trajs,
-                action_dim,
-                device=self.device,
-            )
-
-            # Apply batched mean/std
-            actions_sample = mean.unsqueeze(2) + std.unsqueeze(2) * r
-            actions_sample = actions_sample.clamp(-1, 1)
-            actions[:, :, num_pi_trajs:] = actions_sample
-
-            # Reshape for _estimate_value: (B * num_samples, horizon, action_dim)
-            flat_actions = actions.permute(0, 2, 1, 3).reshape(
-                B * num_samples, horizon, action_dim
-            )
-
-            value = self._estimate_value(z_expanded, flat_actions).nan_to_num(
-                0
-            )
-            value = value.view(
-                B, num_samples
-            )  # Unflatten back to batch format
-
-            # TopK Elites along the sample dimension
-            elite_idxs = torch.topk(
-                value, num_elites, dim=1
-            ).indices  # Shape: (B, num_elites)
-            elite_value = torch.gather(value, 1, elite_idxs)
-
-            # Gather elite actions
-            idx_expanded = (
-                elite_idxs.unsqueeze(1)
-                .unsqueeze(3)
-                .expand(-1, horizon, -1, action_dim)
-            )
-            elite_actions = torch.gather(
-                actions, 2, idx_expanded
-            )  # Shape: (B, horizon, num_elites, action_dim)
-
-            # Update mean and std
-            max_value = elite_value.max(dim=1, keepdim=True).values
-            score = torch.exp(temperature * (elite_value - max_value))
-            score = score / (score.sum(dim=1, keepdim=True) + 1e-9)
-
-            score_expanded = score.unsqueeze(1).unsqueeze(
-                3
-            )  # Shape: (B, 1, num_elites, 1)
-
-            mean = (score_expanded * elite_actions).sum(dim=2)
-            variance = (
-                score_expanded * (elite_actions - mean.unsqueeze(2)) ** 2
-            ).sum(dim=2)
-            std = variance.sqrt().clamp(min_std, max_std)
-
-        best_idx = torch.argmax(score, dim=1)  # (B,)
-        best_idx_expanded = best_idx.view(B, 1, 1, 1).expand(
-            -1, 1, -1, action_dim
-        )
-        best_actions = (
-            torch.gather(elite_actions[:, 0:1, :, :], 2, best_idx_expanded)
-            .squeeze(1)
-            .squeeze(1)
-        )
-
-        self._prev_mean.copy_(mean)
-        return best_actions.clamp(-1, 1)  # Shape: (B, A)
-
-    @torch.no_grad()
-    def get_action(self, info_dict: dict) -> torch.Tensor:
-        """
-        Main entry point for action selection during evaluation or environment stepping.
-        Extracts modalities from the observation dictionary and routes them to the MPPI planner or raw policy.
-
-        Args:
-            info_dict (dict): Dictionary containing environment observations and step information.
-
-        Returns:
-            torch.Tensor: The selected action of shape (B, action_dim).
-        """
-        encoding_keys = list(self.cfg.wm.get('encoding', {}).keys())
-
-        # Get step_idxs safely based on the batch size of the first modality
-        first_key = encoding_keys[0]
-        step_idxs = info_dict.get(
-            'step_idx',
-            torch.zeros(
-                info_dict[first_key].shape[0],
-                device=info_dict[first_key].device,
-            ),
-        )
-
-        obs_dict = {}
-        goal_dict = {}
-
-        for key in encoding_keys:
-            obs_dict[key] = info_dict[key]
-
-            eval_goal_key = f'goal_{key}'
-            if eval_goal_key not in info_dict and 'goal' in info_dict:
-                eval_goal_key = 'goal'
-
-            goal_dict[key] = info_dict[eval_goal_key]
-
-        use_mpc = self.cfg.get('mpc', True)
-        if use_mpc:
-            return self._plan(obs_dict, goal_dict, step_idxs=step_idxs)
-        else:
-            z = self.encode(obs_dict, goal_dict)
-            mu = self.pi(z).chunk(2, dim=-1)[0]
-            return torch.tanh(mu)
-
     def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
         """
-        Evaluates the cost of candidate action trajectories using the learned world model.
-        Used by external trajectory optimizers (like CEM or external MPPI) to rank sequences.
-
-        Args:
-            info_dict (dict): Dictionary containing current observations and goals.
-            action_candidates (torch.Tensor): Candidate action sequences of shape (B, N, H, A)
-                                              where N is the number of samples and H is the horizon.
-
-        Returns:
-            torch.Tensor: The estimated cost (negative conservative return) of each trajectory, shape (B, N).
+        Evaluates the cost of candidate action trajectories.
         """
         device = action_candidates.device
         encoding_keys = list(self.cfg.wm.get('encoding', {}).keys())
@@ -528,20 +281,35 @@ class TDMPC2(nn.Module):
                 eval_goal_key = 'goal'
             goal = info_dict[eval_goal_key].to(device)
 
-            if obs.ndim == 3 and key != 'pixels':
-                obs = obs[:, -1, :]
-            if goal.ndim == 3 and key != 'pixels':
-                goal = goal[:, -1, :]
+            if key != 'pixels':
+                if obs.ndim >= 3:
+                    obs = obs[..., -1, :]
+                if goal.ndim >= 3:
+                    goal = goal[..., -1, :]
+            else:
+                if (
+                    obs.ndim >= 5
+                ):  # e.g., (B, T, C, H, W) or (B, N, T, C, H, W)
+                    obs = obs[..., -1, :, :, :]
+                if goal.ndim >= 5:
+                    goal = goal[..., -1, :, :, :]
 
             obs_dict[key] = obs
             goal_dict[key] = goal
 
-        z = self.encode(obs_dict, goal_dict)  # Shape: (B, latent_dim)
+        z = self.encode(obs_dict, goal_dict)
 
         B, N, H, A = action_candidates.shape
 
-        # Expand z for every candidate trajectory
-        z = z.unsqueeze(1).repeat(1, N, 1).view(B * N, -1)
+        if z.ndim == 2 and z.shape[0] == B:
+            z = z.unsqueeze(1).repeat(1, N, 1).view(B * N, -1)
+        elif z.ndim == 3 and z.shape[0] == B and z.shape[1] == N:
+            z = z.view(B * N, -1)
+        elif z.ndim == 2 and z.shape[0] == B * N:
+            pass
+        else:
+            raise ValueError(f'Unexpected latent state shape: {z.shape}')
+
         actions = action_candidates.view(B * N, H, A)
 
         G, discount = 0, 1.0
