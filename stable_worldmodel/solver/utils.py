@@ -39,6 +39,8 @@ def build_init_action(
     if remaining <= 0:
         return init_action
 
+    # TODO there is an issue, the actor should be rolled out from the state obtained after applying the init_action, not from the current state. This is because the actor may be stateful and the state after applying the init_action may be different from the current state.
+
     with torch.no_grad():
         tail = model.get_action(info_dict, horizon=remaining)
         # tail: (n_envs, remaining, action_dim)
