@@ -4,8 +4,8 @@ from gymnasium.envs import registration
 WORLDS = set()
 
 
-def register(id, entry_point):
-    registration.register(id=id, entry_point=entry_point)
+def register(id, entry_point, **kwargs):
+    registration.register(id=id, entry_point=entry_point, **kwargs)
     WORLDS.add(id)
 
 
@@ -113,6 +113,29 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
 )
 
+register(
+    id='swm/FetchReach-v3',
+    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
+    kwargs={'env_id': 'FetchReach-v4'}
+)
+
+register(
+    id='swm/FetchPush-v3',
+    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
+    kwargs={'env_id': 'FetchPush-v4'}
+)
+
+register(
+    id='swm/FetchSlide-v3',
+    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
+    kwargs={'env_id': 'FetchSlide-v4'}
+)
+
+register(
+    id='swm/FetchPickAndPlace-v3',
+    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
+    kwargs={'env_id': 'FetchPickAndPlace-v4'}
+)
 
 ############
 # DISCRETE #
