@@ -88,7 +88,7 @@ The environment supports extensive domain randomization across both visual textu
 | `object.color` | RGBBox | Manipulated block color (default: `[0.8, 0.1, 0.1]`) |
 | `background.color` | RGBBox | Studio/Skybox background color (default: `[0.1, 0.1, 0.1]`) |
 | `light.intensity` | Box(0.0, 1.0) | Diffuse scene lighting intensity (default: `0.7`) |
-| `camera.angle_delta` | Box(-10.0, 10.0) | Minor azimuth/elevation perturbations |
+| `camera.angle_delta` | Box(-10.0, 10.0, shape=(1, 2)) | Azimuth/elevation camera perturbations (degrees) |
 | `agent.start_position` | Box([1.25, 0.6], [1.45, 0.9]) | Starting 2D (x,y) coordinates for the initial gripper spawn targeting |
 | `block.start_position` | Box([1.15, 0.6], [1.45, 0.9]) | Explicit 2D (x,y) override intercepting initial qpos spawning |
 | `block.angle` | Box(-π, π) | Explicit Z-rotation override intercepting initial qpos quaternions |

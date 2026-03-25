@@ -43,15 +43,35 @@ def test_fetch_visual_randomization():
 
 def test_fetch_physical_randomization():
     env = gym.make("swm/FetchPush-v3")
-    
+
     target_pos = np.array([1.4, 0.8])
     obs, info = env.reset(options={
         "variation_values": {
             "block.start_position": target_pos
         }
     })
-    
+
     vs = env.get_wrapper_attr("variation_space")
     np.testing.assert_allclose(vs["block"]["start_position"].value, target_pos)
-    
+
+    env.close()
+
+@pytest.mark.parametrize("env_id,expected_obs_dim", [
+    ("swm/FetchReach-v3", 13),
+    ("swm/FetchPush-v3", 28),
+])
+def test_fetch_step_output(env_id, expected_obs_dim):
+    env = gym.make(env_id)
+    obs, info = env.reset()
+    assert obs.shape == (expected_obs_dim,), f"reset obs shape mismatch: {obs.shape}"
+
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    assert obs.shape == (expected_obs_dim,), f"step obs shape mismatch: {obs.shape}"
+    assert "env_name" in info
+    assert "proprio" in info
+    assert "state" in info
+    assert "goal_state" in info
+    assert info["state"].shape == (expected_obs_dim,)
+
     env.close()
