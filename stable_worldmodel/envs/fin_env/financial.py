@@ -197,6 +197,17 @@ class FinancialEnvironment(gym.Env):
             self.variation_space, seed, options, DEFAULT_VARIATIONS
         )
 
+        loader = get_registered_dataset('default')
+        if loader is None:
+            raise ValueError(
+                'No financial dataset has been registered. Register one with:\n\n'
+                '    from stable_worldmodel.envs.dataset_registry import register_financial_dataset\n'
+                '    register_financial_dataset(your_loader)\n\n'
+                'The loader must accept (symbols, start_date, end_date, universe) keyword arguments\n'
+                'and return a pd.DataFrame with MultiIndex (date, symbol) and columns\n'
+                'open, high, low, close, volume (daily frequency).'
+            )
+
         start_date: str = self._start_dates[
             int(self.variation_space['market']['start_date_idx'].value)
         ]
@@ -214,17 +225,6 @@ class FinancialEnvironment(gym.Env):
         self._return_clip = float(
             self.variation_space['agent']['return_clip'].value
         )
-
-        loader = get_registered_dataset('default')
-        if loader is None:
-            raise ValueError(
-                'No financial dataset has been registered. Register one with:\n\n'
-                '    from stable_worldmodel.envs.dataset_registry import register_financial_dataset\n'
-                '    register_financial_dataset(your_loader)\n\n'
-                'The loader must accept (symbols, start_date, end_date, universe) keyword arguments\n'
-                'and return a pd.DataFrame with MultiIndex (date, symbol) and columns\n'
-                'open, high, low, close, volume (daily frequency).'
-            )
 
         df = loader(
             symbols=None,
