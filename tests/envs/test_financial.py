@@ -214,7 +214,8 @@ class TestFinancialEnvironment:
 
     def test_reset_goal_shape_matches_observation(self, env):
         obs, info = env.reset(seed=0)
-        assert info['goal'].shape == obs.shape
+        # goal is a single RGB heatmap (3 channels); obs stacks two heatmaps (6 channels)
+        assert info['goal'].shape == (obs.shape[0], obs.shape[1], 3)
 
     def test_reset_is_reproducible_with_same_seed(self, env):
         obs1, _ = env.reset(seed=42)
