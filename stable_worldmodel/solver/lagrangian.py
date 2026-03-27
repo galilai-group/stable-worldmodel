@@ -310,6 +310,26 @@ class LagrangianSolver(torch.nn.Module):
                         self._lambdas[start_idx:end_idx] = lambdas_batch
                         rho = min(self.rho_max, rho * self.rho_scale)
 
+                with torch.no_grad():
+                    mean_cost = costs.mean().item()
+                    if constraints is not None:
+                        viol = F.relu(final_constraints).mean(dim=(0, 1))  # (C,)
+                        lam = lambdas_batch.mean(dim=0)  # (C,)
+                        viol_str = ', '.join(f'{v:.4f}' for v in viol.tolist())
+                        lam_str = ', '.join(f'{l:.4f}' for l in lam.tolist())
+                        print(
+                            f'  [outer {_outer+1}/{self.n_outer_steps}] '
+                            f'cost={mean_cost:.4f} | '
+                            f'constraint_viol=[{viol_str}] | '
+                            f'lambdas=[{lam_str}] | '
+                            f'rho={rho:.4f}'
+                        )
+                    else:
+                        print(
+                            f'  [outer {_outer+1}/{self.n_outer_steps}] '
+                            f'cost={mean_cost:.4f}'
+                        )
+
             outputs['cost'].append(batch_cost_history)
 
             if final_constraints is not None:
