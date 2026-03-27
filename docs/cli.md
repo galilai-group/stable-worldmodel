@@ -8,14 +8,14 @@ After installing `stable-worldmodel`, the `swm` command is available to inspect 
 
 ## `swm datasets`
 
-List all datasets stored in your cache directory (`$STABLEWM_HOME`, defaults to `~/.stable-wm/`).
+List all datasets stored in your cache directory (`$STABLEWM_HOME`, defaults to `~/.stable_worldmodel/`).
 
 ```bash
 swm datasets
 ```
 
 ```
-               Datasets in ~/.stable-wm/
+               Datasets in ~/.stable_worldmodel/
 ┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┓
 ┃ Name                   ┃ Format ┃    Size ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━┩
@@ -35,7 +35,7 @@ swm inspect pusht_expert_train
 ```
 Name:      pusht_expert_train
 Format:    HDF5
-Path:      ~/.stable-wm/pusht_expert_train.h5
+Path:      ~/.stable_worldmodel/pusht_expert_train.h5
 Size:      812.3 MB
 Episodes:  2000
 Steps:     297806

@@ -52,7 +52,7 @@ uv sync --all-extras --group dev
 
 !!! warning ""
     All datasets and models will be saved in the `$STABLEWM_HOME` environment variable.
-    By default the corresponding location is `~/.stable-wm/`. We encourage every user to adapt that directory according to their need and storage.
+    By default the corresponding location is `~/.stable_worldmodel/`. We encourage every user to adapt that directory according to their need and storage.
 
 ## Example
 ---

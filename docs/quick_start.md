@@ -192,7 +192,7 @@ Stable World-Model provides utilities for recording and loading episode datasets
 
 ### Recording a Dataset
 
-Use `world.record_dataset()` to collect episodes and save them in HDF5 format. The dataset is saved to `$STABLEWM_HOME` (defaults to `~/.stable-wm/`). This is useful for collecting expert demonstrations, random exploration data, or rollouts from a trained policy.
+Use `world.record_dataset()` to collect episodes and save them in HDF5 format. The dataset is saved to `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). This is useful for collecting expert demonstrations, random exploration data, or rollouts from a trained policy.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))

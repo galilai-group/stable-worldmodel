@@ -175,7 +175,7 @@ source .venv/bin/activate
 uv sync --all-extras --group dev
 ```
 
-> **Note:** All datasets and models will be saved in the `$STABLEWM_HOME` environment variable. By default this is `~/.stable-wm/`. Adapt this directory according to your storage needs.
+> **Note:** All datasets and models will be saved in the `$STABLEWM_HOME` environment variable. By default this is `~/.stable_worldmodel/`. Adapt this directory according to your storage needs.
 
 
 ### Questions
