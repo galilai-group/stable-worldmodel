@@ -9,6 +9,7 @@ from .dataset import (
     MergeDataset,
     VideoDataset,
 )
+from .lerobot import LeRobotAdapter
 
 __all__ = [
     'utils',
@@ -20,4 +21,5 @@ __all__ = [
     'MergeDataset',
     'GoalDataset',
     'ConcatDataset',
+    'LeRobotAdapter',
 ]
