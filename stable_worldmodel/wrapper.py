@@ -3,7 +3,8 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable, Iterable
-from typing import Any, Sequence
+from typing import Any
+from collections.abc import Sequence
 
 import gymnasium as gym
 import numpy as np
@@ -455,15 +456,22 @@ class ResizeGoalWrapper(gym.Wrapper):
         Returns:
             The processed goal image.
         """
-        # Convert to PIL Image for resizing
-        pil_img = self.Image.fromarray(img)
         height, width = self.pixels_shape
-        pil_img = pil_img.resize((width, height), self.Image.BILINEAR)
-        # Optionally apply torchvision transform
-        if self.torchvision_transform is not None:
-            pixels = self.torchvision_transform(pil_img)
+        n_channels = img.shape[-1] if img.ndim == 3 else 1
+        # PIL only supports 1/2/3/4-channel images; fall back to cv2 for others
+        if n_channels in (1, 2, 3, 4):
+            pil_img = self.Image.fromarray(img)
+            pil_img = pil_img.resize((width, height), self.Image.NEAREST)
+            if self.torchvision_transform is not None:
+                pixels = self.torchvision_transform(pil_img)
+            else:
+                pixels = np.array(pil_img)
         else:
-            pixels = np.array(pil_img)
+            import cv2
+
+            pixels = cv2.resize(
+                img, (width, height), interpolation=cv2.INTER_NEAREST
+            )
         return pixels
 
     def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:

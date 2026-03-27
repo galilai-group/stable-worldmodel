@@ -100,8 +100,10 @@ class FinancialEnvironment(gym.Env):
             dtype=np.uint8,
         )
         # Placeholder action space; replaced in reset() once n_stocks is known.
+        # Use max_stocks if available so the vectorised env caches the correct shape.
+        _placeholder_stocks = _max_stocks if _max_stocks is not None else 1
         self.action_space = spaces.MultiDiscrete(
-            np.full(1, _N_QUINTILES, dtype=np.int64)
+            np.full(_placeholder_stocks, _N_QUINTILES, dtype=np.int64)
         )
 
         self._start_dates: list[str] = get_registered_start_dates()
@@ -375,7 +377,7 @@ class FinancialEnvironment(gym.Env):
 
         returns = self._get_daily_returns(self._current_date_idx)
 
-        # Clip and normalise to [-1, 1]
+        # Clip and normalise to [-1, 1] using fixed scale (preserves magnitude across days)
         clipped = np.clip(returns / self._return_clip, -1.0, 1.0)
 
         # Pad to exactly img_size*img_size pixels
@@ -426,9 +428,7 @@ class FinancialEnvironment(gym.Env):
             'drawdown': float(drawdown),
             'universe': self._universe,
             'n_stocks': len(self._symbols),
-            'goal': np.zeros(
-                (self._img_size, self._img_size, 6), dtype=np.uint8
-            ),
+            'goal': self._get_portfolio_heatmap(relative_scale=True),
         }
 
     @staticmethod
@@ -460,12 +460,18 @@ class FinancialEnvironment(gym.Env):
 
         return (long_w + short_w).astype(np.float32)
 
-    def _get_portfolio_heatmap(self) -> np.ndarray:
+    def _get_portfolio_heatmap(
+        self, relative_scale: bool = False
+    ) -> np.ndarray:
         """Return AxAx3 RGB image encoding current portfolio weights.
 
         Green = long position, intensity proportional to weight magnitude.
         Red   = short position, intensity proportional to weight magnitude.
         Black = no position.
+
+        Args:
+            relative_scale: If True, normalize to max weight (for visualization).
+                            If False, normalize to _MAX_WEIGHT_CLIP (for learning).
         """
         if not self._symbols:
             return np.zeros(
@@ -478,7 +484,11 @@ class FinancialEnvironment(gym.Env):
             else np.zeros(len(self._symbols), dtype=np.float32)
         )
 
-        clipped = np.clip(weights / _MAX_WEIGHT_CLIP, -1.0, 1.0)
+        if relative_scale:
+            max_abs = float(np.abs(weights).max())
+            clipped = weights / max_abs if max_abs > 0.0 else weights.copy()
+        else:
+            clipped = np.clip(weights / _MAX_WEIGHT_CLIP, -1.0, 1.0)
 
         n_pixels = self._img_size * self._img_size
         padded = np.zeros(n_pixels, dtype=np.float32)
