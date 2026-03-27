@@ -24,6 +24,7 @@ nav:
       - envs/dmc.md
       - envs/ogb.md
       - envs/tworoom.md
+      - envs/financial.md
   - cli.md
   # - Tutorial:
   #     - tutorial/collect_data.md
