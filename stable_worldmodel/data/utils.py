@@ -21,6 +21,7 @@ def get_cache_dir(
         Path(base, sub_folder) if sub_folder is not None else Path(base)
     )
 
+    cache_path.mkdir(parents=True, exist_ok=True)
     return cache_path
 
 
