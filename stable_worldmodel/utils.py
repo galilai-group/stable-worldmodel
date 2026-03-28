@@ -11,6 +11,9 @@ from typing import Any
 import numpy as np
 from loguru import logger as logging
 
+DEFAULT_CACHE_DIR = os.path.expanduser('~/.stable_worldmodel')
+HF_BASE_URL = 'https://huggingface.co'
+
 
 def pretraining(
     script_path: str,
