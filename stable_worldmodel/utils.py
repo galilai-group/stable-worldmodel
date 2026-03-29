@@ -15,6 +15,16 @@ DEFAULT_CACHE_DIR = os.path.expanduser('~/.stable_worldmodel')
 HF_BASE_URL = 'https://huggingface.co'
 
 
+def exists(val: Any) -> bool:
+    """Check if a value is not None."""
+    return val is not None
+
+
+def default(val: Any, d: Any) -> Any:
+    """Return val if it exists, otherwise return d."""
+    return val if exists(val) else d
+
+
 def pretraining(
     script_path: str,
     dataset_name: str,
@@ -54,9 +64,7 @@ def pretraining(
     logging.info('🏁🏁🏁 Pretraining script finished 🏁🏁🏁')
 
 
-def flatten_dict(
-    d: dict, parent_key: str = '', sep: str = '.'
-) -> dict:
+def flatten_dict(d: dict, parent_key: str = '', sep: str = '.') -> dict:
     """Flatten a nested dictionary into a single-level dictionary.
 
     Args:
@@ -130,3 +138,15 @@ def record_video_from_dataset(
         imageio.mimsave(file_path, frames.transpose(0, 2, 3, 1), fps=fps)
 
     print(f'Video saved to {video_path}')
+
+
+__all__ = [
+    'exists',
+    'default',
+    'pretraining',
+    'flatten_dict',
+    'get_in',
+    'record_video_from_dataset',
+    'HF_BASE_URL',
+    'DEFAULT_CACHE_DIR',
+]
