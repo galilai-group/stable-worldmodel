@@ -152,46 +152,5 @@ class LeWM(nn.Module):
 
         return cost
 
-    @property
-    def config(self) -> dict:
-        """Return a plain dict that fully describes this LeWM model's constructor args."""
-        cfg = {
-            'predictor': _module_config(self.predictor),
-            'action_encoder': _module_config(self.action_encoder),
-        }
-        if not isinstance(self.projector, nn.Identity):
-            cfg['projector'] = _module_config(self.projector)
-        if not isinstance(self.pred_proj, nn.Identity):
-            cfg['pred_proj'] = _module_config(self.pred_proj)
-        return cfg
-
-    @classmethod
-    def from_config(cls, cfg: dict):
-        # encoder = spt.backbone.utils.vit_hf(
-        #     cfg['encoder']['scale'],
-        #     patch_size=cfg['encoder']['patch_size'],
-        #     image_size=cfg['encoder']['image_size'],
-        #     pretrained=False,
-        #     use_mask_token=False,
-        # )
-        predictor = Predictor(**cfg['predictor'])
-        action_encoder = Embedder(**cfg['action_encoder'])
-
-        projector, pred_proj = None, None
-
-        if 'projector' in cfg:
-            projector = MLP(**cfg['projector'], norm_fn=torch.nn.BatchNorm1d)
-
-        if 'pred_proj' in cfg:
-            pred_proj = MLP(**cfg['pred_proj'], norm_fn=torch.nn.BatchNorm1d)
-
-        return cls(
-            encoder=None,  # encoder,
-            predictor=predictor,
-            action_encoder=action_encoder,
-            projector=projector,
-            pred_proj=pred_proj,
-        )
-
 
 __all__ = ['LeWM']
