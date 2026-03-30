@@ -324,7 +324,7 @@ class World:
             )
 
         path = (
-            Path(cache_dir or get_cache_dir(sub_folder='datasets'))
+            get_cache_dir(cache_dir, sub_folder='datasets')
             / f'{dataset_name}.h5'
         )
         path.parent.mkdir(parents=True, exist_ok=True)

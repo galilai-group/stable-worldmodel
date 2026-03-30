@@ -46,7 +46,7 @@ class TestRealDataCollection:
         )
 
         # 4. Verify HDF5 file was created
-        h5_path = temp_cache_dir / f'{dataset_name}.h5'
+        h5_path = temp_cache_dir / 'datasets' / f'{dataset_name}.h5'
         assert h5_path.exists(), f'HDF5 file not created at {h5_path}'
 
         # 5. Load with HDF5Dataset
@@ -269,7 +269,7 @@ class TestImageDatasetReal:
         world.envs.close()
 
         # 2. Convert HDF5 to image format
-        h5_path = temp_cache_dir / f'{h5_name}.h5'
+        h5_path = temp_cache_dir / 'datasets' / f'{h5_name}.h5'
         image_dataset_dir = temp_cache_dir / 'test_image_format'
         convert_hdf5_to_image_format(
             h5_path, image_dataset_dir, image_key='pixels'
@@ -325,7 +325,7 @@ class TestImageDatasetReal:
         )
         world.envs.close()
 
-        h5_path = temp_cache_dir / f'{h5_name}.h5'
+        h5_path = temp_cache_dir / 'datasets' / f'{h5_name}.h5'
         image_dir = temp_cache_dir / 'test_chunk_images'
         convert_hdf5_to_image_format(h5_path, image_dir)
 
@@ -378,7 +378,7 @@ class TestVideoDatasetReal:
         world.envs.close()
 
         # 2. Convert HDF5 to video format (MP4 files)
-        h5_path = temp_cache_dir / f'{h5_name}.h5'
+        h5_path = temp_cache_dir / 'datasets' / f'{h5_name}.h5'
         video_dataset_dir = temp_cache_dir / 'test_video_format'
         video_dataset_dir.mkdir()
 

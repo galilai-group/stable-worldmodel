@@ -1087,7 +1087,8 @@ def sample_hdf5_for_goal(tmp_path):
     """Create a sample HDF5 dataset for GoalDataset testing."""
     import h5py
 
-    h5_path = tmp_path / 'goal_test.h5'
+    h5_path = tmp_path / 'datasets' / 'goal_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([20, 15])
     ep_offsets = np.array([0, 20])
@@ -1121,7 +1122,8 @@ def sample_hdf5_no_pixels(tmp_path):
     """Create a sample HDF5 dataset without pixels for GoalDataset testing."""
     import h5py
 
-    h5_path = tmp_path / 'goal_no_pixels.h5'
+    h5_path = tmp_path / 'datasets' / 'goal_no_pixels.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([10])
     ep_offsets = np.array([0])
@@ -1146,7 +1148,8 @@ def sample_hdf5_grayscale(tmp_path):
     """Create a sample HDF5 dataset with grayscale images."""
     import h5py
 
-    h5_path = tmp_path / 'grayscale_test.h5'
+    h5_path = tmp_path / 'datasets' / 'grayscale_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([10])
     ep_offsets = np.array([0])
@@ -1388,7 +1391,8 @@ def test_goal_dataset_sample_random_step_empty_dataset(tmp_path):
     """Test _sample_random_step with empty dataset."""
     import h5py
 
-    h5_path = tmp_path / 'empty.h5'
+    h5_path = tmp_path / 'datasets' / 'empty.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(h5_path, 'w') as f:
         f.create_dataset('ep_len', data=np.array([], dtype=np.int64))
         f.create_dataset('ep_offset', data=np.array([], dtype=np.int64))
@@ -1553,7 +1557,8 @@ def test_goal_dataset_seed_reproducibility(sample_hdf5_for_goal):
 def test_goal_dataset_current_goal_equals_current_state(tmp_path):
     """Test that with p_current=1, goal equals the last frame of the clip."""
     # Create dataset with unique identifiable values per step
-    h5_path = tmp_path / 'current_goal_test.h5'
+    h5_path = tmp_path / 'datasets' / 'current_goal_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
     ep_lengths = np.array([10, 8])
     ep_offsets = np.array([0, 10])
     total_steps = sum(ep_lengths)
@@ -1609,7 +1614,8 @@ def test_goal_dataset_current_goal_equals_current_state(tmp_path):
 def test_goal_dataset_future_goal_is_from_same_trajectory_future(tmp_path):
     """Test that with p_future=1, goal is a future state from the same trajectory."""
     # Create dataset with unique identifiable values per step
-    h5_path = tmp_path / 'future_goal_test.h5'
+    h5_path = tmp_path / 'datasets' / 'future_goal_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
     ep_lengths = np.array(
         [20, 15]
     )  # Long episodes to ensure future steps exist
@@ -1685,7 +1691,8 @@ def test_goal_dataset_future_goal_is_from_same_trajectory_future(tmp_path):
 @pytest.fixture
 def sample_hdf5_with_string_column(tmp_path):
     """Create a sample HDF5 dataset with a bytes string column."""
-    h5_path = tmp_path / 'string_col_test.h5'
+    h5_path = tmp_path / 'datasets' / 'string_col_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([10])
     ep_offsets = np.array([0])
@@ -1761,7 +1768,8 @@ def test_hdf5_get_row_data_list_indices(sample_hdf5_grayscale):
 def sequential_hdf5(tmp_path):
     """HDF5 dataset where observation[i] == i, making frame identity easy to verify."""
     n_steps = 30
-    h5_path = tmp_path / 'sequential.h5'
+    h5_path = tmp_path / 'datasets' / 'sequential.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(h5_path, 'w') as f:
         f.create_dataset('ep_len', data=np.array([n_steps]))
         f.create_dataset('ep_offset', data=np.array([0]))

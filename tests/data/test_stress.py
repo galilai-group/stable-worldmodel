@@ -214,7 +214,8 @@ class TestHDF5DatasetStress:
         import h5py
 
         path = tmp_path_factory.mktemp("stress_hdf5")
-        h5_path = path / "large_hdf5.h5"
+        h5_path = path / "datasets" / "large_hdf5.h5"
+        h5_path.parent.mkdir(parents=True, exist_ok=True)
 
         num_episodes = 50
         steps_per_episode = 100
