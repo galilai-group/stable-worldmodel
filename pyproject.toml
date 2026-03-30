@@ -89,3 +89,6 @@ quote-style = "single"
 
 [tool.coverage.run]
 omit = ["stable_worldmodel/envs/*"]
+
+[tool.codespell]
+ignore-words-list = "reacher"

@@ -127,3 +127,10 @@ register(
     id='swm/PushT-Discrete-v1',
     entry_point='stable_worldmodel.envs.pusht:PushTDiscrete',
 )
+
+register(
+    id='swm/STONK-v0',
+    entry_point='stable_worldmodel.envs.fin_env.financial:FinancialEnvironment',
+)
+
+from stable_worldmodel.envs.dataset_registry import register_financial_dataset  # noqa: E402,F401

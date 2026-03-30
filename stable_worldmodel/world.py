@@ -269,6 +269,24 @@ class World:
                 goal_data = self.infos['goal'][i]
                 if goal_data.ndim > 3:
                     goal_data = goal_data[-1]
+                if (
+                    goal_data.ndim == 3
+                    and goal_data.shape[-1] != frame.shape[-1]
+                ):
+                    n_ch = frame.shape[-1]
+                    strips = [
+                        goal_data[..., j * n_ch : (j + 1) * n_ch]
+                        for j in range(goal_data.shape[-1] // n_ch)
+                    ]
+                    goal_data = np.hstack(strips)
+                if goal_data.shape[1] != frame.shape[1]:
+                    import cv2
+
+                    goal_data = cv2.resize(
+                        goal_data,
+                        (frame.shape[1], goal_data.shape[0]),
+                        interpolation=cv2.INTER_NEAREST,
+                    )
                 frame = np.vstack([frame, goal_data])
             o.append_data(frame)
 
@@ -292,6 +310,24 @@ class World:
                     goal_data = self.infos['goal'][i]
                     if goal_data.ndim > 3:
                         goal_data = goal_data[-1]
+                    if (
+                        goal_data.ndim == 3
+                        and goal_data.shape[-1] != frame.shape[-1]
+                    ):
+                        n_ch = frame.shape[-1]
+                        strips = [
+                            goal_data[..., j * n_ch : (j + 1) * n_ch]
+                            for j in range(goal_data.shape[-1] // n_ch)
+                        ]
+                        goal_data = np.hstack(strips)
+                    if goal_data.shape[1] != frame.shape[1]:
+                        import cv2
+
+                        goal_data = cv2.resize(
+                            goal_data,
+                            (frame.shape[1], goal_data.shape[0]),
+                            interpolation=cv2.INTER_NEAREST,
+                        )
                     frame = np.vstack([frame, goal_data])
                 o.append_data(frame)
         for o in out:
