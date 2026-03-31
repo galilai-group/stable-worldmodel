@@ -62,6 +62,7 @@ dev = [
   "mkdocs-shadcn",
   "pymdown-extensions",
   "pillow",
+  "decord",
   "imageio[ffmpeg]",
   "mkdocstrings[python]",
 ]
