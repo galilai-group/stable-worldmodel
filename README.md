@@ -178,6 +178,24 @@ uv sync --all-extras --group dev
 > **Note:** All datasets and models will be saved in the `$STABLEWM_HOME` environment variable. By default this is `~/.stable_worldmodel/`. Adapt this directory according to your storage needs.
 
 
+### macOS (Apple Silicon)
+
+When running on macOS with Apple Silicon (M1/M2/M3/M4), you may encounter the following issues:
+
+**Duplicate libSDL2 conflict.** Both `pygame` and `opencv-python` bundle their own copy of `libSDL2`, which causes warnings like:
+
+```
+Class SDLApplication is implemented in both .../cv2/.dylibs/libSDL2-2.0.0.dylib and .../pygame/.dylibs/libSDL2-2.0.0.dylib
+```
+
+Fix this by replacing `opencv-python` with the headless variant:
+
+```bash
+uv pip uninstall opencv-python && uv pip install opencv-python-headless
+```
+
+**`decord` has no macOS ARM64 wheels.** If you install the `dev` dependency group and see an error about `decord` not being available for your platform, you can safely skip it. `decord` is only used by `VideoDataset` to load MP4 video files. The recommended `HDF5Dataset` and `FolderDataset` formats work without it, so all examples, training, and evaluation are unaffected.
+
 ### Questions
 
 If you have a question, please [file an issue](https://github.com/galilai-group/stable-worldmodel/issues).
