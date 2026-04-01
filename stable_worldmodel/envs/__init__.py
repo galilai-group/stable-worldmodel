@@ -115,6 +115,36 @@ register(
 
 
 ############
+# OPENAPPS #
+############
+
+register(
+    id='swm/OpenApps-Todo-v0',
+    entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+)
+
+register(
+    id='swm/OpenApps-Calendar-v0',
+    entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+)
+
+register(
+    id='swm/OpenApps-Messages-v0',
+    entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+)
+
+register(
+    id='swm/OpenApps-CodeEditor-v0',
+    entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+)
+
+register(
+    id='swm/OpenApps-Map-v0',
+    entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+)
+
+
+############
 # DISCRETE #
 ############
 
