@@ -752,3 +752,57 @@ def test_callable_calls_solve():
     info_dict = {'emb': torch.zeros(2, D), 'goal_emb': torch.ones(2, D)}
     out_call = solver(info_dict)
     assert 'actions' in out_call
+
+
+def test_solve_returns_cost_key():
+    """solve() returns 'cost' with shape (B,) on CPU."""
+    B, T, A, D = 3, 4, 2, 6
+    solver, _ = _make_configured_solver(
+        n_envs=B, horizon=T, action_dim=A, emb_dim=D, n_steps=2
+    )
+    info_dict = {'emb': torch.zeros(B, D), 'goal_emb': torch.ones(B, D)}
+    outputs = solver.solve(info_dict)
+    assert 'cost' in outputs
+    assert outputs['cost'].shape == (B,)
+    assert outputs['cost'].device.type == 'cpu'
+
+
+def test_solve_sync_updates_actions():
+    """Loss changes at the sync boundary, confirming synced actions are applied."""
+    losses: list[float] = []
+    original_loss_fn = GRASPSolver._compute_loss
+
+    def recording_loss(self, *args, **kwargs):
+        loss_val = original_loss_fn(self, *args, **kwargs)
+        losses.append(loss_val.item())
+        return loss_val
+
+    GRASPSolver._compute_loss = recording_loss
+    try:
+        solver, D = _make_configured_solver(
+            n_envs=2,
+            horizon=3,
+            action_dim=2,
+            n_steps=6,
+            gd_interval=3,
+            gd_opt_steps=5,
+            gd_lr=0.1,
+            state_noise_scale=0.0,  # disable noise for a deterministic check
+        )
+        info_dict = {'emb': torch.zeros(2, D), 'goal_emb': torch.ones(2, D)}
+        solver.solve(info_dict)
+        # losses[2] is the last gradient step before the first sync (k=2).
+        # losses[3] is the first gradient step after the sync (k=3).
+        # If synced actions were silently discarded they would be equal.
+        assert losses[2] != losses[3], (
+            'Loss did not change across the sync boundary — '
+            'synced actions may not have been applied to the optimiser.'
+        )
+    finally:
+        GRASPSolver._compute_loss = original_loss_fn
+
+
+def test_default_min_goal_weight():
+    """Default min_goal_weight is 0.0 so the goal term fully anneals."""
+    model = DummyRollableModel()
+    assert GRASPSolver(model=model).min_goal_weight == 0.0

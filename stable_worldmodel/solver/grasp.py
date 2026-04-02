@@ -147,7 +147,7 @@ class GRASPSolver:
         init_noise_scale: float = 0.1,
         min_noise_scale: float = 0.0,
         init_goal_weight: float = 2.0,
-        min_goal_weight: float = 1.0,
+        min_goal_weight: float = 0.0,
         emb_key: str = 'emb',
         goal_emb_key: str = 'goal_emb',
         device: str | torch.device = 'cpu',
@@ -359,7 +359,7 @@ class GRASPSolver:
             dim=1,
         )
 
-        loss = torch.tensor(0.0, device=self.device)
+        terms: list[torch.Tensor] = []
 
         for t in range(self.horizon):
             s_t = s_full[
@@ -377,13 +377,12 @@ class GRASPSolver:
             # predicted_emb: (B, S=1, T=1, D) → (B, D)
             pred_next = step_info['predicted_emb'][:, 0, 0]
 
-            loss = loss + ((pred_next - s_next) ** 2).mean()
-            loss = (
-                loss
-                + goal_weight * ((pred_next - goal_emb.detach()) ** 2).mean()
+            terms.append(((pred_next - s_next) ** 2).mean())
+            terms.append(
+                goal_weight * ((pred_next - goal_emb.detach()) ** 2).mean()
             )
 
-        return loss
+        return torch.stack(terms).sum()
 
     def _compute_per_timestep_var(
         self,
@@ -608,6 +607,8 @@ class GRASPSolver:
               states (CPU).
             * ``'loss_history'``: ``list[list[float]]`` per-step scalar losses,
               one inner list per environment batch.
+            * ``'cost'``: ``(B,)`` final cost for each environment evaluated
+              via ``model.get_cost`` on the optimised actions (CPU).
         """
         start_time = time.time()
 
@@ -633,13 +634,13 @@ class GRASPSolver:
 
             # Slice info_dict for this batch, forwarding all keys
             batch_info: dict = {}
-            for k, v in info_dict.items():
+            for key, v in info_dict.items():
                 if torch.is_tensor(v):
-                    batch_info[k] = v[start_idx:end_idx].to(self.device)
+                    batch_info[key] = v[start_idx:end_idx].to(self.device)
                 elif isinstance(v, np.ndarray):
-                    batch_info[k] = v[start_idx:end_idx]
+                    batch_info[key] = v[start_idx:end_idx]
                 else:
-                    batch_info[k] = v
+                    batch_info[key] = v
 
             batch_init = (
                 init_action[start_idx:end_idx]
@@ -718,12 +719,44 @@ class GRASPSolver:
             batch_vs_list.append(virtual_states.detach().cpu())
             loss_history.append(batch_loss_history)
 
+        all_actions = torch.cat(
+            batch_actions_list, dim=0
+        )  # (B, T, action_dim)
+        all_vs = torch.cat(batch_vs_list, dim=0)  # (B, T-1, D)
+
+        # Compute final cost for every environment, chunked to match batch_size
+        # and with info_dict tensors moved to self.device to avoid device mismatch.
+        cost_chunks: list[torch.Tensor] = []
+        for start_idx in range(0, total_envs, batch_size):
+            end_idx = min(start_idx + batch_size, total_envs)
+            chunk_info: dict = {}
+            for key, v in info_dict.items():
+                if torch.is_tensor(v):
+                    chunk_info[key] = v[start_idx:end_idx].to(self.device)
+                elif isinstance(v, np.ndarray):
+                    chunk_info[key] = v[start_idx:end_idx]
+                else:
+                    chunk_info[key] = v
+            with torch.no_grad():
+                cost_chunks.append(
+                    self.model.get_cost(
+                        chunk_info,
+                        all_actions[start_idx:end_idx]
+                        .to(self.device)
+                        .unsqueeze(1),
+                    )
+                    .squeeze(1)
+                    .cpu()
+                )
+        final_cost = torch.cat(cost_chunks, dim=0)  # (B,)
+
         logging.info(
             f'GRASPSolver.solve completed in {time.time() - start_time:.4f} seconds.'
         )
 
         return {
-            'actions': torch.cat(batch_actions_list, dim=0),
-            'virtual_states': torch.cat(batch_vs_list, dim=0),
+            'actions': all_actions,
+            'virtual_states': all_vs,
             'loss_history': loss_history,
+            'cost': final_cost,  # (B,) — NEW
         }
