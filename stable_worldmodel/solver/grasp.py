@@ -14,8 +14,10 @@ The model passed to :class:`GRASPSolver` must expose:
 
 * **get_cost** (the :class:`.Costable` protocol) — used during periodic
   sync steps to ground the terminal state to the goal.
-* **rollout** (the :class:`.Rollable` protocol) — used for single-step
-  differentiable latent predictions in the main GRASP optimisation loop.
+* **predict(emb, act_emb)** — pure latent-space single-step dynamics
+  function used in the main GRASP optimisation loop.
+* **action_encoder** — module that maps raw actions to action embeddings
+  consumed by ``predict``.
 
 ``info_dict`` passed to :meth:`GRASPSolver.solve` must contain:
 
@@ -79,7 +81,8 @@ class GRASPSolver:
 
     Args:
         model: World model implementing :class:`.Costable` (``get_cost``)
-            and :class:`.Rollable` (``rollout``).
+            and exposing ``predict`` and ``action_encoder`` for latent-space
+            single-step dynamics.
         n_steps: Total number of optimisation iterations per environment
             batch.
         batch_size: Number of environments to process in a single pass.
@@ -153,12 +156,14 @@ class GRASPSolver:
         device: str | torch.device = 'cpu',
         seed: int = 1234,
     ) -> None:
-        if not hasattr(model, 'rollout'):
+        if not hasattr(model, 'predict') or not hasattr(
+            model, 'action_encoder'
+        ):
             raise TypeError(
-                f'GRASPSolver requires a model with a rollout method, '
-                f'got {type(model).__name__}. '
-                'Implement rollout(info_dict, action_sequence) -> dict '
-                '(see the Rollable protocol).'
+                f'GRASPSolver requires a model with predict and action_encoder '
+                f'attributes, got {type(model).__name__}. '
+                'Implement predict(emb, act_emb) and action_encoder for '
+                'latent-space single-step dynamics.'
             )
         if sync_mode not in ('gd', 'cem'):
             raise ValueError(
@@ -319,9 +324,9 @@ class GRASPSolver:
         Builds the full virtual state sequence
         ``[s_0, s_1, ..., s_{T-1}, g]`` and for each timestep *t*:
 
-        * Calls ``model.rollout`` with the stop-gradient state ``sg(s_t)``
-          and single-step action ``a_t`` to obtain the predicted next state
-          ``pred_{t+1}``.
+        * Encodes ``a_t`` via ``model.action_encoder`` and calls
+          ``model.predict`` with the stop-gradient state ``sg(s_t)``
+          to obtain the predicted next state ``pred_{t+1}``.
         * Accumulates the dynamics loss
           ``||pred_{t+1} - s_{t+1}||^2`` (gradient flows through the virtual
           target ``s_{t+1}`` but *not* through the dynamics input ``s_t``).
@@ -337,7 +342,7 @@ class GRASPSolver:
             actions: ``(B, T, action_dim)`` optimisable action sequence.
             emb_0: ``(B, D)`` initial latent state (fixed, no grad).
             goal_emb: ``(B, D)`` goal latent state (fixed, no grad).
-            info_dict: Base info dict forwarded to ``model.rollout``.
+            info_dict: Unused in the inner loop; kept for API consistency.
             goal_weight: Override for the goal loss coefficient.  Defaults to
                 ``self.goal_weight`` when ``None``.
 
@@ -367,15 +372,14 @@ class GRASPSolver:
             ].detach()  # stop-gradient on dynamics input (B, D)
             s_next = s_full[:, t + 1]  # (B, D); grad flows for virtual states
 
-            # Single-step, single-sample action: (B, S=1, T=1, action_dim)
-            a_t = actions[:, t : t + 1].unsqueeze(1)
+            # Single-step action: (B, 1, action_dim)
+            a_t = actions[:, t : t + 1]
 
-            # Call model.rollout with the current (detached) latent state
-            step_info = {**info_dict, self.emb_key: s_t}
-            self.model.rollout(step_info, a_t)
-
-            # predicted_emb: (B, S=1, T=1, D) → (B, D)
-            pred_next = step_info['predicted_emb'][:, 0, 0]
+            # Predict next latent state purely in latent space
+            act_emb = self.model.action_encoder(a_t)  # (B, 1, A_emb)
+            pred_next = self.model.predict(s_t.unsqueeze(1), act_emb)[
+                :, 0
+            ]  # (B, D)
 
             terms.append(((pred_next - s_next) ** 2).mean())
             terms.append(

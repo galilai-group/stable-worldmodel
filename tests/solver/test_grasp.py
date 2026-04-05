@@ -16,19 +16,47 @@ from stable_worldmodel.solver.solver import Rollable
 # ---------------------------------------------------------------------------
 
 
+class DummyActionEncoder(torch.nn.Module):
+    """Trivial action encoder: pads or truncates action to emb_dim."""
+
+    def __init__(self, emb_dim: int = 4):
+        super().__init__()
+        self.emb_dim = emb_dim
+
+    def forward(self, action: torch.Tensor) -> torch.Tensor:
+        """action: (B, T, A) -> (B, T, emb_dim)"""
+        A = action.shape[-1]
+        if A >= self.emb_dim:
+            return action[..., : self.emb_dim]
+        return torch.nn.functional.pad(action, (0, self.emb_dim - A))
+
+
 class DummyRollableModel:
-    """Minimal model implementing both Costable and Rollable for tests.
+    """Minimal model implementing Costable + predict/action_encoder for tests.
 
-    rollout: Wraps the action as the predicted embedding (trivially
-        differentiable with respect to actions so that gradient-based
-        tests can verify the optimiser runs without errors).
-
-    get_cost: Returns the L2 norm of the full action sequence so that the
-        sync step has a real gradient to follow.
+    action_encoder: pads/truncates actions to emb_dim.
+    predict: returns emb + act_emb (trivially differentiable).
+    rollout: used by get_cost sync path — encodes actions in (B,S,T) format.
+    get_cost: returns the L2 norm of the full action sequence.
     """
 
+    def __init__(self, emb_dim: int = 4):
+        self.action_encoder = DummyActionEncoder(emb_dim)
+
+    def predict(
+        self, emb: torch.Tensor, act_emb: torch.Tensor
+    ) -> torch.Tensor:
+        """emb: (B, T, D), act_emb: (B, T, A_emb) -> (B, T, D)"""
+        D = emb.shape[-1]
+        A = act_emb.shape[-1]
+        if A < D:
+            act_emb = torch.nn.functional.pad(act_emb, (0, D - A))
+        else:
+            act_emb = act_emb[..., :D]
+        return emb + act_emb
+
     def rollout(self, info_dict: dict, action_sequence: torch.Tensor) -> dict:
-        """Predict next state as a linear function of the action.
+        """Used by get_cost sync path.
 
         info_dict['emb']:      (B, D)
         action_sequence:       (B, S, T, action_dim)
@@ -37,7 +65,6 @@ class DummyRollableModel:
         emb = info_dict['emb']  # (B, D)
         B, S, T, A = action_sequence.shape
         D = emb.shape[-1]
-        # Project action into embedding space and add to current state
         if A >= D:
             proj = action_sequence[..., :D]
         else:
@@ -58,7 +85,7 @@ class DummyRollableModel:
 
 
 class DummyNonRollableModel:
-    """Model without a rollout method – used to test the guard in __init__."""
+    """Model without predict/action_encoder – tests the guard in __init__."""
 
     def get_cost(
         self, info_dict: dict, action_candidates: torch.Tensor
@@ -147,9 +174,9 @@ def test_init_stores_hyperparams():
 
 
 def test_init_raises_without_rollout():
-    """TypeError is raised when the model has no rollout method."""
+    """TypeError is raised when the model lacks predict/action_encoder."""
     model = DummyNonRollableModel()
-    with pytest.raises(TypeError, match='rollout'):
+    with pytest.raises(TypeError, match='predict'):
         GRASPSolver(model=model)
 
 
