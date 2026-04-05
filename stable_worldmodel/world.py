@@ -684,7 +684,7 @@ class World:
                     # record eval info
                     ep_idx = episode_idx[i]
                     results['episode_successes'][ep_idx] = self.terminateds[i]
-                    results['seeds'][ep_idx] = self.envs.envs[
+                    results['seeds'][ep_idx] = self.envs.unwrapped.envs[
                         i
                     ].unwrapped.np_random_seed
 
@@ -727,7 +727,7 @@ class World:
                     self.envs.unwrapped._autoreset_envs = np.zeros(
                         (self.num_envs,)
                     )
-                    _, infos = self.envs.envs[i].reset(
+                    _, infos = self.envs.unwrapped.envs[i].reset(
                         seed=new_seed, options=options
                     )
 
