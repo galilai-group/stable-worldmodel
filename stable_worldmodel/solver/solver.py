@@ -72,3 +72,33 @@ class Solver(Protocol):
             Dictionary containing optimized actions and other solver-specific info.
         """
         ...
+        
+@runtime_checkable
+class Rollable(Protocol):
+    """Protocol for world models that expose a differentiable rollout method.
+
+    Required by :class:`~stable_worldmodel.solver.grasp.GRASPSolver` to perform
+    single-step latent-space predictions during the joint state–action
+    optimisation loop.
+
+    Implementations must accept an ``info_dict`` whose ``'emb'`` key holds the
+    current latent state and write the predicted next state(s) into
+    ``info_dict['predicted_emb']``.
+    """
+
+    def rollout(self, info_dict: dict, action_sequence: torch.Tensor) -> dict:
+        """Roll the world model forward for one or more steps from a latent state.
+
+        Args:
+            info_dict: Must contain ``'emb': (B, D)`` – the current latent
+                embedding.  Any additional keys are forwarded unchanged.
+            action_sequence: ``(B, S, T, action_dim)`` action candidates where
+                *B* is batch size, *S* is the number of parallel samples, and
+                *T* is the number of timesteps to roll out.
+
+        Returns:
+            The modified ``info_dict`` with ``'predicted_emb': (B, S, T, D)``
+            written in place.
+        """
+        ...
+
