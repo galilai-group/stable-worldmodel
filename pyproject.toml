@@ -24,7 +24,6 @@ dependencies = [
   "h5py",
   "hdf5plugin",
   "tqdm",
-  "gdown",
   "typer",
   "rich",
 ]

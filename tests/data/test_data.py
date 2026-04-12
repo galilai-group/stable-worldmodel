@@ -45,7 +45,9 @@ def test_get_cache_dir_creates_directory():
 @pytest.fixture
 def sample_h5_file(tmp_path):
     """Create a sample HDF5 file for testing."""
-    h5_path = tmp_path / "test_dataset.h5"
+    datasets_dir = tmp_path / "datasets"
+    datasets_dir.mkdir()
+    h5_path = datasets_dir / "test_dataset.h5"
 
     # Create sample data: 2 episodes, 10 steps each
     ep_lengths = [10, 10]
@@ -71,7 +73,9 @@ def sample_h5_file(tmp_path):
 @pytest.fixture
 def sample_h5_short_episode(tmp_path):
     """Create a sample HDF5 file with a short episode."""
-    h5_path = tmp_path / "short_dataset.h5"
+    datasets_dir = tmp_path / "datasets"
+    datasets_dir.mkdir()
+    h5_path = datasets_dir / "short_dataset.h5"
 
     # Create sample data: 2 episodes, different lengths
     ep_lengths = [3, 10]  # First episode too short for default span
@@ -92,7 +96,7 @@ def test_hdf5_dataset_init(sample_h5_file):
     cache_dir, name = sample_h5_file
     dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-    assert dataset.h5_path == cache_dir / f"{name}.h5"
+    assert dataset.h5_path == cache_dir / "datasets" / f"{name}.h5"
     assert len(dataset.lengths) == 2
     assert len(dataset.offsets) == 2
 

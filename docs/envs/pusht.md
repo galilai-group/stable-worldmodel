@@ -14,7 +14,7 @@ A 2D contact-rich manipulation task where an agent controls a circular end-effec
 
 The agent must push the block to match both the target **position** and **orientation**, making this a challenging task that requires planning multi-step pushing sequences rather than simple point-to-point control.
 
-**Success criteria**: The episode is successful when the block position error is less than 20 pixels AND the orientation error is less than π/9 radians (~20°) than the target configuration.
+**Success criteria**: The episode is successful when the combined agent and block position error is less than 20 pixels AND the block orientation error is less than π/9 radians (~20°) from the target configuration. The position error is computed as the L2 norm over the 4D vector of agent position (x, y) and block position (x, y). This criterion follows [DINO-WM](https://arxiv.org/abs/2411.04983).
 
 ```python
 import stable_worldmodel as swm
