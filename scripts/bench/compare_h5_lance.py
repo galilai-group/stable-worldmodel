@@ -78,6 +78,8 @@ def main() -> None:
     parser.add_argument('--lance-local', default='./tworoom_lance_full')
     parser.add_argument('--lance-s3', default='s3://lancedb-datasets-dev-us-east-2-devrel/training/stableworldmodel/tworoom_lance')
     parser.add_argument('--table-name', default='lewm_tworoom')
+    parser.add_argument('--hdf5-s3', default=None,
+                        help='Optional S3 URI for HDF5 (e.g. s3://bucket/path/file.h5)')
     args = parser.parse_args()
     args.lance_local = str(Path(args.lance_local).resolve())
     print(f"Local Lance URI: {args.lance_local}")
@@ -134,6 +136,36 @@ def main() -> None:
         **common,
     )
 
+    h5_s3_datasets = []
+    if args.hdf5_s3:
+        import s3fs
+
+        fs = s3fs.S3FileSystem(
+            key=os.environ.get('AWS_ACCESS_KEY_ID'),
+            secret=os.environ.get('AWS_SECRET_ACCESS_KEY'),
+            token=os.environ.get('AWS_SESSION_TOKEN'),
+        )
+        remote = fs.open(args.hdf5_s3, 'rb')
+        h5_s3_cached = HDF5Dataset(
+            args.hdf5_s3,
+            cache_dir=None,
+            file=remote,
+            keys_to_cache=CACHE_COLS,
+            **common,
+        )
+        remote = fs.open(args.hdf5_s3, 'rb')
+        h5_s3_nocache = HDF5Dataset(
+            args.hdf5_s3,
+            cache_dir=None,
+            file=remote,
+            keys_to_cache=[],
+            **common,
+        )
+        h5_s3_datasets = [
+            ('HDF5 S3 (cached)', h5_s3_cached),
+            ('HDF5 S3 (no cache)', h5_s3_nocache),
+        ]
+
     print('Warming up / benchmarking...')
     results = []
     for label, dataset in [
@@ -143,6 +175,7 @@ def main() -> None:
         ('Lance local (cached)', lance_local_cached),
         ('Lance S3 (no cache)', lance_s3),
         ('Lance S3 (cached)', lance_s3_cached),
+        *h5_s3_datasets,
     ]:
         results.append(_benchmark(label, dataset, args))
 
