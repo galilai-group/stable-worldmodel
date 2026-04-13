@@ -525,13 +525,20 @@ class LanceDataset(Dataset):
     def _decode_image(self, blob: bytes) -> torch.Tensor:
         with Image.open(io.BytesIO(blob)) as img:
             arr = np.array(img.convert('RGB'))
-        tensor = torch.from_numpy(arr)
-        return tensor.permute(2, 0, 1)
+        # from_numpy is fine here: the result is immediately consumed by
+        # torch.stack() in _process_batch, which produces a fresh resizable
+        # tensor — the non-resizable frame tensors never reach collation.
+        return torch.from_numpy(arr).permute(2, 0, 1)
 
     def _prepare_numeric_tensor(self, data: np.ndarray, downsample: bool) -> torch.Tensor:
         if downsample:
             data = data[:: self.frameskip]
-        tensor = torch.from_numpy(data)
+        # torch.tensor() copies into PyTorch-owned resizable storage.
+        # torch.from_numpy() would share numpy's memory and return a
+        # non-resizable tensor, which breaks DataLoader collation when
+        # __getitems__ is defined (collation runs inside the worker and
+        # uses storage.resize_() to preallocate the output batch tensor).
+        tensor = torch.tensor(data)
         if tensor.ndim == 4 and tensor.shape[-1] in (1, 3):
             tensor = tensor.permute(0, 3, 1, 2)
         return tensor
@@ -584,7 +591,9 @@ class LanceDataset(Dataset):
                 continue
 
             if isinstance(values, np.ndarray):
-                data = values.copy()
+                # No .copy() needed: _prepare_numeric_tensor uses torch.tensor()
+                # which always copies, so there is no aliasing risk with the cache.
+                data = values
             else:
                 data = self._pylist_to_numpy(values, col)
 
@@ -639,7 +648,22 @@ class LanceDataset(Dataset):
         big_batch = None
         if self._fetch_columns and all_rows:
             self._ensure_open()
-            big_batch = self._perm.__getitems__(all_rows)
+
+            # ``Permutation.__getitems__`` returns rows in strictly
+            # increasing order and drops duplicates.  Build a sorted unique
+            # row list and map back to the original order so we can
+            # materialize the overlapping windows exactly as requested.
+            unique_rows = sorted(set(all_rows))
+            unique_batch = self._perm.__getitems__(unique_rows)
+
+            if len(unique_rows) == len(all_rows) and all_rows == unique_rows:
+                big_batch = unique_batch
+            else:
+                row_lookup = {row: idx for idx, row in enumerate(unique_rows)}
+                gather = [row_lookup[row] for row in all_rows]
+                pa = self._pa
+                indices_arr = pa.array(gather, type=pa.int64())
+                big_batch = unique_batch.take(indices_arr)
 
         # ── 3. Slice + assemble each sample from the big batch ───────────────
         results: list[dict] = []
