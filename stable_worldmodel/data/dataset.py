@@ -108,13 +108,18 @@ class HDF5Dataset(Dataset):
     Uses SWMR mode for robust reading while writing.
 
     Args:
-        name: Name of the dataset (filename without extension).
+        name: Name of the dataset (filename without extension), or a full path
+            when ``file`` is also provided (used as label only).
         frameskip: Number of frames to skip between samples.
         num_steps: Number of steps per sample sequence.
         transform: Optional data transform callable.
         keys_to_load: Specific keys to load (defaults to all except metadata).
         keys_to_cache: Keys to load entirely into memory for faster access.
-        cache_dir: Directory containing the dataset file.
+        cache_dir: Root cache directory. The file is expected at
+            ``<cache_dir>/datasets/<name>.h5``. Ignored when ``file`` is given.
+        file: Pre-opened file-like object accepted by :func:`h5py.File` (e.g.
+            an ``s3fs`` file handle). When provided, ``cache_dir`` is ignored
+            and SWMR is disabled (SWMR requires a local path, not a handle).
     """
 
     def __init__(
@@ -127,13 +132,20 @@ class HDF5Dataset(Dataset):
         keys_to_cache: list[str] | None = None,
         keys_to_merge: dict[str, list[str] | str] | None = None,
         cache_dir: str | Path | None = None,
+        file: Any | None = None,
     ) -> None:
-        datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
-        self.h5_path = Path(datasets_dir, f'{name}.h5')
+        self._file_handle = file
+        if file is not None:
+            # name is informational; h5py will open via the handle.
+            self.h5_path = Path(name)
+        else:
+            datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
+            self.h5_path = Path(datasets_dir, f'{name}.h5')
         self.h5_file: h5py.File | None = None
         self._cache: dict[str, np.ndarray] = {}
 
-        with h5py.File(self.h5_path, 'r') as f:
+        _open_target: Any = self._file_handle if self._file_handle is not None else self.h5_path
+        with h5py.File(_open_target, 'r') as f:
             lengths, offsets = f['ep_len'][:], f['ep_offset'][:]
             self._keys = keys_to_load or [
                 k for k in f.keys() if k not in ('ep_len', 'ep_offset')
@@ -155,8 +167,12 @@ class HDF5Dataset(Dataset):
 
     def _open(self) -> None:
         if self.h5_file is None:
+            # SWMR requires a real filesystem path; disable it for file handles
+            # (e.g. s3fs objects) which h5py accepts but doesn't support SWMR on.
+            target: Any = self._file_handle if self._file_handle is not None else self.h5_path
+            swmr = self._file_handle is None
             self.h5_file = h5py.File(
-                self.h5_path, 'r', swmr=True, rdcc_nbytes=256 * 1024 * 1024
+                target, 'r', swmr=swmr, rdcc_nbytes=256 * 1024 * 1024
             )
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
@@ -246,6 +262,7 @@ class LanceDataset(Dataset):
 
     _lancedb = None
     _permutation = None
+    _pa = None  # pyarrow; populated alongside _lancedb
 
     def __init__(
         self,
@@ -327,6 +344,7 @@ class LanceDataset(Dataset):
             return
         try:
             import lancedb
+            import pyarrow as pa
             from lancedb.permutation import Permutation
         except ImportError as exc:  # pragma: no cover - exercised in runtime
             raise ImportError(
@@ -336,6 +354,7 @@ class LanceDataset(Dataset):
             ) from exc
         cls._lancedb = lancedb
         cls._permutation = Permutation
+        cls._pa = pa
 
     def _connect_table(self):
         self._import_lance()
@@ -343,42 +362,59 @@ class LanceDataset(Dataset):
         return db.open_table(self.table_name)
 
     def _compute_episode_structure(self, table) -> tuple[np.ndarray, np.ndarray]:
-        lengths: list[int] = []
-        offsets: list[int] = []
-        total_rows = 0
-        current_ep = None
-        current_len = 0
+        """Read episode_idx column and build per-episode (lengths, offsets) arrays.
 
-        reader = (
-            table.to_lance().scanner(columns=list(self._index_columns)).to_reader()
-        )
+        **Ordering assumption**: rows must be stored in episode-contiguous order,
+        i.e. all rows for episode 0 appear before episode 1, etc.  This is
+        guaranteed by :func:`convert_hdf5_to_lance` which writes episodes
+        sequentially.  Lance compaction or any operation that reorders physical
+        rows can break this invariant.  If that happens, :meth:`_load_slice`
+        will silently return data from the wrong rows — a hard-to-debug
+        correctness failure.
+
+        **Risk of compaction**: ``lancedb.Table.compact_files()`` (or any
+        ``optimize_*`` call) may reorder rows.  If you run compaction after
+        conversion, re-run ``convert_hdf5_to_lance`` with ``overwrite=True``
+        to restore the expected row order.
+
+        **No memory risk**: only the episode_idx column (int32, ~4 bytes/row)
+        is read here; even a 10 M-row dataset needs only ~40 MB for this pass.
+        """
         ep_col, _ = self._index_columns
+        reader = (
+            table.to_lance().scanner(columns=[ep_col]).to_reader()
+        )
+
+        chunks: list[np.ndarray] = []
         for batch in reader:
-            eps = batch.column(batch.schema.get_field_index(ep_col)).to_numpy()
-            for ep in eps.tolist():
-                if current_ep is None:
-                    current_ep = ep
-                    offsets.append(total_rows)
-                    current_len = 0
-                elif ep != current_ep:
-                    lengths.append(current_len)
-                    current_ep = ep
-                    offsets.append(total_rows)
-                    current_len = 0
+            chunks.append(
+                batch.column(batch.schema.get_field_index(ep_col)).to_numpy()
+            )
 
-                current_len += 1
-                total_rows += 1
-
-        if current_ep is not None:
-            lengths.append(current_len)
-
-        if not lengths:
+        if not chunks:
             return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
 
-        return (
-            np.asarray(lengths, dtype=np.int64),
-            np.asarray(offsets, dtype=np.int64),
-        )
+        all_ep_ids = np.concatenate(chunks)
+
+        # Verify rows are in episode-contiguous (non-decreasing) order.
+        # We check for *decreasing* transitions which indicate a reordering.
+        if len(all_ep_ids) > 1 and (np.diff(all_ep_ids) < 0).any():
+            raise ValueError(
+                f"Lance table '{self.table_name}' at '{self.uri}' has rows that "
+                "are NOT in episode-contiguous order (episode_idx is not "
+                "non-decreasing).  This can happen after Lance compaction or "
+                "other table-maintenance operations.  Re-run "
+                "convert_hdf5_to_lance(..., overwrite=True) to restore "
+                "the expected row order before using this dataset."
+            )
+
+        # Vectorised boundary detection — O(N) numpy, no Python loop over rows.
+        boundary_mask = np.diff(all_ep_ids) != 0
+        change_positions = np.flatnonzero(boundary_mask) + 1  # first row of each new ep
+        offsets = np.concatenate([[0], change_positions]).astype(np.int64)
+        lengths = np.diff(np.concatenate([offsets, [len(all_ep_ids)]])).astype(np.int64)
+
+        return lengths, offsets
 
     def _load_full_column(self, table, key: str) -> np.ndarray:
         data: list[np.ndarray | np.generic | list[Any] | bytes] = []
@@ -423,6 +459,46 @@ class LanceDataset(Dataset):
             raise KeyError(f"Column '{key}' not found in batch")
         return batch.column(idx).to_pylist()
 
+    def _extract_column(self, batch, key: str):
+        """Fast column extraction from an Arrow RecordBatch.
+
+        Avoids the Python-list roundtrip that :meth:`_batch_column_pylist`
+        incurs for numeric columns stored as fixed-size lists.
+
+        Returns
+        -------
+        numpy ndarray
+            For fixed-size list (numeric vectors) and scalar numeric columns.
+        list of bytes
+            For binary columns (JPEG/PNG image blobs).
+        list of str
+            For string columns.
+        """
+        pa = self._pa
+        col_idx = batch.schema.get_field_index(key)
+        if col_idx == -1:
+            raise KeyError(f"Column '{key}' not found in batch")
+        col = batch.column(col_idx)
+        col_type = col.type
+
+        if pa.types.is_binary(col_type) or pa.types.is_large_binary(col_type):
+            # Image blobs — pylist gives bytes objects required for JPEG decode.
+            return col.to_pylist()
+
+        if pa.types.is_fixed_size_list(col_type):
+            # Numeric vector columns (e.g. action, proprio stored as
+            # pa.list_(pa.float32(), dim)).  Flatten to a contiguous float32
+            # buffer and reshape — no Python object creation at all.
+            dim = col_type.list_size
+            flat = col.flatten()  # pa.Array of length N * dim
+            return flat.to_numpy(zero_copy_only=False).reshape(len(col), dim)
+
+        if pa.types.is_string(col_type) or pa.types.is_large_string(col_type):
+            return col.to_pylist()
+
+        # Scalar numeric (int, float) — zero-copy numpy view when possible.
+        return col.to_numpy(zero_copy_only=False)
+
     def _pylist_to_numpy(self, values: list[Any], key: str) -> np.ndarray:
         if not values:
             return np.array([], dtype=np.float32)
@@ -460,29 +536,46 @@ class LanceDataset(Dataset):
             tensor = tensor.permute(0, 3, 1, 2)
         return tensor
 
-    def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
-        g_start, g_end = (
-            self.offsets[ep_idx] + start,
-            self.offsets[ep_idx] + end,
-        )
-        rows = list(range(int(g_start), int(g_end)))
-        batch = self._fetch_rows(rows)
+    def _process_batch(self, ep_idx: int, g_start: int, batch) -> dict:
+        """Assemble one training-sample dict from a pre-fetched Arrow sub-batch.
 
+        This is the inner loop shared by :meth:`_load_slice` (single sample)
+        and :meth:`__getitems__` (batch of samples).  It never issues any
+        Lance / network I/O — all fetching must be done by the caller.
+
+        Parameters
+        ----------
+        ep_idx:
+            Episode index (used only for cache addressing).
+        g_start:
+            Global row offset into ``self._cache`` arrays
+            (``offsets[ep_idx] + local_start``).
+        batch:
+            Arrow ``RecordBatch`` containing exactly ``self.span`` rows for the
+            non-cached columns, or ``None`` when every column is cached.
+        """
+        g_end = g_start + self.span
         steps: dict[str, Any] = {}
+
         for col in self._keys:
             if col in self._cache:
                 values = self._cache[col][g_start:g_end]
             else:
                 if batch is None:
                     raise KeyError(
-                        f"Column '{col}' missing from cached columns and fetch columns"
+                        f"Column '{col}' is not in the cache and no Arrow batch "
+                        "was provided — this is a bug."
                     )
-                values = self._batch_column_pylist(batch, col)
+                # Fast path: avoids Python list roundtrip for numeric columns.
+                values = self._extract_column(batch, col)
 
             if col in self.image_columns:
-                # Decode image bytes and downsample in the temporal dimension.
-                raw_values = values[:: self.frameskip]
-                frames = [self._decode_image(v) for v in raw_values]
+                # Decode JPEG/PNG blobs; downsample in the temporal axis.
+                if isinstance(values, np.ndarray):
+                    blobs = values[:: self.frameskip].tolist()
+                else:
+                    blobs = values[:: self.frameskip]
+                frames = [self._decode_image(v) for v in blobs]
                 steps[col] = (
                     torch.stack(frames)
                     if frames
@@ -507,7 +600,64 @@ class LanceDataset(Dataset):
             downsample = col != 'action'
             steps[col] = self._prepare_numeric_tensor(data, downsample)
 
+        return steps
+
+    def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
+        g_start = int(self.offsets[ep_idx] + start)
+        rows = list(range(g_start, g_start + (end - start)))
+        batch = self._fetch_rows(rows)
+        steps = self._process_batch(ep_idx, g_start, batch)
         return self.transform(steps) if self.transform else steps
+
+    def __getitems__(self, indices: list[int]) -> list[dict]:
+        """Batch-level fetch: one Lance ``take`` for the whole batch.
+
+        PyTorch DataLoader (≥ 2.0) calls this automatically when the method is
+        defined, passing all sample indices for the batch at once.  Instead of
+        N individual ``Permutation.__getitems__`` calls (one per sample) this
+        issues a **single** call with all row IDs flattened together, then
+        slices the returned ``RecordBatch`` with zero-copy
+        ``RecordBatch.slice(offset, length)`` per sample.
+
+        For local storage the win is modest (one Python call vs. N).  For
+        remote storage (S3, GCS) the win is large: one HTTP round-trip fetches
+        the data for the entire batch rather than one round-trip per sample.
+        """
+        # ── 1. Collect all global row IDs for the batch ──────────────────────
+        all_rows: list[int] = []
+        row_offsets: list[int] = []  # position of each sample's first row in all_rows
+        sample_meta: list[tuple[int, int]] = []  # (ep_idx, g_start)
+
+        for idx in indices:
+            ep_idx, start = self.clip_indices[idx]
+            g_start = int(self.offsets[ep_idx] + start)
+            row_offsets.append(len(all_rows))
+            all_rows.extend(range(g_start, g_start + self.span))
+            sample_meta.append((ep_idx, g_start))
+
+        # ── 2. Single Lance take for all non-cached columns ──────────────────
+        big_batch = None
+        if self._fetch_columns and all_rows:
+            self._ensure_open()
+            big_batch = self._perm.__getitems__(all_rows)
+
+        # ── 3. Slice + assemble each sample from the big batch ───────────────
+        results: list[dict] = []
+        for i, (ep_idx, g_start) in enumerate(sample_meta):
+            # RecordBatch.slice is zero-copy — no data is copied here.
+            sub_batch = (
+                big_batch.slice(row_offsets[i], self.span)
+                if big_batch is not None
+                else None
+            )
+            steps = self._process_batch(ep_idx, g_start, sub_batch)
+            if self.transform:
+                steps = self.transform(steps)
+            if 'action' in steps:
+                steps['action'] = steps['action'].reshape(self.num_steps, -1)
+            results.append(steps)
+
+        return results
 
     def get_col_data(self, col: str) -> np.ndarray:
         if col in self._cache:

@@ -145,19 +145,18 @@ def main() -> None:
             secret=os.environ.get('AWS_SECRET_ACCESS_KEY'),
             token=os.environ.get('AWS_SESSION_TOKEN'),
         )
-        remote = fs.open(args.hdf5_s3, 'rb')
+        # HDF5Dataset accepts a pre-opened file-like object via `file=`.
+        # s3fs handles satisfy h5py's file-object protocol.
+        # SWMR is automatically disabled for file handles (local-only feature).
         h5_s3_cached = HDF5Dataset(
             args.hdf5_s3,
-            cache_dir=None,
-            file=remote,
+            file=fs.open(args.hdf5_s3, 'rb'),
             keys_to_cache=CACHE_COLS,
             **common,
         )
-        remote = fs.open(args.hdf5_s3, 'rb')
         h5_s3_nocache = HDF5Dataset(
             args.hdf5_s3,
-            cache_dir=None,
-            file=remote,
+            file=fs.open(args.hdf5_s3, 'rb'),
             keys_to_cache=[],
             **common,
         )
