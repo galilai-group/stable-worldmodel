@@ -2,7 +2,7 @@ title: Dataset
 summary: Dataset handling
 ---
 
-`stable_worldmodel` provides a flexible dataset API that supports both HDF5-based storage (for speed and compactness) and Folder-based storage.
+`stable_worldmodel` provides a flexible dataset API that supports HDF5 files, LanceDB tables (local or remote), and folder-based layouts.
 
 ## **[ Storage Formats ]**
 
@@ -30,6 +30,28 @@ dataset = HDF5Dataset(
     num_steps=50  # Sequence length for training
 )
 ```
+///
+
+/// tab | LanceDB Format
+The **`LanceDataset`** streams directly from a Lance table (local path, `hf://` dataset, or any `s3://`/object-store URI). Each row represents a timestep and only the requested columns are scanned, making it ideal for training straight from cloud storage.
+
+**Usage:**
+```python
+from stable_worldmodel.data import LanceDataset
+
+dataset = LanceDataset(
+    uri='s3://my-bucket/lewm',       # or ./lewm_lance, hf://datasets/…
+    table_name='lewm_pusht',
+    num_steps=4,
+    frameskip=5,
+    keys_to_load=['pixels', 'action', 'proprio'],
+    image_columns=['pixels'],
+    connect_kwargs={'aws_region': 'us-east-2'},  # optional credentials/region
+)
+```
+
+!!! tip
+    Lance tables store JPEG-compressed frames by default. Decoding happens inside each PyTorch DataLoader worker and the dataset never calls `.to_arrow()`—only `Permutation` and column scanners—so you can safely read from very large remote datasets without materializing them.
 ///
 
 /// tab | Folder Format
@@ -152,6 +174,12 @@ item = goal_dataset[0]
         members: false
         show_source: false
 
+::: stable_worldmodel.data.LanceDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
 ::: stable_worldmodel.data.FolderDataset
     options:
         heading_level: 3
@@ -191,3 +219,36 @@ item = goal_dataset[0]
         heading_level: 3
         members: false
         show_source: false
+
+::: stable_worldmodel.data.create_dataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+## **[ Converting to Lance ]**
+
+Use the bundled CLI to convert any supported HDF5 dataset (local file, HuggingFace repo, or the built-in presets) into a LanceDB table:
+
+```bash
+python scripts/data/convert_to_lance.py \
+  --dataset pusht \
+  --lance-uri ./lewm_lance \
+  --max-episodes 2 \
+  --overwrite
+```
+
+Custom datasets can be converted by providing `--source /path/to/dataset.h5 --columns pixels action proprio` and an explicit `--table-name`.
+
+Hydra configs stay unchanged: override Lance-specific keys at launch time, e.g.
+
+```bash
+python scripts/train/lewm.py \
+  data.dataset.uri=./lewm_lance \
+  data.dataset.table_name=lewm_pusht \
+  data.dataset.keys_to_load='[pixels,action,proprio,state]' \
+  data.dataset.keys_to_cache='[action,proprio,state]' \
+  data.dataset.image_columns='[pixels]'
+```
+
+Providing `uri`/`table_name` automatically instantiates `LanceDataset`, so existing HDF5 configs remain backward compatible.

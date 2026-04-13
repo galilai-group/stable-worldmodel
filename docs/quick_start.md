@@ -212,16 +212,28 @@ world.record_dataset(
 
 ### Loading a Dataset
 
-Load recorded datasets using `HDF5Dataset`. The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample. This makes it easy to train models on temporal sequences of observations and actions.
+Load recorded datasets using either `HDF5Dataset` (local files) or `LanceDataset` (local LanceDB tables, Hugging Face datasets, or object storage like s3 etc). The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample regardless of backend.
 
 ```python
-from stable_worldmodel.data import HDF5Dataset
+from stable_worldmodel.data import HDF5Dataset, LanceDataset
 
+# Local HDF5 file
 dataset = HDF5Dataset(
     name='pusht_random',
     frameskip=1,  # stride between frames
     num_steps=4,  # sequence length
-    keys_to_load=['pixels', 'action', 'state']
+    keys_to_load=['pixels', 'action', 'state'],
+)
+
+# LanceDB table (local folder, hf:// dataset, or s3:// bucket)
+lance_dataset = LanceDataset(
+    uri='s3://my-bucket/lewm',
+    table_name='lewm_pusht',
+    frameskip=5,
+    num_steps=4,
+    keys_to_load=['pixels', 'action', 'proprio'],
+    image_columns=['pixels'],
+    connect_kwargs={'aws_access_key_id': '***', 'aws_secret_access_key': '***'},
 )
 
 # Access samples
@@ -229,6 +241,8 @@ sample = dataset[0]
 print(sample['pixels'].shape)   # (4, 3, H, W)
 print(sample['action'].shape)   # (4, action_dim)
 ```
+
+`LanceDataset` streams only the requested columns via LanceDB's permutation API, never materializes the entire table in RAM, and decodes JPEG frames inside DataLoader workers. When reading from secure endpoints, provide the needed credentials or custom endpoints through `connect_kwargs`.
 
 The dataset is compatible with PyTorch `DataLoader` for batched training.
 

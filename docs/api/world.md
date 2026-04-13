@@ -75,11 +75,18 @@ world.record_dataset(
 /// tab | Evaluation
 ```python
 from stable_worldmodel import World
-from stable_worldmodel.data import HDF5Dataset
+from stable_worldmodel.data import HDF5Dataset, LanceDataset
 from stable_worldmodel.policy import RandomPolicy # or your trained policy
 
 # 1. Load a dataset for initial states
 dataset = HDF5Dataset("pusht_random", cache_dir="./data")
+# or stream straight from LanceDB if the dataset lives on S3 / hf://
+lance_dataset = LanceDataset(
+    uri='s3://my-bucket/lewm',
+    table_name='lewm_pusht',
+    num_steps=4,
+    frameskip=5,
+)
 
 # 2. Setup World
 world = World(env_name="swm/PushT-v1", num_envs=4, image_shape=(64, 64))
@@ -88,7 +95,7 @@ world.set_policy(RandomPolicy())
 # 3. Evaluate starting from dataset states
 results = world.evaluate_from_dataset(
     dataset=dataset,
-    episodes_idx=[0, 1, 2, 3],  # Episodes to test on
+    episodes_idx=[0, 1, 2, 3],  # Episodes to test
     start_steps=[0, 0, 0, 0],   # Start from beginning
     goal_offset_steps=50,       # Goal is state at t=50
     eval_budget=100             # Max steps to reach goal
@@ -97,6 +104,9 @@ results = world.evaluate_from_dataset(
 print(f"Success Rate: {results['success_rate']}%")
 ```
 ///
+
+!!! info "Lance datasets"
+    When you pass a `LanceDataset`, `evaluate_from_dataset` streams only the requested rows and never stages the full table on disk. Provide credentials or custom endpoints through the dataset's `connect_kwargs` field.
 
 !!! tip "Performance"
     The `World` class uses a custom `SyncWorld` vectorized environment for synchronized execution, ensuring deterministic and batched stepping across multiple environments.

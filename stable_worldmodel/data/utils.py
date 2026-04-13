@@ -2,7 +2,9 @@ import json
 import os
 import subprocess
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from loguru import logger as logging
 from tqdm import tqdm
@@ -29,6 +31,54 @@ def get_cache_dir(
 def ensure_dir_exists(path: Path):
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
+
+
+def _config_to_dict(config: Any) -> dict[str, Any]:
+    if config is None:
+        return {}
+    if isinstance(config, Mapping):
+        return dict(config)
+
+    try:  # Lazy import to avoid Hydra dependency during runtime.
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(config):
+            return OmegaConf.to_container(config, resolve=True)  # type: ignore[arg-type]
+    except Exception:  # pragma: no cover - OmegaConf optional
+        pass
+
+    raise TypeError(
+        'Dataset config must be a mapping or OmegaConf object; '
+        f'got {type(config)}'
+    )
+
+
+def create_dataset(config: Any):
+    """Instantiate the configured dataset backend.
+
+    Args:
+        config: Mapping/OmegaConf with at least a ``type`` key (``hdf5`` or
+            ``lance``). Remaining keys are forwarded to the dataset class.
+    """
+
+    cfg = _config_to_dict(config)
+    dataset_type = cfg.pop('type', None)
+    if dataset_type is None:
+        if 'uri' in cfg or 'table_name' in cfg:
+            dataset_type = 'lance'
+        else:
+            dataset_type = 'hdf5'
+    dataset_type = str(dataset_type).lower()
+
+    from stable_worldmodel.data.dataset import HDF5Dataset, LanceDataset
+
+    if dataset_type == 'hdf5':
+        return HDF5Dataset(**cfg)
+    if dataset_type in {'lance', 'lancedb', 'lance_dataset'}:
+        return LanceDataset(**cfg)
+    raise ValueError(
+        f"Unsupported dataset type '{dataset_type}'. Expected 'hdf5' or 'lance'."
+    )
 
 
 def load_dataset(name: str, cache_dir: str = None, **kwargs):

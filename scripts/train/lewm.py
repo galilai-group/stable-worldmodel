@@ -113,7 +113,8 @@ def run(cfg):
     ##       dataset       ##
     #########################
 
-    dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+    dataset = swm.data.create_dataset(cfg.data.dataset)
+    dataset.transform = None
     transforms = [
         get_img_preprocessor(
             source='pixels', target='pixels', img_size=cfg.img_size

@@ -1,5 +1,6 @@
 """Tests for data module."""
 
+import io
 import os
 import tempfile
 from pathlib import Path
@@ -9,9 +10,15 @@ import h5py
 import numpy as np
 import pytest
 import torch
+from PIL import Image
 
-from stable_worldmodel.data import HDF5Dataset
-from stable_worldmodel.data.utils import get_cache_dir
+from stable_worldmodel.data import (
+    HDF5Dataset,
+    LanceDataset,
+    convert_hdf5_to_lance,
+)
+from stable_worldmodel.data.utils import create_dataset, get_cache_dir
+from stable_worldmodel.utils import DEFAULT_CACHE_DIR
 
 
 def test_get_cache_dir_default():
@@ -20,7 +27,8 @@ def test_get_cache_dir_default():
         if "STABLEWM_HOME" in os.environ:
             del os.environ["STABLEWM_HOME"]
         result = get_cache_dir()
-        assert result == Path(os.path.expanduser("~/.stable_worldmodel"))
+        expected = Path(DEFAULT_CACHE_DIR)
+        assert result == expected
 
 
 def test_get_cache_dir_custom():
@@ -70,6 +78,80 @@ def sample_h5_file(tmp_path):
     return tmp_path, "test_dataset"
 
 
+def _encode_png(frame: np.ndarray) -> bytes:
+    buffer = io.BytesIO()
+    Image.fromarray(frame).save(buffer, format='PNG')
+    buffer.seek(0)
+    return buffer.read()
+
+
+def _build_shared_arrays() -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(42)
+    ep_lengths = np.array([4, 4], dtype=np.int32)
+    ep_offsets = np.array([0, 4], dtype=np.int32)
+    total_steps = int(ep_lengths.sum())
+    episode_idx = np.repeat(np.arange(len(ep_lengths)), ep_lengths)
+    step_idx = np.concatenate(
+        [np.arange(length, dtype=np.int32) for length in ep_lengths]
+    )
+    observation = rng.standard_normal((total_steps, 3)).astype(np.float32)
+    action = rng.standard_normal((total_steps, 2)).astype(np.float32)
+    pixels = rng.integers(0, 255, (total_steps, 8, 8, 3), dtype=np.uint8)
+    return {
+        'ep_lengths': ep_lengths,
+        'ep_offsets': ep_offsets,
+        'episode_idx': episode_idx.astype(np.int32),
+        'step_idx': step_idx.astype(np.int32),
+        'observation': observation,
+        'action': action,
+        'pixels': pixels,
+    }
+
+
+@pytest.fixture
+def paired_datasets(tmp_path):
+    """Create matching HDF5 and Lance datasets from the same arrays."""
+
+    lancedb = pytest.importorskip('lancedb')
+
+    data = _build_shared_arrays()
+    dataset_name = 'paired_dataset'
+
+    datasets_dir = tmp_path / 'datasets'
+    datasets_dir.mkdir()
+    h5_path = datasets_dir / f'{dataset_name}.h5'
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=data['ep_lengths'])
+        f.create_dataset('ep_offset', data=data['ep_offsets'])
+        f.create_dataset('observation', data=data['observation'])
+        f.create_dataset('action', data=data['action'])
+        f.create_dataset('pixels', data=data['pixels'])
+
+    records = []
+    for idx in range(len(data['episode_idx'])):
+        records.append(
+            {
+                'episode_idx': int(data['episode_idx'][idx]),
+                'step_idx': int(data['step_idx'][idx]),
+                'pixels': _encode_png(data['pixels'][idx]),
+                'observation': data['observation'][idx].tolist(),
+                'action': data['action'][idx].tolist(),
+            }
+        )
+
+    lance_uri = tmp_path / 'lance_db'
+    db = lancedb.connect(str(lance_uri))
+    table_name = 'paired_table'
+    db.create_table(table_name, records, mode='overwrite')
+
+    return {
+        'h5': (tmp_path, dataset_name),
+        'lance': {'uri': str(lance_uri), 'table_name': table_name},
+        'keys': ['pixels', 'action', 'observation'],
+        'total_rows': int(data['ep_lengths'].sum()),
+    }
+
+
 @pytest.fixture
 def sample_h5_short_episode(tmp_path):
     """Create a sample HDF5 file with a short episode."""
@@ -89,6 +171,36 @@ def sample_h5_short_episode(tmp_path):
         f.create_dataset("action", data=np.random.rand(total_steps, 2).astype(np.float32))
 
     return tmp_path, "short_dataset"
+
+
+def _make_hdf5_lance_pair(
+    paired_datasets,
+    *,
+    num_steps: int,
+    frameskip: int,
+    keys_to_cache: list[str] | None = None,
+) -> tuple[HDF5Dataset, LanceDataset]:
+    cache_dir, dataset_name = paired_datasets['h5']
+    lance_cfg = paired_datasets['lance']
+    keys = paired_datasets['keys']
+    h5_kwargs = {
+        'num_steps': num_steps,
+        'frameskip': frameskip,
+        'keys_to_load': keys,
+        'keys_to_cache': keys_to_cache or [],
+    }
+    lance_kwargs = {
+        'num_steps': num_steps,
+        'frameskip': frameskip,
+        'keys_to_load': keys,
+        'image_columns': ['pixels'],
+        'keys_to_cache': keys_to_cache or [],
+    }
+    h5_ds = HDF5Dataset(dataset_name, cache_dir=str(cache_dir), **h5_kwargs)
+    lance_ds = LanceDataset(
+        uri=lance_cfg['uri'], table_name=lance_cfg['table_name'], **lance_kwargs
+    )
+    return h5_ds, lance_ds
 
 
 def test_hdf5_dataset_init(sample_h5_file):
@@ -289,3 +401,118 @@ def test_hdf5_dataset_file_not_found(tmp_path):
     """Test HDF5Dataset raises error for missing file."""
     with pytest.raises(FileNotFoundError):
         HDF5Dataset("nonexistent", cache_dir=str(tmp_path))
+
+
+def test_lance_dataset_matches_hdf5_length(paired_datasets):
+    """LanceDataset should expose the same number of samples as HDF5Dataset."""
+    h5_ds, lance_ds = _make_hdf5_lance_pair(
+        paired_datasets, num_steps=2, frameskip=1
+    )
+    assert len(h5_ds) == len(lance_ds)
+
+
+def test_lance_dataset_output_parity(paired_datasets):
+    """Individual samples should match between Lance and HDF5 backends."""
+    h5_ds, lance_ds = _make_hdf5_lance_pair(
+        paired_datasets, num_steps=2, frameskip=1
+    )
+    for idx in range(len(lance_ds)):
+        h_item, l_item = h5_ds[idx], lance_ds[idx]
+        assert torch.equal(h_item['pixels'], l_item['pixels'])
+        assert torch.allclose(h_item['action'], l_item['action'])
+        assert torch.allclose(h_item['observation'], l_item['observation'])
+
+
+def test_lance_dataset_get_col_data(paired_datasets):
+    """get_col_data should return full columns when reading from Lance."""
+    _, lance_ds = _make_hdf5_lance_pair(
+        paired_datasets, num_steps=2, frameskip=1
+    )
+    obs = lance_ds.get_col_data('observation')
+    assert isinstance(obs, np.ndarray)
+    assert obs.shape[0] == paired_datasets['total_rows']
+
+
+def test_lance_dataset_keys_to_cache(paired_datasets):
+    """Keys listed in keys_to_cache are materialized eagerly."""
+    _, lance_ds = _make_hdf5_lance_pair(
+        paired_datasets,
+        num_steps=2,
+        frameskip=1,
+        keys_to_cache=['observation'],
+    )
+    assert 'observation' in lance_ds._cache
+
+
+def test_create_dataset_lance_backend(paired_datasets):
+    """create_dataset should instantiate the Lance backend when requested."""
+    lance_cfg = paired_datasets['lance']
+    dataset = create_dataset(
+        {
+            'type': 'lance',
+            'uri': lance_cfg['uri'],
+            'table_name': lance_cfg['table_name'],
+            'num_steps': 2,
+            'frameskip': 1,
+            'keys_to_load': paired_datasets['keys'],
+            'image_columns': ['pixels'],
+        }
+    )
+    assert isinstance(dataset, LanceDataset)
+
+
+def test_create_dataset_infers_lance_backend(paired_datasets):
+    """When Lance fields are provided without type, inference should kick in."""
+    lance_cfg = paired_datasets['lance']
+    dataset = create_dataset(
+        {
+            'uri': lance_cfg['uri'],
+            'table_name': lance_cfg['table_name'],
+            'num_steps': 2,
+            'frameskip': 1,
+            'keys_to_load': paired_datasets['keys'],
+            'image_columns': ['pixels'],
+        }
+    )
+    assert isinstance(dataset, LanceDataset)
+
+
+def test_convert_hdf5_to_lance(tmp_path, sample_h5_file):
+    """The conversion helper should produce a Lance table compatible with LanceDataset."""
+    cache_dir, name = sample_h5_file
+    h5_path = cache_dir / 'datasets' / f'{name}.h5'
+    lance_dir = tmp_path / 'lance'
+
+    summary = convert_hdf5_to_lance(
+        h5_path=h5_path,
+        lance_uri=str(lance_dir),
+        table_name='test_table',
+        columns=['pixels', 'action', 'observation'],
+        batch_rows=4,
+        jpeg_quality=90,
+        overwrite=True,
+        max_steps=10,
+    )
+
+    assert summary['rows'] == 10
+
+    h5_dataset = HDF5Dataset(
+        name,
+        cache_dir=str(cache_dir),
+        num_steps=1,
+        keys_to_load=['pixels', 'action', 'observation'],
+    )
+    lance_dataset = LanceDataset(
+        uri=str(lance_dir),
+        table_name='test_table',
+        num_steps=1,
+        keys_to_load=['pixels', 'action', 'observation'],
+        image_columns=['pixels'],
+    )
+
+    h5_item = h5_dataset[0]
+    lance_item = lance_dataset[0]
+
+    assert torch.allclose(lance_item['action'], h5_item['action'])
+    assert torch.allclose(lance_item['observation'], h5_item['observation'])
+    assert lance_item['pixels'].shape[1:] == h5_item['pixels'].shape[1:]

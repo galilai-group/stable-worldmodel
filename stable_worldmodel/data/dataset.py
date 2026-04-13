@@ -1,5 +1,6 @@
 """Dataset classes for episode-based reinforcement learning data."""
 
+import io
 import logging
 from collections.abc import Callable
 from functools import lru_cache
@@ -215,6 +216,351 @@ class HDF5Dataset(Dataset):
         data = self.get_col_data(col)
         return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
+
+class LanceDataset(Dataset):
+    """Dataset backed by LanceDB tables.
+
+    The table is expected to store flattened timesteps with two index columns:
+    ``episode_idx`` and ``step_idx``. All other columns are treated as data.
+
+    Args:
+        uri: LanceDB URI (local path, ``s3://`` bucket, ``hf://`` dataset, ...).
+        table_name: Table to open inside the LanceDB database.
+        frameskip: Number of raw rows to skip between returned steps.
+        num_steps: Length of the returned temporal window.
+        transform: Optional transform composed on top of the returned dict.
+        keys_to_load: Explicit list of columns to read. Defaults to all
+            non-index columns in the table.
+        keys_to_cache: Columns that should be fully loaded into RAM for faster
+            random access (same semantics as :class:`HDF5Dataset`).
+        keys_to_merge: Optional mapping of target -> source pattern(s) to
+            concatenate and expose as a new cached column.
+        image_columns: Columns storing encoded images (JPEG/PNG). These are
+            decoded per frame and returned as ``(T, C, H, W)`` tensors similar
+            to :class:`HDF5Dataset`.
+        episode_index_column: Name of the column containing episode indices.
+        step_index_column: Name of the column containing per-episode step ids.
+        connect_kwargs: Extra kwargs forwarded to :func:`lancedb.connect`. This
+            is how credentials for S3/object storage endpoints are supplied.
+    """
+
+    _lancedb = None
+    _permutation = None
+
+    def __init__(
+        self,
+        uri: str,
+        table_name: str,
+        *,
+        frameskip: int = 1,
+        num_steps: int = 1,
+        transform: Callable[[dict], dict] | None = None,
+        keys_to_load: list[str] | None = None,
+        keys_to_cache: list[str] | None = None,
+        keys_to_merge: dict[str, list[str] | str] | None = None,
+        image_columns: list[str] | None = None,
+        episode_index_column: str = 'episode_idx',
+        step_index_column: str = 'step_idx',
+        connect_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        self.uri = uri
+        self.table_name = table_name
+        self.connect_kwargs = connect_kwargs or {}
+        self._index_columns = (episode_index_column, step_index_column)
+        self._cache: dict[str, np.ndarray] = {}
+        self._perm = None
+        self._fetch_columns: list[str] | None = None
+
+        table = self._connect_table()
+        self._schema_names = list(table.schema.names)
+        available = [
+            c for c in self._schema_names if c not in self._index_columns
+        ]
+        if not available:
+            raise ValueError(
+                'No data columns found in Lance table. Expected columns '
+                'other than episode/step indices.'
+            )
+
+        self._keys = keys_to_load or available
+        missing = [k for k in self._keys if k not in available]
+        if missing:
+            raise KeyError(
+                f"Columns {missing} missing from Lance table '{table_name}'"
+            )
+
+        default_image_cols = ['pixels'] if 'pixels' in self._keys else []
+        requested_images = (
+            image_columns if image_columns is not None else default_image_cols
+        )
+        self.image_columns = {
+            col for col in requested_images if col in self._keys
+        }
+
+        lengths, offsets = self._compute_episode_structure(table)
+
+        for key in keys_to_cache or []:
+            if key not in self._keys:
+                raise KeyError(f"Cannot cache missing column '{key}'")
+            self._cache[key] = self._load_full_column(table, key)
+
+        self._update_fetch_columns()
+
+        super().__init__(lengths, offsets, frameskip, num_steps, transform)
+
+        if keys_to_merge:
+            for target, source in keys_to_merge.items():
+                self.merge_col(source, target)
+
+    @property
+    def column_names(self) -> list[str]:
+        return list(self._keys)
+
+    def __getstate__(self) -> dict:
+        state = super().__dict__.copy()
+        state['_perm'] = None
+        return state
+
+    @classmethod
+    def _import_lance(cls) -> None:
+        if cls._lancedb is not None:
+            return
+        try:
+            import lancedb
+            from lancedb.permutation import Permutation
+        except ImportError as exc:  # pragma: no cover - exercised in runtime
+            raise ImportError(
+                'LanceDataset requires the "lancedb" package. '
+                'Install with `pip install lancedb` or '
+                '`pip install stable-worldmodel[lance]`.'
+            ) from exc
+        cls._lancedb = lancedb
+        cls._permutation = Permutation
+
+    def _connect_table(self):
+        self._import_lance()
+        db = self._lancedb.connect(self.uri, **self.connect_kwargs)
+        return db.open_table(self.table_name)
+
+    def _compute_episode_structure(self, table) -> tuple[np.ndarray, np.ndarray]:
+        lengths: list[int] = []
+        offsets: list[int] = []
+        total_rows = 0
+        current_ep = None
+        current_len = 0
+
+        reader = (
+            table.to_lance().scanner(columns=list(self._index_columns)).to_reader()
+        )
+        ep_col, _ = self._index_columns
+        for batch in reader:
+            eps = batch.column(batch.schema.get_field_index(ep_col)).to_numpy()
+            for ep in eps.tolist():
+                if current_ep is None:
+                    current_ep = ep
+                    offsets.append(total_rows)
+                    current_len = 0
+                elif ep != current_ep:
+                    lengths.append(current_len)
+                    current_ep = ep
+                    offsets.append(total_rows)
+                    current_len = 0
+
+                current_len += 1
+                total_rows += 1
+
+        if current_ep is not None:
+            lengths.append(current_len)
+
+        if not lengths:
+            return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+
+        return (
+            np.asarray(lengths, dtype=np.int64),
+            np.asarray(offsets, dtype=np.int64),
+        )
+
+    def _load_full_column(self, table, key: str) -> np.ndarray:
+        data: list[np.ndarray | np.generic | list[Any] | bytes] = []
+        reader = table.to_lance().scanner(columns=[key]).to_reader()
+        for batch in reader:
+            values = self._batch_column_pylist(batch, key)
+            if not values:
+                continue
+            data.append(self._pylist_to_numpy(values, key))
+
+        if not data:
+            return np.array([], dtype=np.float32)
+
+        return np.concatenate(data, axis=0)
+
+    def _update_fetch_columns(self) -> None:
+        cached = set(self._cache.keys())
+        self._fetch_columns = [k for k in self._keys if k not in cached]
+        if not self._fetch_columns:
+            self._perm = None
+
+    def _ensure_open(self) -> None:
+        if not self._fetch_columns:
+            return
+        if self._perm is None:
+            table = self._connect_table()
+            self._perm = (
+                self._permutation.identity(table)
+                .select_columns(self._fetch_columns)
+                .with_format('arrow')
+            )
+
+    def _fetch_rows(self, rows: list[int]):
+        if not self._fetch_columns:
+            return None
+        self._ensure_open()
+        return self._perm.__getitems__(rows)
+
+    def _batch_column_pylist(self, batch, key: str) -> list[Any]:
+        idx = batch.schema.get_field_index(key)
+        if idx == -1:
+            raise KeyError(f"Column '{key}' not found in batch")
+        return batch.column(idx).to_pylist()
+
+    def _pylist_to_numpy(self, values: list[Any], key: str) -> np.ndarray:
+        if not values:
+            return np.array([], dtype=np.float32)
+        first = values[0]
+
+        if isinstance(first, (bytes, bytearray, memoryview)):
+            return np.asarray(values, dtype=object)
+        if isinstance(first, str):
+            return np.asarray(values, dtype=object)
+        if isinstance(first, (list, tuple)):
+            return np.asarray(values, dtype=np.float32)
+        if isinstance(first, (int, float, np.integer, np.floating)):
+            dtype = np.float32 if isinstance(first, (float, np.floating)) else np.int64
+            return np.asarray(values, dtype=dtype)
+        if isinstance(first, np.ndarray):
+            return np.stack(values)
+
+        logging.warning(
+            f"Column '{key}' produced unrecognized type {type(first)}; "
+            'falling back to object array.'
+        )
+        return np.asarray(values, dtype=object)
+
+    def _decode_image(self, blob: bytes) -> torch.Tensor:
+        with Image.open(io.BytesIO(blob)) as img:
+            arr = np.array(img.convert('RGB'))
+        tensor = torch.from_numpy(arr)
+        return tensor.permute(2, 0, 1)
+
+    def _prepare_numeric_tensor(self, data: np.ndarray, downsample: bool) -> torch.Tensor:
+        if downsample:
+            data = data[:: self.frameskip]
+        tensor = torch.from_numpy(data)
+        if tensor.ndim == 4 and tensor.shape[-1] in (1, 3):
+            tensor = tensor.permute(0, 3, 1, 2)
+        return tensor
+
+    def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
+        g_start, g_end = (
+            self.offsets[ep_idx] + start,
+            self.offsets[ep_idx] + end,
+        )
+        rows = list(range(int(g_start), int(g_end)))
+        batch = self._fetch_rows(rows)
+
+        steps: dict[str, Any] = {}
+        for col in self._keys:
+            if col in self._cache:
+                values = self._cache[col][g_start:g_end]
+            else:
+                if batch is None:
+                    raise KeyError(
+                        f"Column '{col}' missing from cached columns and fetch columns"
+                    )
+                values = self._batch_column_pylist(batch, col)
+
+            if col in self.image_columns:
+                # Decode image bytes and downsample in the temporal dimension.
+                raw_values = values[:: self.frameskip]
+                frames = [self._decode_image(v) for v in raw_values]
+                steps[col] = (
+                    torch.stack(frames)
+                    if frames
+                    else torch.empty(0, dtype=torch.uint8)
+                )
+                continue
+
+            if isinstance(values, np.ndarray):
+                data = values.copy()
+            else:
+                data = self._pylist_to_numpy(values, col)
+
+            if data.dtype == object and data.size > 0:
+                first = data.flat[0]
+                if isinstance(first, (bytes, bytearray)):
+                    steps[col] = first.decode() if isinstance(first, bytes) else first
+                    continue
+                if isinstance(first, str):
+                    steps[col] = first
+                    continue
+
+            downsample = col != 'action'
+            steps[col] = self._prepare_numeric_tensor(data, downsample)
+
+        return self.transform(steps) if self.transform else steps
+
+    def get_col_data(self, col: str) -> np.ndarray:
+        if col in self._cache:
+            return self._cache[col]
+        table = self._connect_table()
+        data = self._load_full_column(table, col)
+        self._cache[col] = data
+        self._update_fetch_columns()
+        return data
+
+    def get_row_data(self, row_idx: int | list[int]) -> dict:
+        if isinstance(row_idx, (list, tuple, np.ndarray)):
+            idxs = [int(i) for i in row_idx]
+        else:
+            idxs = [int(row_idx)]
+        batch = self._fetch_rows(idxs)
+        out: dict[str, Any] = {}
+        for col in self._keys:
+            if col in self._cache:
+                values = self._cache[col][idxs]
+            else:
+                if batch is None:
+                    raise KeyError(
+                        f"Column '{col}' missing from cached columns and fetch columns"
+                    )
+                values = self._batch_column_pylist(batch, col)
+            if isinstance(values, np.ndarray):
+                arr = values
+            else:
+                arr = self._pylist_to_numpy(values, col)
+            out[col] = arr
+        return out
+
+    def merge_col(
+        self,
+        source: list[str] | str,
+        target: str,
+        dim: int = -1,
+    ) -> None:
+        if isinstance(source, str):
+            pattern = re.compile(source)
+            cols = [k for k in self._keys if pattern.match(k)]
+        else:
+            cols = source
+        merged = np.concatenate([self.get_col_data(c) for c in cols], axis=dim)
+        self._cache[target] = merged
+        if target not in self._keys:
+            self._keys.append(target)
+        self._update_fetch_columns()
+
+    def get_dim(self, col: str) -> int:
+        data = self.get_col_data(col)
+        return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
 class FolderDataset(Dataset):
     """Dataset loading from folder structure.
@@ -813,6 +1159,7 @@ class GoalDataset:
 __all__ = [
     'Dataset',
     'HDF5Dataset',
+    'LanceDataset',
     'FolderDataset',
     'ImageDataset',
     'VideoDataset',
