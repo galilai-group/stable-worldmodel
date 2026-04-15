@@ -57,7 +57,24 @@ class ManiSkillWrapper(gym.Env):
         )
 
         act_space = self.env.action_space
-        if hasattr(act_space, 'low') and act_space.low.ndim == 2:
+        self._action_keys: list[str] | None = None
+        self._action_splits: list[int] | None = None
+        if isinstance(act_space, gym.spaces.Dict):
+            self._action_keys = list(act_space.spaces.keys())
+            lows, highs, sizes = [], [], []
+            for k in self._action_keys:
+                sub = act_space.spaces[k]
+                sub_low = np.asarray(sub.low, dtype=np.float32)
+                sub_high = np.asarray(sub.high, dtype=np.float32)
+                if sub_low.ndim == 2:
+                    sub_low, sub_high = sub_low[0], sub_high[0]
+                lows.append(sub_low)
+                highs.append(sub_high)
+                sizes.append(sub_low.size)
+            low = np.concatenate(lows)
+            high = np.concatenate(highs)
+            self._action_splits = list(np.cumsum(sizes)[:-1])
+        elif hasattr(act_space, 'low') and act_space.low.ndim == 2:
             low = np.asarray(act_space.low[0], dtype=np.float32)
             high = np.asarray(act_space.high[0], dtype=np.float32)
         else:
@@ -116,7 +133,15 @@ class ManiSkillWrapper(gym.Env):
         return obs, out_info
 
     def step(self, action):
-        action = np.asarray(action, dtype=np.float32).reshape(1, -1)
+        action = np.asarray(action, dtype=np.float32).reshape(-1)
+        if self._action_keys is not None:
+            parts = np.split(action, self._action_splits)
+            action = {
+                k: parts[i].reshape(1, -1)
+                for i, k in enumerate(self._action_keys)
+            }
+        else:
+            action = action.reshape(1, -1)
         obs, reward, terminated, truncated, info = self.env.step(action)
         reward = self._scalarize(reward)
         terminated = bool(self._scalarize(terminated))

@@ -42,52 +42,54 @@ world = swm.World('swm/PickCubeManiSkill-v0', num_envs=4, image_shape=(128, 128)
 
 All tabletop wrappers inherit from `TableTopManiSkillWrapper` and share the
 same default [variation space](#variation-space) (robot, ground, scene
-lighting, gravity, and joint/contact physics). `PickCube` additionally
-exposes cube and goal variations — see [PickCube-specific variations](#pickcube-specific-variations).
+lighting, gravity, joint/contact physics). Each subclass also declares an
+`actors` mapping that adds per-task `<actor>.color` (and, for dynamic rigid
+bodies, `<actor>_physics.*`) entries to the variation space — see
+[Per-task actor variations](#per-task-actor-variations).
 
 ### Single-arm pick / place
 
-| ID | Task | Description |
-|----|------|-------------|
-| `swm/PickCubeManiSkill-v0` | `PickCube-v1` | Pick up a cube and move it to a target position (Franka Panda). |
-| `swm/PickCubeSO100ManiSkill-v0` | `PickCubeSO100-v1` | `PickCube` with the low-cost SO-100 arm. |
-| `swm/PickCubeWidowXAIManiSkill-v0` | `PickCubeWidowXAI-v1` | `PickCube` with the WidowX-AI arm. |
-| `swm/PickSingleYCBManiSkill-v0` | `PickSingleYCB-v1` | Pick up a YCB object sampled from the dataset and move it to a target. |
-| `swm/PlaceSphereManiSkill-v0` | `PlaceSphere-v1` | Place a sphere into a container / target location. |
+| ID | Task | Default | Randomized | Description |
+|----|------|---------|------------|-------------|
+| `swm/PickCubeManiSkill-v0` | `PickCube-v1` | ![](../assets/pickcube.gif){ width=140 } | ![](../assets/pickcube_var.gif){ width=140 } | Pick up a cube and move it to a target position (Franka Panda). |
+| `swm/PickCubeSO100ManiSkill-v0` | `PickCubeSO100-v1` | ![](../assets/pickcubeso100.gif){ width=140 } | ![](../assets/pickcubeso100_var.gif){ width=140 } | `PickCube` with the low-cost SO-100 arm. |
+| `swm/PickCubeWidowXAIManiSkill-v0` | `PickCubeWidowXAI-v1` | ![](../assets/pickcubewidowxai.gif){ width=140 } | ![](../assets/pickcubewidowxai_var.gif){ width=140 } | `PickCube` with the WidowX-AI arm. |
+| `swm/PickSingleYCBManiSkill-v0` | `PickSingleYCB-v1` | ![](../assets/picksingleycb.gif){ width=140 } | ![](../assets/picksingleycb_var.gif){ width=140 } | Pick up a YCB object sampled from the dataset and move it to a target. |
+| `swm/PlaceSphereManiSkill-v0` | `PlaceSphere-v1` | ![](../assets/placesphere.gif){ width=140 } | ![](../assets/placesphere_var.gif){ width=140 } | Place a sphere into a container / target location. |
 
 ### Pushing / pulling / poking
 
-| ID | Task | Description |
-|----|------|-------------|
-| `swm/PushCubeManiSkill-v0` | `PushCube-v1` | Push a cube to a target region on the table. |
-| `swm/PullCubeManiSkill-v0` | `PullCube-v1` | Pull a cube toward the robot base to reach the target. |
-| `swm/PullCubeToolManiSkill-v0` | `PullCubeTool-v1` | Use an L-shaped tool to pull a cube that is out of reach. |
-| `swm/PokeCubeManiSkill-v0` | `PokeCube-v1` | Poke a cube with a peg to knock it to the goal. |
-| `swm/PushTManiSkill-v0` | `PushT-v1` | ManiSkill3 version of the classic Push-T planar manipulation task. |
-| `swm/RollBallManiSkill-v0` | `RollBall-v1` | Roll a ball on the table to a goal region. |
+| ID | Task | Default | Randomized | Description |
+|----|------|---------|------------|-------------|
+| `swm/PushCubeManiSkill-v0` | `PushCube-v1` | ![](../assets/pushcube.gif){ width=140 } | ![](../assets/pushcube_var.gif){ width=140 } | Push a cube to a target region on the table. |
+| `swm/PullCubeManiSkill-v0` | `PullCube-v1` | ![](../assets/pullcube.gif){ width=140 } | ![](../assets/pullcube_var.gif){ width=140 } | Pull a cube toward the robot base to reach the target. |
+| `swm/PullCubeToolManiSkill-v0` | `PullCubeTool-v1` | ![](../assets/pullcubetool.gif){ width=140 } | ![](../assets/pullcubetool_var.gif){ width=140 } | Use an L-shaped tool to pull a cube that is out of reach. |
+| `swm/PokeCubeManiSkill-v0` | `PokeCube-v1` | ![](../assets/pokecube.gif){ width=140 } | ![](../assets/pokecube_var.gif){ width=140 } | Poke a cube with a peg to knock it to the goal. |
+| `swm/PushTManiSkill-v0` | `PushT-v1` | ![](../assets/pushtmaniskill.gif){ width=140 } | ![](../assets/pushtmaniskill_var.gif){ width=140 } | ManiSkill3 version of the classic Push-T planar manipulation task. |
+| `swm/RollBallManiSkill-v0` | `RollBall-v1` | ![](../assets/rollball.gif){ width=140 } | ![](../assets/rollball_var.gif){ width=140 } | Roll a ball on the table to a goal region. |
 
 ### Stacking
 
-| ID | Task | Description |
-|----|------|-------------|
-| `swm/StackCubeManiSkill-v0` | `StackCube-v1` | Stack one cube on top of another. |
-| `swm/StackPyramidManiSkill-v0` | `StackPyramid-v1` | Stack three cubes into a pyramid. |
-| `swm/LiftPegUprightManiSkill-v0` | `LiftPegUpright-v1` | Lift a lying peg and stand it upright on the table. |
+| ID | Task | Default | Randomized | Description |
+|----|------|---------|------------|-------------|
+| `swm/StackCubeManiSkill-v0` | `StackCube-v1` | ![](../assets/stackcube.gif){ width=140 } | ![](../assets/stackcube_var.gif){ width=140 } | Stack one cube on top of another. |
+| `swm/StackPyramidManiSkill-v0` | `StackPyramid-v1` | ![](../assets/stackpyramid.gif){ width=140 } | ![](../assets/stackpyramid_var.gif){ width=140 } | Stack three cubes into a pyramid. |
+| `swm/LiftPegUprightManiSkill-v0` | `LiftPegUpright-v1` | ![](../assets/liftpegupright.gif){ width=140 } | ![](../assets/liftpegupright_var.gif){ width=140 } | Lift a lying peg and stand it upright on the table. |
 
 ### Insertion / assembly
 
-| ID | Task | Description |
-|----|------|-------------|
-| `swm/PegInsertionSideManiSkill-v0` | `PegInsertionSide-v1` | Insert a peg into a box through a side hole. |
-| `swm/PlugChargerManiSkill-v0` | `PlugCharger-v1` | Plug a charger model into a wall socket. |
-| `swm/AssemblingKitsManiSkill-v0` | `AssemblingKits-v1` | Insert a shaped object into its matching slot in a kit board. |
+| ID | Task | Default | Randomized | Description |
+|----|------|---------|------------|-------------|
+| `swm/PegInsertionSideManiSkill-v0` | `PegInsertionSide-v1` | ![](../assets/peginsertionside.gif){ width=140 } | ![](../assets/peginsertionside_var.gif){ width=140 } | Insert a peg into a box through a side hole. |
+| `swm/PlugChargerManiSkill-v0` | `PlugCharger-v1` | ![](../assets/plugcharger.gif){ width=140 } | ![](../assets/plugcharger_var.gif){ width=140 } | Plug a charger model into a wall socket. |
+| `swm/AssemblingKitsManiSkill-v0` | `AssemblingKits-v1` | ![](../assets/assemblingkits.gif){ width=140 } | ![](../assets/assemblingkits_var.gif){ width=140 } | Insert a shaped object into its matching slot in a kit board. |
 
 ### Dual-arm
 
-| ID | Task | Description |
-|----|------|-------------|
-| `swm/TwoRobotPickCubeManiSkill-v0` | `TwoRobotPickCube-v1` | Two robots hand off a cube out of each other's reach. |
-| `swm/TwoRobotStackCubeManiSkill-v0` | `TwoRobotStackCube-v1` | Two robots cooperate to stack cubes. |
+| ID | Task | Default | Randomized | Description |
+|----|------|---------|------------|-------------|
+| `swm/TwoRobotPickCubeManiSkill-v0` | `TwoRobotPickCube-v1` | ![](../assets/tworobotpickcube.gif){ width=140 } | ![](../assets/tworobotpickcube_var.gif){ width=140 } | Two robots hand off a cube out of each other's reach. |
+| `swm/TwoRobotStackCubeManiSkill-v0` | `TwoRobotStackCube-v1` | ![](../assets/tworobotstackcube.gif){ width=140 } | ![](../assets/tworobotstackcube_var.gif){ width=140 } | Two robots cooperate to stack cubes. |
 
 ## Environment Specs
 
@@ -153,20 +155,35 @@ tabletop task.
 | `robot_physics.joint_friction` | Box(0.0, 1.0) | Friction applied to each robot active joint (default: 0.0) |
 | `robot_physics.joint_damping` | Box(0.0, 10.0) | Damping coefficient on each robot active joint (default: 0.0) |
 
-### PickCube-specific variations
+### Per-task actor variations
 
-`PickCubeManiSkillWrapper` extends the base space with cube and goal-site
-variations:
+Every wrapper extends the base variation space with one entry per actor
+declared in its `actors` class attribute:
+
+- `<actor>.color` — RGB base color, applied to every render shape backing
+  the actor.
+- `<actor>_physics.{mass,friction,restitution,linear_damping,angular_damping}` —
+  added when the actor is a dynamic rigid body (`physics: True`). Skipped
+  for kinematic visual targets such as `goal_site` / `goal_region`,
+  receptacles, bins, and articulations.
+
+For example, `PickCubeManiSkillWrapper` adds:
 
 | Factor | Type | Description |
 |--------|------|-------------|
-| `cube.color` | RGBBox | Cube base color (default: [1.0, 0.2, 0.2]) |
-| `goal.color` | RGBBox | Goal site color (default: [0.2, 1.0, 0.2]) |
+| `cube.color` | RGBBox | Cube base color (default: [1.0, 0.0, 0.0]) |
+| `goal.color` | RGBBox | Goal site color (default: [0.0, 1.0, 0.0]) |
 | `cube_physics.mass` | Box(0.02, 0.5) | Cube mass in kg (default: 0.1) |
 | `cube_physics.friction` | Box(0.1, 2.0) | Cube static & dynamic friction (default: 0.5) |
 | `cube_physics.restitution` | Box(0.0, 0.8) | Cube restitution / bounce (default: 0.1) |
 | `cube_physics.linear_damping` | Box(0.0, 2.0) | Cube linear velocity damping (default: 0.0) |
 | `cube_physics.angular_damping` | Box(0.0, 2.0) | Cube angular velocity damping (default: 0.05) |
+
+Other tasks declare different actor sets — `StackPyramid` exposes
+`cubeA` / `cubeB` / `cubeC`, `PullCubeTool` exposes `cube` / `tool`,
+`PlugCharger` exposes `charger` / `receptacle`, etc. Inspect a wrapper's
+`actors` dict (or the env's `variation_space`) to see what is available
+for that task.
 
 ```python
 # Randomize a subset
