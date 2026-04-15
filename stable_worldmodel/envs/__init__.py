@@ -113,6 +113,101 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
 )
 
+register(
+    id='swm/PickCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.pick_cube:PickCubeManiSkillWrapper',
+)
+
+register(
+    id='swm/PushCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.push_cube:PushCubeManiSkillWrapper',
+)
+
+register(
+    id='swm/PullCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.pull_cube:PullCubeManiSkillWrapper',
+)
+
+register(
+    id='swm/PullCubeToolManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.pull_cube_tool:PullCubeToolManiSkillWrapper',
+)
+
+register(
+    id='swm/LiftPegUprightManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.lift_peg_upright:LiftPegUprightManiSkillWrapper',
+)
+
+register(
+    id='swm/PegInsertionSideManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.peg_insertion_side:PegInsertionSideManiSkillWrapper',
+)
+
+register(
+    id='swm/PlugChargerManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.plug_charger:PlugChargerManiSkillWrapper',
+)
+
+register(
+    id='swm/PokeCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.poke_cube:PokeCubeManiSkillWrapper',
+)
+
+register(
+    id='swm/RollBallManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.roll_ball:RollBallManiSkillWrapper',
+)
+
+register(
+    id='swm/StackCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.stack_cube:StackCubeManiSkillWrapper',
+)
+
+register(
+    id='swm/StackPyramidManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.stack_pyramid:StackPyramidManiSkillWrapper',
+)
+
+register(
+    id='swm/PlaceSphereManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.place_sphere:PlaceSphereManiSkillWrapper',
+)
+
+register(
+    id='swm/PushTManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.push_t:PushTManiSkillWrapper',
+)
+
+register(
+    id='swm/AssemblingKitsManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.assembling_kits:AssemblingKitsManiSkillWrapper',
+)
+
+register(
+    id='swm/PickSingleYCBManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.pick_single_ycb:PickSingleYCBManiSkillWrapper',
+)
+
+register(
+    id='swm/PickCubeSO100ManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.pick_cube_so100:PickCubeSO100ManiSkillWrapper',
+)
+
+register(
+    id='swm/PickCubeWidowXAIManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.pick_cube_widowxai:PickCubeWidowXAIManiSkillWrapper',
+)
+
+register(
+    id='swm/TwoRobotPickCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.two_robot_pick_cube:TwoRobotPickCubeManiSkillWrapper',
+)
+
+register(
+    id='swm/TwoRobotStackCubeManiSkill-v0',
+    entry_point='stable_worldmodel.envs.maniskill.table_top.two_robot_stack_cube:TwoRobotStackCubeManiSkillWrapper',
+)
+
 
 ############
 # DISCRETE #

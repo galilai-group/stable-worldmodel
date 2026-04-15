@@ -49,6 +49,7 @@ env = [
     "gymnasium[all]",
     "opencv-python",
     "stable_baselines3",
+    "mani_skill",
 ]
 
 lerobot = [
