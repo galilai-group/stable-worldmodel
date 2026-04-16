@@ -6,6 +6,10 @@ external_links:
     github: https://github.com/haosulab/ManiSkill
 ---
 
+!!! warning "Python 3.10 only"
+    ManiSkill3 and its dependencies (notably `toppra`) only provide wheels for
+    **Python 3.10**. Install with `python=3.10` to use these environments.
+
 !!! danger "Vulkan support is required"
     ManiSkill3 uses [SAPIEN](https://sapien.ucsd.edu/) as its rendering and
     physics backend, which depends on **Vulkan**. You will not be able to run
