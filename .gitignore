@@ -212,7 +212,7 @@ logs/
 **/__pycache__/**
 **/*.pyc
 !scripts/minerl.sh
-
+CLAUDE.md
 outputs/
 multirun/
 checkpoints/

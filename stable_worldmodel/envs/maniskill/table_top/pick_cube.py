@@ -24,7 +24,7 @@ class PickCubeManiSkillWrapper(TableTopManiSkillWrapper):
 
     task_id = 'PickCube-v1'
     actors = {
-        'cube': {'attrs': ('cube',), 'rgb': (1.0, 0.2, 0.2), 'physics': True},
+        'cube': {'attrs': ('cube',), 'rgb': (1.0, 0.2, 0.2)},
         'goal': {'attrs': ('goal_site', 'goal'), 'rgb': (0.2, 1.0, 0.2)},
     }
 

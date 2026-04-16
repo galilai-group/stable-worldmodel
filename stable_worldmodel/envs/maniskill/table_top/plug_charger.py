@@ -5,10 +5,6 @@ class PlugChargerManiSkillWrapper(TableTopManiSkillWrapper):
 
     task_id = 'PlugCharger-v1'
     actors = {
-
-
-        'charger': {'attrs': ('charger',), 'rgb': (0.859, 0.710, 0.224), 'physics': True,
-                    'mass': (0.02, 0.3, 0.1)},
-
+        'charger': {'attrs': ('charger',), 'rgb': (0.859, 0.710, 0.224)},
         'receptacle': {'attrs': ('receptacle',), 'rgb': (1.0, 1.0, 1.0)},
     }
