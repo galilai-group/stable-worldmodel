@@ -298,6 +298,42 @@ class World:
             o.close()
         print(f'Video saved to {video_path}')
 
+    def record_video_from_dataset(
+        self,
+        video_path: str | Path,
+        dataset_name: str,
+        episode_idx: int | list[int] = 0,
+        max_steps: int = 500,
+        fps: int = 30,
+        viewname: str | list[str] = 'pixels',
+        cache_dir: os.PathLike | str | None = None,
+    ) -> None:
+        """Record videos by replaying stored dataset episodes.
+
+        Args:
+            video_path: Directory path to save the videos.
+            dataset_name: Name of the HDF5 dataset to load.
+            episode_idx: Episode index or list of indices to record.
+            max_steps: Maximum frames per video.
+            fps: Frames per second for the output video.
+            viewname: Key(s) in the dataset to use as video frames.
+            cache_dir: Directory containing the dataset. Defaults to standard cache.
+        """
+        from stable_worldmodel.data.dataset import HDF5Dataset
+        from stable_worldmodel.utils import (
+            record_video_from_dataset as _record_video_from_dataset,
+        )
+
+        dataset = HDF5Dataset(dataset_name, cache_dir=cache_dir)
+        _record_video_from_dataset(
+            video_path,
+            dataset,
+            episode_idx=episode_idx,
+            max_steps=max_steps,
+            fps=fps,
+            viewname=viewname,
+        )
+
     def record_dataset(
         self,
         dataset_name: str,
