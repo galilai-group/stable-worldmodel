@@ -29,16 +29,18 @@ class ManiSkillWrapper(gym.Env):
         obs_mode: str = 'state',
         control_mode: str | None = None,
         render_mode: str = 'rgb_array',
+        shader_dir: str = 'rt',
         sim_backend: str = 'cpu',
         seed: int | None = None,
         **make_kwargs,
     ):
-        import mani_skill.envs                                 
+        import mani_skill.envs
 
         self._task_id = task_id
         kwargs = dict(
             obs_mode=obs_mode,
             render_mode=render_mode,
+            shader_dir=shader_dir,
             sim_backend=sim_backend,
             num_envs=1,
         )
