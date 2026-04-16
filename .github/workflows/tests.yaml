@@ -15,30 +15,33 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: False
-      matrix:
-        include:
-          - python-version: "3.10"
-            extras: "--extra train --extra env"
-            test-path: ""
-          - python-version: "3.12"
-            extras: "--extra train --extra lerobot"
-            test-path: "tests/data/test_lerobot_adapter.py"
     steps:
     - uses: actions/checkout@v5
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.10"
     - name: Dependencies
-      run: uv sync ${{ matrix.extras }}
+      run: uv sync --extra train --extra env --extra robotics
     - name: Tests
-      run: uv run --group dev pytest ${{ matrix.test-path }}
+      run: uv run --group dev pytest
     - name: Build
       run: uv build
     - name: PyPi
       run: uv pip install stable-worldmodel
+
+  lerobot:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: "3.12"
+    - name: Dependencies
+      run: uv sync --extra train --extra env --extra lerobot
+    - name: Tests
+      run: uv run --group dev pytest tests/data/test_lerobot_adapter.py
 
 
   docs:

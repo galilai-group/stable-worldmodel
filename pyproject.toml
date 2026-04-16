@@ -44,11 +44,15 @@ env = [
     "pygame",
     "pymunk",
     "shapely",
-    "ogbench",
     "minigrid",
     "gymnasium[all]",
     "opencv-python",
     "stable_baselines3",
+]
+
+robotics = [
+    "stable-worldmodel[env]",
+    "ogbench",
     "mani_skill",
 ]
 
@@ -79,7 +83,7 @@ build-backend = "uv_build"
 prerelease = "allow"
 conflicts = [
     [
-        { extra = "env" },
+        { extra = "robotics" },
         { extra = "lerobot" },
     ],
 ]
