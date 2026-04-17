@@ -34,21 +34,7 @@ def get_data(cfg, goal_probabilities):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    def get_column_normalizer(dataset, source: str, target: str):
-        """Get normalizer for a specific column in the dataset."""
-        data = torch.from_numpy(dataset.get_col_data(source)[:])
-        data = data[~torch.isnan(data).any(dim=1)]
-        mean = data.mean(0, keepdim=True).clone()
-        std = data.std(0, keepdim=True).clone()
-
-        def norm_fn(x):
-            return ((x - mean) / std).float()
-
-        normalizer = spt.data.transforms.WrapTorchTransform(
-            norm_fn, source=source, target=target
-        )
-
-        return normalizer
+    from stable_worldmodel.wm.utils import column_normalizer as get_column_normalizer  # noqa: F401 — picklable normalizer for spawn workers
 
     cache_dir = None
     if not hasattr(cfg, 'local_cache_dir'):

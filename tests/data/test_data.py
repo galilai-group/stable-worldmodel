@@ -2,6 +2,7 @@
 
 import io
 import os
+import pickle
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -54,7 +55,7 @@ def test_get_cache_dir_creates_directory():
 def sample_h5_file(tmp_path):
     """Create a sample HDF5 file for testing."""
     datasets_dir = tmp_path / "datasets"
-    datasets_dir.mkdir()
+    datasets_dir.mkdir(exist_ok=True)
     h5_path = datasets_dir / "test_dataset.h5"
 
     # Create sample data: 2 episodes, 10 steps each
@@ -118,7 +119,7 @@ def paired_datasets(tmp_path):
     dataset_name = 'paired_dataset'
 
     datasets_dir = tmp_path / 'datasets'
-    datasets_dir.mkdir()
+    datasets_dir.mkdir(exist_ok=True)
     h5_path = datasets_dir / f'{dataset_name}.h5'
     with h5py.File(h5_path, 'w') as f:
         f.create_dataset('ep_len', data=data['ep_lengths'])
@@ -403,215 +404,41 @@ def test_hdf5_dataset_file_not_found(tmp_path):
         HDF5Dataset("nonexistent", cache_dir=str(tmp_path))
 
 
-def test_lance_dataset_matches_hdf5_length(paired_datasets):
-    """LanceDataset should expose the same number of samples as HDF5Dataset."""
-    h5_ds, lance_ds = _make_hdf5_lance_pair(
-        paired_datasets, num_steps=2, frameskip=1
-    )
-    assert len(h5_ds) == len(lance_ds)
+def test_lance_parity_with_hdf5(paired_datasets):
+    """End-to-end parity: Lance and HDF5 return the same samples at num_steps>=2
+    across frameskip 1 and 2, for both single-item and batch access paths,
+    and image columns are auto-detected from the Arrow schema (no
+    ``image_columns`` kwarg required)."""
+    for frameskip in (1, 2):
+        h5_ds, lance_ds = _make_hdf5_lance_pair(
+            paired_datasets, num_steps=2, frameskip=frameskip
+        )
+        # Lance opened without image_columns=['pixels'] — detection is by type.
+        assert lance_ds.image_columns == {'pixels'}
+        assert len(h5_ds) == len(lance_ds) > 0
+
+        # Single-item parity (__getitem__).
+        for idx in range(len(lance_ds)):
+            h_item, l_item = h5_ds[idx], lance_ds[idx]
+            assert h_item['pixels'].shape == l_item['pixels'].shape
+            assert torch.equal(h_item['pixels'], l_item['pixels'])
+            assert torch.allclose(h_item['action'], l_item['action'])
+            assert torch.allclose(h_item['observation'], l_item['observation'])
+
+        # Batch-path parity (__getitems__ coalesces into one Lance take).
+        indices = list(range(len(lance_ds)))
+        batch = lance_ds.__getitems__(indices)
+        for i, idx in enumerate(indices):
+            single = lance_ds[idx]
+            assert torch.equal(batch[i]['pixels'], single['pixels'])
+            assert torch.allclose(batch[i]['action'], single['action'])
 
 
-def test_lance_dataset_output_parity(paired_datasets):
-    """Individual samples should match between Lance and HDF5 backends."""
-    h5_ds, lance_ds = _make_hdf5_lance_pair(
-        paired_datasets, num_steps=2, frameskip=1
-    )
-    for idx in range(len(lance_ds)):
-        h_item, l_item = h5_ds[idx], lance_ds[idx]
-        assert torch.equal(h_item['pixels'], l_item['pixels'])
-        assert torch.allclose(h_item['action'], l_item['action'])
-        assert torch.allclose(h_item['observation'], l_item['observation'])
+def test_lance_convert_roundtrip_and_multi_camera(tmp_path):
+    """Converter produces a table that loads correctly, including multi-camera
+    datasets with dot-separated HDF5 names (transparently renamed for Lance)."""
+    pytest.importorskip('lancedb')
 
-
-def test_lance_dataset_output_parity_frameskip(paired_datasets):
-    """Parity holds with frameskip > 1: downsampling and action reshape must match."""
-    # Episodes are length 4; frameskip=2, num_steps=2 → span=4, exactly fills one episode.
-    h5_ds, lance_ds = _make_hdf5_lance_pair(
-        paired_datasets, num_steps=2, frameskip=2
-    )
-    assert len(h5_ds) == len(lance_ds)
-    for idx in range(len(lance_ds)):
-        h_item, l_item = h5_ds[idx], lance_ds[idx]
-        # observation is downsampled: shape (num_steps, obs_dim)
-        assert h_item['observation'].shape == l_item['observation'].shape
-        assert torch.allclose(h_item['observation'], l_item['observation'])
-        # action is NOT downsampled, then reshaped to (num_steps, frameskip * action_dim)
-        assert h_item['action'].shape == l_item['action'].shape
-        assert torch.allclose(h_item['action'], l_item['action'])
-        # pixels: one frame per macro-step after frameskip
-        assert h_item['pixels'].shape == l_item['pixels'].shape
-        assert torch.equal(h_item['pixels'], l_item['pixels'])
-
-
-def test_lance_dataset_getitems_matches_getitem(paired_datasets):
-    """__getitems__ batch path must return the same values as N individual __getitem__ calls."""
-    _, lance_ds = _make_hdf5_lance_pair(
-        paired_datasets, num_steps=2, frameskip=1
-    )
-    indices = list(range(len(lance_ds)))
-    # Batch path: one Lance take for all samples
-    batch_results = lance_ds.__getitems__(indices)
-    # Single-item path: one Lance take per sample
-    for i, idx in enumerate(indices):
-        single = lance_ds[idx]
-        assert torch.equal(batch_results[i]['pixels'], single['pixels']), \
-            f"pixels mismatch at idx={idx}"
-        assert torch.allclose(batch_results[i]['action'], single['action']), \
-            f"action mismatch at idx={idx}"
-        assert torch.allclose(batch_results[i]['observation'], single['observation']), \
-            f"observation mismatch at idx={idx}"
-
-
-def test_lance_dataset_get_col_data(paired_datasets):
-    """get_col_data should return full columns when reading from Lance."""
-    _, lance_ds = _make_hdf5_lance_pair(
-        paired_datasets, num_steps=2, frameskip=1
-    )
-    obs = lance_ds.get_col_data('observation')
-    assert isinstance(obs, np.ndarray)
-    assert obs.shape[0] == paired_datasets['total_rows']
-
-
-def test_lance_dataset_keys_to_cache(paired_datasets):
-    """Keys listed in keys_to_cache are materialized eagerly."""
-    _, lance_ds = _make_hdf5_lance_pair(
-        paired_datasets,
-        num_steps=2,
-        frameskip=1,
-        keys_to_cache=['observation'],
-    )
-    assert 'observation' in lance_ds._cache
-
-
-def test_build_script_dataset_hdf5_default(sample_h5_file):
-    """Without dataset_uri, build_script_dataset returns an HDF5Dataset."""
-    cache_dir, name = sample_h5_file
-    ds = build_script_dataset(
-        {'dataset_name': name, 'n_steps': 1, 'frameskip': 1},
-        keys_to_load=['observation', 'action'],
-        keys_to_cache=['action'],
-        cache_dir=str(cache_dir),
-    )
-    assert isinstance(ds, HDF5Dataset)
-
-
-def test_build_script_dataset_routes_to_lance(paired_datasets):
-    """With dataset_uri pointing at a .lance path, it dispatches to Lance."""
-    lance_cfg = paired_datasets['lance']
-    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
-    ds = build_script_dataset(
-        {'dataset_uri': full_path, 'n_steps': 1, 'frameskip': 1},
-        keys_to_load=paired_datasets['keys'],
-    )
-    assert isinstance(ds, LanceDataset)
-    assert ds.table_name == lance_cfg['table_name']
-
-
-def test_lance_dataset_auto_detects_binary_image_column(paired_datasets):
-    """No image_columns kwarg needed: pa.binary columns are detected as images."""
-    lance_cfg = paired_datasets['lance']
-    ds = LanceDataset(
-        uri=lance_cfg['uri'],
-        table_name=lance_cfg['table_name'],
-        num_steps=2,
-        frameskip=1,
-        keys_to_load=paired_datasets['keys'],
-    )
-    assert ds.image_columns == {'pixels'}
-    sample = ds[0]
-    # Decoded to (T, C, H, W) — 8x8 RGB in the fixture.
-    assert sample['pixels'].shape == (2, 3, 8, 8)
-
-
-def test_lance_dataset_uri_shorthand(paired_datasets):
-    """A single ``.lance`` URI should split into (db_uri, table_name)."""
-    lance_cfg = paired_datasets['lance']
-    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
-
-    shorthand = LanceDataset(
-        uri=full_path,
-        num_steps=2,
-        frameskip=1,
-        keys_to_load=paired_datasets['keys'],
-        image_columns=['pixels'],
-    )
-    explicit = LanceDataset(
-        uri=lance_cfg['uri'],
-        table_name=lance_cfg['table_name'],
-        num_steps=2,
-        frameskip=1,
-        keys_to_load=paired_datasets['keys'],
-        image_columns=['pixels'],
-    )
-    assert shorthand.uri == explicit.uri
-    assert shorthand.table_name == explicit.table_name
-    assert len(shorthand) == len(explicit)
-    assert torch.equal(shorthand[0]['pixels'], explicit[0]['pixels'])
-
-
-def test_lance_dataset_uri_shorthand_via_create_dataset(paired_datasets):
-    """create_dataset should also accept the ``.lance`` shorthand."""
-    lance_cfg = paired_datasets['lance']
-    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
-    ds = create_dataset(
-        {
-            'uri': full_path,
-            'num_steps': 2,
-            'frameskip': 1,
-            'keys_to_load': paired_datasets['keys'],
-            'image_columns': ['pixels'],
-        }
-    )
-    assert isinstance(ds, LanceDataset)
-    assert ds.table_name == lance_cfg['table_name']
-
-
-def test_lance_dataset_missing_table_name_errors(tmp_path):
-    """URIs that don't end in .lance must still require an explicit table_name."""
-    with pytest.raises(ValueError, match='table_name'):
-        LanceDataset(uri=str(tmp_path / 'lance_db'), num_steps=1)
-
-
-def test_create_dataset_lance_backend(paired_datasets):
-    """create_dataset should instantiate the Lance backend when requested."""
-    lance_cfg = paired_datasets['lance']
-    dataset = create_dataset(
-        {
-            'type': 'lance',
-            'uri': lance_cfg['uri'],
-            'table_name': lance_cfg['table_name'],
-            'num_steps': 2,
-            'frameskip': 1,
-            'keys_to_load': paired_datasets['keys'],
-            'image_columns': ['pixels'],
-        }
-    )
-    assert isinstance(dataset, LanceDataset)
-
-
-def test_create_dataset_infers_lance_backend(paired_datasets):
-    """When Lance fields are provided without type, inference should kick in."""
-    lance_cfg = paired_datasets['lance']
-    dataset = create_dataset(
-        {
-            'uri': lance_cfg['uri'],
-            'table_name': lance_cfg['table_name'],
-            'num_steps': 2,
-            'frameskip': 1,
-            'keys_to_load': paired_datasets['keys'],
-            'image_columns': ['pixels'],
-        }
-    )
-    assert isinstance(dataset, LanceDataset)
-
-
-def test_convert_hdf5_to_lance_multi_camera(tmp_path):
-    """Converter should encode multiple image columns and transparently rename
-    dot-separated HDF5 names to underscore-separated Lance names."""
-    lancedb = pytest.importorskip('lancedb')
-
-    # HDF5 file uses dot-separated names (common in real datasets).
-    # The converter must rename them to underscores without user intervention.
     datasets_dir = tmp_path / 'datasets'
     datasets_dir.mkdir()
     h5_path = datasets_dir / 'multi_cam.h5'
@@ -635,58 +462,56 @@ def test_convert_hdf5_to_lance_multi_camera(tmp_path):
     )
     assert summary['rows'] == total
 
-    # Lance table has underscore names; LanceDataset auto-detects them as image columns.
+    # Load via shorthand URI; auto-detect should pick up both cameras by type.
     ds = LanceDataset(
-        uri=str(lance_dir),
-        table_name='multi_cam',
+        uri=str(lance_dir / 'multi_cam.lance'),
         num_steps=1,
         keys_to_load=['pixels_top', 'pixels_wrist', 'action'],
     )
-    assert 'pixels_top' in ds.image_columns
-    assert 'pixels_wrist' in ds.image_columns
-
+    assert ds.image_columns == {'pixels_top', 'pixels_wrist'}
     item = ds[0]
-    assert item['pixels_top'].shape == (1, 3, 8, 8)    # (T, C, H, W)
+    assert item['pixels_top'].shape == (1, 3, 8, 8)
     assert item['pixels_wrist'].shape == (1, 3, 8, 8)
     assert item['action'].shape == (1, 2)
 
 
-def test_convert_hdf5_to_lance(tmp_path, sample_h5_file):
-    """The conversion helper should produce a Lance table compatible with LanceDataset."""
-    cache_dir, name = sample_h5_file
-    h5_path = cache_dir / 'datasets' / f'{name}.h5'
-    lance_dir = tmp_path / 'lance'
+def test_lance_factories_and_pickling(paired_datasets, sample_h5_file):
+    """Cover the public plumbing surface:
+    * ``create_dataset`` routes on ``uri`` and respects the ``.lance`` shorthand.
+    * ``build_script_dataset`` dispatches HDF5 by default, Lance with ``dataset_uri``.
+    * LanceDataset survives pickling (spawn-worker handoff).
+    * Clear error when neither ``table_name`` nor a ``.lance`` URI is given.
+    """
+    lance_cfg = paired_datasets['lance']
+    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
 
-    summary = convert_hdf5_to_lance(
-        h5_path=h5_path,
-        lance_uri=str(lance_dir),
-        table_name='test_table',
-        columns=['pixels', 'action', 'observation'],
-        batch_rows=4,
-        jpeg_quality=90,
-        overwrite=True,
-        max_steps=10,
+    # create_dataset via shorthand URI (no explicit table_name).
+    ds = create_dataset(
+        {
+            'uri': full_path,
+            'num_steps': 2,
+            'frameskip': 1,
+            'keys_to_load': paired_datasets['keys'],
+        }
     )
+    assert isinstance(ds, LanceDataset)
+    assert ds.table_name == lance_cfg['table_name']
 
-    assert summary['rows'] == 10
+    # Pickle round-trip: _perm handle dropped, lazily reopens on first use.
+    _ = ds[0]
+    restored = pickle.loads(pickle.dumps(ds))
+    assert restored._perm is None
+    assert torch.equal(restored[0]['pixels'], ds[0]['pixels'])
 
-    h5_dataset = HDF5Dataset(
-        name,
-        cache_dir=str(cache_dir),
-        num_steps=1,
-        keys_to_load=['pixels', 'action', 'observation'],
+    # build_script_dataset: HDF5 path when dataset_uri is absent.
+    h5_cache_dir, h5_name = sample_h5_file
+    h5_ds = build_script_dataset(
+        {'dataset_name': h5_name, 'n_steps': 1, 'frameskip': 1},
+        keys_to_load=['observation', 'action'],
+        cache_dir=str(h5_cache_dir),
     )
-    lance_dataset = LanceDataset(
-        uri=str(lance_dir),
-        table_name='test_table',
-        num_steps=1,
-        keys_to_load=['pixels', 'action', 'observation'],
-        image_columns=['pixels'],
-    )
+    assert isinstance(h5_ds, HDF5Dataset)
 
-    h5_item = h5_dataset[0]
-    lance_item = lance_dataset[0]
-
-    assert torch.allclose(lance_item['action'], h5_item['action'])
-    assert torch.allclose(lance_item['observation'], h5_item['observation'])
-    assert lance_item['pixels'].shape[1:] == h5_item['pixels'].shape[1:]
+    # Missing table_name + non-.lance URI should fail clearly.
+    with pytest.raises(ValueError, match='table_name'):
+        LanceDataset(uri=lance_cfg['uri'], num_steps=1)

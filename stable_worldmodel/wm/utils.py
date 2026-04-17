@@ -1,6 +1,7 @@
 import json
 import urllib.request
 from pathlib import Path
+import numpy as np
 import torch
 
 from loguru import logger as logging
@@ -8,6 +9,48 @@ from tqdm import tqdm
 
 from stable_worldmodel.utils import HF_BASE_URL
 from stable_worldmodel.data import get_cache_dir, ensure_dir_exists
+
+
+class ZScoreNormalizer(torch.nn.Module):
+    """Picklable z-score normaliser for use in dataset transforms.
+
+    The training scripts previously closed over ``mean``/``std`` from a local
+    function.  That works under the default ``fork`` multiprocessing start
+    method (child inherits memory), but breaks under ``spawn`` — which
+    ``LanceDataset`` forces on Linux, and which DDP also requires — because
+    local closures are not picklable.
+
+    Subclassing ``torch.nn.Module`` and storing the stats as buffers gives us
+    both picklability and automatic device movement.
+    """
+
+    def __init__(self, mean: torch.Tensor, std: torch.Tensor) -> None:
+        super().__init__()
+        self.register_buffer('mean', mean.clone())
+        self.register_buffer('std', std.clone())
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return ((x - self.mean) / self.std).float()
+
+
+def column_normalizer(dataset, source: str, target: str):
+    """Build a picklable column normaliser wrapped for use as a dataset transform.
+
+    Computes z-score stats once over ``dataset.get_col_data(source)`` (skipping
+    any rows with NaN), and returns a ``WrapTorchTransform`` that applies them.
+    Replaces the closure-based pattern previously repeated across the training
+    scripts, which broke under ``spawn`` DataLoader workers.
+    """
+    from stable_pretraining.data.transforms import WrapTorchTransform
+
+    col_data = dataset.get_col_data(source)
+    data = torch.from_numpy(np.asarray(col_data))
+    data = data[~torch.isnan(data).any(dim=1)]
+    normaliser = ZScoreNormalizer(
+        mean=data.mean(0, keepdim=True),
+        std=data.std(0, keepdim=True),
+    )
+    return WrapTorchTransform(normaliser, source=source, target=target)
 
 
 def save_pretrained(
