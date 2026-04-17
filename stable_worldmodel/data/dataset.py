@@ -239,6 +239,8 @@ class LanceDataset(Dataset):
     The table is expected to store flattened timesteps with two index columns:
     ``episode_idx`` and ``step_idx``. All other columns are treated as data.
 
+    **Multiprocessing: must use ``spawn`` on Linux.** 
+
     **Why ``keys_to_cache`` is not needed here (unlike HDF5Dataset)**
 
     :class:`HDF5Dataset` caches columns because HDF5 is a single compressed
@@ -256,10 +258,11 @@ class LanceDataset(Dataset):
       ``batch_size`` to ``1`` per batch — the dominant cost is transfer
       bandwidth, not seek latency.
 
-    Loading entire columns into RAM via ``keys_to_cache`` therefore provides
-    negligible throughput gain (<1 % measured on tworoom and pusht) while
-    risking **OOM on large datasets** and slowing down startup with a full
-    column scan.  Leave ``keys_to_cache`` empty (the default).
+    The non-cached path is already fast enough for training when using lance
+    compared to H5 caching via
+    ``keys_to_cache`` offers little extra throughput while risking **OOM on
+    massive datasets** and slowing startup with a full column scan.  Leave
+    ``keys_to_cache`` empty (the default).
 
     Args:
         uri: LanceDB URI (local path, ``s3://`` bucket, ``hf://`` dataset, ...).
@@ -287,6 +290,7 @@ class LanceDataset(Dataset):
     _lancedb = None
     _permutation = None
     _pa = None  # pyarrow; populated alongside _lancedb
+    _fork_warning_emitted = False
 
     def __init__(
         self,
@@ -312,6 +316,7 @@ class LanceDataset(Dataset):
         self._perm = None
         self._fetch_columns: list[str] | None = None
 
+        self._maybe_warn_fork_start_method()
         table = self._connect_table()
         self._schema_names = list(table.schema.names)
         available = [
@@ -350,8 +355,8 @@ class LanceDataset(Dataset):
             logging.warning(
                 "LanceDataset: keys_to_cache=%s was provided, but column caching "
                 "is not recommended for Lance datasets. __getitems__ already batches "
-                "all row fetches into a single take() call, so caching provides "
-                "<1%% throughput gain while risking OOM on large datasets. "
+                "all row fetches into a single take() call, so the non-cached path "
+                "is already fast enough — caching mainly risks OOM on large datasets. "
                 "Remove keys_to_cache from your config to use Lance efficiently.",
                 keys_to_cache,
             )
@@ -373,7 +378,10 @@ class LanceDataset(Dataset):
         return list(self._keys)
 
     def __getstate__(self) -> dict:
-        state = super().__dict__.copy()
+        # ``self._perm`` wraps a Rust ``PermutationReader`` that is not
+        # picklable, and Lance internals are not fork-safe anyway — each
+        # DataLoader worker must open its own reader after spawn.
+        state = self.__dict__.copy()
         state['_perm'] = None
         return state
 
@@ -399,6 +407,34 @@ class LanceDataset(Dataset):
         self._import_lance()
         db = self._lancedb.connect(self.uri, **self.connect_kwargs)
         return db.open_table(self.table_name)
+
+    @classmethod
+    def _maybe_warn_fork_start_method(cls) -> None:
+        """Warn once if workers will inherit Lance state via ``fork``.
+
+        Lance's internal tokio threadpool is not fork-safe; forked
+        DataLoader workers deadlock silently on first read.  macOS
+        already defaults to ``spawn``.  On Linux the default is ``fork``
+        which leads to hangs unless the caller overrides it.
+        """
+        if cls._fork_warning_emitted:
+            return
+        import multiprocessing as mp
+        import sys
+
+        if sys.platform != 'linux':
+            return
+        if mp.get_start_method(allow_none=True) == 'spawn':
+            return
+        logging.warning(
+            'LanceDataset detected the default multiprocessing start method is '
+            "'%s' on Linux. Lance is not fork-safe; DataLoader workers may "
+            "deadlock silently. Call multiprocessing.set_start_method('spawn', "
+            "force=True) once at program start, or pass "
+            "multiprocessing_context='spawn' to torch.utils.data.DataLoader.",
+            mp.get_start_method(allow_none=True) or 'fork (default)',
+        )
+        cls._fork_warning_emitted = True
 
     def _compute_episode_structure(self, table) -> tuple[np.ndarray, np.ndarray]:
         """Read episode_idx column and build per-episode (lengths, offsets) arrays.
