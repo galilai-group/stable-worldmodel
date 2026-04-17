@@ -252,3 +252,41 @@ python scripts/train/lewm.py \
 ```
 
 Providing `uri`/`table_name` automatically instantiates `LanceDataset`, so existing HDF5 configs remain backward compatible.
+
+---
+
+## **[ Why Lance ]**
+
+### No RAM cache required
+
+`HDF5Dataset` needs `keys_to_cache` to hold columns like `action` and `proprio` in RAM, because random seeks into a compressed HDF5 file are too slow per-sample. This caps usable dataset size to available RAM.
+
+`LanceDataset` reaches higher throughput without caching. `__getitems__` (PyTorch DataLoader ≥ 2.0) coalesces the entire batch into one columnar `take()` call — only the requested columns and rows are read, with no decompression of unneeded data. Datasets that do not fit in RAM work out of the box.
+
+### Train directly from object storage
+
+HDF5 on S3 is slow enough to be unusable without pre-downloading the file: every random-access seek triggers a separate HTTP range request. Lance on S3 issues **one** vectorised read per batch (one round-trip instead of `batch_size` sequential round-trips) and its columnar fragment layout minimises bytes transferred.
+
+Benchmark on the Tworoom dataset, 4 DataLoader workers, batch size 64, local Mac hardware:
+
+| Backend | Notes | samples / s |
+|---|---|---|
+| HDF5 local | action + proprio cached | 1 615 |
+| HDF5 local | no cache | 1 434 |
+| **Lance local** | **no cache** | **3 758** |
+| Lance local | action + proprio cached | 3 897 |
+| **Lance S3** | **no cache** | **2 261** |
+| Lance S3 | action + proprio cached | 2 208 |
+| HDF5 S3 | action + proprio cached | 832 |
+| HDF5 S3 | no cache | 24 |
+
+Note: these results might vary depending on your bucket location.
+Lance local is **2.3× faster than HDF5 local** (cached). Lance S3 (no cache, no download) is **94× faster than HDF5 S3** (no cache) and still **40% faster than HDF5 local cached** — meaning you can start training immediately on a spot instance with no local disk and no data download step. 
+
+### Zero-copy dataset evolution
+
+Lance versions the table on every write. Common curation tasks cost no extra storage:
+
+- **Add a column** (e.g. a new reward signal): `table.add_columns(...)` writes only the new fragment files.
+- **Delete episodes** (e.g. failed rollouts): `table.delete("episode_idx = 42")` records a deletion in a new version file; no rows are moved.
+- **Time-travel**: `db.open_table("name", version=N)` reopens any prior snapshot of the dataset.
