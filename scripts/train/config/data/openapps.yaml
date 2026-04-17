@@ -1,0 +1,9 @@
+dataset:
+  num_steps: ${eval:'${wm.num_preds} + ${wm.history_size}'}
+  frameskip: 1
+  name: openapps_todo_trajectory
+  keys_to_load:
+    - pixels
+    - action
+  keys_to_cache:
+    - action

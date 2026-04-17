@@ -1,28 +1,49 @@
 """OpenAppsEnv — gymnasium environment wrapping Playwright + FastHTML.
 
 This is the core gym.Env implementation for OpenApps in swm. It manages
-the full lifecycle of the FastHTML server and Playwright browser,
-presenting a standard gym interface with Box(5,) actions and screenshot
-observations.
+the full lifecycle of the FastHTML server (in-process background thread)
+and Playwright browser, presenting a standard gym interface with
+MultiDiscrete(NUM_ACTIONS, GRID_X, GRID_Y) actions and screenshot observations.
 
-From swm's perspective this looks identical to PushTEnv — the server and
-browser complexity is fully encapsulated.
+Action space: MultiDiscrete([3, 32, 20])
+  action[0] in {0, 1, 2}   — 0=click, 1=scroll_down, 2=scroll_up
+  action[1] in {0..31}     — x grid cell (32px per cell)
+  action[2] in {0..19}     — y grid cell (32px per cell)
+
+The FastHTML server runs in a daemon thread within the same process,
+which means resets can be done via direct Python calls (no HTTP needed
+for state management).
 """
 
+import io
 import shutil
-from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
+import requests
 from gymnasium import spaces
 from loguru import logger
+from PIL import Image
+
+from open_apps.tasks.add_tasks_to_browsergym import get_current_state
+from open_apps.tasks.tasks import Task
 
 from .executor import (
+    GRID_X,
+    GRID_Y,
+    NUM_ACTIONS,
     VIEWPORT_HEIGHT,
     VIEWPORT_WIDTH,
-    action_vec_to_playwright,
+    action_multidiscrete_to_playwright,
 )
-from .server import start_server_process, stop_server, wait_until_healthy
+from .server import (
+    _init_app,
+    _load_hydra_config,
+    pick_free_port,
+    reset_app,
+    start_server_thread,
+    wait_until_healthy,
+)
 
 # Lazy imports for Playwright (only needed at runtime)
 _playwright_ctx = None
@@ -44,13 +65,24 @@ class OpenAppsEnv(gym.Env):
     """Gymnasium environment for OpenApps browser-based UI tasks.
 
     Wraps a FastHTML web server and a headless Chromium browser managed
-    via Playwright. Actions are Box(5,) float vectors encoding click,
-    double-click, or scroll operations. Observations are screenshots.
+    via Playwright. Actions are MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
+    integer vectors encoding click or scroll operations on a pixel grid.
+    Observations are screenshots.
+
+    Action space: MultiDiscrete([3, 32, 20])
+      action[0]: action type — 0=click, 1=scroll_down, 2=scroll_up
+      action[1]: x grid cell [0, GRID_X-1], maps to pixel x = cell * 32 + 16
+      action[2]: y grid cell [0, GRID_Y-1], maps to pixel y = cell * 32 + 16
+
+    The server runs in a background daemon thread within this process.
+    Resets are direct Python calls — no HTTP round-trip needed.
 
     Args:
         app_name: Which OpenApps app to target (e.g. "todo", "calendar").
-        task_description: Natural-language task goal for reward computation.
-        config_path: Path to OpenApps Hydra config file. None for default.
+        task: An OpenApps Task object whose ``check_if_task_is_complete``
+            method is used for reward computation. When provided,
+            ``task_description`` defaults to the task's goal string.
+        task_description: Natural-language task goal (falls back to task.goal).
         port: Port for the FastHTML server.
         max_steps: Maximum steps per episode before truncation.
         render_mode: "rgb_array" (default) for numpy screenshots.
@@ -69,43 +101,42 @@ class OpenAppsEnv(gym.Env):
     def __init__(
         self,
         app_name: str = "todo",
+        task: Task | None = None,
         task_description: str = "",
-        config_path: str | None = None,
-        port: int = 5001,
+        port: int | None = None,
         max_steps: int = 50,
         render_mode: str = "rgb_array",
-        target_state: dict | None = None,
     ):
         super().__init__()
 
         self.app_name = app_name
-        self.task_description = task_description
-        self.config_path = config_path
-        self.port = port
+        self.env_name = f"OpenApps-{app_name}"
+        self.task = task
+        self.task_description = task_description or (task.goal if task else "")
+        self.port = port if port is not None else pick_free_port()
         self.max_steps = max_steps
         self.render_mode = render_mode
-        self.target_state = target_state or {}
 
-        self.base_url = f"http://127.0.0.1:{port}"
+        self.base_url = f"http://127.0.0.1:{self.port}"
         self._step_count = 0
         self._last_screenshot = None
+        self._initial_state: dict | None = None
 
-        # Spaces — must match design notes exactly
+        # Spaces
         self.observation_space = spaces.Box(
             0, 255, (VIEWPORT_HEIGHT, VIEWPORT_WIDTH, 3), np.uint8
         )
-        self.action_space = spaces.Box(
-            low=np.array([0.0, 0.0, 0.0, -1.0, -1.0], dtype=np.float32),
-            high=np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-        )
+        self.action_space = spaces.MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
 
-        # Start server
-        self._server_proc = start_server_process(
-            config_path=config_path, port=port
+        # ── Start server in-process ──────────────────────────────────
+        self._cfg, self._tmp_logs_dir = _load_hydra_config()
+        self._asgi_app, self._cfg = _init_app(self._cfg)
+        self._server_thread, self._server = start_server_thread(
+            self._asgi_app, port=self.port
         )
         wait_until_healthy(self.base_url)
 
-        # Start browser
+        # ── Start browser ────────────────────────────────────────────
         browser = _get_playwright()
         self._context = browser.new_context(
             viewport={
@@ -118,59 +149,23 @@ class OpenAppsEnv(gym.Env):
     # ── Reset ─────────────────────────────────────────────────────────
 
     def reset(self, *, seed=None, options=None):
-        """Reset the environment to initial state.
-
-        Calls reset_all_apps via Python import (per design notes) to
-        re-seed all app databases, then navigates the browser to the
-        target app page.
-        """
+        """Reset the environment to initial state."""
         super().reset(seed=seed, options=options)
         self._step_count = 0
 
-        # Reset all apps via the generic loop (design notes §5.2)
-        self._reset_apps()
+        reset_app(self.app_name, self._cfg.apps)
+        self._initial_state = get_current_state(self.base_url)
 
-        # Navigate to the target app
         self._page.goto(f"{self.base_url}/{self.app_name}")
         self._page.wait_for_load_state("networkidle")
 
         obs = self._capture_screenshot()
-        info = {"pixels": obs}
+        info = {
+            "pixels": obs,
+            "env_name": self.env_name,
+            "goal": self.task_description,
+        }
         return obs, info
-
-    def _reset_apps(self):
-        """Reset all OpenApps databases using the generic loop.
-
-        Per design notes: calls reset_all_apps() which re-runs the
-        set_environment loop from start_page/main.py. No per-app
-        HTTP endpoints needed.
-        """
-        try:
-            from open_apps.apps.start_page.main import (
-                AVAILABLE_APPS,
-            )
-            from open_apps.configs import load_config
-
-            config = load_config(self.config_path)
-
-            # Clean code editor filesystem before reset (design notes §5.3)
-            if hasattr(config, "codeeditor") and hasattr(
-                config.codeeditor, "folder_path"
-            ):
-                folder = Path(config.codeeditor.folder_path)
-                if folder.exists():
-                    shutil.rmtree(folder)
-
-            # Generic reset loop — mirrors start_page/main.py init
-            for app_name, (module_path, getter_func) in AVAILABLE_APPS.items():
-                module = __import__(module_path, fromlist=[getter_func])
-                if hasattr(module, "set_environment"):
-                    module.set_environment(config)
-                    logger.debug(f"Reset app: {app_name}")
-
-        except Exception as e:
-            logger.warning(f"reset_all_apps failed: {e}. Falling back to page reload.")
-            self._page.reload()
 
     # ── Step ──────────────────────────────────────────────────────────
 
@@ -178,18 +173,16 @@ class OpenAppsEnv(gym.Env):
         """Execute one action and return the new observation.
 
         Args:
-            action: Box(5,) float vector.
+            action: MultiDiscrete int64 array [action_type, grid_x, grid_y].
 
         Returns:
             (obs, reward, terminated, truncated, info)
         """
         self._step_count += 1
 
-        # Execute the action via Playwright
-        action_desc = action_vec_to_playwright(action, self._page)
+        action_desc = action_multidiscrete_to_playwright(action, self._page)
         logger.debug(f"Step {self._step_count}: {action_desc}")
 
-        # Brief wait for UI to settle after action
         self._page.wait_for_timeout(300)
 
         obs = self._capture_screenshot()
@@ -199,8 +192,9 @@ class OpenAppsEnv(gym.Env):
 
         info = {
             "pixels": obs,
-            "action_desc": action_desc,
-            "step": self._step_count,
+            "env_name": self.env_name,
+            "goal": self.task_description,
+            "_action_desc": action_desc,
         }
 
         return obs, reward, terminated, truncated, info
@@ -216,10 +210,6 @@ class OpenAppsEnv(gym.Env):
     def _capture_screenshot(self) -> np.ndarray:
         """Take a Playwright screenshot and convert to numpy."""
         png_bytes = self._page.screenshot()
-        # Decode PNG bytes to numpy array
-        from PIL import Image
-        import io
-
         img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
         arr = np.array(img, dtype=np.uint8)
         self._last_screenshot = arr
@@ -228,42 +218,22 @@ class OpenAppsEnv(gym.Env):
     # ── Reward ────────────────────────────────────────────────────────
 
     def _compute_reward(self) -> float:
-        """Compute reward by comparing current app state to target.
+        """Compute reward by delegating to the OpenApps Task.
 
-        GETs the app's _all endpoint (e.g. /todo_all) and uses DeepDiff
-        to compare against the target state. Returns 1.0 on match, 0.0
-        otherwise.
+        Returns 1.0 on task completion, 0.0 otherwise.
         """
-        if not self.target_state:
+        if self.task is None or self._initial_state is None:
             return 0.0
 
         try:
-            import requests
-            from deepdiff import DeepDiff
-
-            # Map app names to their state endpoints
-            state_endpoints = {
-                "todo": "/todo_all",
-                "calendar": "/calendar_all",
-                "messages": "/messages_all",
-                "codeeditor": "/codeeditor_all",
-                "map": "/maps/landmarks",
-            }
-
-            endpoint = state_endpoints.get(self.app_name)
-            if not endpoint:
-                return 0.0
-
-            resp = requests.get(f"{self.base_url}{endpoint}", timeout=5)
-            current_state = resp.json()
-
-            diff = DeepDiff(
-                current_state,
-                self.target_state,
-                ignore_order=True,
+            current_state = get_current_state(self.base_url)
+            return (
+                1.0
+                if self.task.check_if_task_is_complete(
+                    self._initial_state, current_state
+                )
+                else 0.0
             )
-            return 0.0 if diff else 1.0
-
         except Exception as e:
             logger.warning(f"Reward computation failed: {e}")
             return 0.0
@@ -271,16 +241,26 @@ class OpenAppsEnv(gym.Env):
     # ── Cleanup ───────────────────────────────────────────────────────
 
     def close(self):
-        """Clean up browser and server resources."""
+        """Tear down browser, uvicorn server, and tmp config dir."""
         try:
-            if hasattr(self, "_page") and self._page:
+            if getattr(self, "_page", None):
                 self._page.close()
-            if hasattr(self, "_context") and self._context:
+            if getattr(self, "_context", None):
                 self._context.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Browser close failed: {e}")
 
-        if hasattr(self, "_server_proc"):
-            stop_server(self._server_proc)
+        server = getattr(self, "_server", None)
+        thread = getattr(self, "_server_thread", None)
+        if server is not None:
+            server.should_exit = True
+            if thread is not None:
+                thread.join(timeout=5.0)
+                if thread.is_alive():
+                    logger.warning("uvicorn thread did not exit within 5s")
+
+        tmp_dir = getattr(self, "_tmp_logs_dir", None)
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
         super().close()

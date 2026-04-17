@@ -13,7 +13,11 @@ import numpy as np
 from loguru import logger
 
 from stable_worldmodel.policy import BasePolicy
-from .executor import VIEWPORT_HEIGHT, VIEWPORT_WIDTH, action_str_to_box5
+from .executor import (
+    GRID_X,
+    GRID_Y,
+    action_str_to_multidiscrete,
+)
 
 
 class VLMPolicy(BasePolicy):
@@ -39,7 +43,7 @@ class VLMPolicy(BasePolicy):
         self.agent = agent
         self.task = task_description
         self.history: deque = deque(maxlen=history_len)
-        self._text_action_count = 0
+        self._dropped_action_count = 0
         self._total_steps = 0
 
     def get_action(self, obs, **kwargs) -> np.ndarray:
@@ -49,68 +53,74 @@ class VLMPolicy(BasePolicy):
             obs: Dict with at least 'pixels' key (H, W, 3 uint8 array).
 
         Returns:
-            Box(5,) float32 action vector.
+            MultiDiscrete int64 array [action_type, grid_x, grid_y].
         """
         screenshot = obs["pixels"] if isinstance(obs, dict) else obs
+        # swm's vector-env wrapping adds a leading batch dim; openapps's
+        # TarsAgent expects a plain HxWx3 frame, so normalize here.
+        screenshot = np.squeeze(screenshot)
         self.history.append(screenshot)
         self._total_steps += 1
 
-        # Call the VLM
         raw = self.agent.predict(
             screenshot=screenshot,
             task=self.task,
             history=list(self.history),
         )
 
-        # Parse the VLM output into a BrowserGym action string
         parsed = self._parse_action(raw)
 
-        # Handle text actions as no-ops (design notes §4.2)
-        if parsed.startswith("keyboard_type") or parsed.startswith("type("):
-            self._text_action_count += 1
+        # The env only supports click / scroll_up / scroll_down. Any other
+        # TARS action (type, wait, finished, hotkey, drag, ...) is dropped
+        # to a center no-op click so the episode can continue.
+        if not self._is_supported(parsed):
+            self._dropped_action_count += 1
             logger.debug(
-                f"Text action dropped ({self._text_action_count}/"
+                f"Unsupported action dropped ({self._dropped_action_count}/"
                 f"{self._total_steps}): {parsed}"
             )
-            return np.zeros(5, dtype=np.float32)
+            return np.array([[0, GRID_X // 2, GRID_Y // 2]], dtype=np.int64)
 
-        return action_str_to_box5(parsed)
+        return action_str_to_multidiscrete(parsed)[None, :]
+
+    @staticmethod
+    def _is_supported(parsed: str) -> bool:
+        """True if the parsed action maps to a click/scroll the env can run."""
+        supported = ("mouse_click", "click(", "scroll")
+        return parsed.startswith(supported)
 
     def _parse_action(self, raw_action: str) -> str:
-        """Parse raw VLM output into a BrowserGym-style action string.
-
-        Attempts to use uitars_parser if available, otherwise does basic
-        string matching.
-        """
+        """Parse raw VLM output into a BrowserGym-style action string."""
         try:
-            # Try uitars_parser from browsergym if available
             from browsergym.core.action.parsers import uitars_parser
-
             result = uitars_parser({"action": raw_action})
             return result["action"]
         except (ImportError, Exception):
-            # Fallback: return raw string if it already looks like an action
             return raw_action
 
     @property
-    def text_action_rate(self) -> float:
-        """Fraction of steps where text actions were dropped."""
+    def dropped_action_rate(self) -> float:
+        """Fraction of steps where unsupported actions were dropped."""
         if self._total_steps == 0:
             return 0.0
-        return self._text_action_count / self._total_steps
+        return self._dropped_action_count / self._total_steps
 
 
 class DummyPolicy(BasePolicy):
-    """Random click policy for smoke-testing without a VLM."""
+    """Random action policy for smoke-testing without a VLM.
 
-    def __init__(self, **kwargs):
+    Samples uniformly from MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y]).
+    """
+
+    def __init__(self, seed: int | None = None, **kwargs):
         super().__init__(**kwargs)
         self.type = "dummy"
+        self.seed = seed
 
     def get_action(self, obs, **kwargs) -> np.ndarray:
-        """Return a random click action."""
-        vec = np.zeros(5, dtype=np.float32)
-        vec[0] = np.random.uniform(0.0, 0.33)  # always click
-        vec[1] = np.random.uniform(0.0, 1.0)   # random x
-        vec[2] = np.random.uniform(0.0, 1.0)   # random y
-        return vec
+        """Return a random MultiDiscrete action."""
+        return self.env.action_space.sample()
+
+    def set_seed(self, seed: int) -> None:
+        if self.env is not None:
+            self.env.action_space.seed(seed)
