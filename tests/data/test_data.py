@@ -423,6 +423,45 @@ def test_lance_dataset_output_parity(paired_datasets):
         assert torch.allclose(h_item['observation'], l_item['observation'])
 
 
+def test_lance_dataset_output_parity_frameskip(paired_datasets):
+    """Parity holds with frameskip > 1: downsampling and action reshape must match."""
+    # Episodes are length 4; frameskip=2, num_steps=2 → span=4, exactly fills one episode.
+    h5_ds, lance_ds = _make_hdf5_lance_pair(
+        paired_datasets, num_steps=2, frameskip=2
+    )
+    assert len(h5_ds) == len(lance_ds)
+    for idx in range(len(lance_ds)):
+        h_item, l_item = h5_ds[idx], lance_ds[idx]
+        # observation is downsampled: shape (num_steps, obs_dim)
+        assert h_item['observation'].shape == l_item['observation'].shape
+        assert torch.allclose(h_item['observation'], l_item['observation'])
+        # action is NOT downsampled, then reshaped to (num_steps, frameskip * action_dim)
+        assert h_item['action'].shape == l_item['action'].shape
+        assert torch.allclose(h_item['action'], l_item['action'])
+        # pixels: one frame per macro-step after frameskip
+        assert h_item['pixels'].shape == l_item['pixels'].shape
+        assert torch.equal(h_item['pixels'], l_item['pixels'])
+
+
+def test_lance_dataset_getitems_matches_getitem(paired_datasets):
+    """__getitems__ batch path must return the same values as N individual __getitem__ calls."""
+    _, lance_ds = _make_hdf5_lance_pair(
+        paired_datasets, num_steps=2, frameskip=1
+    )
+    indices = list(range(len(lance_ds)))
+    # Batch path: one Lance take for all samples
+    batch_results = lance_ds.__getitems__(indices)
+    # Single-item path: one Lance take per sample
+    for i, idx in enumerate(indices):
+        single = lance_ds[idx]
+        assert torch.equal(batch_results[i]['pixels'], single['pixels']), \
+            f"pixels mismatch at idx={idx}"
+        assert torch.allclose(batch_results[i]['action'], single['action']), \
+            f"action mismatch at idx={idx}"
+        assert torch.allclose(batch_results[i]['observation'], single['observation']), \
+            f"observation mismatch at idx={idx}"
+
+
 def test_lance_dataset_get_col_data(paired_datasets):
     """get_col_data should return full columns when reading from Lance."""
     _, lance_ds = _make_hdf5_lance_pair(
@@ -475,6 +514,52 @@ def test_create_dataset_infers_lance_backend(paired_datasets):
         }
     )
     assert isinstance(dataset, LanceDataset)
+
+
+def test_convert_hdf5_to_lance_multi_camera(tmp_path):
+    """Converter should encode multiple image columns and transparently rename
+    dot-separated HDF5 names to underscore-separated Lance names."""
+    lancedb = pytest.importorskip('lancedb')
+
+    # HDF5 file uses dot-separated names (common in real datasets).
+    # The converter must rename them to underscores without user intervention.
+    datasets_dir = tmp_path / 'datasets'
+    datasets_dir.mkdir()
+    h5_path = datasets_dir / 'multi_cam.h5'
+    ep_lengths = [4, 4]
+    total = sum(ep_lengths)
+    rng = np.random.default_rng(0)
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=np.array(ep_lengths))
+        f.create_dataset('ep_offset', data=np.array([0, 4]))
+        f.create_dataset('pixels.top', data=rng.integers(0, 255, (total, 8, 8, 3), dtype=np.uint8))
+        f.create_dataset('pixels.wrist', data=rng.integers(0, 255, (total, 8, 8, 3), dtype=np.uint8))
+        f.create_dataset('action', data=rng.standard_normal((total, 2)).astype(np.float32))
+
+    lance_dir = tmp_path / 'lance'
+    summary = convert_hdf5_to_lance(
+        h5_path=h5_path,
+        lance_uri=str(lance_dir),
+        table_name='multi_cam',
+        columns=['pixels.top', 'pixels.wrist', 'action'],
+        overwrite=True,
+    )
+    assert summary['rows'] == total
+
+    # Lance table has underscore names; LanceDataset auto-detects them as image columns.
+    ds = LanceDataset(
+        uri=str(lance_dir),
+        table_name='multi_cam',
+        num_steps=1,
+        keys_to_load=['pixels_top', 'pixels_wrist', 'action'],
+    )
+    assert 'pixels_top' in ds.image_columns
+    assert 'pixels_wrist' in ds.image_columns
+
+    item = ds[0]
+    assert item['pixels_top'].shape == (1, 3, 8, 8)    # (T, C, H, W)
+    assert item['pixels_wrist'].shape == (1, 3, 8, 8)
+    assert item['action'].shape == (1, 2)
 
 
 def test_convert_hdf5_to_lance(tmp_path, sample_h5_file):

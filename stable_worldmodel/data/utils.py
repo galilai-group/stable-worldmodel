@@ -253,4 +253,4 @@ def _extract_zst(archive: Path) -> None:
         )
 
 
-__all__ = ['load_dataset', 'get_cache_dir', 'ensure_dir_exists']
+__all__ = ['load_dataset', 'get_cache_dir', 'ensure_dir_exists', 'create_dataset']

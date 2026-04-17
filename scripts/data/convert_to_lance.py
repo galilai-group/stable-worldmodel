@@ -1,4 +1,21 @@
-"""CLI to convert stable-worldmodel HDF5 datasets into LanceDB tables."""
+"""CLI to convert stable-worldmodel HDF5 datasets into LanceDB tables.
+
+Column naming rules
+-------------------
+Lance uses ``.`` as a struct-field path separator, so **top-level column names
+must not contain dots**.  Use underscores for all multi-part names:
+
+  Correct : pixels_top, pixels_wrist_left, observation_state
+  Wrong   : pixels.top, pixels.wrist_left, observation.state
+
+Image columns are auto-detected by naming convention: ``pixels`` (single
+camera) or ``pixels_<view>`` (multi-camera).  Use ``--columns`` to pass
+the column list explicitly if auto-detection is wrong for your dataset.
+
+If your HDF5 file uses dot-separated column names (e.g. ``pixels.top``),
+rename them before conversion — h5py does not restrict key names but Lance
+will reject the schema.
+"""
 
 from __future__ import annotations
 
