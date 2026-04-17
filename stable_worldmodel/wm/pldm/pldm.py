@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 
-from .module import Embedder, MLP, Predictor, detach_clone
+from .module import detach_clone
 
 
 class PLDM(nn.Module):
@@ -153,4 +153,4 @@ class PLDM(nn.Module):
         return cost
 
 
-__all__ = ['LeWM']
+__all__ = ['PLDM']

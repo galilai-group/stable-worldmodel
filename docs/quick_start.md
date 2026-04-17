@@ -244,6 +244,21 @@ print(sample['action'].shape)   # (4, action_dim)
 ```
 
 `LanceDataset` streams only the requested columns via LanceDB's permutation API, never materializes the entire table in RAM, and decodes JPEG frames inside DataLoader workers. When reading from secure endpoints, provide the needed credentials or custom endpoints through `connect_kwargs`.
+```python
+from stable_worldmodel.data import LeRobotAdapter
+
+dataset = LeRobotAdapter(
+    repo_id='lerobot/pusht',
+    primary_camera_key='observation.images.top',  # gets mapped to `pixels`
+    num_steps=4,
+    frameskip=1,
+    keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
+    keys_to_cache=['action', 'proprio', 'ep_idx', 'step_idx'],
+)
+```
+
+!!! info "LeRobot Support"
+    LeRobotAdapter support is read-only and requires Python 3.12+. You can install it passing in the optional dependency via `pip install 'stable-worldmodel[lerobot]'`.
 
 The dataset is compatible with PyTorch `DataLoader` for batched training.
 
