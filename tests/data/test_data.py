@@ -17,7 +17,7 @@ from stable_worldmodel.data import (
     LanceDataset,
     convert_hdf5_to_lance,
 )
-from stable_worldmodel.data.utils import create_dataset, get_cache_dir
+from stable_worldmodel.data.utils import build_script_dataset, create_dataset, get_cache_dir
 from stable_worldmodel.utils import DEFAULT_CACHE_DIR
 
 
@@ -481,6 +481,95 @@ def test_lance_dataset_keys_to_cache(paired_datasets):
         keys_to_cache=['observation'],
     )
     assert 'observation' in lance_ds._cache
+
+
+def test_build_script_dataset_hdf5_default(sample_h5_file):
+    """Without dataset_uri, build_script_dataset returns an HDF5Dataset."""
+    cache_dir, name = sample_h5_file
+    ds = build_script_dataset(
+        {'dataset_name': name, 'n_steps': 1, 'frameskip': 1},
+        keys_to_load=['observation', 'action'],
+        keys_to_cache=['action'],
+        cache_dir=str(cache_dir),
+    )
+    assert isinstance(ds, HDF5Dataset)
+
+
+def test_build_script_dataset_routes_to_lance(paired_datasets):
+    """With dataset_uri pointing at a .lance path, it dispatches to Lance."""
+    lance_cfg = paired_datasets['lance']
+    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
+    ds = build_script_dataset(
+        {'dataset_uri': full_path, 'n_steps': 1, 'frameskip': 1},
+        keys_to_load=paired_datasets['keys'],
+    )
+    assert isinstance(ds, LanceDataset)
+    assert ds.table_name == lance_cfg['table_name']
+
+
+def test_lance_dataset_auto_detects_binary_image_column(paired_datasets):
+    """No image_columns kwarg needed: pa.binary columns are detected as images."""
+    lance_cfg = paired_datasets['lance']
+    ds = LanceDataset(
+        uri=lance_cfg['uri'],
+        table_name=lance_cfg['table_name'],
+        num_steps=2,
+        frameskip=1,
+        keys_to_load=paired_datasets['keys'],
+    )
+    assert ds.image_columns == {'pixels'}
+    sample = ds[0]
+    # Decoded to (T, C, H, W) — 8x8 RGB in the fixture.
+    assert sample['pixels'].shape == (2, 3, 8, 8)
+
+
+def test_lance_dataset_uri_shorthand(paired_datasets):
+    """A single ``.lance`` URI should split into (db_uri, table_name)."""
+    lance_cfg = paired_datasets['lance']
+    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
+
+    shorthand = LanceDataset(
+        uri=full_path,
+        num_steps=2,
+        frameskip=1,
+        keys_to_load=paired_datasets['keys'],
+        image_columns=['pixels'],
+    )
+    explicit = LanceDataset(
+        uri=lance_cfg['uri'],
+        table_name=lance_cfg['table_name'],
+        num_steps=2,
+        frameskip=1,
+        keys_to_load=paired_datasets['keys'],
+        image_columns=['pixels'],
+    )
+    assert shorthand.uri == explicit.uri
+    assert shorthand.table_name == explicit.table_name
+    assert len(shorthand) == len(explicit)
+    assert torch.equal(shorthand[0]['pixels'], explicit[0]['pixels'])
+
+
+def test_lance_dataset_uri_shorthand_via_create_dataset(paired_datasets):
+    """create_dataset should also accept the ``.lance`` shorthand."""
+    lance_cfg = paired_datasets['lance']
+    full_path = f"{lance_cfg['uri']}/{lance_cfg['table_name']}.lance"
+    ds = create_dataset(
+        {
+            'uri': full_path,
+            'num_steps': 2,
+            'frameskip': 1,
+            'keys_to_load': paired_datasets['keys'],
+            'image_columns': ['pixels'],
+        }
+    )
+    assert isinstance(ds, LanceDataset)
+    assert ds.table_name == lance_cfg['table_name']
+
+
+def test_lance_dataset_missing_table_name_errors(tmp_path):
+    """URIs that don't end in .lance must still require an explicit table_name."""
+    with pytest.raises(ValueError, match='table_name'):
+        LanceDataset(uri=str(tmp_path / 'lance_db'), num_steps=1)
 
 
 def test_create_dataset_lance_backend(paired_datasets):

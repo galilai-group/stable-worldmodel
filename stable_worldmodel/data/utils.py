@@ -81,6 +81,59 @@ def create_dataset(config: Any):
     )
 
 
+def build_script_dataset(
+    cfg: Any,
+    *,
+    keys_to_load: list[str],
+    keys_to_cache: list[str] | None = None,
+    cache_dir: str | Path | None = None,
+    extra: dict[str, Any] | None = None,
+):
+    """Dataset factory for the flat-config training scripts (gcbc, prejepa, …).
+
+    These scripts use scalar config keys (``cfg.dataset_name``, ``cfg.n_steps``,
+    ``cfg.frameskip``) rather than a ``cfg.data.dataset`` block, so they can't
+    just forward a sub-config to :func:`create_dataset`.  This helper bridges
+    the two styles:
+
+    * By default it builds an :class:`HDF5Dataset` from ``cfg.dataset_name``.
+    * If ``cfg.dataset_uri`` is set (e.g. via ``+dataset_uri=…`` on the CLI)
+      it routes to :class:`LanceDataset` instead.  The URI can be a full
+      ``.../foo.lance`` path (table name inferred) or a database URI paired
+      with ``cfg.dataset_table_name``.
+
+    ``extra`` is merged last and wins over inferred keys.
+    """
+    def _read(key, default=None):
+        if isinstance(cfg, Mapping):
+            return cfg.get(key, default)
+        return getattr(cfg, key, default)
+
+    dataset_uri = _read('dataset_uri')
+    table_name = _read('dataset_table_name')
+
+    params: dict[str, Any] = {
+        'num_steps': _read('n_steps'),
+        'frameskip': _read('frameskip'),
+        'keys_to_load': list(keys_to_load),
+    }
+    if keys_to_cache is not None:
+        params['keys_to_cache'] = list(keys_to_cache)
+
+    if dataset_uri:
+        params['uri'] = dataset_uri
+        if table_name:
+            params['table_name'] = table_name
+    else:
+        params['name'] = _read('dataset_name')
+        if cache_dir is not None:
+            params['cache_dir'] = cache_dir
+
+    if extra:
+        params.update(extra)
+    return create_dataset(params)
+
+
 def load_dataset(name: str, cache_dir: str = None, **kwargs):
     """Resolve a dataset and return an instantiated :class:`HDF5Dataset`.
 
@@ -253,4 +306,10 @@ def _extract_zst(archive: Path) -> None:
         )
 
 
-__all__ = ['load_dataset', 'get_cache_dir', 'ensure_dir_exists', 'create_dataset']
+__all__ = [
+    'load_dataset',
+    'get_cache_dir',
+    'ensure_dir_exists',
+    'create_dataset',
+    'build_script_dataset',
+]

@@ -239,7 +239,7 @@ class LanceDataset(Dataset):
     The table is expected to store flattened timesteps with two index columns:
     ``episode_idx`` and ``step_idx``. All other columns are treated as data.
 
-    **Multiprocessing: must use ``spawn`` on Linux.** 
+    **Multiprocessing: ``spawn`` is forced on Linux.** Lance is not fork-safe
 
     **Why ``keys_to_cache`` is not needed here (unlike HDF5Dataset)**
 
@@ -265,8 +265,15 @@ class LanceDataset(Dataset):
     ``keys_to_cache`` empty (the default).
 
     Args:
-        uri: LanceDB URI (local path, ``s3://`` bucket, ``hf://`` dataset, ...).
-        table_name: Table to open inside the LanceDB database.
+        uri: Either a LanceDB database URI (local folder, ``s3://`` bucket,
+            ``hf://`` dataset, …) paired with an explicit ``table_name``, or a
+            full table path ending in ``.lance`` — e.g.
+            ``./bench_data/lance_store/lewm_pusht.lance`` or
+            ``s3://bucket/training/lewm_pusht.lance``. In the second form the
+            parent directory becomes the database URI and the table name is
+            inferred from the ``.lance`` stem, so ``table_name`` can be omitted.
+        table_name: Table to open inside the LanceDB database. Optional when
+            ``uri`` already ends in ``.lance``.
         frameskip: Number of raw rows to skip between returned steps.
         num_steps: Length of the returned temporal window.
         transform: Optional transform composed on top of the returned dict.
@@ -278,9 +285,11 @@ class LanceDataset(Dataset):
             column accessed millions of times outside the DataLoader hot path).
         keys_to_merge: Optional mapping of target -> source pattern(s) to
             concatenate and expose as a new cached column.
-        image_columns: Columns storing encoded images (JPEG/PNG). These are
-            decoded per frame and returned as ``(T, C, H, W)`` tensors similar
-            to :class:`HDF5Dataset`.
+        image_columns: Optional override for image auto-detection. By default
+            any ``pa.binary`` / ``pa.large_binary`` column in the table is
+            treated as an encoded image blob and decoded per frame into a
+            ``(T, C, H, W)`` tensor — you only need to pass this when a binary
+            column holds something other than an image.
         episode_index_column: Name of the column containing episode indices.
         step_index_column: Name of the column containing per-episode step ids.
         connect_kwargs: Extra kwargs forwarded to :func:`lancedb.connect`. This
@@ -295,7 +304,7 @@ class LanceDataset(Dataset):
     def __init__(
         self,
         uri: str,
-        table_name: str,
+        table_name: str | None = None,
         *,
         frameskip: int = 1,
         num_steps: int = 1,
@@ -308,6 +317,7 @@ class LanceDataset(Dataset):
         step_index_column: str = 'step_idx',
         connect_kwargs: dict[str, Any] | None = None,
     ) -> None:
+        uri, table_name = self._resolve_uri_and_table(uri, table_name)
         self.uri = uri
         self.table_name = table_name
         self.connect_kwargs = connect_kwargs or {}
@@ -335,19 +345,24 @@ class LanceDataset(Dataset):
                 f"Columns {missing} missing from Lance table '{table_name}'"
             )
 
-        # Auto-detect image columns from naming convention when not specified:
-        # 'pixels' (single camera) or 'pixels_<view>' (multi-camera).
-        # Note: dots cannot be used as separators — Lance reserves '.' for
-        # struct field access and rejects top-level names containing it.
-        default_image_cols = [
-            c for c in self._keys if c == 'pixels' or c.startswith('pixels_')
-        ]
-        requested_images = (
-            image_columns if image_columns is not None else default_image_cols
-        )
-        self.image_columns = {
-            col for col in requested_images if col in self._keys
+        # Auto-detect image columns from the Arrow schema: any binary /
+        # large-binary column is treated as an encoded image blob. This is the
+        # type our converter emits for JPEG frames and matches what
+        # ``_extract_column`` already hands back for binary columns.  Users can
+        # still pass ``image_columns=[...]`` to narrow the set when a binary
+        # column holds something other than an image (rare).
+        pa = self._pa
+        binary_cols = {
+            field.name
+            for field in table.schema
+            if pa.types.is_binary(field.type) or pa.types.is_large_binary(field.type)
         }
+        if image_columns is None:
+            self.image_columns = binary_cols & set(self._keys)
+        else:
+            self.image_columns = {
+                col for col in image_columns if col in self._keys
+            }
 
         lengths, offsets = self._compute_episode_structure(table)
 
@@ -408,14 +423,61 @@ class LanceDataset(Dataset):
         db = self._lancedb.connect(self.uri, **self.connect_kwargs)
         return db.open_table(self.table_name)
 
+    @staticmethod
+    def _resolve_uri_and_table(
+        uri: str, table_name: str | None
+    ) -> tuple[str, str]:
+        """Accept either ``(uri, table_name)`` or a single ``.../foo.lance`` URI.
+
+        LanceDB stores each table as ``<uri>/<table_name>.lance``.  When users
+        already know the full table path, forcing them to split it into two
+        config keys is needless friction — especially with Hydra overrides.
+        This helper pulls the split apart whenever ``uri`` ends in ``.lance``
+        and ``table_name`` is unset, and errors clearly when neither is true.
+        """
+        if table_name is not None:
+            return uri, table_name
+
+        stripped = uri.rstrip('/')
+        if not stripped.lower().endswith('.lance'):
+            raise ValueError(
+                "LanceDataset: ``table_name`` was not provided and ``uri`` "
+                f"({uri!r}) does not end in '.lance'. Either pass ``table_name`` "
+                "explicitly, or point ``uri`` at the full table path, e.g. "
+                "'./store/lewm_pusht.lance' or 's3://bucket/lewm_pusht.lance'."
+            )
+
+        # Split at the last path separator, honouring both '/' and scheme URIs
+        # like s3://bucket/path/foo.lance (still slash-separated after scheme).
+        sep = stripped.rfind('/')
+        if sep < 0:
+            # Bare "foo.lance" relative path.
+            parent, leaf = '.', stripped
+        else:
+            parent, leaf = stripped[:sep], stripped[sep + 1:]
+        inferred_name = leaf[: -len('.lance')]
+        if not inferred_name:
+            raise ValueError(
+                f"LanceDataset: could not infer table name from uri {uri!r}."
+            )
+        return parent, inferred_name
+
     @classmethod
     def _maybe_warn_fork_start_method(cls) -> None:
-        """Warn once if workers will inherit Lance state via ``fork``.
+        """Force the multiprocessing start method to ``spawn`` on Linux.
 
-        Lance's internal tokio threadpool is not fork-safe; forked
-        DataLoader workers deadlock silently on first read.  macOS
-        already defaults to ``spawn``.  On Linux the default is ``fork``
-        which leads to hangs unless the caller overrides it.
+        Lance's internal tokio threadpool is not fork-safe; forked DataLoader
+        workers deadlock silently on first read.  macOS already defaults to
+        ``spawn``.  On Linux we flip the process-wide default from ``fork`` to
+        ``spawn`` eagerly — the alternative is a silent hang, so the change is
+        the lesser evil.  PyTorch ``DataLoader`` picks up the new default
+        automatically (it calls ``multiprocessing.get_start_method()`` when
+        ``multiprocessing_context`` is left unset).
+
+        We only touch the setting when it is currently ``None`` (never set) or
+        ``'fork'`` — if the user has already chosen ``'spawn'`` or
+        ``'forkserver'`` we leave it alone.  If ``set_start_method`` fails
+        (child processes already created), we fall back to a warning.
         """
         if cls._fork_warning_emitted:
             return
@@ -423,17 +485,30 @@ class LanceDataset(Dataset):
         import sys
 
         if sys.platform != 'linux':
+            cls._fork_warning_emitted = True
             return
-        if mp.get_start_method(allow_none=True) == 'spawn':
+
+        current = mp.get_start_method(allow_none=True)
+        if current not in (None, 'fork'):
+            cls._fork_warning_emitted = True
             return
-        logging.warning(
-            'LanceDataset detected the default multiprocessing start method is '
-            "'%s' on Linux. Lance is not fork-safe; DataLoader workers may "
-            "deadlock silently. Call multiprocessing.set_start_method('spawn', "
-            "force=True) once at program start, or pass "
-            "multiprocessing_context='spawn' to torch.utils.data.DataLoader.",
-            mp.get_start_method(allow_none=True) or 'fork (default)',
-        )
+
+        try:
+            mp.set_start_method('spawn', force=True)
+            logging.info(
+                "LanceDataset: set multiprocessing start method to 'spawn' "
+                "(was %s). Lance is not fork-safe on Linux, so DataLoader "
+                "workers must start via spawn to avoid silent deadlocks.",
+                current or 'default (fork)',
+            )
+        except RuntimeError as exc:
+            logging.warning(
+                "LanceDataset could not switch multiprocessing start method "
+                "to 'spawn' (%s). If DataLoader uses num_workers > 0 on Linux, "
+                "workers may deadlock silently. Set spawn explicitly at program "
+                "start or pass multiprocessing_context='spawn' to DataLoader.",
+                exc,
+            )
         cls._fork_warning_emitted = True
 
     def _compute_episode_structure(self, table) -> tuple[np.ndarray, np.ndarray]:

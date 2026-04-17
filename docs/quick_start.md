@@ -225,14 +225,15 @@ dataset = HDF5Dataset(
     keys_to_load=['pixels', 'action', 'state'],
 )
 
-# LanceDB table (local folder, hf:// dataset, or s3:// bucket)
+# LanceDB table — point at the full .lance table path (local folder,
+# hf:// dataset, or s3:// bucket). The table name is inferred from the suffix.
+# Image columns are auto-detected from the Arrow schema (any pa.binary column),
+# so no extra image_columns arg is needed in the common case.
 lance_dataset = LanceDataset(
-    uri='s3://my-bucket/lewm',
-    table_name='lewm_pusht',
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
     frameskip=5,
     num_steps=4,
     keys_to_load=['pixels', 'action', 'proprio'],
-    image_columns=['pixels'],
     connect_kwargs={'aws_access_key_id': '***', 'aws_secret_access_key': '***'},
 )
 

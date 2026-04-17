@@ -40,14 +40,17 @@ The **`LanceDataset`** streams directly from a Lance table (local path, `hf://` 
 from stable_worldmodel.data import LanceDataset
 
 dataset = LanceDataset(
-    uri='s3://my-bucket/lewm',       # or ./lewm_lance, hf://datasets/…
-    table_name='lewm_pusht',
+    # Point at the full .lance table path — table name is inferred.
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',  # or ./lewm_lance/lewm_pusht.lance, hf://datasets/…
     num_steps=4,
     frameskip=5,
     keys_to_load=['pixels', 'action', 'proprio'],
-    image_columns=['pixels'],
     connect_kwargs={'aws_region': 'us-east-2'},  # optional credentials/region
 )
+# Image columns are auto-detected from the Arrow schema (any pa.binary column).
+# Pass image_columns=[...] only to override that default.
+# Equivalent two-argument form (if you want to share a database URI across tables):
+# LanceDataset(uri='s3://my-bucket/lewm', table_name='lewm_pusht', ...)
 ```
 
 !!! tip
@@ -244,14 +247,11 @@ Hydra configs stay unchanged: override Lance-specific keys at launch time, e.g.
 
 ```bash
 python scripts/train/lewm.py \
-  data.dataset.uri=./lewm_lance \
-  data.dataset.table_name=lewm_pusht \
-  data.dataset.keys_to_load='[pixels,action,proprio,state]' \
-  data.dataset.keys_to_cache='[action,proprio,state]' \
-  data.dataset.image_columns='[pixels]'
+  +data.dataset.uri=./lewm_lance/lewm_pusht.lance \
+  data.dataset.keys_to_load='[pixels,action,proprio,state]'
 ```
 
-Providing `uri`/`table_name` automatically instantiates `LanceDataset`, so existing HDF5 configs remain backward compatible.
+Providing `uri` (or the explicit `uri`+`table_name` pair) automatically instantiates `LanceDataset`, so existing HDF5 configs remain backward compatible. The `.../foo.lance` shorthand infers the table name from the suffix — use a separate `table_name` only when you want to share a database URI across multiple tables.
 
 ---
 

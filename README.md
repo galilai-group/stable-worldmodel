@@ -35,10 +35,10 @@ world.record_dataset(dataset_name='pusht_demo', episodes=100)
 
 # load dataset (HDF5 or Lance) and train your world model
 dataset = HDF5Dataset(name='pusht_demo', num_steps=16)
-# or stream directly from LanceDB (local path or s3:// bucket)
+# or stream directly from LanceDB — point at the full .lance table path
+# (local folder or s3:// bucket); table name is inferred from the suffix
 lance_dataset = LanceDataset(
-    uri='s3://my-bucket/lewm',
-    table_name='lewm_pusht',
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
     num_steps=16,
     frameskip=5,
 )
@@ -78,14 +78,11 @@ Training configs remain untouched: override Lance-specific fields at launch time
 
 ```bash
 python scripts/train/lewm.py \
-  data.dataset.uri=./lewm_lance \
-  data.dataset.table_name=lewm_pusht \
-  data.dataset.keys_to_load='[pixels,action,proprio,state]' \
-  data.dataset.keys_to_cache='[action,proprio,state]' \
-  data.dataset.image_columns='[pixels]'
+  +data.dataset.uri=./lewm_lance/lewm_pusht.lance \
+  data.dataset.keys_to_load='[pixels,action,proprio,state]'
 ```
 
-Whenever `uri`/`table_name` are present, `swm.data.create_dataset` automatically switches to `LanceDataset`, so existing HDF5 configs stay fully backward compatible.
+Whenever `uri` is present, `swm.data.create_dataset` automatically switches to `LanceDataset`, so existing HDF5 configs stay fully backward compatible. `uri` can be the full `.../foo.lance` table path (table name is inferred from the suffix) or an explicit `uri=<db>` + `table_name=<foo>` pair if you prefer.
 
 <p align="center">
   <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">

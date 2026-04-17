@@ -233,15 +233,13 @@ def run(cfg):
     encoding_keys = list(cfg.wm.get('encoding', {}).keys())
     keys_to_load = ['pixels'] + encoding_keys
 
-    dataset = swm.data.HDF5Dataset(
-        cfg.dataset_name,
-        num_steps=cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
-        cache_dir=cfg.get('cache_dir', None),
+    dataset = swm.data.build_script_dataset(
+        cfg,
         keys_to_load=keys_to_load,
         keys_to_cache=encoding_keys,
+        cache_dir=cfg.get('cache_dir', None),
     )
+    dataset.transform = None
 
     normalizers = [
         get_column_normalizer(dataset, col, col)

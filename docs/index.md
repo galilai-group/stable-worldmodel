@@ -85,10 +85,9 @@ dataset = HDF5Dataset(
     num_steps=16,
     keys_to_load=['pixels', 'action', 'state']
 )
-# or connect to LanceDB directly (local path or s3:// bucket)
+# or connect to LanceDB directly — full .lance table path (local or s3://)
 lance_dataset = LanceDataset(
-    uri='s3://my-bucket/lewm',
-    table_name='lewm_pusht',
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
     frameskip=5,
     num_steps=16,
 )

@@ -57,15 +57,13 @@ def get_data(cfg):
     if not hasattr(cfg, 'local_cache_dir'):
         cache_dir = os.environ.get('SLURM_TMPDIR', None)
 
-    dataset = swm.data.HDF5Dataset(
-        cfg.dataset_name,
-        num_steps=cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
-        cache_dir=cache_dir,
+    dataset = swm.data.build_script_dataset(
+        cfg,
         keys_to_load=['pixels', 'action', 'proprio'],
         keys_to_cache=['action', 'proprio'],
+        cache_dir=cache_dir,
     )
+    dataset.transform = None
 
     norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
     norm_proprio_transform = get_column_normalizer(

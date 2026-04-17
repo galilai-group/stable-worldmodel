@@ -80,10 +80,9 @@ from stable_worldmodel.policy import RandomPolicy # or your trained policy
 
 # 1. Load a dataset for initial states
 dataset = HDF5Dataset("pusht_random", cache_dir="./data")
-# or stream straight from LanceDB if the dataset lives on S3 / hf://
+# or stream straight from LanceDB — full .lance path, table inferred
 lance_dataset = LanceDataset(
-    uri='s3://my-bucket/lewm',
-    table_name='lewm_pusht',
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
     num_steps=4,
     frameskip=5,
 )

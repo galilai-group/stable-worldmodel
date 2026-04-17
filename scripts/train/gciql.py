@@ -61,15 +61,13 @@ def get_data(cfg, goal_probabilities):
     keys_to_load = ['pixels', 'action'] + (['proprio'] if use_proprio else [])
     keys_to_cache = ['action'] + (['proprio'] if use_proprio else [])
 
-    dataset = swm.data.HDF5Dataset(
-        cfg.dataset_name,
-        num_steps=cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
-        cache_dir=cache_dir,
+    dataset = swm.data.build_script_dataset(
+        cfg,
         keys_to_load=keys_to_load,
         keys_to_cache=keys_to_cache,
+        cache_dir=cache_dir,
     )
+    dataset.transform = None
 
     norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
 
