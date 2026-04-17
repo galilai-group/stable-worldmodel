@@ -234,66 +234,28 @@ class HDF5Dataset(Dataset):
 
 
 class LanceDataset(Dataset):
-    """Dataset backed by LanceDB tables.
+    """Dataset backed by a LanceDB table of flattened timesteps.
 
-    The table is expected to store flattened timesteps with two index columns:
-    ``episode_idx`` and ``step_idx``. All other columns are treated as data.
+    The table carries two index columns (``episode_idx``, ``step_idx``); rows
+    must be episode-contiguous (``convert_hdf5_to_lance`` guarantees this).
 
-    **Multiprocessing: ``spawn`` is forced on Linux.** Lance is not fork-safe
-
-    **Why ``keys_to_cache`` is not needed here (unlike HDF5Dataset)**
-
-    :class:`HDF5Dataset` caches columns because HDF5 is a single compressed
-    file: every random-access read must locate and decompress the relevant
-    chunk, so pulling the whole column into RAM once pays off quickly.
-
-    Lance has a fundamentally different access pattern:
-
-    * Columns are stored in separate fragment files — a projection onto
-      ``['action', 'proprio']`` never touches the pixel fragments at all.
-    * :meth:`__getitems__` batches the entire batch's row IDs into **one**
-      ``Permutation.take()`` call, so Lance already reads a large sequential
-      slice from each fragment rather than many tiny random reads.
-    * For remote storage (S3/GCS) this reduces round-trips from
-      ``batch_size`` to ``1`` per batch — the dominant cost is transfer
-      bandwidth, not seek latency.
-
-    The non-cached path is already fast enough for training when using lance
-    compared to H5 caching via
-    ``keys_to_cache`` offers little extra throughput while risking **OOM on
-    massive datasets** and slowing startup with a full column scan.  Leave
-    ``keys_to_cache`` empty (the default).
+    On Linux, construction forces the multiprocessing start method to
+    ``spawn`` (Lance's tokio pool is not fork-safe).  See
+    ``docs/lance_implementation.md`` for the full design notes, including
+    why ``keys_to_cache`` is normally unnecessary here.
 
     Args:
-        uri: Either a LanceDB database URI (local folder, ``s3://`` bucket,
-            ``hf://`` dataset, …) paired with an explicit ``table_name``, or a
-            full table path ending in ``.lance`` — e.g.
-            ``./bench_data/lance_store/lewm_pusht.lance`` or
-            ``s3://bucket/training/lewm_pusht.lance``. In the second form the
-            parent directory becomes the database URI and the table name is
-            inferred from the ``.lance`` stem, so ``table_name`` can be omitted.
-        table_name: Table to open inside the LanceDB database. Optional when
-            ``uri`` already ends in ``.lance``.
-        frameskip: Number of raw rows to skip between returned steps.
-        num_steps: Length of the returned temporal window.
-        transform: Optional transform composed on top of the returned dict.
-        keys_to_load: Explicit list of columns to read. Defaults to all
-            non-index columns in the table.
-        keys_to_cache: Columns to fully materialise into RAM.  **Not
-            recommended** — see note above.  Accepted for API parity with
-            :class:`HDF5Dataset` and for unusual cases (e.g. a tiny auxiliary
-            column accessed millions of times outside the DataLoader hot path).
-        keys_to_merge: Optional mapping of target -> source pattern(s) to
-            concatenate and expose as a new cached column.
-        image_columns: Optional override for image auto-detection. By default
-            any ``pa.binary`` / ``pa.large_binary`` column in the table is
-            treated as an encoded image blob and decoded per frame into a
-            ``(T, C, H, W)`` tensor — you only need to pass this when a binary
-            column holds something other than an image.
-        episode_index_column: Name of the column containing episode indices.
-        step_index_column: Name of the column containing per-episode step ids.
-        connect_kwargs: Extra kwargs forwarded to :func:`lancedb.connect`. This
-            is how credentials for S3/object storage endpoints are supplied.
+        uri: LanceDB database URI, or a full ``.../foo.lance`` path (table
+            name is then inferred from the ``.lance`` stem).
+        table_name: Table inside the database; optional when ``uri`` ends
+            in ``.lance``.
+        frameskip, num_steps, transform, keys_to_load, keys_to_cache,
+            keys_to_merge: mirror :class:`HDF5Dataset`.
+        image_columns: optional override — every ``pa.binary`` /
+            ``pa.large_binary`` column is treated as an encoded image by
+            default.
+        episode_index_column, step_index_column: index column names.
+        connect_kwargs: forwarded to :func:`lancedb.connect` (e.g. S3 creds).
     """
 
     _lancedb = None
@@ -329,50 +291,32 @@ class LanceDataset(Dataset):
         self._maybe_warn_fork_start_method()
         table = self._connect_table()
         self._schema_names = list(table.schema.names)
-        available = [
-            c for c in self._schema_names if c not in self._index_columns
-        ]
+        available = [c for c in self._schema_names if c not in self._index_columns]
         if not available:
-            raise ValueError(
-                'No data columns found in Lance table. Expected columns '
-                'other than episode/step indices.'
-            )
+            raise ValueError('Lance table has no data columns (only index columns).')
 
         self._keys = keys_to_load or available
         missing = [k for k in self._keys if k not in available]
         if missing:
-            raise KeyError(
-                f"Columns {missing} missing from Lance table '{table_name}'"
-            )
+            raise KeyError(f"Columns {missing} missing from Lance table '{table_name}'")
 
-        # Auto-detect image columns from the Arrow schema: any binary /
-        # large-binary column is treated as an encoded image blob. This is the
-        # type our converter emits for JPEG frames and matches what
-        # ``_extract_column`` already hands back for binary columns.  Users can
-        # still pass ``image_columns=[...]`` to narrow the set when a binary
-        # column holds something other than an image (rare).
+        # Binary columns → encoded image blobs (what the converter emits).
         pa = self._pa
         binary_cols = {
-            field.name
-            for field in table.schema
-            if pa.types.is_binary(field.type) or pa.types.is_large_binary(field.type)
+            f.name for f in table.schema
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
         }
-        if image_columns is None:
-            self.image_columns = binary_cols & set(self._keys)
-        else:
-            self.image_columns = {
-                col for col in image_columns if col in self._keys
-            }
+        self.image_columns = (
+            binary_cols & set(self._keys) if image_columns is None
+            else {c for c in image_columns if c in self._keys}
+        )
 
         lengths, offsets = self._compute_episode_structure(table)
 
         if keys_to_cache:
             logging.warning(
-                "LanceDataset: keys_to_cache=%s was provided, but column caching "
-                "is not recommended for Lance datasets. __getitems__ already batches "
-                "all row fetches into a single take() call, so the non-cached path "
-                "is already fast enough — caching mainly risks OOM on large datasets. "
-                "Remove keys_to_cache from your config to use Lance efficiently.",
+                'LanceDataset: keys_to_cache=%s is unnecessary — __getitems__ '
+                'already batches reads; caching risks OOM. Drop it from your config.',
                 keys_to_cache,
             )
             for key in keys_to_cache:
@@ -393,9 +337,7 @@ class LanceDataset(Dataset):
         return list(self._keys)
 
     def __getstate__(self) -> dict:
-        # ``self._perm`` wraps a Rust ``PermutationReader`` that is not
-        # picklable, and Lance internals are not fork-safe anyway — each
-        # DataLoader worker must open its own reader after spawn.
+        # _perm wraps an unpicklable Rust reader; workers reopen on first use.
         state = self.__dict__.copy()
         state['_perm'] = None
         return state
@@ -427,14 +369,7 @@ class LanceDataset(Dataset):
     def _resolve_uri_and_table(
         uri: str, table_name: str | None
     ) -> tuple[str, str]:
-        """Accept either ``(uri, table_name)`` or a single ``.../foo.lance`` URI.
-
-        LanceDB stores each table as ``<uri>/<table_name>.lance``.  When users
-        already know the full table path, forcing them to split it into two
-        config keys is needless friction — especially with Hydra overrides.
-        This helper pulls the split apart whenever ``uri`` ends in ``.lance``
-        and ``table_name`` is unset, and errors clearly when neither is true.
-        """
+        """Split ``.../foo.lance`` into ``(parent_uri, foo)`` when ``table_name`` is None."""
         if table_name is not None:
             return uri, table_name
 
@@ -442,124 +377,69 @@ class LanceDataset(Dataset):
         if not stripped.lower().endswith('.lance'):
             raise ValueError(
                 "LanceDataset: ``table_name`` was not provided and ``uri`` "
-                f"({uri!r}) does not end in '.lance'. Either pass ``table_name`` "
-                "explicitly, or point ``uri`` at the full table path, e.g. "
-                "'./store/lewm_pusht.lance' or 's3://bucket/lewm_pusht.lance'."
+                f"({uri!r}) does not end in '.lance'. Either pass "
+                "``table_name`` explicitly, or point ``uri`` at the full "
+                "table path, e.g. './store/foo.lance'."
             )
-
-        # Split at the last path separator, honouring both '/' and scheme URIs
-        # like s3://bucket/path/foo.lance (still slash-separated after scheme).
         sep = stripped.rfind('/')
-        if sep < 0:
-            # Bare "foo.lance" relative path.
-            parent, leaf = '.', stripped
-        else:
-            parent, leaf = stripped[:sep], stripped[sep + 1:]
+        parent, leaf = (stripped[:sep], stripped[sep + 1:]) if sep >= 0 else ('.', stripped)
         inferred_name = leaf[: -len('.lance')]
         if not inferred_name:
-            raise ValueError(
-                f"LanceDataset: could not infer table name from uri {uri!r}."
-            )
+            raise ValueError(f'LanceDataset: could not infer table name from uri {uri!r}.')
         return parent, inferred_name
 
     @classmethod
     def _maybe_warn_fork_start_method(cls) -> None:
-        """Force the multiprocessing start method to ``spawn`` on Linux.
-
-        Lance's internal tokio threadpool is not fork-safe; forked DataLoader
-        workers deadlock silently on first read.  macOS already defaults to
-        ``spawn``.  On Linux we flip the process-wide default from ``fork`` to
-        ``spawn`` eagerly — the alternative is a silent hang, so the change is
-        the lesser evil.  PyTorch ``DataLoader`` picks up the new default
-        automatically (it calls ``multiprocessing.get_start_method()`` when
-        ``multiprocessing_context`` is left unset).
-
-        We only touch the setting when it is currently ``None`` (never set) or
-        ``'fork'`` — if the user has already chosen ``'spawn'`` or
-        ``'forkserver'`` we leave it alone.  If ``set_start_method`` fails
-        (child processes already created), we fall back to a warning.
-        """
+        """On Linux, switch ``fork`` → ``spawn`` (Lance is not fork-safe)."""
         if cls._fork_warning_emitted:
             return
         import multiprocessing as mp
         import sys
 
+        cls._fork_warning_emitted = True
         if sys.platform != 'linux':
-            cls._fork_warning_emitted = True
             return
-
         current = mp.get_start_method(allow_none=True)
         if current not in (None, 'fork'):
-            cls._fork_warning_emitted = True
             return
-
         try:
             mp.set_start_method('spawn', force=True)
             logging.info(
-                "LanceDataset: set multiprocessing start method to 'spawn' "
-                "(was %s). Lance is not fork-safe on Linux, so DataLoader "
-                "workers must start via spawn to avoid silent deadlocks.",
+                "LanceDataset: multiprocessing start method set to 'spawn' (was %s).",
                 current or 'default (fork)',
             )
         except RuntimeError as exc:
             logging.warning(
-                "LanceDataset could not switch multiprocessing start method "
-                "to 'spawn' (%s). If DataLoader uses num_workers > 0 on Linux, "
-                "workers may deadlock silently. Set spawn explicitly at program "
-                "start or pass multiprocessing_context='spawn' to DataLoader.",
+                "LanceDataset could not switch multiprocessing to 'spawn' (%s); "
+                'DataLoader workers may deadlock. Set it explicitly at startup.',
                 exc,
             )
-        cls._fork_warning_emitted = True
 
     def _compute_episode_structure(self, table) -> tuple[np.ndarray, np.ndarray]:
-        """Read episode_idx column and build per-episode (lengths, offsets) arrays.
+        """Scan episode_idx once and return per-episode (lengths, offsets).
 
-        **Ordering assumption**: rows must be stored in episode-contiguous order,
-        i.e. all rows for episode 0 appear before episode 1, etc.  This is
-        guaranteed by :func:`convert_hdf5_to_lance` which writes episodes
-        sequentially.
-
-        Note: ``lancedb.compact_files()`` preserves logical row ordering (it
-        merges fragments in fragment-ID order), so compaction is safe.  The
-        check below catches tables where data was inserted out of order to
-        begin with.
-
-        **No memory risk**: only the episode_idx column (int32, ~4 bytes/row)
-        is read here; even a 10 M-row dataset needs only ~40 MB for this pass.
+        Assumes rows are in episode-contiguous (non-decreasing) order.
         """
         ep_col, _ = self._index_columns
-        reader = (
-            table.to_lance().scanner(columns=[ep_col]).to_reader()
-        )
-
-        chunks: list[np.ndarray] = []
-        for batch in reader:
-            chunks.append(
-                batch.column(batch.schema.get_field_index(ep_col)).to_numpy()
-            )
-
+        reader = table.to_lance().scanner(columns=[ep_col]).to_reader()
+        chunks = [
+            batch.column(batch.schema.get_field_index(ep_col)).to_numpy()
+            for batch in reader
+        ]
         if not chunks:
             return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
 
         all_ep_ids = np.concatenate(chunks)
-
-        # Verify rows are in episode-contiguous (non-decreasing) order.
-        # We check for *decreasing* transitions which indicate a reordering.
         if len(all_ep_ids) > 1 and (np.diff(all_ep_ids) < 0).any():
             raise ValueError(
-                f"Lance table '{self.table_name}' at '{self.uri}' has rows that "
-                "are NOT in episode-contiguous order (episode_idx is not "
-                "non-decreasing).  This likely means data was appended out of "
-                "order.  Re-run convert_hdf5_to_lance(..., overwrite=True) to "
-                "rebuild the table with the correct row order."
+                f"Lance table '{self.table_name}' at '{self.uri}' is not "
+                'episode-contiguous (episode_idx decreases). Rebuild with '
+                'convert_hdf5_to_lance(..., overwrite=True).'
             )
 
-        # Vectorised boundary detection — O(N) numpy, no Python loop over rows.
-        boundary_mask = np.diff(all_ep_ids) != 0
-        change_positions = np.flatnonzero(boundary_mask) + 1  # first row of each new ep
+        change_positions = np.flatnonzero(np.diff(all_ep_ids) != 0) + 1
         offsets = np.concatenate([[0], change_positions]).astype(np.int64)
         lengths = np.diff(np.concatenate([offsets, [len(all_ep_ids)]])).astype(np.int64)
-
         return lengths, offsets
 
     def _load_full_column(self, table, key: str) -> np.ndarray:
@@ -606,20 +486,7 @@ class LanceDataset(Dataset):
         return batch.column(idx).to_pylist()
 
     def _extract_column(self, batch, key: str):
-        """Fast column extraction from an Arrow RecordBatch.
-
-        Avoids the Python-list roundtrip that :meth:`_batch_column_pylist`
-        incurs for numeric columns stored as fixed-size lists.
-
-        Returns
-        -------
-        numpy ndarray
-            For fixed-size list (numeric vectors) and scalar numeric columns.
-        list
-            For binary columns (JPEG/PNG blobs), string columns, and
-            variable-length list columns (schema inferred from Python dicts
-            or LeRobot-style datasets).
-        """
+        """Zero-copy numpy for fixed-size lists / scalars; pylist otherwise."""
         pa = self._pa
         col_idx = batch.schema.get_field_index(key)
         if col_idx == -1:
@@ -628,27 +495,15 @@ class LanceDataset(Dataset):
         col_type = col.type
 
         if pa.types.is_binary(col_type) or pa.types.is_large_binary(col_type):
-            # Image blobs — pylist gives bytes objects required for JPEG decode.
             return col.to_pylist()
-
         if pa.types.is_fixed_size_list(col_type):
-            # Numeric vector columns (e.g. action, proprio stored as
-            # pa.list_(pa.float32(), dim)).  Flatten to a contiguous float32
-            # buffer and reshape — no Python object creation at all.
             dim = col_type.list_size
-            flat = col.flatten()  # pa.Array of length N * dim
+            flat = col.flatten()
             return flat.to_numpy(zero_copy_only=False).reshape(len(col), dim)
-
         if pa.types.is_string(col_type) or pa.types.is_large_string(col_type):
             return col.to_pylist()
-
         if pa.types.is_list(col_type):
-            # Variable-length list column (e.g. schema inferred from Python dicts,
-            # or LeRobot datasets). Fall back to pylist; _pylist_to_numpy will
-            # stack into a float32 array.
             return col.to_pylist()
-
-        # Scalar numeric (int, float) — zero-copy numpy view when possible.
         return col.to_numpy(zero_copy_only=False)
 
     def _pylist_to_numpy(self, values: list[Any], key: str) -> np.ndarray:
@@ -675,79 +530,44 @@ class LanceDataset(Dataset):
         return np.asarray(values, dtype=object)
 
     def _decode_image(self, blob: bytes) -> torch.Tensor:
+        # from_numpy is safe here — torch.stack() in _process_batch copies
+        # each frame into a fresh resizable tensor before collation sees it.
         with Image.open(io.BytesIO(blob)) as img:
             arr = np.array(img.convert('RGB'))
-        # from_numpy is fine here: the result is immediately consumed by
-        # torch.stack() in _process_batch, which produces a fresh resizable
-        # tensor — the non-resizable frame tensors never reach collation.
         return torch.from_numpy(arr).permute(2, 0, 1)
 
     def _prepare_numeric_tensor(self, data: np.ndarray, downsample: bool) -> torch.Tensor:
+        # torch.tensor (not from_numpy): collation under __getitems__ calls
+        # storage.resize_(), which fails on numpy-backed non-resizable tensors.
         if downsample:
             data = data[:: self.frameskip]
-        # torch.tensor() copies into PyTorch-owned resizable storage.
-        # torch.from_numpy() would share numpy's memory and return a
-        # non-resizable tensor, which breaks DataLoader collation when
-        # __getitems__ is defined (collation runs inside the worker and
-        # uses storage.resize_() to preallocate the output batch tensor).
         tensor = torch.tensor(data)
         if tensor.ndim == 4 and tensor.shape[-1] in (1, 3):
             tensor = tensor.permute(0, 3, 1, 2)
         return tensor
 
     def _process_batch(self, ep_idx: int, g_start: int, batch) -> dict:
-        """Assemble one training-sample dict from a pre-fetched Arrow sub-batch.
-
-        This is the inner loop shared by :meth:`_load_slice` (single sample)
-        and :meth:`__getitems__` (batch of samples).  It never issues any
-        Lance / network I/O — all fetching must be done by the caller.
-
-        Parameters
-        ----------
-        ep_idx:
-            Episode index (used only for cache addressing).
-        g_start:
-            Global row offset into ``self._cache`` arrays
-            (``offsets[ep_idx] + local_start``).
-        batch:
-            Arrow ``RecordBatch`` containing exactly ``self.span`` rows for the
-            non-cached columns, or ``None`` when every column is cached.
-        """
+        """Assemble one sample dict from a pre-fetched Arrow batch (no I/O)."""
         g_end = g_start + self.span
         steps: dict[str, Any] = {}
 
         for col in self._keys:
             if col in self._cache:
                 values = self._cache[col][g_start:g_end]
+            elif batch is None:
+                raise KeyError(f"Column '{col}' not cached and no batch provided")
             else:
-                if batch is None:
-                    raise KeyError(
-                        f"Column '{col}' is not in the cache and no Arrow batch "
-                        "was provided — this is a bug."
-                    )
-                # Fast path: avoids Python list roundtrip for numeric columns.
                 values = self._extract_column(batch, col)
 
             if col in self.image_columns:
-                # Decode JPEG/PNG blobs; downsample in the temporal axis.
-                if isinstance(values, np.ndarray):
-                    blobs = values[:: self.frameskip].tolist()
-                else:
-                    blobs = values[:: self.frameskip]
+                blobs = values[:: self.frameskip]
+                if isinstance(blobs, np.ndarray):
+                    blobs = blobs.tolist()
                 frames = [self._decode_image(v) for v in blobs]
-                steps[col] = (
-                    torch.stack(frames)
-                    if frames
-                    else torch.empty(0, dtype=torch.uint8)
-                )
+                steps[col] = torch.stack(frames) if frames else torch.empty(0, dtype=torch.uint8)
                 continue
 
-            if isinstance(values, np.ndarray):
-                # No .copy() needed: _prepare_numeric_tensor uses torch.tensor()
-                # which always copies, so there is no aliasing risk with the cache.
-                data = values
-            else:
-                data = self._pylist_to_numpy(values, col)
+            data = values if isinstance(values, np.ndarray) else self._pylist_to_numpy(values, col)
 
             if data.dtype == object and data.size > 0:
                 first = data.flat[0]
@@ -758,8 +578,7 @@ class LanceDataset(Dataset):
                     steps[col] = first
                     continue
 
-            downsample = col != 'action'
-            steps[col] = self._prepare_numeric_tensor(data, downsample)
+            steps[col] = self._prepare_numeric_tensor(data, downsample=col != 'action')
 
         return steps
 
@@ -771,24 +590,14 @@ class LanceDataset(Dataset):
         return self.transform(steps) if self.transform else steps
 
     def __getitems__(self, indices: list[int]) -> list[dict]:
-        """Batch-level fetch: one Lance ``take`` for the whole batch.
+        """Batch fetch: one Lance ``take`` for the whole DataLoader batch.
 
-        PyTorch DataLoader (≥ 2.0) calls this automatically when the method is
-        defined, passing all sample indices for the batch at once.  Instead of
-        N individual ``Permutation.__getitems__`` calls (one per sample) this
-        issues a **single** call with all row IDs flattened together, then
-        slices the returned ``RecordBatch`` with zero-copy
-        ``RecordBatch.slice(offset, length)`` per sample.
-
-        For local storage the win is modest (one Python call vs. N).  For
-        remote storage (S3, GCS) the win is large: one HTTP round-trip fetches
-        the data for the entire batch rather than one round-trip per sample.
+        Called by PyTorch DataLoader ≥ 2.0 when defined, collapsing
+        ``batch_size`` HTTP round-trips to one on remote storage.
         """
-        # ── 1. Collect all global row IDs for the batch ──────────────────────
         all_rows: list[int] = []
-        row_offsets: list[int] = []  # position of each sample's first row in all_rows
-        sample_meta: list[tuple[int, int]] = []  # (ep_idx, g_start)
-
+        row_offsets: list[int] = []
+        sample_meta: list[tuple[int, int]] = []
         for idx in indices:
             ep_idx, start = self.clip_indices[idx]
             g_start = int(self.offsets[ep_idx] + start)
@@ -796,43 +605,27 @@ class LanceDataset(Dataset):
             all_rows.extend(range(g_start, g_start + self.span))
             sample_meta.append((ep_idx, g_start))
 
-        # ── 2. Single Lance take for all non-cached columns ──────────────────
         big_batch = None
         if self._fetch_columns and all_rows:
             self._ensure_open()
-
-            # ``Permutation.__getitems__`` returns rows in strictly
-            # increasing order and drops duplicates.  Build a sorted unique
-            # row list and map back to the original order so we can
-            # materialize the overlapping windows exactly as requested.
             unique_rows = sorted(set(all_rows))
             unique_batch = self._perm.__getitems__(unique_rows)
-
             if len(unique_rows) == len(all_rows) and all_rows == unique_rows:
                 big_batch = unique_batch
             else:
-                row_lookup = {row: idx for idx, row in enumerate(unique_rows)}
-                gather = [row_lookup[row] for row in all_rows]
-                pa = self._pa
-                indices_arr = pa.array(gather, type=pa.int64())
-                big_batch = unique_batch.take(indices_arr)
+                row_lookup = {row: i for i, row in enumerate(unique_rows)}
+                gather = self._pa.array([row_lookup[r] for r in all_rows], type=self._pa.int64())
+                big_batch = unique_batch.take(gather)
 
-        # ── 3. Slice + assemble each sample from the big batch ───────────────
         results: list[dict] = []
         for i, (ep_idx, g_start) in enumerate(sample_meta):
-            # RecordBatch.slice is zero-copy — no data is copied here.
-            sub_batch = (
-                big_batch.slice(row_offsets[i], self.span)
-                if big_batch is not None
-                else None
-            )
+            sub_batch = big_batch.slice(row_offsets[i], self.span) if big_batch is not None else None
             steps = self._process_batch(ep_idx, g_start, sub_batch)
             if self.transform:
                 steps = self.transform(steps)
             if 'action' in steps:
                 steps['action'] = steps['action'].reshape(self.num_steps, -1)
             results.append(steps)
-
         return results
 
     def get_col_data(self, col: str) -> np.ndarray:
