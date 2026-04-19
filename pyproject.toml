@@ -24,7 +24,7 @@ dependencies = [
   "einops",
   "h5py",
   "hdf5plugin",
-  "lancedb>=0.20.0",
+  "lancedb>=0.25.0",
   "tqdm",
   "typer",
   "rich",

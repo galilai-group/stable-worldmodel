@@ -10,8 +10,11 @@ from typing import Any
 
 import h5py
 import hdf5plugin  # noqa: F401
+import lancedb
 import numpy as np
+import pyarrow as pa
 import torch
+from lancedb.permutation import Permutation
 from PIL import Image
 
 from stable_worldmodel.data.utils import get_cache_dir
@@ -258,9 +261,6 @@ class LanceDataset(Dataset):
         connect_kwargs: forwarded to :func:`lancedb.connect` (e.g. S3 creds).
     """
 
-    _lancedb = None
-    _permutation = None
-    _pa = None  # pyarrow; populated alongside _lancedb
     _fork_warning_emitted = False
 
     def __init__(
@@ -301,7 +301,6 @@ class LanceDataset(Dataset):
             raise KeyError(f"Columns {missing} missing from Lance table '{table_name}'")
 
         # Binary columns → encoded image blobs (what the converter emits).
-        pa = self._pa
         binary_cols = {
             f.name for f in table.schema
             if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
@@ -342,27 +341,8 @@ class LanceDataset(Dataset):
         state['_perm'] = None
         return state
 
-    @classmethod
-    def _import_lance(cls) -> None:
-        if cls._lancedb is not None:
-            return
-        try:
-            import lancedb
-            import pyarrow as pa
-            from lancedb.permutation import Permutation
-        except ImportError as exc:  # pragma: no cover - exercised in runtime
-            raise ImportError(
-                'LanceDataset requires the "lancedb" package. '
-                'Install with `pip install lancedb` or '
-                '`pip install stable-worldmodel[lance]`.'
-            ) from exc
-        cls._lancedb = lancedb
-        cls._permutation = Permutation
-        cls._pa = pa
-
     def _connect_table(self):
-        self._import_lance()
-        db = self._lancedb.connect(self.uri, **self.connect_kwargs)
+        db = lancedb.connect(self.uri, **self.connect_kwargs)
         return db.open_table(self.table_name)
 
     @staticmethod
@@ -468,7 +448,7 @@ class LanceDataset(Dataset):
         if self._perm is None:
             table = self._connect_table()
             self._perm = (
-                self._permutation.identity(table)
+                Permutation.identity(table)
                 .select_columns(self._fetch_columns)
                 .with_format('arrow')
             )
@@ -487,7 +467,6 @@ class LanceDataset(Dataset):
 
     def _extract_column(self, batch, key: str):
         """Zero-copy numpy for fixed-size lists / scalars; pylist otherwise."""
-        pa = self._pa
         col_idx = batch.schema.get_field_index(key)
         if col_idx == -1:
             raise KeyError(f"Column '{key}' not found in batch")
@@ -614,7 +593,7 @@ class LanceDataset(Dataset):
                 big_batch = unique_batch
             else:
                 row_lookup = {row: i for i, row in enumerate(unique_rows)}
-                gather = self._pa.array([row_lookup[r] for r in all_rows], type=self._pa.int64())
+                gather = pa.array([row_lookup[r] for r in all_rows], type=pa.int64())
                 big_batch = unique_batch.take(gather)
 
         results: list[dict] = []
