@@ -73,10 +73,13 @@ class PiecewiseEnv(gym.Env):
 
         zones_dict = {}
         for i in range(n_zones):
+            angle = 2.0 * math.pi * i / n_zones
+            bx = 2.0 * math.cos(angle)
+            by = 2.0 * math.sin(angle)
             zones_dict[f'bias_{i}'] = swm_spaces.Box(
-                low=np.array([-5.0, -5.0], dtype=np.float32),
-                high=np.array([5.0, 5.0], dtype=np.float32),
-                init_value=np.array([0.0, 0.0], dtype=np.float32),
+                low=np.array([-4.0, -4.0], dtype=np.float32),
+                high=np.array([4.0, 4.0], dtype=np.float32),
+                init_value=np.array([bx, by], dtype=np.float32),
                 shape=(2,),
                 dtype=np.float32,
             )
