@@ -113,6 +113,10 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
 )
 
+register(
+    id='swm/Piecewise-v0',
+    entry_point='stable_worldmodel.envs.piecewise.piecewise_env:PiecewiseEnv',
+)
 
 ############
 # DISCRETE #
