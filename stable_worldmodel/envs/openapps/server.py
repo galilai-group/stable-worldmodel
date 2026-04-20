@@ -56,11 +56,17 @@ def _ensure_openapps_importable() -> None:
 _ensure_openapps_importable()
 
 
-def _load_hydra_config():
+def _load_hydra_config(extra_overrides: list[str] | None = None):
     """Load the OpenApps Hydra config using the compose API.
 
     Returns ``(cfg, tmp_logs_dir)`` — the tmp dir is returned so the
     caller can clean it up on ``close()``.
+
+    Args:
+        extra_overrides: Additional Hydra override strings appended after
+            the defaults. Used by the variation space to swap appearance/
+            content groups per-reset, e.g.
+            ``["apps/todo/appearance=dark_theme", "seed=17"]``.
     """
     from hydra import compose, initialize_config_dir
 
@@ -70,16 +76,60 @@ def _load_hydra_config():
 
     tmp_logs = tempfile.mkdtemp(prefix="openapps_logs_")
 
+    overrides = [
+        f"logs_dir={tmp_logs}",
+        "use_wandb=False",
+    ]
+    if extra_overrides:
+        overrides.extend(extra_overrides)
+
     with initialize_config_dir(config_dir=config_dir, version_base=None):
-        cfg = compose(
-            config_name="config",
-            overrides=[
-                f"logs_dir={tmp_logs}",
-                "use_wandb=False",
-            ],
-        )
+        cfg = compose(config_name="config", overrides=overrides)
 
     return cfg, tmp_logs
+
+
+# ── Variation discovery ─────────────────────────────────────────────
+
+# App key as used by OpenAppsEnv → directory name under openapps/config/apps/.
+# Matches _APPS in __init__.py (after pluralisation differences).
+_APP_TO_CONFIG_DIR = {
+    "todo": "todo",
+    "calendar": "calendar",
+    "messages": "messenger",
+    "messenger": "messenger",
+    "codeeditor": "code_editor",
+    "code_editor": "code_editor",
+    "map": "maps",
+    "maps": "maps",
+}
+
+
+def discover_variants(app_name: str, group: str) -> list[str]:
+    """List Hydra variant yamls available for an app's group.
+
+    Returns a sorted list of variant stems (without ``.yaml``) found in
+    ``openapps/config/apps/{app}/{group}/``. ``"default"`` is always
+    placed first so it maps to index 0. Returns ``["default"]`` as a
+    fallback if the directory is missing.
+
+    Args:
+        app_name: OpenApps app key (e.g. ``"todo"``, ``"messages"``).
+        group: Variant group name (``"appearance"`` or ``"content"``).
+    """
+    here = Path(__file__).resolve()
+    workspace_root = here.parents[4]
+    cfg_dir_name = _APP_TO_CONFIG_DIR.get(app_name, app_name)
+    group_dir = workspace_root / "openapps" / "config" / "apps" / cfg_dir_name / group
+
+    if not group_dir.is_dir():
+        return ["default"]
+
+    stems = sorted(p.stem for p in group_dir.glob("*.yaml"))
+    if "default" in stems:
+        stems.remove("default")
+        return ["default"] + stems
+    return stems or ["default"]
 
 
 def _init_app(cfg):

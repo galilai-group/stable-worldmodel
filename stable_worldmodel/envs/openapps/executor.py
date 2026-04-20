@@ -82,7 +82,8 @@ def _extract_coords(action_str: str) -> tuple[int, int]:
     match = re.search(r"<point>\s*(\d+)[\s,]+(\d+)\s*</point>", action_str)
     if match:
         return int(match.group(1)), int(match.group(2))
-    match = re.search(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)", action_str)
+    # TARS sometimes uses comma, sometimes whitespace: (97,185) or (97 185).
+    match = re.search(r"\(\s*(\d+)\s*[,\s]\s*(\d+)\s*\)", action_str)
     if match:
         return int(match.group(1)), int(match.group(2))
     raise ValueError(f"Cannot extract coords from: {action_str}")
