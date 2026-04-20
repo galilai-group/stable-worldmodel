@@ -24,6 +24,8 @@ nav:
       - envs/dmc.md
       - envs/ogb.md
       - envs/tworoom.md
+  - Guides:
+      - guides/checkpoints.md
   - cli.md
   # - Tutorial:
   #     - tutorial/collect_data.md

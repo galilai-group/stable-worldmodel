@@ -7,6 +7,7 @@ import lightning as pl
 import stable_pretraining as spt
 import torch
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf
@@ -328,35 +329,30 @@ def setup_pl_logger(cfg):
     return wandb_logger
 
 
-class ModelObjectCallBack(Callback):
-    """Callback to pickle model after each epoch."""
+class SaveCkptCallback(Callback):
+    """Callback to save model checkpoint after each epoch using save_pretrained."""
 
     def __init__(
-        self, dirpath, filename='model_object', epoch_interval: int = 1
+        self, run_name, cfg, epoch_interval: int = 1
     ):
         super().__init__()
-        self.dirpath = dirpath
-        self.filename = filename
+        self.run_name = run_name
+        self.cfg = cfg
         self.epoch_interval = epoch_interval
 
-    def on_train_epoch_end(
-        self, trainer: 'pl.Trainer', pl_module: 'pl.LightningModule'
-    ) -> None:
+    def on_train_epoch_end(self, trainer, pl_module):
         super().on_train_epoch_end(trainer, pl_module)
 
         if trainer.is_global_zero:
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
-                output_path = Path(
-                    self.dirpath,
-                    f'{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt',
-                )
-                torch.save(pl_module, output_path)
-                logging.info(f'Saved world model object to {output_path}')
-            # Additionally, save at final epoch
+                self._save(pl_module.model, trainer.current_epoch + 1)
+
+            # save final epoch
             if (trainer.current_epoch + 1) == trainer.max_epochs:
-                final_path = self.dirpath / f'{self.filename}_object.ckpt'
-                torch.save(pl_module, final_path)
-                logging.info(f'Saved final world model object to {final_path}')
+                self._save(pl_module.model, trainer.current_epoch + 1)
+
+    def _save(self, model, epoch):
+        save_pretrained(model, run_name=self.run_name, config=self.cfg, filename=f'weights_epoch_{epoch}.pt')
 
 
 # ============================================================================
@@ -370,10 +366,10 @@ def run(cfg):
     data = get_data(cfg)
     gcbc_policy = get_gcbc_policy(cfg)
 
-    cache_dir = swm.data.utils.get_cache_dir()
-    dump_object_callback = ModelObjectCallBack(
-        dirpath=cache_dir,
-        filename=cfg.output_model_name,
+    cache_dir = swm.data.utils.get_cache_dir(sub_folder='checkpoints')
+    dump_object_callback = SaveCkptCallback(
+        run_name=cfg.output_model_name,
+        cfg=cfg,
         epoch_interval=3,
     )
 

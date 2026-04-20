@@ -14,15 +14,15 @@ from torch import nn
 from torch.utils.data import DataLoader
 import numpy as np
 
-from stable_worldmodel.wm.lewm import (
-    JEPA,
+from stable_worldmodel.wm.pldm.module import (
     MLP,
     Embedder,
-    ARPredictor,
-    PathStraighteningLoss,
-    PLDM,
+    Predictor,
 )
+from stable_worldmodel.wm.pldm import PLDM
+from stable_worldmodel.wm.loss import PLDMLoss, TemporalStraighteningLoss
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel.wm.utils import save_pretrained
 
 
 def get_img_preprocessor(source: str, target: str, img_size: int = 224):
@@ -51,38 +51,30 @@ def get_column_normalizer(dataset, source: str, target: str):
     return normalizer
 
 
-class ModelObjectCallBack(Callback):
-    """Callback to pickle model object after each epoch."""
+class SaveCkptCallback(Callback):
+    """Callback to save model checkpoint after each epoch using save_pretrained."""
 
     def __init__(
-        self, dirpath, filename='model_object', epoch_interval: int = 1
+        self, run_name, cfg, epoch_interval: int = 1
     ):
         super().__init__()
-        self.dirpath = Path(dirpath)
-        self.filename = filename
+        self.run_name = run_name
+        self.cfg = cfg
         self.epoch_interval = epoch_interval
 
     def on_train_epoch_end(self, trainer, pl_module):
         super().on_train_epoch_end(trainer, pl_module)
 
-        output_path = (
-            self.dirpath
-            / f'{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt'
-        )
-
         if trainer.is_global_zero:
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
-                self._dump_model(pl_module.model, output_path)
+                self._save(pl_module.model, trainer.current_epoch + 1)
 
             # save final epoch
             if (trainer.current_epoch + 1) == trainer.max_epochs:
-                self._dump_model(pl_module.model, output_path)
+                self._save(pl_module.model, trainer.current_epoch + 1)
 
-    def _dump_model(self, model, path):
-        try:
-            torch.save(model, path)
-        except Exception as e:
-            print(f'Error saving model object: {e}')
+    def _save(self, model, epoch):
+        save_pretrained(model, run_name=self.run_name, config=self.cfg, filename=f'weights_epoch_{epoch}.pt')
 
 
 def pldm_forward(self, batch, stage, cfg):
@@ -182,7 +174,7 @@ def run(cfg):
     hidden_dim = encoder.config.hidden_size
     embed_dim = cfg.wm.get('embed_dim', hidden_dim)
 
-    predictor = ARPredictor(
+    predictor = Predictor(
         num_frames=cfg.wm.history_size,
         input_dim=embed_dim,
         hidden_dim=hidden_dim,
@@ -211,7 +203,7 @@ def run(cfg):
         input_dim=2 * embed_dim, hidden_dim=512, output_dim=effective_act_dim
     )
 
-    world_model = JEPA(
+    world_model = PLDM(
         encoder=encoder,
         predictor=predictor,
         action_encoder=action_encoder,
@@ -225,8 +217,8 @@ def run(cfg):
     }
 
     losses = {
-        'pldm': PLDM(),
-        'path_straight': PathStraighteningLoss(),
+        'pldm': PLDMLoss(),
+        'path_straight': TemporalStraighteningLoss(),
     }
 
     optimizers = {}
@@ -251,7 +243,9 @@ def run(cfg):
     ##########################
 
     run_id = cfg.get('subdir') or ''
-    run_dir = Path(swm.data.utils.get_cache_dir(), run_id)
+    run_dir = Path(
+        swm.data.utils.get_cache_dir(sub_folder='checkpoints'), run_id
+    )
     logging.info(f'🫆🫆🫆 Run ID: {run_id} 🫆🫆🫆')
 
     logger = None
@@ -263,8 +257,8 @@ def run(cfg):
     with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
 
-    object_dump_callback = ModelObjectCallBack(
-        dirpath=run_dir, filename=cfg.output_model_name, epoch_interval=5
+    object_dump_callback = SaveCkptCallback(
+        run_name=cfg.output_model_name, cfg=cfg, epoch_interval=5
     )
 
     trainer = pl.Trainer(

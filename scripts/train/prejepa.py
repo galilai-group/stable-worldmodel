@@ -8,6 +8,7 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
@@ -122,29 +123,26 @@ class VideoPipeline(spt.data.transforms.Transform):
 # ---------------------------------------------------------------------------
 
 
-class ModelObjectCallBack(Callback):
-    """Save the model object periodically and at the final epoch."""
+class SaveCkptCallback(Callback):
+    """Callback to save model checkpoint after each epoch using save_pretrained."""
 
-    def __init__(self, dirpath, filename='model_object', epoch_interval=1):
+    def __init__(self, run_name, cfg, epoch_interval=1):
         super().__init__()
-        self.dirpath, self.filename, self.epoch_interval = (
-            Path(dirpath),
-            filename,
-            epoch_interval,
-        )
+        self.run_name = run_name
+        self.cfg = cfg
+        self.epoch_interval = epoch_interval
 
     def on_train_epoch_end(self, trainer, pl_module):
         if not trainer.is_global_zero:
             return
         epoch = trainer.current_epoch + 1
         if epoch % self.epoch_interval == 0:
-            path = self.dirpath / f'{self.filename}_epoch_{epoch}_object.ckpt'
-            torch.save(pl_module.model, path)
-            logging.info(f'Saved world model to {path}')
+            self._save(pl_module.model, epoch)
         if epoch == trainer.max_epochs:
-            path = self.dirpath / f'{self.filename}_object.ckpt'
-            torch.save(pl_module.model, path)
-            logging.info(f'Saved final world model to {path}')
+            self._save(pl_module.model, epoch)
+
+    def _save(self, model, epoch):
+        save_pretrained(model, run_name=self.run_name, config=self.cfg, filename=f'weights_epoch_{epoch}.pt')
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +344,9 @@ def run(cfg):
 
     # --- Training ---
     run_id = cfg.get('subdir') or ''
-    run_dir = Path(swm.data.utils.get_cache_dir(), run_id)
+    run_dir = Path(
+        swm.data.utils.get_cache_dir(sub_folder='checkpoints'), run_id
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f'Run ID: {run_id}')
 
@@ -369,9 +369,9 @@ def run(cfg):
         **cfg.trainer,
         callbacks=[
             spt.callbacks.CPUOffloadCallback(),
-            ModelObjectCallBack(
-                dirpath=run_dir,
-                filename=cfg.output_model_name,
+            SaveCkptCallback(
+                run_name=cfg.output_model_name,
+                cfg=cfg,
                 epoch_interval=5,
             ),
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),

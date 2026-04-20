@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import urllib.request
@@ -66,12 +67,14 @@ def load_dataset(name: str, cache_dir: str = None, **kwargs):
 
 def _resolve_dataset(name: str, datasets_dir: Path) -> Path:
     local = Path(name)
+    if not local.is_absolute():
+        local = datasets_dir / local
 
     # format 1a: explicit HDF5 file path
     if local.suffix in ('.h5', '.hdf5'):
-        if not local.exists():
-            raise FileNotFoundError(f'Dataset file not found: {local}')
-        return local
+        if local.exists():
+            return local
+        raise FileNotFoundError(f'Dataset file not found: {local}')
 
     # format 1b: directory containing a single HDF5 file
     if local.is_dir():
@@ -100,12 +103,25 @@ def _resolve_dataset_folder(folder: Path) -> Path:
     return h5_files[0]
 
 
+def _hf_dataset_find_archive(repo_id: str) -> str:
+    """Return the filename of the first .h5.zst or .tar.zst in a HF dataset repo."""
+    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main'
+    with urllib.request.urlopen(api_url) as resp:
+        entries = json.loads(resp.read())
+    for entry in entries:
+        name = entry.get('path', '')
+        if name.endswith('.h5.zst') or name.endswith('.tar.zst'):
+            return name
+    raise FileNotFoundError(
+        f'No .h5.zst or .tar.zst file found in HF dataset repo {repo_id}'
+    )
+
+
 def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
     """Resolve a HF repo id, downloading and extracting when not cached.
 
     Local layout: ``<datasets_dir>/<user>--<repo>/dataset.h5``
-    The archive fetched from HF must be a ``.tar.zst`` file containing a
-    single HDF5 file.
+    The archive fetched from HF must be a ``.h5.zst`` or ``.tar.zst`` file.
     """
     local_dir = datasets_dir / repo_id.replace('/', '--')
 
@@ -120,15 +136,18 @@ def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
     logging.info(f'Downloading dataset {repo_id} from HuggingFace...')
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    archive_name = 'dataset.tar.zst'
-    url = f'{HF_BASE_URL}/{repo_id}/resolve/main/{archive_name}'
+    archive_name = _hf_dataset_find_archive(repo_id)
+    url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
     archive_path = local_dir / archive_name
 
     logging.info(f'Fetching {url}')
     _download(url, archive_path)
 
     logging.info(f'Extracting {archive_path} into {local_dir}')
-    _extract_zst_tar(archive_path, local_dir)
+    if archive_name.endswith('.tar.zst'):
+        _extract_zst_tar(archive_path, local_dir)
+    else:
+        _extract_zst(archive_path)
     archive_path.unlink()
 
     return _resolve_dataset_folder(local_dir)
@@ -167,6 +186,20 @@ def _extract_zst_tar(archive: Path, dest: Path) -> None:
     if result.returncode != 0:
         raise RuntimeError(
             f'Failed to extract {archive}:\n{result.stderr.strip()}'
+        )
+
+
+def _extract_zst(archive: Path) -> None:
+    """Decompress a plain ``.zst`` file in-place using ``unzstd``."""
+    result = subprocess.run(
+        ['unzstd', str(archive), '-o', str(archive.with_suffix(''))],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'Failed to decompress {archive}:\n{result.stderr.strip()}'
         )
 
 

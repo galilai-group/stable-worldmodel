@@ -230,6 +230,22 @@ print(sample['pixels'].shape)   # (4, 3, H, W)
 print(sample['action'].shape)   # (4, action_dim)
 ```
 
+```python
+from stable_worldmodel.data import LeRobotAdapter
+
+dataset = LeRobotAdapter(
+    repo_id='lerobot/pusht',
+    primary_camera_key='observation.images.top',  # gets mapped to `pixels`
+    num_steps=4,
+    frameskip=1,
+    keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
+    keys_to_cache=['action', 'proprio', 'ep_idx', 'step_idx'],
+)
+```
+
+!!! info "LeRobot Support"
+    LeRobotAdapter support is read-only and requires Python 3.12+. You can install it passing in the optional dependency via `pip install 'stable-worldmodel[lerobot]'`.
+
 The dataset is compatible with PyTorch `DataLoader` for batched training.
 
 Use the CLI to list all available datasets, or inspect a specific one:
