@@ -10,9 +10,7 @@ Action space: MultiDiscrete([3, 32, 20])
   action[1] in {0..31}     — x grid cell (32px per cell)
   action[2] in {0..19}     — y grid cell (32px per cell)
 
-The FastHTML server runs in a daemon thread within the same process,
-which means resets can be done via direct Python calls (no HTTP needed
-for state management).
+The FastHTML server runs in a daemon thread within the same process.
 """
 
 import io
@@ -60,16 +58,11 @@ from .server import (
 VIEWPORT_CHOICES_W = [800, 1024, 1280, 1920]
 VIEWPORT_CHOICES_H = [600, 640, 720, 1080]
 
-# Initial scroll offset applied to every app after page.goto. All apps
-# are shorter than 600px at the default viewport, so larger values are
-# mostly clamped by the browser — which is fine: we want "scroll bottom"
-# to end up at the actual bottom, not sail off into empty space.
+# Initial scroll offset applied to every app after page.goto.
 SCROLL_Y_CHOICES = [0, 100, 300, 600]
 
 # ``map.city`` variation: indexes this list to pick the lat/lng that
-# gets written into ``cfg.apps.maps.init_location`` on reset. Names are
-# for debugging/logging; coordinates are the city center as used by the
-# OpenStreetMap tile server.
+# gets written into ``cfg.apps.maps.init_location`` on reset.
 MAP_CITY_CHOICES: list[tuple[str, list[float]]] = [
     ('NYC', [40.7831, -73.9712]),
     ('Paris', [48.8566, 2.3522]),
@@ -86,9 +79,7 @@ def _read_variant_saved_places(content: str) -> list | None:
     """Return the ``saved_places`` list declared in the map content yaml.
 
     Upstream yamls use Hydra's ``+saved_places:`` (add-key) which silently
-    no-ops when the key already exists via defaults. We read the yaml
-    file directly so the sidebar pins swap per-variant even though Hydra
-    never merges them in.
+    no-ops when the key already exists via defaults.
     """
     yaml_path = app_content_yaml('map', content)
     if not yaml_path.is_file():
@@ -99,15 +90,13 @@ def _read_variant_saved_places(content: str) -> list | None:
         return None
     if not isinstance(raw, dict):
         return None
-    # ``+saved_places`` (Hydra add-key form) or ``saved_places`` (plain).
     for key in ('+saved_places', 'saved_places'):
         if key in raw and isinstance(raw[key], list):
             return raw[key]
     return None
 
 
-# Task class → OpenApps app key. Used to validate that a task key resolved
-# from the yaml is compatible with the env's app_name.
+# Task class to OpenApps app key.
 _TASK_CLASS_TO_APP = {
     'AddEventTask': 'calendar',
     'RemoveEventTask': 'calendar',
@@ -122,7 +111,7 @@ def _load_task_from_yaml(task_key: str, app_name: str) -> Task:
     """Resolve a task key against ``openapps/config/tasks/all_tasks.yaml``.
 
     Raises ValueError if the key is unknown or resolves to a Task whose
-    class doesn't match ``app_name``.
+    class doesn't match the env's app_name.
     """
     if not TASKS_YAML.is_file():
         raise FileNotFoundError(f'Tasks yaml not found at {TASKS_YAML}')
@@ -149,8 +138,7 @@ def _load_task_from_yaml(task_key: str, app_name: str) -> Task:
 def list_tasks(app_name: str | None = None) -> list[str]:
     """List task keys from ``all_tasks.yaml``, optionally filtered by app.
 
-    Returns the keys you can pass as ``task=`` to ``gym.make``. Intended
-    for discovery from notebooks / scripts.
+    Returns the keys you can pass as ``task=`` to ``gym.make``.
     """
     if not TASKS_YAML.is_file():
         return []
@@ -167,10 +155,7 @@ def list_tasks(app_name: str | None = None) -> list[str]:
     return keys
 
 
-# Lazy imports for Playwright (only needed at runtime). Playwright is a
-# heavy optional dependency — deferring its import keeps ``import
-# stable_worldmodel.envs.openapps`` cheap for callers that only need
-# ``list_tasks`` or read metadata.
+# Lazy imports for Playwright (only needed at runtime).
 _playwright_ctx = None
 _browser = None
 
@@ -200,15 +185,15 @@ class OpenAppsEnv(gym.Env):
       action[2]: y grid cell [0, GRID_Y-1], maps to pixel y = cell * 32 + 16
 
     The server runs in a background daemon thread within this process.
-    Resets are direct Python calls — no HTTP round-trip needed.
+    Resets are direct Python calls, so no HTTP round-trip needed!
 
-    Only one live ``OpenAppsEnv`` instance per Python process is
+    Only one live OpenAppsEnv instance per Python process is
     supported. The Playwright browser is a module-level singleton whose
     sync API is not safe across concurrent pages, and the FastHTML
     ``app`` object is global too. Attempting to create a second env
     before closing the first raises ``RuntimeError``. In practice this
     means swm ``World`` must be constructed with ``num_envs=1`` for
-    OpenApps.
+    OpenApps!
 
     Args:
         app_name: Which OpenApps app to target (e.g. "todo", "calendar").
@@ -233,9 +218,8 @@ class OpenAppsEnv(gym.Env):
     DEFAULT_IMAGE_SHAPE = (VIEWPORT_HEIGHT, VIEWPORT_WIDTH)
 
     # Tracks how many live OpenAppsEnv instances exist in this process.
-    # The browser + FastHTML server are module-level singletons; only one
-    # env may hold them at a time. Incremented in __init__, decremented
-    # in close().
+    # The browser + FastHTML server are module-level singletons, so only one
+    # env may hold them at a time. Incremented in __init__, decremented in close.
     _active_instances: int = 0
 
     def __init__(
@@ -280,10 +264,6 @@ class OpenAppsEnv(gym.Env):
         self.action_space = spaces.MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
 
         # ── Variation space ──────────────────────────────────────────
-        # Discrete dimensions index into _appearance_variants /
-        # _content_variants so the variation values stay portable;
-        # reset() translates them into Hydra group overrides
-        # (e.g. apps/todo/appearance=dark_theme).
         self._appearance_variants = discover_variants(app_name, 'appearance')
         self._content_variants = discover_variants(app_name, 'content')
 
@@ -316,8 +296,7 @@ class OpenAppsEnv(gym.Env):
                         [len(VIEWPORT_CHOICES_W), len(VIEWPORT_CHOICES_H)],
                         init_value=np.array([1, 1], dtype=np.int64),
                     ),
-                    # Initial scroll offset (px) applied after page.goto.
-                    # Indexes SCROLL_Y_CHOICES.
+                    # Initial scroll offset applied after page.goto.
                     'scroll_y': swm_space.Discrete(
                         len(SCROLL_Y_CHOICES), init_value=0
                     ),
@@ -325,8 +304,7 @@ class OpenAppsEnv(gym.Env):
             ),
         }
 
-        # Per-app axes: only included in the variation space for envs
-        # where they actually do something.
+        # Per-app axes
         if self.app_name == 'map':
             spaces_dict['map'] = swm_space.Dict(
                 {
@@ -339,9 +317,6 @@ class OpenAppsEnv(gym.Env):
 
         self.variation_space = swm_space.Dict(spaces_dict)
 
-        # Keys resampled by default when reset() is called without an
-        # explicit ``options['variation']`` list. Per-app axes are only
-        # added if the env actually has them.
         default_vars: list[str] = [
             'appearance.theme',
             'content.variant',
@@ -451,21 +426,11 @@ class OpenAppsEnv(gym.Env):
 
         new_cfg, new_tmp_logs = _load_hydra_config(extra_overrides=overrides)
 
-        # In-place merge into self._cfg. ``app.config`` (set by
-        # initialize_routes_and_configure_task) holds the same object, so
-        # already-registered routes see the new values on their next request.
         OmegaConf.set_struct(self._cfg, False)
         with open_dict(self._cfg):
             self._cfg.apps = new_cfg.apps
             self._cfg.seed = new_cfg.seed
 
-            # Map: pin ``init_location`` to the sampled city (defaults
-            # to NYC at variation index 0) and override ``saved_places``
-            # from the variant yaml. The variant's ``saved_places`` is
-            # declared with ``+saved_places:`` — Hydra's "add new key"
-            # form — which silently no-ops when the key already exists
-            # via defaults. We re-parse the yaml directly so the
-            # sidebar overlay actually swaps per-variant.
             if self.app_name == 'map' and hasattr(self._cfg.apps, 'maps'):
                 city_idx = int(np.asarray(v['map']['city']).reshape(-1)[0])
                 _, coords = MAP_CITY_CHOICES[city_idx]
@@ -474,10 +439,8 @@ class OpenAppsEnv(gym.Env):
                 if variant_places is not None:
                     self._cfg.apps.maps.saved_places = variant_places
 
-        # Discard the new tmp logs dir — we keep the original from __init__.
         shutil.rmtree(new_tmp_logs, ignore_errors=True)
 
-        # Browser viewport: map MultiDiscrete index → pixel size.
         vp_idx = np.asarray(v['browser']['viewport']).reshape(-1)
         vw = VIEWPORT_CHOICES_W[int(vp_idx[0])]
         vh = VIEWPORT_CHOICES_H[int(vp_idx[1])]
@@ -529,8 +492,7 @@ class OpenAppsEnv(gym.Env):
         """Take a Playwright screenshot and convert to numpy.
 
         Resizes to the fixed (VIEWPORT_HEIGHT, VIEWPORT_WIDTH) declared by
-        ``observation_space`` so that browser-viewport variation does not
-        break the gym contract — the agent always sees a canonical shape.
+        ``observation_space`` so the agent always sees a canonical shape.
         """
         png_bytes = self._page.screenshot()
         img = Image.open(io.BytesIO(png_bytes)).convert('RGB')

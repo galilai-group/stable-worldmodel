@@ -2,8 +2,7 @@
 
 Importing this module registers one gym env id per OpenApps application
 (``swm/OpenApps-Todo-v0``, ``-Calendar-v0``, ...). The task is selected
-at ``gym.make`` time via the ``task=`` kwarg, mirroring the convention
-used by the DMControl wrappers (e.g. ``CheetahDMControlWrapper``):
+at ``gym.make`` time via the ``task=`` kwarg:
 
     gym.make("swm/OpenApps-Calendar-v0", task="add_meeting_with_dennis")
 
@@ -14,11 +13,7 @@ used by the DMControl wrappers (e.g. ``CheetahDMControlWrapper``):
     ``openapps/config/tasks/all_tasks.yaml`` and Hydra-instantiated.
   * a ``Task`` instance — used directly, no yaml lookup.
 
-Registration is intentionally kept lazy: ``stable_worldmodel.envs`` does
-*not* import this subpackage on its own, so projects that don't use
-OpenApps avoid pulling in Playwright / FastHTML / Hydra / the openapps
-monorepo. Users opt in with a one-liner:
-
+Registration is kept lazy, users opt in with a one-liner:
     import stable_worldmodel.envs.openapps  # noqa: F401
 """
 

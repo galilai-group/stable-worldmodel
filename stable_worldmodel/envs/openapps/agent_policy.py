@@ -4,7 +4,7 @@ Implements get_action(obs, **kwargs) -> np.ndarray, which is the only
 interface swm calls. The VLM complexity (screenshot encoding, prompt
 construction, action parsing) is fully hidden from swm.
 
-Supported agents: UI-TARS-1.5-7B, GPT-4o/5.1, Claude, Dummy (random).
+Supported agents: UI-TARS, Dummy (random).
 """
 
 from collections import deque
@@ -66,8 +66,6 @@ class VLMPolicy(BasePolicy):
             MultiDiscrete int64 array [action_type, grid_x, grid_y].
         """
         screenshot = obs['pixels'] if isinstance(obs, dict) else obs
-        # swm's vector-env wrapping adds a leading batch dim; openapps's
-        # TarsAgent expects a plain HxWx3 frame, so normalize here.
         screenshot = np.squeeze(screenshot)
         self.history.append(screenshot)
         self._total_steps += 1
@@ -80,9 +78,6 @@ class VLMPolicy(BasePolicy):
 
         parsed = self._parse_action(raw)
 
-        # The env only supports click / scroll_up / scroll_down. Any other
-        # TARS action (type, wait, finished, hotkey, drag, ...) is dropped
-        # to a center no-op click so the episode can continue.
         if not self._is_supported(parsed):
             self._dropped_action_count += 1
             logger.debug(
@@ -117,7 +112,7 @@ class VLMPolicy(BasePolicy):
 
 
 class DummyPolicy(BasePolicy):
-    """Random action policy for smoke-testing without a VLM.
+    """Random action policy.
 
     Samples uniformly from MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y]).
     """
