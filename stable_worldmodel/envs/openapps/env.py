@@ -116,6 +116,55 @@ def _read_variant_saved_places(content: str) -> list | None:
     return None
 
 
+# Task class → OpenApps app key. Used to validate that a task key resolved
+# from the yaml is compatible with the env's app_name. Kept here (rather
+# than in __init__.py) so it stays colocated with the env that uses it.
+_TASK_CLASS_TO_APP = {
+    "AddEventTask": "calendar",
+    "RemoveEventTask": "calendar",
+    "AddToDoTask": "todo",
+    "MarkToDoDoneTask": "todo",
+    "SendMessageTask": "messages",
+    "SavePlaceTask": "map",
+}
+
+
+def _load_task_from_yaml(task_key: str, app_name: str) -> Task:
+    """Resolve a task key against ``openapps/config/tasks/all_tasks.yaml``.
+
+    Raises ValueError if the key is unknown or resolves to a Task whose
+    class doesn't match ``app_name``.
+    """
+    from pathlib import Path
+
+    from hydra.utils import instantiate
+    from omegaconf import OmegaConf
+
+    here = Path(__file__).resolve()
+    workspace_root = here.parents[4]
+    tasks_yaml = workspace_root / "openapps" / "config" / "tasks" / "all_tasks.yaml"
+    if not tasks_yaml.is_file():
+        raise FileNotFoundError(f"Tasks yaml not found at {tasks_yaml}")
+
+    cfg = OmegaConf.load(tasks_yaml)
+    if task_key not in cfg:
+        raise ValueError(
+            f"Unknown task key {task_key!r}. Available: {list(cfg.keys())}"
+        )
+
+    task_cfg = cfg[task_key]
+    target = task_cfg.get("_target_", "")
+    task_class = target.rsplit(".", 1)[-1]
+    expected_app = _TASK_CLASS_TO_APP.get(task_class)
+    if expected_app is not None and expected_app != app_name:
+        raise ValueError(
+            f"Task {task_key!r} ({task_class}) targets app "
+            f"{expected_app!r}, but env was constructed with "
+            f"app_name={app_name!r}"
+        )
+    return instantiate(task_cfg)
+
+
 # Lazy imports for Playwright (only needed at runtime)
 _playwright_ctx = None
 _browser = None
@@ -150,9 +199,10 @@ class OpenAppsEnv(gym.Env):
 
     Args:
         app_name: Which OpenApps app to target (e.g. "todo", "calendar").
-        task: An OpenApps Task object whose ``check_if_task_is_complete``
-            method is used for reward computation. When provided,
-            ``task_description`` defaults to the task's goal string.
+        task: Either an OpenApps ``Task`` instance, or a task key (str)
+            referencing an entry in ``openapps/config/tasks/all_tasks.yaml``
+            which will be Hydra-instantiated. ``None`` disables reward
+            (always 0.0) — useful for data collection.
         task_description: Natural-language task goal (falls back to task.goal).
         port: Port for the FastHTML server.
         max_steps: Maximum steps per episode before truncation.
@@ -172,7 +222,7 @@ class OpenAppsEnv(gym.Env):
     def __init__(
         self,
         app_name: str = "todo",
-        task: Task | None = None,
+        task: "Task | str | None" = None,
         task_description: str = "",
         port: int | None = None,
         max_steps: int = 50,
@@ -182,6 +232,8 @@ class OpenAppsEnv(gym.Env):
 
         self.app_name = app_name
         self.env_name = f"OpenApps-{app_name}"
+        if isinstance(task, str):
+            task = _load_task_from_yaml(task, app_name=app_name)
         self.task = task
         self.task_description = task_description or (task.goal if task else "")
         self.port = port if port is not None else pick_free_port()

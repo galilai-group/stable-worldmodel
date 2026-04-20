@@ -1,17 +1,26 @@
 """OpenApps gymnasium envs for stable-worldmodel.
 
-Importing this module registers:
-  * One generic env per OpenApps application (no task bound, reward always 0).
-  * One task-bound env per entry in ``openapps/config/tasks/all_tasks.yaml``.
+Importing this module registers one gym env id per OpenApps application
+(``swm/OpenApps-Todo-v0``, ``-Calendar-v0``, ...). The task is selected
+at ``gym.make`` time via the ``task=`` kwarg, mirroring the convention
+used by the DMControl wrappers (e.g. ``CheetahDMControlWrapper``):
+
+    gym.make("swm/OpenApps-Calendar-v0", task="add_meeting_with_dennis")
+
+``task`` may be:
+  * ``None`` — no task bound, reward is always 0.0 (useful for data
+    collection / world-modeling).
+  * a task key (str) — resolved against
+    ``openapps/config/tasks/all_tasks.yaml`` and Hydra-instantiated.
+  * a ``Task`` instance — used directly, no yaml lookup.
 """
 
-from pathlib import Path
-
 from gymnasium.envs import registration
-from loguru import logger
 
 from stable_worldmodel.envs import WORLDS
+
 from .env import OpenAppsEnv  # noqa: F401 — also triggers server path setup
+
 
 _APPS = ["todo", "calendar", "messages", "codeeditor", "map"]
 
@@ -25,83 +34,34 @@ for _app in _APPS:
     WORLDS.add(_env_id)
 
 
-# ── Task-bound env registration ──────────────────────────────────────
+def list_tasks(app_name: str | None = None) -> list[str]:
+    """List task keys from ``all_tasks.yaml``, optionally filtered by app.
 
-# Maps Task class name → OpenApps app key (must match _APPS).
-_TASK_CLASS_TO_APP = {
-    "AddEventTask": "calendar",
-    "RemoveEventTask": "calendar",
-    "AddToDoTask": "todo",
-    "MarkToDoDoneTask": "todo",
-    "SendMessageTask": "messages",
-    "SavePlaceTask": "map",
-}
-
-
-def _snake_to_pascal(name: str) -> str:
-    return "".join(part.capitalize() for part in name.split("_"))
-
-
-def _register_tasks_from_yaml() -> None:
-    """Load canonical OpenApps tasks and register one env id per task.
-
-    Silently skips if the yaml or openapps repo is unavailable — the
-    generic shells already cover the basic case.
+    Returns the keys you can pass as ``task=`` to ``gym.make``. Intended
+    for discovery from notebooks / scripts.
     """
-    try:
-        from hydra.utils import instantiate
-        from omegaconf import OmegaConf
-    except ImportError as e:
-        logger.warning(f"Skipping OpenApps task registration (hydra missing): {e}")
-        return
+    from pathlib import Path
+
+    from omegaconf import OmegaConf
+
+    from .env import _TASK_CLASS_TO_APP
 
     here = Path(__file__).resolve()
     workspace_root = here.parents[4]
     tasks_yaml = workspace_root / "openapps" / "config" / "tasks" / "all_tasks.yaml"
-
     if not tasks_yaml.is_file():
-        logger.warning(f"OpenApps tasks yaml not found at {tasks_yaml}; skipping")
-        return
+        return []
 
-    try:
-        cfg = OmegaConf.load(tasks_yaml)
-    except Exception as e:
-        logger.warning(f"Failed to load {tasks_yaml}: {e}")
-        return
-
-    for task_key, task_cfg in cfg.items():
-        target = task_cfg.get("_target_", "")
-        task_class = target.rsplit(".", 1)[-1]
-        app_name = _TASK_CLASS_TO_APP.get(task_class)
+    cfg = OmegaConf.load(tasks_yaml)
+    keys: list[str] = []
+    for k, v in cfg.items():
         if app_name is None:
-            logger.warning(
-                f"No app mapping for task class {task_class!r} "
-                f"(task {task_key!r}); skipping"
-            )
+            keys.append(k)
             continue
-
-        try:
-            task_obj = instantiate(task_cfg)
-        except Exception as e:
-            logger.warning(f"Failed to instantiate task {task_key!r}: {e}")
-            continue
-
-        env_id = (
-            f"swm/OpenApps-{app_name.capitalize()}-"
-            f"{_snake_to_pascal(task_key)}-v0"
-        )
-        registration.register(
-            id=env_id,
-            entry_point="stable_worldmodel.envs.openapps.env:OpenAppsEnv",
-            kwargs={
-                "app_name": app_name,
-                "task": task_obj,
-                "task_description": task_obj.goal,
-            },
-        )
-        WORLDS.add(env_id)
+        cls = v.get("_target_", "").rsplit(".", 1)[-1]
+        if _TASK_CLASS_TO_APP.get(cls) == app_name:
+            keys.append(k)
+    return keys
 
 
-_register_tasks_from_yaml()
-
-__all__ = ["OpenAppsEnv"]
+__all__ = ["OpenAppsEnv", "list_tasks"]
