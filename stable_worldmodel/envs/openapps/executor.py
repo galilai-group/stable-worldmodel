@@ -17,14 +17,14 @@ import numpy as np
 VIEWPORT_WIDTH = 1024
 VIEWPORT_HEIGHT = 640
 
-GRID_X = 32          # 1024 / 32 = 32 px per cell
-GRID_Y = 20          # 640  / 20 = 32 px per cell
-NUM_ACTIONS = 3      # 0=click, 1=scroll_down, 2=scroll_up
+GRID_X = 32  # 1024 / 32 = 32 px per cell
+GRID_Y = 20  # 640  / 20 = 32 px per cell
+NUM_ACTIONS = 3  # 0=click, 1=scroll_down, 2=scroll_up
 
-CELL_W = VIEWPORT_WIDTH // GRID_X    # 32 px
-CELL_H = VIEWPORT_HEIGHT // GRID_Y   # 32 px
+CELL_W = VIEWPORT_WIDTH // GRID_X  # 32 px
+CELL_H = VIEWPORT_HEIGHT // GRID_Y  # 32 px
 
-SCROLL_DELTA = 300   # px per scroll step (~3–4 list items)
+SCROLL_DELTA = 300  # px per scroll step (~3–4 list items)
 
 
 def _cell_to_px(gx: int, gy: int) -> tuple[int, int]:
@@ -49,15 +49,15 @@ def action_multidiscrete_to_playwright(action: np.ndarray, page) -> str:
 
     if action_type == 0:
         page.mouse.click(x, y)
-        return f"mouse_click(x={x}, y={y})"
+        return f'mouse_click(x={x}, y={y})'
     elif action_type == 1:
         page.mouse.move(x, y)
         page.mouse.wheel(0, SCROLL_DELTA)
-        return f"scroll_down(x={x}, y={y}, delta={SCROLL_DELTA})"
+        return f'scroll_down(x={x}, y={y}, delta={SCROLL_DELTA})'
     else:  # action_type == 2
         page.mouse.move(x, y)
         page.mouse.wheel(0, -SCROLL_DELTA)
-        return f"scroll_up(x={x}, y={y}, delta={SCROLL_DELTA})"
+        return f'scroll_up(x={x}, y={y}, delta={SCROLL_DELTA})'
 
 
 # ── Action string → MultiDiscrete ────────────────────────────────────
@@ -76,24 +76,24 @@ def _extract_coords(action_str: str) -> tuple[int, int]:
     Accepts mouse_click(x=N, y=N), TARS click(start_box='(x,y)'), and
     click(point='<point>x y</point>') forms.
     """
-    match = re.search(r"x=(\d+).*?y=(\d+)", action_str)
+    match = re.search(r'x=(\d+).*?y=(\d+)', action_str)
     if match:
         return int(match.group(1)), int(match.group(2))
-    match = re.search(r"<point>\s*(\d+)[\s,]+(\d+)\s*</point>", action_str)
+    match = re.search(r'<point>\s*(\d+)[\s,]+(\d+)\s*</point>', action_str)
     if match:
         return int(match.group(1)), int(match.group(2))
     # TARS sometimes uses comma, sometimes whitespace: (97,185) or (97 185).
-    match = re.search(r"\(\s*(\d+)\s*[,\s]\s*(\d+)\s*\)", action_str)
+    match = re.search(r'\(\s*(\d+)\s*[,\s]\s*(\d+)\s*\)', action_str)
     if match:
         return int(match.group(1)), int(match.group(2))
-    raise ValueError(f"Cannot extract coords from: {action_str}")
+    raise ValueError(f'Cannot extract coords from: {action_str}')
 
 
 def _extract_scroll_dy(action_str: str) -> float:
     """Extract dy scroll value from a BrowserGym scroll string."""
-    match = re.search(r"dy=([-\d.]+)", action_str)
+    match = re.search(r'dy=([-\d.]+)', action_str)
     if not match:
-        raise ValueError(f"Cannot extract dy from: {action_str}")
+        raise ValueError(f'Cannot extract dy from: {action_str}')
     return float(match.group(1))
 
 
@@ -112,16 +112,16 @@ def action_str_to_multidiscrete(action_str: str) -> np.ndarray:
     """
     vec = np.zeros(3, dtype=np.int64)
 
-    if action_str.startswith("mouse_click") or action_str.startswith("click"):
+    if action_str.startswith('mouse_click') or action_str.startswith('click'):
         x_px, y_px = _extract_coords(action_str)
         vec[0] = 0
         vec[1], vec[2] = _px_to_cell(x_px, y_px)
 
-    elif "scroll" in action_str:
+    elif 'scroll' in action_str:
         # Determine direction from dy sign or action name
-        if action_str.startswith("scroll_up"):
+        if action_str.startswith('scroll_up'):
             dy = -1.0
-        elif action_str.startswith("scroll_down"):
+        elif action_str.startswith('scroll_down'):
             dy = 1.0
         else:
             try:

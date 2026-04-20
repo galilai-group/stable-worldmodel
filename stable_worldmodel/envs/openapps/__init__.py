@@ -13,55 +13,33 @@ used by the DMControl wrappers (e.g. ``CheetahDMControlWrapper``):
   * a task key (str) — resolved against
     ``openapps/config/tasks/all_tasks.yaml`` and Hydra-instantiated.
   * a ``Task`` instance — used directly, no yaml lookup.
+
+Registration is intentionally kept lazy: ``stable_worldmodel.envs`` does
+*not* import this subpackage on its own, so projects that don't use
+OpenApps avoid pulling in Playwright / FastHTML / Hydra / the openapps
+monorepo. Users opt in with a one-liner:
+
+    import stable_worldmodel.envs.openapps  # noqa: F401
 """
 
 from gymnasium.envs import registration
 
 from stable_worldmodel.envs import WORLDS
 
-from .env import OpenAppsEnv  # noqa: F401 — also triggers server path setup
+from .agent_policy import DummyPolicy, VLMPolicy
+from .env import OpenAppsEnv, list_tasks
 
 
-_APPS = ["todo", "calendar", "messages", "codeeditor", "map"]
+_APPS = ('todo', 'calendar', 'messages', 'codeeditor', 'map')
 
 for _app in _APPS:
-    _env_id = f"swm/OpenApps-{_app.capitalize()}-v0"
+    _env_id = f'swm/OpenApps-{_app.capitalize()}-v0'
     registration.register(
         id=_env_id,
-        entry_point="stable_worldmodel.envs.openapps.env:OpenAppsEnv",
-        kwargs={"app_name": _app},
+        entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+        kwargs={'app_name': _app},
     )
     WORLDS.add(_env_id)
 
 
-def list_tasks(app_name: str | None = None) -> list[str]:
-    """List task keys from ``all_tasks.yaml``, optionally filtered by app.
-
-    Returns the keys you can pass as ``task=`` to ``gym.make``. Intended
-    for discovery from notebooks / scripts.
-    """
-    from pathlib import Path
-
-    from omegaconf import OmegaConf
-
-    from .env import _TASK_CLASS_TO_APP
-
-    here = Path(__file__).resolve()
-    workspace_root = here.parents[4]
-    tasks_yaml = workspace_root / "openapps" / "config" / "tasks" / "all_tasks.yaml"
-    if not tasks_yaml.is_file():
-        return []
-
-    cfg = OmegaConf.load(tasks_yaml)
-    keys: list[str] = []
-    for k, v in cfg.items():
-        if app_name is None:
-            keys.append(k)
-            continue
-        cls = v.get("_target_", "").rsplit(".", 1)[-1]
-        if _TASK_CLASS_TO_APP.get(cls) == app_name:
-            keys.append(k)
-    return keys
-
-
-__all__ = ["OpenAppsEnv", "list_tasks"]
+__all__ = ['DummyPolicy', 'OpenAppsEnv', 'VLMPolicy', 'list_tasks']

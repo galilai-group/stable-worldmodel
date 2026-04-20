@@ -13,11 +13,21 @@ import numpy as np
 from loguru import logger
 
 from stable_worldmodel.policy import BasePolicy
+
 from .executor import (
     GRID_X,
     GRID_Y,
     action_str_to_multidiscrete,
 )
+
+
+# browsergym is an optional dependency used only to parse TARS-formatted
+# action strings. When it isn't installed we fall back to passing the raw
+# string through unchanged.
+try:
+    from browsergym.core.action.parsers import uitars_parser
+except ImportError:
+    uitars_parser = None
 
 
 class VLMPolicy(BasePolicy):
@@ -39,7 +49,7 @@ class VLMPolicy(BasePolicy):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.type = "vlm"
+        self.type = 'vlm'
         self.agent = agent
         self.task = task_description
         self.history: deque = deque(maxlen=history_len)
@@ -55,7 +65,7 @@ class VLMPolicy(BasePolicy):
         Returns:
             MultiDiscrete int64 array [action_type, grid_x, grid_y].
         """
-        screenshot = obs["pixels"] if isinstance(obs, dict) else obs
+        screenshot = obs['pixels'] if isinstance(obs, dict) else obs
         # swm's vector-env wrapping adds a leading batch dim; openapps's
         # TarsAgent expects a plain HxWx3 frame, so normalize here.
         screenshot = np.squeeze(screenshot)
@@ -76,8 +86,8 @@ class VLMPolicy(BasePolicy):
         if not self._is_supported(parsed):
             self._dropped_action_count += 1
             logger.debug(
-                f"Unsupported action dropped ({self._dropped_action_count}/"
-                f"{self._total_steps}): {parsed}"
+                f'Unsupported action dropped ({self._dropped_action_count}/'
+                f'{self._total_steps}): {parsed}'
             )
             return np.array([[0, GRID_X // 2, GRID_Y // 2]], dtype=np.int64)
 
@@ -86,16 +96,16 @@ class VLMPolicy(BasePolicy):
     @staticmethod
     def _is_supported(parsed: str) -> bool:
         """True if the parsed action maps to a click/scroll the env can run."""
-        supported = ("mouse_click", "click(", "scroll")
+        supported = ('mouse_click', 'click(', 'scroll')
         return parsed.startswith(supported)
 
     def _parse_action(self, raw_action: str) -> str:
         """Parse raw VLM output into a BrowserGym-style action string."""
+        if uitars_parser is None:
+            return raw_action
         try:
-            from browsergym.core.action.parsers import uitars_parser
-            result = uitars_parser({"action": raw_action})
-            return result["action"]
-        except (ImportError, Exception):
+            return uitars_parser({'action': raw_action})['action']
+        except Exception:
             return raw_action
 
     @property
@@ -114,7 +124,7 @@ class DummyPolicy(BasePolicy):
 
     def __init__(self, seed: int | None = None, **kwargs):
         super().__init__(**kwargs)
-        self.type = "dummy"
+        self.type = 'dummy'
         self.seed = seed
 
     def get_action(self, obs, **kwargs) -> np.ndarray:

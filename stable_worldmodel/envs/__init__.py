@@ -118,7 +118,14 @@ register(
 # OPENAPPS #
 ############
 
-# OpenApps env registrations live in stable_worldmodel.envs.openapps.
+# OpenApps env ids (swm/OpenApps-*-v0) are intentionally NOT registered
+# from this module. Importing the openapps subpackage drags in Playwright,
+# FastHTML, Hydra, and the sibling openapps monorepo — too heavy for
+# projects that never touch browser envs. Opt in explicitly:
+#
+#     import stable_worldmodel.envs.openapps  # noqa: F401
+#
+# After that import, ``gym.make("swm/OpenApps-Todo-v0")`` works normally.
 
 
 ############
