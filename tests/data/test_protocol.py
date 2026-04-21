@@ -11,7 +11,8 @@ from stable_worldmodel.data import Dataset, HDF5Dataset
 @pytest.fixture
 def sample_h5_file(tmp_path):
     """Create a sample HDF5 file for testing."""
-    h5_path = tmp_path / "test_dataset.h5"
+    h5_path = tmp_path / "datasets" / "test_dataset.h5"
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = [10, 10]
     ep_offsets = [0, 10]

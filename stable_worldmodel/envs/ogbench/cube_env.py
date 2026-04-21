@@ -909,6 +909,10 @@ class CubeEnv(ManipSpaceEnv):
                 'pos': (0.414, -0.753, 0.639),
                 'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
             },
+            'side': {
+                'pos': (1.287, 0.000, 0.509),
+                'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
+            },
         }
 
         for camera_name, camera_kwargs in self.cameras.items():
@@ -1659,7 +1663,7 @@ class CubeEnv(ManipSpaceEnv):
         if not self._multiview:
             return self.render(camera=camera, *args, **kwargs)
 
-        cam_names = ['front_pixels', 'side_pixels']
+        cam_names = list(self.cameras.keys())
         multi_view = {
             cam: self.render(camera=cam, *args, **kwargs) for cam in cam_names
         }

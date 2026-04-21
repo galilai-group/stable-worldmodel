@@ -2,7 +2,7 @@ title: Dataset
 summary: Dataset handling
 ---
 
-`stable_worldmodel` provides a flexible dataset API that supports both HDF5-based storage (for speed and compactness) and Folder-based storage.
+`stable_worldmodel` provides a flexible dataset API that supports HDF5, folder-backed media datasets, and read-only LeRobot datasets.
 
 ## **[ Storage Formats ]**
 
@@ -111,6 +111,26 @@ dataset = ImageDataset(
 ```
 ///
 
+/// tab | LeRobot Format
+The **`LeRobotAdapter`** wraps lerobot's read-only `LeRobotDataset` and exposes the same episode-based API as the native SWM datasets. By default, it maps (only one) camera view to `pixels`, `action` to `action`, and `observation.state` to `proprio`.
+
+LeRobot support is feature-gated to Python 3.12+ because the official `lerobot` package currently requires it.
+
+**Usage:**
+```python
+from stable_worldmodel.data import LeRobotAdapter
+
+dataset = LeRobotAdapter(
+    repo_id="your-org/your-lerobot-dataset",
+    primary_camera_key="observation.images.front",  # will be mapped to `pixels`
+    num_steps=8,
+    frameskip=1,
+    keys_to_load=["pixels", "action", "proprio", "ep_idx", "step_idx"],
+    keys_to_cache=["action", "proprio", "ep_idx", "step_idx"],
+)
+```
+///
+
 /// tab | Goal-Conditioned
 The **`GoalDataset`** wraps any dataset to add goal observations for goal-conditioned learning. Goals are sampled from random states, future states in the same episode, or the current state.
 
@@ -165,6 +185,12 @@ item = goal_dataset[0]
         show_source: false
 
 ::: stable_worldmodel.data.ImageDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+::: stable_worldmodel.data.LeRobotAdapter
     options:
         heading_level: 3
         members: false

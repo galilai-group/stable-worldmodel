@@ -323,7 +323,10 @@ class World:
                 'Frame history > 1 not supported for dataset recording.'
             )
 
-        path = Path(cache_dir or get_cache_dir()) / f'{dataset_name}.h5'
+        path = (
+            get_cache_dir(cache_dir, sub_folder='datasets')
+            / f'{dataset_name}.h5'
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
 
         self.terminateds = np.zeros(self.num_envs, dtype=bool)
@@ -681,7 +684,7 @@ class World:
                     # record eval info
                     ep_idx = episode_idx[i]
                     results['episode_successes'][ep_idx] = self.terminateds[i]
-                    results['seeds'][ep_idx] = self.envs.envs[
+                    results['seeds'][ep_idx] = self.envs.unwrapped.envs[
                         i
                     ].unwrapped.np_random_seed
 
@@ -724,7 +727,7 @@ class World:
                     self.envs.unwrapped._autoreset_envs = np.zeros(
                         (self.num_envs,)
                     )
-                    _, infos = self.envs.envs[i].reset(
+                    _, infos = self.envs.unwrapped.envs[i].reset(
                         seed=new_seed, options=options
                     )
 
@@ -788,7 +791,9 @@ class World:
 
         ep_idx_arr = np.array(episodes_idx)
         start_steps_arr = np.array(start_steps)
-        end_steps = start_steps_arr + goal_offset_steps
+        # We add +1 so that the last loaded frame will align with the last frame we encounter
+        # when stepping through the rollout.
+        end_steps = start_steps_arr + goal_offset_steps + 1
 
         if not (len(ep_idx_arr) == len(start_steps_arr)):
             raise ValueError(

@@ -127,7 +127,8 @@ class HDF5Dataset(Dataset):
         keys_to_merge: dict[str, list[str] | str] | None = None,
         cache_dir: str | Path | None = None,
     ) -> None:
-        self.h5_path = Path(cache_dir or get_cache_dir(), f'{name}.h5')
+        datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
+        self.h5_path = Path(datasets_dir, f'{name}.h5')
         self.h5_file: h5py.File | None = None
         self._cache: dict[str, np.ndarray] = {}
 
@@ -240,7 +241,9 @@ class FolderDataset(Dataset):
         folder_keys: list[str] | None = None,
         cache_dir: str | Path | None = None,
     ) -> None:
-        self.path = Path(cache_dir or get_cache_dir()) / name
+        self.path = (
+            Path(cache_dir or get_cache_dir(sub_folder='datasets')) / name
+        )
         self.folder_keys = folder_keys or []
         self._cache: dict[str, np.ndarray] = {}
 
@@ -805,3 +808,15 @@ class GoalDataset:
             steps[goal_key] = goal_val
 
         return steps
+
+
+__all__ = [
+    'Dataset',
+    'HDF5Dataset',
+    'FolderDataset',
+    'ImageDataset',
+    'VideoDataset',
+    'MergeDataset',
+    'ConcatDataset',
+    'GoalDataset',
+]

@@ -52,15 +52,17 @@ class PushT(gym.Env):
 
         self.shapes = ['o', 'L', 'T', 'Z', 'square', 'I', 'small_tee', '+']
 
+        # Velocities are last two components of proprio and state; they can be negative
+        # (Pymunk). Declaring low=0 made passive_env_checker reject valid observations.
         self.observation_space = spaces.Dict(
             {
                 'proprio': spaces.Box(
-                    low=np.array([0, 0, 0, 0]),
+                    low=np.array([0, 0, -ws, -ws]),
                     high=np.array([ws, ws, ws, ws]),
                     dtype=np.float64,
                 ),
                 'state': spaces.Box(
-                    low=np.array([0, 0, 0, 0, 0, 0, 0]),
+                    low=np.array([0, 0, 0, 0, 0, -ws, -ws]),
                     high=np.array([ws, ws, ws, ws, np.pi * 2, ws, ws]),
                     dtype=np.float64,
                 ),

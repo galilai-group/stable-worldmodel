@@ -96,7 +96,7 @@ def run(cfg: DictConfig):
     policy = cfg.get('policy', 'random')
 
     if policy != 'random':
-        model = swm.policy.AutoCostModel(cfg.policy)
+        model = swm.wm.utils.load_pretrained(cfg.policy)
         model = model.to('cuda')
         model = model.eval()
         model.requires_grad_(False)
@@ -111,7 +111,9 @@ def run(cfg: DictConfig):
         policy = swm.policy.RandomPolicy()
 
     results_path = (
-        Path(swm.data.utils.get_cache_dir(), cfg.policy).parent
+        Path(
+            swm.data.utils.get_cache_dir(sub_folder='checkpoints'), cfg.policy
+        ).parent
         if cfg.policy != 'random'
         else Path(__file__).parent
     )

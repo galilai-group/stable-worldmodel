@@ -21,40 +21,44 @@ from stable_worldmodel.data import (
 from stable_worldmodel.data.dataset import Dataset
 
 
-class TestDatasetBase:
-    """Tests for the base Dataset class abstract methods."""
+##############################################################################
+## TestDatasetBase — Tests for the base Dataset class abstract methods      ##
+##############################################################################
 
-    def test_column_names_not_implemented(self):
-        """Test that column_names raises NotImplementedError."""
-        lengths = np.array([10])
-        offsets = np.array([0])
-        dataset = Dataset(lengths, offsets)
-        with pytest.raises(NotImplementedError):
-            _ = dataset.column_names
+def test_column_names_not_implemented():
+    """Test that column_names raises NotImplementedError."""
+    lengths = np.array([10])
+    offsets = np.array([0])
+    dataset = Dataset(lengths, offsets)
+    with pytest.raises(NotImplementedError):
+        _ = dataset.column_names
 
-    def test_load_slice_not_implemented(self):
-        """Test that _load_slice raises NotImplementedError."""
-        lengths = np.array([10])
-        offsets = np.array([0])
-        dataset = Dataset(lengths, offsets)
-        with pytest.raises(NotImplementedError):
-            dataset._load_slice(0, 0, 5)
 
-    def test_get_col_data_not_implemented(self):
-        """Test that get_col_data raises NotImplementedError."""
-        lengths = np.array([10])
-        offsets = np.array([0])
-        dataset = Dataset(lengths, offsets)
-        with pytest.raises(NotImplementedError):
-            dataset.get_col_data('col')
+def test_load_slice_not_implemented():
+    """Test that _load_slice raises NotImplementedError."""
+    lengths = np.array([10])
+    offsets = np.array([0])
+    dataset = Dataset(lengths, offsets)
+    with pytest.raises(NotImplementedError):
+        dataset._load_slice(0, 0, 5)
 
-    def test_get_row_data_not_implemented(self):
-        """Test that get_row_data raises NotImplementedError."""
-        lengths = np.array([10])
-        offsets = np.array([0])
-        dataset = Dataset(lengths, offsets)
-        with pytest.raises(NotImplementedError):
-            dataset.get_row_data(0)
+
+def test_get_col_data_not_implemented():
+    """Test that get_col_data raises NotImplementedError."""
+    lengths = np.array([10])
+    offsets = np.array([0])
+    dataset = Dataset(lengths, offsets)
+    with pytest.raises(NotImplementedError):
+        dataset.get_col_data('col')
+
+
+def test_get_row_data_not_implemented():
+    """Test that get_row_data raises NotImplementedError."""
+    lengths = np.array([10])
+    offsets = np.array([0])
+    dataset = Dataset(lengths, offsets)
+    with pytest.raises(NotImplementedError):
+        dataset.get_row_data(0)
 
 
 @pytest.fixture
@@ -276,741 +280,803 @@ def mock_dataset_c():
     )
 
 
-class TestImageDataset:
-    def test_init(self, sample_image_dataset):
-        """Test ImageDataset initialization."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        assert dataset.path == cache_dir / name
-        assert len(dataset.lengths) == 2
-        assert len(dataset.offsets) == 2
-
-    def test_len(self, sample_image_dataset):
-        """Test ImageDataset length calculation."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        assert len(dataset) > 0
-
-    def test_column_names(self, sample_image_dataset):
-        """Test column_names property excludes metadata keys."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        column_names = dataset.column_names
-        assert 'observation' in column_names
-        assert 'action' in column_names
-        assert 'pixels' in column_names
-        assert 'ep_len' not in column_names
-        assert 'ep_offset' not in column_names
-
-    def test_getitem(self, sample_image_dataset):
-        """Test ImageDataset __getitem__ method."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        item = dataset[0]
-
-        assert isinstance(item, dict)
-        assert 'observation' in item
-        assert 'action' in item
-        assert 'pixels' in item
-        assert isinstance(item['observation'], torch.Tensor)
-        assert isinstance(item['action'], torch.Tensor)
-        assert isinstance(item['pixels'], torch.Tensor)
-
-    def test_image_permutation(self, sample_image_dataset):
-        """Test that images are permuted to TCHW format."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        item = dataset[0]
-
-        assert 'pixels' in item
-        # With num_steps=1, shape should be (1, 3, 64, 64)
-        assert item['pixels'].shape[-3] == 3  # channels
-
-    def test_frameskip(self, sample_image_dataset):
-        """Test ImageDataset with frameskip."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(
-            name, cache_dir=str(cache_dir), frameskip=2, num_steps=2
-        )
-
-        assert len(dataset) > 0
-        item = dataset[0]
-        assert isinstance(item, dict)
-
-    def test_keys_to_load(self, sample_image_dataset):
-        """Test ImageDataset with specific keys_to_load."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(
-            name,
-            cache_dir=str(cache_dir),
-            keys_to_load=['observation', 'action'],
-        )
-
-        item = dataset[0]
-        assert 'observation' in item
-        assert 'action' in item
-        assert 'pixels' not in item
-
-    def test_load_chunk(self, sample_image_dataset):
-        """Test load_chunk returns correct slices."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        episodes_idx = np.array([0, 1])
-        start = np.array([0, 0])
-        end = np.array([3, 5])
-
-        chunk = dataset.load_chunk(episodes_idx, start, end)
-
-        assert isinstance(chunk, list)
-        assert len(chunk) == 2
-        assert 'observation' in chunk[0]
-        assert 'action' in chunk[0]
-
-    def test_get_col_data(self, sample_image_dataset):
-        """Test get_col_data method."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        col_data = dataset.get_col_data('observation')
-        assert isinstance(col_data, np.ndarray)
-        assert col_data.shape[0] == 20  # Total steps
-
-    def test_get_col_data_image_key_raises(self, sample_image_dataset):
-        """Test get_col_data raises for image keys."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        with pytest.raises(KeyError, match='not in cache'):
-            dataset.get_col_data('pixels')
-
-    def test_get_row_data(self, sample_image_dataset):
-        """Test get_row_data method."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        row_data = dataset.get_row_data(5)
-        assert isinstance(row_data, dict)
-        assert 'observation' in row_data
-        assert 'action' in row_data
-        # pixels not in row_data because it's an image key
-
-    def test_transform(self, sample_image_dataset):
-        """Test ImageDataset with transform function."""
-        cache_dir, name = sample_image_dataset
-
-        def double_transform(data):
-            for k in data:
-                if data[k].dtype == torch.float32:
-                    data[k] = data[k] * 2
-            return data
-
-        dataset = ImageDataset(
-            name,
-            cache_dir=str(cache_dir),
-            transform=double_transform,
-        )
-
-        item = dataset[0]
-        assert isinstance(item, dict)
-
-    def test_short_episode_filtered(self, sample_image_dataset_short_episode):
-        """Test that episodes shorter than span are filtered out."""
-        cache_dir, name = sample_image_dataset_short_episode
-        dataset = ImageDataset(
-            name, cache_dir=str(cache_dir), num_steps=5, frameskip=1
-        )
-
-        # Only second episode (length 10) should have valid clips
-        for ep_idx, _ in dataset.clip_indices:
-            assert ep_idx == 1
-
-    def test_load_file(self, sample_image_dataset):
-        """Test _load_file method."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        img = dataset._load_file(0, 0, 'pixels')
-        assert isinstance(img, np.ndarray)
-        assert img.shape == (64, 64, 3)
-
-    def test_load_file_jpg_fallback(self, sample_image_dataset_jpg):
-        """Test _load_file falls back to .jpg when .jpeg doesn't exist."""
-        cache_dir, name = sample_image_dataset_jpg
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        img = dataset._load_file(0, 0, 'pixels')
-        assert isinstance(img, np.ndarray)
-        assert img.shape == (64, 64, 3)
-
-    def test_load_episode(self, sample_image_dataset):
-        """Test load_episode loads full episode data."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
-
-        episode = dataset.load_episode(0)
-
-        assert isinstance(episode, dict)
-        assert 'observation' in episode
-        assert 'action' in episode
-        assert 'pixels' in episode
-        # Episode 0 has 10 steps
-        assert episode['observation'].shape[0] == 10
-        assert episode['pixels'].shape[0] == 10
-
-
-class TestVideoDataset:
-    def test_init(self, sample_video_dataset):
-        """Test VideoDataset initialization."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        assert dataset.path == cache_dir / name
-        assert len(dataset.lengths) == 2
-        assert len(dataset.offsets) == 2
-
-    def test_len(self, sample_video_dataset):
-        """Test VideoDataset length calculation."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        assert len(dataset) > 0
-
-    def test_column_names(self, sample_video_dataset):
-        """Test column_names property excludes metadata keys."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        column_names = dataset.column_names
-        assert 'observation' in column_names
-        assert 'action' in column_names
-        assert 'video' in column_names
-        assert 'ep_len' not in column_names
-        assert 'ep_offset' not in column_names
-
-    def test_getitem(self, sample_video_dataset):
-        """Test VideoDataset __getitem__ method."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        item = dataset[0]
-
-        assert isinstance(item, dict)
-        assert 'observation' in item
-        assert 'action' in item
-        assert 'video' in item
-        assert isinstance(item['video'], torch.Tensor)
-
-    def test_video_permutation(self, sample_video_dataset):
-        """Test that video frames are permuted to TCHW format."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        item = dataset[0]
-
-        assert 'video' in item
-        assert item['video'].shape[-3] == 3  # channels
-
-    def test_frameskip(self, sample_video_dataset):
-        """Test VideoDataset with frameskip."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(
-            name, cache_dir=str(cache_dir), frameskip=2, num_steps=2
-        )
-
-        assert len(dataset) > 0
-        item = dataset[0]
-        assert isinstance(item, dict)
-
-    def test_keys_to_load(self, sample_video_dataset):
-        """Test VideoDataset with specific keys_to_load."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(
-            name,
-            cache_dir=str(cache_dir),
-            keys_to_load=['observation', 'action'],
-        )
-
-        item = dataset[0]
-        assert 'observation' in item
-        assert 'action' in item
-        assert 'video' not in item
-
-    def test_load_chunk(self, sample_video_dataset):
-        """Test load_chunk returns correct slices."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        episodes_idx = np.array([0, 1])
-        start = np.array([0, 0])
-        end = np.array([3, 5])
-
-        chunk = dataset.load_chunk(episodes_idx, start, end)
-
-        assert isinstance(chunk, list)
-        assert len(chunk) == 2
-        assert 'observation' in chunk[0]
-        assert 'action' in chunk[0]
-        assert 'video' in chunk[0]
-
-    def test_get_col_data(self, sample_video_dataset):
-        """Test get_col_data method."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        col_data = dataset.get_col_data('observation')
-        assert isinstance(col_data, np.ndarray)
-        assert col_data.shape[0] == 20
-
-    def test_get_col_data_video_key_raises(self, sample_video_dataset):
-        """Test get_col_data raises for video keys."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        with pytest.raises(KeyError, match='not in cache'):
-            dataset.get_col_data('video')
-
-    def test_get_row_data(self, sample_video_dataset):
-        """Test get_row_data method."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        row_data = dataset.get_row_data(5)
-        assert isinstance(row_data, dict)
-        assert 'observation' in row_data
-        assert 'action' in row_data
-
-    def test_transform(self, sample_video_dataset):
-        """Test VideoDataset with transform function."""
-        cache_dir, name = sample_video_dataset
-
-        def double_transform(data):
-            for k in data:
-                if data[k].dtype == torch.float32:
-                    data[k] = data[k] * 2
-            return data
-
-        dataset = VideoDataset(
-            name,
-            cache_dir=str(cache_dir),
-            transform=double_transform,
-        )
-
-        item = dataset[0]
-        assert isinstance(item, dict)
-
-    def test_load_file(self, sample_video_dataset):
-        """Test _load_file method."""
-        cache_dir, name = sample_video_dataset
-        dataset = VideoDataset(name, cache_dir=str(cache_dir))
-
-        frame = dataset._load_file(0, 0, 'video')
-        assert isinstance(frame, np.ndarray)
-        assert frame.shape == (64, 64, 3)
-
-    def test_decord_import_error(self, sample_video_dataset):
-        """Test VideoDataset raises ImportError when decord is not available."""
-        cache_dir, name = sample_video_dataset
-
-        # Reset the class-level cached decord module
-        VideoDataset._decord = None
-
-        # Mock the import to raise ImportError
-        with patch.dict(sys.modules, {'decord': None}):
-            with pytest.raises(
-                ImportError, match='VideoDataset requires decord'
-            ):
-                VideoDataset(name, cache_dir=str(cache_dir))
-
-
-class TestMergeDataset:
-    def test_init(self, mock_dataset_a, mock_dataset_b):
-        """Test MergeDataset initialization."""
-        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
-
-        assert len(merged.datasets) == 2
-        assert len(merged) == 20
-
-    def test_init_empty_raises(self):
-        """Test MergeDataset raises error for empty list."""
-        with pytest.raises(ValueError, match='Need at least one dataset'):
-            MergeDataset([])
-
-    def test_column_names_auto_dedupe(self, mock_dataset_a, mock_dataset_b):
-        """Test column_names with automatic deduplication."""
-        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
-
-        cols = merged.column_names
-        # First dataset provides pixels, action, observation
-        # Second dataset provides only audio (action, observation deduplicated)
-        assert 'pixels' in cols
-        assert 'action' in cols
-        assert 'observation' in cols
-        assert 'audio' in cols
-
-    def test_column_names_explicit_keys(self, mock_dataset_a, mock_dataset_b):
-        """Test column_names with explicit keys_from_dataset."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels', 'action'],
-                ['audio'],
-            ],
-        )
-
-        cols = merged.column_names
-        assert 'pixels' in cols
-        assert 'action' in cols
-        assert 'audio' in cols
-        assert 'observation' not in cols  # Not requested
-
-    def test_len(self, mock_dataset_a, mock_dataset_b):
-        """Test MergeDataset length."""
-        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
-        assert len(merged) == 20
-
-    def test_getitem_auto_dedupe(self, mock_dataset_a, mock_dataset_b):
-        """Test __getitem__ with automatic deduplication."""
-        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
-
-        item = merged[0]
-
-        assert 'pixels' in item
-        assert 'action' in item
-        assert 'observation' in item
-        assert 'audio' in item
-
-    def test_getitem_explicit_keys(self, mock_dataset_a, mock_dataset_b):
-        """Test __getitem__ with explicit keys_from_dataset."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels'],
-                ['audio'],
-            ],
-        )
-
-        item = merged[0]
-
-        assert 'pixels' in item
-        assert 'audio' in item
-        assert 'action' not in item
-        assert 'observation' not in item
-
-    def test_getitem_empty_keys(self, mock_dataset_a, mock_dataset_b):
-        """Test __getitem__ when one dataset has empty keys list."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels', 'action', 'observation'],
-                [],  # Empty keys for second dataset
-            ],
-        )
-
-        item = merged[0]
-
-        assert 'pixels' in item
-        assert 'action' in item
-        assert 'observation' in item
-        assert 'audio' not in item
-
-    def test_load_chunk(self, mock_dataset_a, mock_dataset_b):
-        """Test load_chunk method."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels', 'action'],
-                ['audio'],
-            ],
-        )
-
-        episodes_idx = np.array([0, 0])
-        start = np.array([0, 5])
-        end = np.array([5, 10])
-
-        chunk = merged.load_chunk(episodes_idx, start, end)
-
-        assert isinstance(chunk, list)
-        assert len(chunk) == 2
-        assert 'pixels' in chunk[0]
-        assert 'action' in chunk[0]
-        assert 'audio' in chunk[0]
-
-    def test_load_chunk_merges_all_datasets(
-        self, mock_dataset_a, mock_dataset_b
-    ):
-        """Test load_chunk merges data from all datasets."""
-        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
-
-        episodes_idx = np.array([0])
-        start = np.array([0])
-        end = np.array([5])
-
-        chunk = merged.load_chunk(episodes_idx, start, end)
-
-        assert len(chunk) == 1
-        # load_chunk returns data from all datasets
-        assert 'pixels' in chunk[0]
-        assert 'audio' in chunk[0]
-
-    def test_get_col_data(self, mock_dataset_a, mock_dataset_b):
-        """Test get_col_data method."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels', 'action'],
-                ['audio'],
-            ],
-        )
-
-        pixels_data = merged.get_col_data('pixels')
-        assert pixels_data.shape[0] == 20
-
-        audio_data = merged.get_col_data('audio')
-        assert audio_data.shape[0] == 20
-
-    def test_get_col_data_not_assigned_raises(
-        self, mock_dataset_a, mock_dataset_b
-    ):
-        """Test get_col_data raises for unassigned column."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels'],
-                ['audio'],
-            ],
-        )
-
-        with pytest.raises(KeyError):
-            merged.get_col_data('action')
-
-    def test_get_row_data(self, mock_dataset_a, mock_dataset_b):
-        """Test get_row_data method."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels', 'action'],
-                ['audio'],
-            ],
-        )
-
-        row_data = merged.get_row_data(5)
-
-        assert 'pixels' in row_data
-        assert 'action' in row_data
-        assert 'audio' in row_data
-
-    def test_get_row_data_empty_keys(self, mock_dataset_a, mock_dataset_b):
-        """Test get_row_data when one dataset has empty keys list."""
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels'],
-                [],
-            ],
-        )
-
-        row_data = merged.get_row_data(5)
-
-        assert 'pixels' in row_data
-        assert 'audio' not in row_data
-
-
-class TestConcatDataset:
-    def test_init(self, mock_dataset_a, mock_dataset_c):
-        """Test ConcatDataset initialization."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        assert len(concat.datasets) == 2
-        assert concat._cum[-1] == 35  # 20 + 15
-
-    def test_init_empty_raises(self):
-        """Test ConcatDataset raises error for empty list."""
-        with pytest.raises(ValueError, match='Need at least one dataset'):
-            ConcatDataset([])
-
-    def test_len(self, mock_dataset_a, mock_dataset_c):
-        """Test ConcatDataset length is sum of individual lengths."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-        assert len(concat) == 35
-
-    def test_column_names(self, mock_dataset_a, mock_dataset_c):
-        """Test column_names returns union of all columns."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        cols = concat.column_names
-        assert 'pixels' in cols
-        assert 'action' in cols
-        assert 'observation' in cols  # Only in mock_dataset_a
-
-    def test_getitem_first_dataset(self, mock_dataset_a, mock_dataset_c):
-        """Test __getitem__ returns item from first dataset."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        item = concat[0]
-
-        assert 'pixels' in item
-        assert 'action' in item
-        assert 'observation' in item
-
-    def test_getitem_second_dataset(self, mock_dataset_a, mock_dataset_c):
-        """Test __getitem__ returns item from second dataset."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        # Index 20 should be from second dataset (index 0 in second)
-        item = concat[20]
-
-        assert 'pixels' in item
-        assert 'action' in item
-        # observation not in mock_dataset_c
-
-    def test_getitem_negative_index(self, mock_dataset_a, mock_dataset_c):
-        """Test __getitem__ with negative index."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        # -1 should be last item (index 14 in second dataset)
-        item = concat[-1]
-
-        assert 'pixels' in item
-        assert 'action' in item
-
-    def test_loc(self, mock_dataset_a, mock_dataset_c):
-        """Test _loc mapping."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        # First dataset
-        ds_idx, local_idx = concat._loc(5)
-        assert ds_idx == 0
-        assert local_idx == 5
-
-        # Second dataset
-        ds_idx, local_idx = concat._loc(25)
-        assert ds_idx == 1
-        assert local_idx == 5
-
-    def test_load_chunk(self, mock_dataset_a, mock_dataset_c):
-        """Test load_chunk delegates to first dataset."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        episodes_idx = np.array([0])
-        start = np.array([0])
-        end = np.array([5])
-
-        chunk = concat.load_chunk(episodes_idx, start, end)
-
-        assert isinstance(chunk, list)
-        assert len(chunk) == 1
-
-    def test_get_col_data(self, mock_dataset_a, mock_dataset_c):
-        """Test get_col_data concatenates data from all datasets."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        col_data = concat.get_col_data('pixels')
-        assert col_data.shape[0] == 35  # 20 + 15
-
-        action_data = concat.get_col_data('action')
-        assert action_data.shape[0] == 35
-
-    def test_get_col_data_not_found_raises(
-        self, mock_dataset_a, mock_dataset_c
-    ):
-        """Test get_col_data raises for missing column."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        with pytest.raises(KeyError):
-            concat.get_col_data('nonexistent')
-
-    def test_get_row_data_single_int(self, mock_dataset_a, mock_dataset_c):
-        """Test get_row_data with single int index."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        # From first dataset
-        row_data = concat.get_row_data(5)
-        assert 'pixels' in row_data
-        assert 'action' in row_data
-
-        # From second dataset
-        row_data = concat.get_row_data(25)
-        assert 'pixels' in row_data
-        assert 'action' in row_data
-
-    def test_get_row_data_list(self, mock_dataset_a, mock_dataset_c):
-        """Test get_row_data with list of indices."""
-        concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
-
-        # Mix of indices from both datasets
-        row_data = concat.get_row_data([5, 25])
-
-        assert 'pixels' in row_data
-        assert 'action' in row_data
-        assert row_data['pixels'].shape[0] == 2
-        assert row_data['action'].shape[0] == 2
-
-
-class TestIntegration:
-    def test_merge_then_concat(
-        self, mock_dataset_a, mock_dataset_b, mock_dataset_c
-    ):
-        """Test combining MergeDataset and ConcatDataset."""
-        # Create another mock dataset with same structure as merged
-        mock_dataset_d = MockDataset(
-            data={
-                'pixels': torch.randn(15, 3, 64, 64),
-                'audio': torch.randn(15, 16000),
-                'action': torch.randn(15, 2),
-                'observation': torch.randn(15, 4),
-            },
-            length=15,
-        )
-
-        # Merge A and B
-        merged = MergeDataset(
-            [mock_dataset_a, mock_dataset_b],
-            keys_from_dataset=[
-                ['pixels', 'action', 'observation'],
-                ['audio'],
-            ],
-        )
-
-        # Concat merged with D
-        concat = ConcatDataset([merged, mock_dataset_d])
-
-        assert len(concat) == 35  # 20 + 15
-
-        # Test accessing items
-        item_from_merged = concat[5]
-        assert 'pixels' in item_from_merged
-        assert 'audio' in item_from_merged
-
-        item_from_d = concat[25]
-        assert 'pixels' in item_from_d
-
-    def test_concat_multiple_datasets(self, mock_dataset_a):
-        """Test concatenating multiple datasets."""
-        ds_list = [mock_dataset_a for _ in range(5)]
-        concat = ConcatDataset(ds_list)
-
-        assert len(concat) == 100  # 20 * 5
-
-        # Test boundary access
-        assert concat[0] is not None
-        assert concat[19] is not None  # Last of first
-        assert concat[20] is not None  # First of second
-        assert concat[99] is not None  # Last overall
-
-
-class TestMergeDatasetLengths:
-    """Test MergeDataset.lengths property."""
-
-    def test_lengths_property(self, mock_dataset_a, mock_dataset_b):
-        """Test lengths property returns first dataset's lengths."""
-        merged = MergeDataset([mock_dataset_a, mock_dataset_b])
-        np.testing.assert_array_equal(merged.lengths, mock_dataset_a.lengths)
+##############################################################################
+## TestImageDataset — Tests for ImageDataset                                ##
+##############################################################################
+
+def test_image_dataset_init(sample_image_dataset):
+    """Test ImageDataset initialization."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    assert dataset.path == cache_dir / name
+    assert len(dataset.lengths) == 2
+    assert len(dataset.offsets) == 2
+
+
+def test_image_dataset_len(sample_image_dataset):
+    """Test ImageDataset length calculation."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    assert len(dataset) > 0
+
+
+def test_image_dataset_column_names(sample_image_dataset):
+    """Test column_names property excludes metadata keys."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    column_names = dataset.column_names
+    assert 'observation' in column_names
+    assert 'action' in column_names
+    assert 'pixels' in column_names
+    assert 'ep_len' not in column_names
+    assert 'ep_offset' not in column_names
+
+
+def test_image_dataset_getitem(sample_image_dataset):
+    """Test ImageDataset __getitem__ method."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    item = dataset[0]
+
+    assert isinstance(item, dict)
+    assert 'observation' in item
+    assert 'action' in item
+    assert 'pixels' in item
+    assert isinstance(item['observation'], torch.Tensor)
+    assert isinstance(item['action'], torch.Tensor)
+    assert isinstance(item['pixels'], torch.Tensor)
+
+
+def test_image_dataset_image_permutation(sample_image_dataset):
+    """Test that images are permuted to TCHW format."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    item = dataset[0]
+
+    assert 'pixels' in item
+    # With num_steps=1, shape should be (1, 3, 64, 64)
+    assert item['pixels'].shape[-3] == 3  # channels
+
+
+def test_image_dataset_frameskip(sample_image_dataset):
+    """Test ImageDataset with frameskip."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(
+        name, cache_dir=str(cache_dir), frameskip=2, num_steps=2
+    )
+
+    assert len(dataset) > 0
+    item = dataset[0]
+    assert isinstance(item, dict)
+
+
+def test_image_dataset_keys_to_load(sample_image_dataset):
+    """Test ImageDataset with specific keys_to_load."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(
+        name,
+        cache_dir=str(cache_dir),
+        keys_to_load=['observation', 'action'],
+    )
+
+    item = dataset[0]
+    assert 'observation' in item
+    assert 'action' in item
+    assert 'pixels' not in item
+
+
+def test_image_dataset_load_chunk(sample_image_dataset):
+    """Test load_chunk returns correct slices."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    episodes_idx = np.array([0, 1])
+    start = np.array([0, 0])
+    end = np.array([3, 5])
+
+    chunk = dataset.load_chunk(episodes_idx, start, end)
+
+    assert isinstance(chunk, list)
+    assert len(chunk) == 2
+    assert 'observation' in chunk[0]
+    assert 'action' in chunk[0]
+
+
+def test_image_dataset_get_col_data(sample_image_dataset):
+    """Test get_col_data method."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    col_data = dataset.get_col_data('observation')
+    assert isinstance(col_data, np.ndarray)
+    assert col_data.shape[0] == 20  # Total steps
+
+
+def test_image_dataset_get_col_data_image_key_raises(sample_image_dataset):
+    """Test get_col_data raises for image keys."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    with pytest.raises(KeyError, match='not in cache'):
+        dataset.get_col_data('pixels')
+
+
+def test_image_dataset_get_row_data(sample_image_dataset):
+    """Test get_row_data method."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    row_data = dataset.get_row_data(5)
+    assert isinstance(row_data, dict)
+    assert 'observation' in row_data
+    assert 'action' in row_data
+    # pixels not in row_data because it's an image key
+
+
+def test_image_dataset_transform(sample_image_dataset):
+    """Test ImageDataset with transform function."""
+    cache_dir, name = sample_image_dataset
+
+    def double_transform(data):
+        for k in data:
+            if data[k].dtype == torch.float32:
+                data[k] = data[k] * 2
+        return data
+
+    dataset = ImageDataset(
+        name,
+        cache_dir=str(cache_dir),
+        transform=double_transform,
+    )
+
+    item = dataset[0]
+    assert isinstance(item, dict)
+
+
+def test_image_dataset_short_episode_filtered(sample_image_dataset_short_episode):
+    """Test that episodes shorter than span are filtered out."""
+    cache_dir, name = sample_image_dataset_short_episode
+    dataset = ImageDataset(
+        name, cache_dir=str(cache_dir), num_steps=5, frameskip=1
+    )
+
+    # Only second episode (length 10) should have valid clips
+    for ep_idx, _ in dataset.clip_indices:
+        assert ep_idx == 1
+
+
+def test_image_dataset_load_file(sample_image_dataset):
+    """Test _load_file method."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    img = dataset._load_file(0, 0, 'pixels')
+    assert isinstance(img, np.ndarray)
+    assert img.shape == (64, 64, 3)
+
+
+def test_image_dataset_load_file_jpg_fallback(sample_image_dataset_jpg):
+    """Test _load_file falls back to .jpg when .jpeg doesn't exist."""
+    cache_dir, name = sample_image_dataset_jpg
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    img = dataset._load_file(0, 0, 'pixels')
+    assert isinstance(img, np.ndarray)
+    assert img.shape == (64, 64, 3)
+
+
+def test_image_dataset_load_episode(sample_image_dataset):
+    """Test load_episode loads full episode data."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    episode = dataset.load_episode(0)
+
+    assert isinstance(episode, dict)
+    assert 'observation' in episode
+    assert 'action' in episode
+    assert 'pixels' in episode
+    # Episode 0 has 10 steps
+    assert episode['observation'].shape[0] == 10
+    assert episode['pixels'].shape[0] == 10
+
+
+##############################################################################
+## TestVideoDataset — Tests for VideoDataset                                ##
+##############################################################################
+
+def test_video_dataset_init(sample_video_dataset):
+    """Test VideoDataset initialization."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    assert dataset.path == cache_dir / name
+    assert len(dataset.lengths) == 2
+    assert len(dataset.offsets) == 2
+
+
+def test_video_dataset_len(sample_video_dataset):
+    """Test VideoDataset length calculation."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    assert len(dataset) > 0
+
+
+def test_video_dataset_column_names(sample_video_dataset):
+    """Test column_names property excludes metadata keys."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    column_names = dataset.column_names
+    assert 'observation' in column_names
+    assert 'action' in column_names
+    assert 'video' in column_names
+    assert 'ep_len' not in column_names
+    assert 'ep_offset' not in column_names
+
+
+def test_video_dataset_getitem(sample_video_dataset):
+    """Test VideoDataset __getitem__ method."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    item = dataset[0]
+
+    assert isinstance(item, dict)
+    assert 'observation' in item
+    assert 'action' in item
+    assert 'video' in item
+    assert isinstance(item['video'], torch.Tensor)
+
+
+def test_video_dataset_video_permutation(sample_video_dataset):
+    """Test that video frames are permuted to TCHW format."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    item = dataset[0]
+
+    assert 'video' in item
+    assert item['video'].shape[-3] == 3  # channels
+
+
+def test_video_dataset_frameskip(sample_video_dataset):
+    """Test VideoDataset with frameskip."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(
+        name, cache_dir=str(cache_dir), frameskip=2, num_steps=2
+    )
+
+    assert len(dataset) > 0
+    item = dataset[0]
+    assert isinstance(item, dict)
+
+
+def test_video_dataset_keys_to_load(sample_video_dataset):
+    """Test VideoDataset with specific keys_to_load."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(
+        name,
+        cache_dir=str(cache_dir),
+        keys_to_load=['observation', 'action'],
+    )
+
+    item = dataset[0]
+    assert 'observation' in item
+    assert 'action' in item
+    assert 'video' not in item
+
+
+def test_video_dataset_load_chunk(sample_video_dataset):
+    """Test load_chunk returns correct slices."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    episodes_idx = np.array([0, 1])
+    start = np.array([0, 0])
+    end = np.array([3, 5])
+
+    chunk = dataset.load_chunk(episodes_idx, start, end)
+
+    assert isinstance(chunk, list)
+    assert len(chunk) == 2
+    assert 'observation' in chunk[0]
+    assert 'action' in chunk[0]
+    assert 'video' in chunk[0]
+
+
+def test_video_dataset_get_col_data(sample_video_dataset):
+    """Test get_col_data method."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    col_data = dataset.get_col_data('observation')
+    assert isinstance(col_data, np.ndarray)
+    assert col_data.shape[0] == 20
+
+
+def test_video_dataset_get_col_data_video_key_raises(sample_video_dataset):
+    """Test get_col_data raises for video keys."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    with pytest.raises(KeyError, match='not in cache'):
+        dataset.get_col_data('video')
+
+
+def test_video_dataset_get_row_data(sample_video_dataset):
+    """Test get_row_data method."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    row_data = dataset.get_row_data(5)
+    assert isinstance(row_data, dict)
+    assert 'observation' in row_data
+    assert 'action' in row_data
+
+
+def test_video_dataset_transform(sample_video_dataset):
+    """Test VideoDataset with transform function."""
+    cache_dir, name = sample_video_dataset
+
+    def double_transform(data):
+        for k in data:
+            if data[k].dtype == torch.float32:
+                data[k] = data[k] * 2
+        return data
+
+    dataset = VideoDataset(
+        name,
+        cache_dir=str(cache_dir),
+        transform=double_transform,
+    )
+
+    item = dataset[0]
+    assert isinstance(item, dict)
+
+
+def test_video_dataset_load_file(sample_video_dataset):
+    """Test _load_file method."""
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(name, cache_dir=str(cache_dir))
+
+    frame = dataset._load_file(0, 0, 'video')
+    assert isinstance(frame, np.ndarray)
+    assert frame.shape == (64, 64, 3)
+
+
+def test_video_dataset_decord_import_error(sample_video_dataset):
+    """Test VideoDataset raises ImportError when decord is not available."""
+    cache_dir, name = sample_video_dataset
+
+    # Reset the class-level cached decord module
+    VideoDataset._decord = None
+
+    # Mock the import to raise ImportError
+    with patch.dict(sys.modules, {'decord': None}):
+        with pytest.raises(
+            ImportError, match='VideoDataset requires decord'
+        ):
+            VideoDataset(name, cache_dir=str(cache_dir))
+
+
+##############################################################################
+## TestMergeDataset — Tests for MergeDataset                                ##
+##############################################################################
+
+def test_merge_dataset_init(mock_dataset_a, mock_dataset_b):
+    """Test MergeDataset initialization."""
+    merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+
+    assert len(merged.datasets) == 2
+    assert len(merged) == 20
+
+
+def test_merge_dataset_init_empty_raises():
+    """Test MergeDataset raises error for empty list."""
+    with pytest.raises(ValueError, match='Need at least one dataset'):
+        MergeDataset([])
+
+
+def test_merge_dataset_column_names_auto_dedupe(mock_dataset_a, mock_dataset_b):
+    """Test column_names with automatic deduplication."""
+    merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+
+    cols = merged.column_names
+    # First dataset provides pixels, action, observation
+    # Second dataset provides only audio (action, observation deduplicated)
+    assert 'pixels' in cols
+    assert 'action' in cols
+    assert 'observation' in cols
+    assert 'audio' in cols
+
+
+def test_merge_dataset_column_names_explicit_keys(mock_dataset_a, mock_dataset_b):
+    """Test column_names with explicit keys_from_dataset."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels', 'action'],
+            ['audio'],
+        ],
+    )
+
+    cols = merged.column_names
+    assert 'pixels' in cols
+    assert 'action' in cols
+    assert 'audio' in cols
+    assert 'observation' not in cols  # Not requested
+
+
+def test_merge_dataset_len(mock_dataset_a, mock_dataset_b):
+    """Test MergeDataset length."""
+    merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+    assert len(merged) == 20
+
+
+def test_merge_dataset_getitem_auto_dedupe(mock_dataset_a, mock_dataset_b):
+    """Test __getitem__ with automatic deduplication."""
+    merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+
+    item = merged[0]
+
+    assert 'pixels' in item
+    assert 'action' in item
+    assert 'observation' in item
+    assert 'audio' in item
+
+
+def test_merge_dataset_getitem_explicit_keys(mock_dataset_a, mock_dataset_b):
+    """Test __getitem__ with explicit keys_from_dataset."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels'],
+            ['audio'],
+        ],
+    )
+
+    item = merged[0]
+
+    assert 'pixels' in item
+    assert 'audio' in item
+    assert 'action' not in item
+    assert 'observation' not in item
+
+
+def test_merge_dataset_getitem_empty_keys(mock_dataset_a, mock_dataset_b):
+    """Test __getitem__ when one dataset has empty keys list."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels', 'action', 'observation'],
+            [],  # Empty keys for second dataset
+        ],
+    )
+
+    item = merged[0]
+
+    assert 'pixels' in item
+    assert 'action' in item
+    assert 'observation' in item
+    assert 'audio' not in item
+
+
+def test_merge_dataset_load_chunk(mock_dataset_a, mock_dataset_b):
+    """Test load_chunk method."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels', 'action'],
+            ['audio'],
+        ],
+    )
+
+    episodes_idx = np.array([0, 0])
+    start = np.array([0, 5])
+    end = np.array([5, 10])
+
+    chunk = merged.load_chunk(episodes_idx, start, end)
+
+    assert isinstance(chunk, list)
+    assert len(chunk) == 2
+    assert 'pixels' in chunk[0]
+    assert 'action' in chunk[0]
+    assert 'audio' in chunk[0]
+
+
+def test_merge_dataset_load_chunk_merges_all_datasets(mock_dataset_a, mock_dataset_b):
+    """Test load_chunk merges data from all datasets."""
+    merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+
+    episodes_idx = np.array([0])
+    start = np.array([0])
+    end = np.array([5])
+
+    chunk = merged.load_chunk(episodes_idx, start, end)
+
+    assert len(chunk) == 1
+    # load_chunk returns data from all datasets
+    assert 'pixels' in chunk[0]
+    assert 'audio' in chunk[0]
+
+
+def test_merge_dataset_get_col_data(mock_dataset_a, mock_dataset_b):
+    """Test get_col_data method."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels', 'action'],
+            ['audio'],
+        ],
+    )
+
+    pixels_data = merged.get_col_data('pixels')
+    assert pixels_data.shape[0] == 20
+
+    audio_data = merged.get_col_data('audio')
+    assert audio_data.shape[0] == 20
+
+
+def test_merge_dataset_get_col_data_not_assigned_raises(mock_dataset_a, mock_dataset_b):
+    """Test get_col_data raises for unassigned column."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels'],
+            ['audio'],
+        ],
+    )
+
+    with pytest.raises(KeyError):
+        merged.get_col_data('action')
+
+
+def test_merge_dataset_get_row_data(mock_dataset_a, mock_dataset_b):
+    """Test get_row_data method."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels', 'action'],
+            ['audio'],
+        ],
+    )
+
+    row_data = merged.get_row_data(5)
+
+    assert 'pixels' in row_data
+    assert 'action' in row_data
+    assert 'audio' in row_data
+
+
+def test_merge_dataset_get_row_data_empty_keys(mock_dataset_a, mock_dataset_b):
+    """Test get_row_data when one dataset has empty keys list."""
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels'],
+            [],
+        ],
+    )
+
+    row_data = merged.get_row_data(5)
+
+    assert 'pixels' in row_data
+    assert 'audio' not in row_data
+
+
+##############################################################################
+## TestConcatDataset — Tests for ConcatDataset                              ##
+##############################################################################
+
+def test_concat_dataset_init(mock_dataset_a, mock_dataset_c):
+    """Test ConcatDataset initialization."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    assert len(concat.datasets) == 2
+    assert concat._cum[-1] == 35  # 20 + 15
+
+
+def test_concat_dataset_init_empty_raises():
+    """Test ConcatDataset raises error for empty list."""
+    with pytest.raises(ValueError, match='Need at least one dataset'):
+        ConcatDataset([])
+
+
+def test_concat_dataset_len(mock_dataset_a, mock_dataset_c):
+    """Test ConcatDataset length is sum of individual lengths."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+    assert len(concat) == 35
+
+
+def test_concat_dataset_column_names(mock_dataset_a, mock_dataset_c):
+    """Test column_names returns union of all columns."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    cols = concat.column_names
+    assert 'pixels' in cols
+    assert 'action' in cols
+    assert 'observation' in cols  # Only in mock_dataset_a
+
+
+def test_concat_dataset_getitem_first_dataset(mock_dataset_a, mock_dataset_c):
+    """Test __getitem__ returns item from first dataset."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    item = concat[0]
+
+    assert 'pixels' in item
+    assert 'action' in item
+    assert 'observation' in item
+
+
+def test_concat_dataset_getitem_second_dataset(mock_dataset_a, mock_dataset_c):
+    """Test __getitem__ returns item from second dataset."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # Index 20 should be from second dataset (index 0 in second)
+    item = concat[20]
+
+    assert 'pixels' in item
+    assert 'action' in item
+    # observation not in mock_dataset_c
+
+
+def test_concat_dataset_getitem_negative_index(mock_dataset_a, mock_dataset_c):
+    """Test __getitem__ with negative index."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # -1 should be last item (index 14 in second dataset)
+    item = concat[-1]
+
+    assert 'pixels' in item
+    assert 'action' in item
+
+
+def test_concat_dataset_loc(mock_dataset_a, mock_dataset_c):
+    """Test _loc mapping."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # First dataset
+    ds_idx, local_idx = concat._loc(5)
+    assert ds_idx == 0
+    assert local_idx == 5
+
+    # Second dataset
+    ds_idx, local_idx = concat._loc(25)
+    assert ds_idx == 1
+    assert local_idx == 5
+
+
+def test_concat_dataset_load_chunk(mock_dataset_a, mock_dataset_c):
+    """Test load_chunk delegates to first dataset."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    episodes_idx = np.array([0])
+    start = np.array([0])
+    end = np.array([5])
+
+    chunk = concat.load_chunk(episodes_idx, start, end)
+
+    assert isinstance(chunk, list)
+    assert len(chunk) == 1
+
+
+def test_concat_dataset_get_col_data(mock_dataset_a, mock_dataset_c):
+    """Test get_col_data concatenates data from all datasets."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    col_data = concat.get_col_data('pixels')
+    assert col_data.shape[0] == 35  # 20 + 15
+
+    action_data = concat.get_col_data('action')
+    assert action_data.shape[0] == 35
+
+
+def test_concat_dataset_get_col_data_not_found_raises(mock_dataset_a, mock_dataset_c):
+    """Test get_col_data raises for missing column."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    with pytest.raises(KeyError):
+        concat.get_col_data('nonexistent')
+
+
+def test_concat_dataset_get_row_data_single_int(mock_dataset_a, mock_dataset_c):
+    """Test get_row_data with single int index."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # From first dataset
+    row_data = concat.get_row_data(5)
+    assert 'pixels' in row_data
+    assert 'action' in row_data
+
+    # From second dataset
+    row_data = concat.get_row_data(25)
+    assert 'pixels' in row_data
+    assert 'action' in row_data
+
+
+def test_concat_dataset_get_row_data_list(mock_dataset_a, mock_dataset_c):
+    """Test get_row_data with list of indices."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # Mix of indices from both datasets
+    row_data = concat.get_row_data([5, 25])
+
+    assert 'pixels' in row_data
+    assert 'action' in row_data
+    assert row_data['pixels'].shape[0] == 2
+    assert row_data['action'].shape[0] == 2
+
+
+##############################################################################
+## TestIntegration — Integration tests combining MergeDataset/ConcatDataset ##
+##############################################################################
+
+def test_merge_then_concat(mock_dataset_a, mock_dataset_b, mock_dataset_c):
+    """Test combining MergeDataset and ConcatDataset."""
+    # Create another mock dataset with same structure as merged
+    mock_dataset_d = MockDataset(
+        data={
+            'pixels': torch.randn(15, 3, 64, 64),
+            'audio': torch.randn(15, 16000),
+            'action': torch.randn(15, 2),
+            'observation': torch.randn(15, 4),
+        },
+        length=15,
+    )
+
+    # Merge A and B
+    merged = MergeDataset(
+        [mock_dataset_a, mock_dataset_b],
+        keys_from_dataset=[
+            ['pixels', 'action', 'observation'],
+            ['audio'],
+        ],
+    )
+
+    # Concat merged with D
+    concat = ConcatDataset([merged, mock_dataset_d])
+
+    assert len(concat) == 35  # 20 + 15
+
+    # Test accessing items
+    item_from_merged = concat[5]
+    assert 'pixels' in item_from_merged
+    assert 'audio' in item_from_merged
+
+    item_from_d = concat[25]
+    assert 'pixels' in item_from_d
+
+
+def test_concat_multiple_datasets(mock_dataset_a):
+    """Test concatenating multiple datasets."""
+    ds_list = [mock_dataset_a for _ in range(5)]
+    concat = ConcatDataset(ds_list)
+
+    assert len(concat) == 100  # 20 * 5
+
+    # Test boundary access
+    assert concat[0] is not None
+    assert concat[19] is not None  # Last of first
+    assert concat[20] is not None  # First of second
+    assert concat[99] is not None  # Last overall
+
+
+##############################################################################
+## TestMergeDatasetLengths — Test MergeDataset.lengths property             ##
+##############################################################################
+
+def test_merge_dataset_lengths_property(mock_dataset_a, mock_dataset_b):
+    """Test lengths property returns first dataset's lengths."""
+    merged = MergeDataset([mock_dataset_a, mock_dataset_b])
+    np.testing.assert_array_equal(merged.lengths, mock_dataset_a.lengths)
 
 
 # --- HDF5Dataset fixtures for GoalDataset tests ---
@@ -1021,7 +1087,8 @@ def sample_hdf5_for_goal(tmp_path):
     """Create a sample HDF5 dataset for GoalDataset testing."""
     import h5py
 
-    h5_path = tmp_path / 'goal_test.h5'
+    h5_path = tmp_path / 'datasets' / 'goal_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([20, 15])
     ep_offsets = np.array([0, 20])
@@ -1055,7 +1122,8 @@ def sample_hdf5_no_pixels(tmp_path):
     """Create a sample HDF5 dataset without pixels for GoalDataset testing."""
     import h5py
 
-    h5_path = tmp_path / 'goal_no_pixels.h5'
+    h5_path = tmp_path / 'datasets' / 'goal_no_pixels.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([10])
     ep_offsets = np.array([0])
@@ -1080,7 +1148,8 @@ def sample_hdf5_grayscale(tmp_path):
     """Create a sample HDF5 dataset with grayscale images."""
     import h5py
 
-    h5_path = tmp_path / 'grayscale_test.h5'
+    h5_path = tmp_path / 'datasets' / 'grayscale_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([10])
     ep_offsets = np.array([0])
@@ -1103,495 +1172,527 @@ def sample_hdf5_grayscale(tmp_path):
     return tmp_path, 'grayscale_test'
 
 
-class TestGoalDataset:
-    """Tests for GoalDataset wrapper."""
+##############################################################################
+## TestGoalDataset — Tests for GoalDataset wrapper                          ##
+##############################################################################
 
-    def test_init(self, sample_hdf5_for_goal):
-        """Test GoalDataset initialization."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
+def test_goal_dataset_init(sample_hdf5_for_goal):
+    """Test GoalDataset initialization."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        assert goal_dataset.dataset is base_dataset
-        assert goal_dataset.goal_probabilities == (0.3, 0.5, 0.0, 0.2)
-        assert goal_dataset.gamma == 0.99
-        assert len(goal_dataset.episode_lengths) == 2
-        assert goal_dataset.episode_offsets is not None
+    assert goal_dataset.dataset is base_dataset
+    assert goal_dataset.goal_probabilities == (0.3, 0.5, 0.0, 0.2)
+    assert goal_dataset.gamma == 0.99
+    assert len(goal_dataset.episode_lengths) == 2
+    assert goal_dataset.episode_offsets is not None
 
-    def test_init_custom_probabilities(self, sample_hdf5_for_goal):
-        """Test GoalDataset with custom goal probabilities."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.5, 0.3, 0.0, 0.2),
-            seed=42,
-        )
 
-        assert goal_dataset.goal_probabilities == (0.5, 0.3, 0.0, 0.2)
+def test_goal_dataset_init_custom_probabilities(sample_hdf5_for_goal):
+    """Test GoalDataset with custom goal probabilities."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.5, 0.3, 0.0, 0.2),
+        seed=42,
+    )
 
-    def test_init_custom_gamma(self, sample_hdf5_for_goal):
-        """Test GoalDataset with custom gamma."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, gamma=0.95, seed=42)
+    assert goal_dataset.goal_probabilities == (0.5, 0.3, 0.0, 0.2)
 
-        assert goal_dataset.gamma == 0.95
 
-    def test_init_invalid_probabilities_length(self, sample_hdf5_for_goal):
-        """Test GoalDataset raises error for invalid probability tuple length."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+def test_goal_dataset_init_custom_gamma(sample_hdf5_for_goal):
+    """Test GoalDataset with custom gamma."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, gamma=0.95, seed=42)
 
-        with pytest.raises(ValueError, match='4-tuple'):
-            GoalDataset(base_dataset, goal_probabilities=(0.5, 0.5))
+    assert goal_dataset.gamma == 0.95
 
-    def test_init_invalid_probabilities_sum(self, sample_hdf5_for_goal):
-        """Test GoalDataset raises error when probabilities don't sum to 1."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-        with pytest.raises(ValueError, match='sum to 1.0'):
-            GoalDataset(base_dataset, goal_probabilities=(0.3, 0.3, 0.3, 0.2))
+def test_goal_dataset_init_invalid_probabilities_length(sample_hdf5_for_goal):
+    """Test GoalDataset raises error for invalid probability tuple length."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-    def test_init_custom_goal_keys(self, sample_hdf5_for_goal):
-        """Test GoalDataset with custom goal_keys mapping."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_keys={'observation': 'goal_obs'},
-            seed=42,
-        )
+    with pytest.raises(ValueError, match='4-tuple'):
+        GoalDataset(base_dataset, goal_probabilities=(0.5, 0.5))
 
-        assert goal_dataset.goal_keys == {'observation': 'goal_obs'}
 
-    def test_init_auto_detect_goal_keys(self, sample_hdf5_for_goal):
-        """Test GoalDataset auto-detects goal keys from column names."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
+def test_goal_dataset_init_invalid_probabilities_sum(sample_hdf5_for_goal):
+    """Test GoalDataset raises error when probabilities don't sum to 1."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-        # Should auto-detect pixels and proprio
-        assert 'pixels' in goal_dataset.goal_keys
-        assert 'proprio' in goal_dataset.goal_keys
-        assert goal_dataset.goal_keys['pixels'] == 'goal_pixels'
-        assert goal_dataset.goal_keys['proprio'] == 'goal_proprio'
+    with pytest.raises(ValueError, match='sum to 1.0'):
+        GoalDataset(base_dataset, goal_probabilities=(0.3, 0.3, 0.3, 0.2))
 
-    def test_init_no_pixels_or_proprio(self, sample_hdf5_no_pixels):
-        """Test GoalDataset with dataset that has no pixels or proprio."""
-        cache_dir, name = sample_hdf5_no_pixels
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        # goal_keys should be empty
-        assert goal_dataset.goal_keys == {}
+def test_goal_dataset_init_custom_goal_keys(sample_hdf5_for_goal):
+    """Test GoalDataset with custom goal_keys mapping."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_keys={'observation': 'goal_obs'},
+        seed=42,
+    )
 
-    def test_len(self, sample_hdf5_for_goal):
-        """Test GoalDataset length is <= base dataset (filtered for future goals)."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
+    assert goal_dataset.goal_keys == {'observation': 'goal_obs'}
 
-        # Default probabilities include future sampling, so some clips may be filtered out
-        assert len(goal_dataset) <= len(base_dataset)
-        assert len(goal_dataset) > 0
 
-    def test_len_no_future(self, sample_hdf5_for_goal):
-        """Test GoalDataset length matches base dataset when no future sampling."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.5, 0.0, 0.0, 0.5),  # No future sampling
-            seed=42,
-        )
+def test_goal_dataset_init_auto_detect_goal_keys(sample_hdf5_for_goal):
+    """Test GoalDataset auto-detects goal keys from column names."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        assert len(goal_dataset) == len(base_dataset)
+    # Should auto-detect pixels and proprio
+    assert 'pixels' in goal_dataset.goal_keys
+    assert 'proprio' in goal_dataset.goal_keys
+    assert goal_dataset.goal_keys['pixels'] == 'goal_pixels'
+    assert goal_dataset.goal_keys['proprio'] == 'goal_proprio'
 
-    def test_column_names(self, sample_hdf5_for_goal):
-        """Test GoalDataset column_names property."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        assert goal_dataset.column_names == base_dataset.column_names
+def test_goal_dataset_init_no_pixels_or_proprio(sample_hdf5_no_pixels):
+    """Test GoalDataset with dataset that has no pixels or proprio."""
+    cache_dir, name = sample_hdf5_no_pixels
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-    def test_getitem_adds_goal_keys(self, sample_hdf5_for_goal):
-        """Test __getitem__ adds goal observations."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
+    # goal_keys should be empty
+    assert goal_dataset.goal_keys == {}
 
-        item = goal_dataset[0]
 
-        # Original keys should be present
-        assert 'pixels' in item
-        assert 'proprio' in item
-        assert 'action' in item
-        assert 'observation' in item
+def test_goal_dataset_len(sample_hdf5_for_goal):
+    """Test GoalDataset length is <= base dataset (filtered for future goals)."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        # Goal keys should be added
-        assert 'goal_pixels' in item
-        assert 'goal_proprio' in item
+    # Default probabilities include future sampling, so some clips may be filtered out
+    assert len(goal_dataset) <= len(base_dataset)
+    assert len(goal_dataset) > 0
 
-    def test_getitem_no_goal_keys(self, sample_hdf5_no_pixels):
-        """Test __getitem__ when no goal keys are configured."""
-        cache_dir, name = sample_hdf5_no_pixels
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        item = goal_dataset[0]
+def test_goal_dataset_len_no_future(sample_hdf5_for_goal):
+    """Test GoalDataset length matches base dataset when no future sampling."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.5, 0.0, 0.0, 0.5),  # No future sampling
+        seed=42,
+    )
 
-        # Should just return base dataset item
-        assert 'observation' in item
-        assert 'action' in item
-        # No goal keys added
-        assert 'goal_pixels' not in item
-        assert 'goal_proprio' not in item
+    assert len(goal_dataset) == len(base_dataset)
 
-    def test_sample_goal_kind_random(self, sample_hdf5_for_goal):
-        """Test _sample_goal_kind returns 'random' with high random probability."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(1.0, 0.0, 0.0, 0.0),  # Always random
-            seed=42,
-        )
 
-        for _ in range(10):
-            assert goal_dataset._sample_goal_kind() == 'random'
+def test_goal_dataset_column_names(sample_hdf5_for_goal):
+    """Test GoalDataset column_names property."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-    def test_sample_goal_kind_future(self, sample_hdf5_for_goal):
-        """Test _sample_goal_kind returns 'geometric_future' with high geometric future probability."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
-            seed=42,
-        )
+    assert goal_dataset.column_names == base_dataset.column_names
 
-        for _ in range(10):
-            assert goal_dataset._sample_goal_kind() == 'geometric_future'
 
-    def test_sample_goal_kind_current(self, sample_hdf5_for_goal):
-        """Test _sample_goal_kind returns 'current' with high current probability."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
-            seed=42,
-        )
+def test_goal_dataset_getitem_adds_goal_keys(sample_hdf5_for_goal):
+    """Test __getitem__ adds goal observations."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        for _ in range(10):
-            assert goal_dataset._sample_goal_kind() == 'current'
+    item = goal_dataset[0]
 
-    def test_sample_random_step(self, sample_hdf5_for_goal):
-        """Test _sample_random_step returns valid episode and local indices."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
+    # Original keys should be present
+    assert 'pixels' in item
+    assert 'proprio' in item
+    assert 'action' in item
+    assert 'observation' in item
 
-        for _ in range(50):
-            ep_idx, local_idx = goal_dataset._sample_random_step()
-            assert 0 <= ep_idx < len(goal_dataset.episode_lengths)
-            assert 0 <= local_idx < goal_dataset.episode_lengths[ep_idx]
+    # Goal keys should be added
+    assert 'goal_pixels' in item
+    assert 'goal_proprio' in item
 
-    def test_sample_random_step_empty_dataset(self, tmp_path):
-        """Test _sample_random_step with empty dataset."""
-        import h5py
 
-        h5_path = tmp_path / 'empty.h5'
-        with h5py.File(h5_path, 'w') as f:
-            f.create_dataset('ep_len', data=np.array([], dtype=np.int64))
-            f.create_dataset('ep_offset', data=np.array([], dtype=np.int64))
-            f.create_dataset('action', data=np.zeros((0, 2), dtype=np.float32))
+def test_goal_dataset_getitem_no_goal_keys(sample_hdf5_no_pixels):
+    """Test __getitem__ when no goal keys are configured."""
+    cache_dir, name = sample_hdf5_no_pixels
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        base_dataset = HDF5Dataset('empty', cache_dir=str(tmp_path))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
+    item = goal_dataset[0]
 
-        # Should return (0, 0) for empty dataset
+    # Should just return base dataset item
+    assert 'observation' in item
+    assert 'action' in item
+    # No goal keys added
+    assert 'goal_pixels' not in item
+    assert 'goal_proprio' not in item
+
+
+def test_goal_dataset_sample_goal_kind_random(sample_hdf5_for_goal):
+    """Test _sample_goal_kind returns 'random' with high random probability."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(1.0, 0.0, 0.0, 0.0),  # Always random
+        seed=42,
+    )
+
+    for _ in range(10):
+        assert goal_dataset._sample_goal_kind() == 'random'
+
+
+def test_goal_dataset_sample_goal_kind_future(sample_hdf5_for_goal):
+    """Test _sample_goal_kind returns 'geometric_future' with high geometric future probability."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
+        seed=42,
+    )
+
+    for _ in range(10):
+        assert goal_dataset._sample_goal_kind() == 'geometric_future'
+
+
+def test_goal_dataset_sample_goal_kind_current(sample_hdf5_for_goal):
+    """Test _sample_goal_kind returns 'current' with high current probability."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
+        seed=42,
+    )
+
+    for _ in range(10):
+        assert goal_dataset._sample_goal_kind() == 'current'
+
+
+def test_goal_dataset_sample_random_step(sample_hdf5_for_goal):
+    """Test _sample_random_step returns valid episode and local indices."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
+
+    for _ in range(50):
         ep_idx, local_idx = goal_dataset._sample_random_step()
-        assert ep_idx == 0
-        assert local_idx == 0
+        assert 0 <= ep_idx < len(goal_dataset.episode_lengths)
+        assert 0 <= local_idx < goal_dataset.episode_lengths[ep_idx]
 
-    def test_sample_geometric_future_step(self, sample_hdf5_for_goal):
-        """Test _sample_geometric_future_step returns future step in same episode."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
 
-        # Sample from episode 0, starting at step 5
-        ep_idx = 0
-        local_start = 5
-        future_ep_idx, future_local_idx = (
-            goal_dataset._sample_geometric_future_step(ep_idx, local_start)
+def test_goal_dataset_sample_random_step_empty_dataset(tmp_path):
+    """Test _sample_random_step with empty dataset."""
+    import h5py
+
+    h5_path = tmp_path / 'datasets' / 'empty.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=np.array([], dtype=np.int64))
+        f.create_dataset('ep_offset', data=np.array([], dtype=np.int64))
+        f.create_dataset('action', data=np.zeros((0, 2), dtype=np.float32))
+
+    base_dataset = HDF5Dataset('empty', cache_dir=str(tmp_path))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
+
+    # Should return (0, 0) for empty dataset
+    ep_idx, local_idx = goal_dataset._sample_random_step()
+    assert ep_idx == 0
+    assert local_idx == 0
+
+
+def test_goal_dataset_sample_geometric_future_step(sample_hdf5_for_goal):
+    """Test _sample_geometric_future_step returns future step in same episode."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
+
+    # Sample from episode 0, starting at step 5
+    ep_idx = 0
+    local_start = 5
+    future_ep_idx, future_local_idx = (
+        goal_dataset._sample_geometric_future_step(ep_idx, local_start)
+    )
+
+    # Calculate current_end (last frame of the history/current state)
+    frameskip = base_dataset.frameskip
+    current_end = (
+        local_start + (goal_dataset.current_goal_offset - 1) * frameskip
+    )
+
+    # Should be same episode
+    assert future_ep_idx == ep_idx
+    # Should be > current_end (strictly after the current state)
+    assert future_local_idx > current_end
+    # Should be within episode bounds
+    assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
+
+
+def test_goal_dataset_sample_uniform_future_step(sample_hdf5_for_goal):
+    """Test _sample_uniform_future_step returns future step in same episode."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
+
+    # Sample from episode 0, starting at step 5
+    ep_idx = 0
+    local_start = 5
+    future_ep_idx, future_local_idx = (
+        goal_dataset._sample_uniform_future_step(ep_idx, local_start)
+    )
+
+    # Calculate current_end
+    frameskip = base_dataset.frameskip
+    current_end = (
+        local_start + (goal_dataset.current_goal_offset - 1) * frameskip
+    )
+
+    # Should be same episode
+    assert future_ep_idx == ep_idx
+    # Should be > current_end
+    assert future_local_idx > current_end
+    # Should be within episode bounds
+    assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
+
+
+def test_goal_dataset_get_clip_info(sample_hdf5_for_goal):
+    """Test _get_clip_info returns correct episode and local start."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
+
+    for idx in range(min(5, len(goal_dataset))):
+        ep_idx, local_start = goal_dataset._get_clip_info(idx)
+        # Should match base dataset's clip_indices
+        expected = base_dataset.clip_indices[idx]
+        assert (ep_idx, local_start) == expected
+
+
+def test_goal_dataset_load_single_step(sample_hdf5_for_goal):
+    """Test _load_single_step loads correct data."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(base_dataset, seed=42)
+
+    step = goal_dataset._load_single_step(0, 5)
+
+    assert isinstance(step, dict)
+    assert 'pixels' in step
+    assert 'observation' in step
+    # Should be single step
+    assert step['observation'].shape[0] == 1
+
+
+def test_goal_dataset_getitem_current_goal(sample_hdf5_for_goal):
+    """Test __getitem__ with 'current' goal sampling."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
+        seed=42,
+    )
+
+    item = goal_dataset[0]
+
+    # Goal should match last frame of the clip
+    # The shapes should match
+    assert item['goal_pixels'].shape == item['pixels'][-1:].shape
+
+
+def test_goal_dataset_getitem_random_goal(sample_hdf5_for_goal):
+    """Test __getitem__ with 'random' goal sampling."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(1.0, 0.0, 0.0, 0.0),  # Always random
+        seed=42,
+    )
+
+    item = goal_dataset[0]
+
+    assert 'goal_pixels' in item
+    assert 'goal_proprio' in item
+    # Goal tensors should have shape (1, ...)
+    assert item['goal_pixels'].ndim >= 1
+
+
+def test_goal_dataset_getitem_future_goal(sample_hdf5_for_goal):
+    """Test __getitem__ with 'future' goal sampling."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
+        seed=42,
+    )
+
+    item = goal_dataset[0]
+
+    assert 'goal_pixels' in item
+    assert 'goal_proprio' in item
+
+
+def test_goal_dataset_seed_reproducibility(sample_hdf5_for_goal):
+    """Test that same seed produces same results."""
+    cache_dir, name = sample_hdf5_for_goal
+    base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+    goal_dataset1 = GoalDataset(base_dataset, seed=123)
+    goal_dataset2 = GoalDataset(base_dataset, seed=123)
+
+    # Sample should be deterministic with same seed
+    kind1 = [goal_dataset1._sample_goal_kind() for _ in range(10)]
+    kind2 = [goal_dataset2._sample_goal_kind() for _ in range(10)]
+    assert kind1 == kind2
+
+
+def test_goal_dataset_current_goal_equals_current_state(tmp_path):
+    """Test that with p_current=1, goal equals the last frame of the clip."""
+    # Create dataset with unique identifiable values per step
+    h5_path = tmp_path / 'datasets' / 'current_goal_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
+    ep_lengths = np.array([10, 8])
+    ep_offsets = np.array([0, 10])
+    total_steps = sum(ep_lengths)
+
+    # Create unique pixel values for each step (step index encoded in pixels)
+    pixels = np.zeros((total_steps, 4, 4, 3), dtype=np.uint8)
+    proprio = np.zeros((total_steps, 3), dtype=np.float32)
+    for i in range(total_steps):
+        pixels[i] = i  # Each step has unique pixel value
+        proprio[i] = float(i)  # Each step has unique proprio value
+
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=ep_lengths)
+        f.create_dataset('ep_offset', data=ep_offsets)
+        f.create_dataset('pixels', data=pixels)
+        f.create_dataset('proprio', data=proprio)
+        f.create_dataset(
+            'action', data=np.zeros((total_steps, 2), dtype=np.float32)
         )
 
-        # Calculate current_end (last frame of the history/current state)
+    base_dataset = HDF5Dataset(
+        'current_goal_test', cache_dir=str(tmp_path)
+    )
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
+        seed=42,
+    )
+
+    # Test multiple samples
+    for idx in range(min(5, len(goal_dataset))):
+        item = goal_dataset[idx]
+        ep_idx, local_start = goal_dataset._get_clip_info(idx)
+
+        # Goal should be the last frame of the clip
+        # The goal is loaded as a single step, so it has shape (1, C, H, W) for pixels
+        last_frame_pixels = item['pixels'][
+            -1:
+        ]  # Last frame of current clip
+        goal_pixels = item['goal_pixels']
+
+        last_frame_proprio = item['proprio'][-1:]  # Last step proprio
+        goal_proprio = item['goal_proprio']
+
+        assert torch.allclose(goal_pixels, last_frame_pixels), (
+            f'Goal pixels should match last frame at idx {idx}'
+        )
+        assert torch.allclose(goal_proprio, last_frame_proprio), (
+            f'Goal proprio should match last frame at idx {idx}'
+        )
+
+
+def test_goal_dataset_future_goal_is_from_same_trajectory_future(tmp_path):
+    """Test that with p_future=1, goal is a future state from the same trajectory."""
+    # Create dataset with unique identifiable values per step
+    h5_path = tmp_path / 'datasets' / 'future_goal_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
+    ep_lengths = np.array(
+        [20, 15]
+    )  # Long episodes to ensure future steps exist
+    ep_offsets = np.array([0, 20])
+    total_steps = sum(ep_lengths)
+
+    # Create unique values: encode (episode_idx * 1000 + local_step) for identification
+    pixels = np.zeros((total_steps, 4, 4, 3), dtype=np.uint8)
+    proprio = np.zeros((total_steps, 3), dtype=np.float32)
+
+    step = 0
+    for ep_idx, ep_len in enumerate(ep_lengths):
+        for local_idx in range(ep_len):
+            # Encode episode and local index in the data
+            unique_val = ep_idx * 1000 + local_idx
+            pixels[step] = unique_val % 256  # Keep in uint8 range
+            proprio[step, 0] = float(ep_idx)  # Episode index
+            proprio[step, 1] = float(local_idx)  # Local step index
+            proprio[step, 2] = float(unique_val)  # Unique identifier
+            step += 1
+
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=ep_lengths)
+        f.create_dataset('ep_offset', data=ep_offsets)
+        f.create_dataset('pixels', data=pixels)
+        f.create_dataset('proprio', data=proprio)
+        f.create_dataset(
+            'action', data=np.zeros((total_steps, 2), dtype=np.float32)
+        )
+
+    base_dataset = HDF5Dataset('future_goal_test', cache_dir=str(tmp_path))
+    goal_dataset = GoalDataset(
+        base_dataset,
+        goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
+        gamma=0.99,
+        seed=42,
+    )
+
+    # Test multiple samples
+    for idx in range(min(10, len(goal_dataset))):
+        item = goal_dataset[idx]
+        ep_idx, local_start = goal_dataset._get_clip_info(idx)
+
+        # Calculate clip_end (last frame of the clip)
         frameskip = base_dataset.frameskip
-        current_end = (
-            local_start + (goal_dataset.current_goal_offset - 1) * frameskip
+        num_steps = base_dataset.num_steps
+        clip_end = local_start + (num_steps - 1) * frameskip
+
+        # Extract goal proprio info (encoded episode and local indices)
+        goal_proprio = item['goal_proprio']
+        goal_ep_idx = int(goal_proprio[0, 0].item())
+        goal_local_idx = int(goal_proprio[0, 1].item())
+
+        # Current state info
+        current_ep_idx = ep_idx
+
+        # Goal must be from the same episode
+        assert goal_ep_idx == current_ep_idx, (
+            f'Goal episode {goal_ep_idx} should match current episode {current_ep_idx}'
         )
 
-        # Should be same episode
-        assert future_ep_idx == ep_idx
-        # Should be > current_end (strictly after the current state)
-        assert future_local_idx > current_end
-        # Should be within episode bounds
-        assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
-
-    def test_sample_uniform_future_step(self, sample_hdf5_for_goal):
-        """Test _sample_uniform_future_step returns future step in same episode."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
-
-        # Sample from episode 0, starting at step 5
-        ep_idx = 0
-        local_start = 5
-        future_ep_idx, future_local_idx = (
-            goal_dataset._sample_uniform_future_step(ep_idx, local_start)
+        # Goal must be from a future or equal step (>= clip_end, the last frame of the clip)
+        assert goal_local_idx >= clip_end, (
+            f'Goal local idx {goal_local_idx} should be >= clip_end {clip_end}'
         )
 
-        # Calculate current_end
-        frameskip = base_dataset.frameskip
-        current_end = (
-            local_start + (goal_dataset.current_goal_offset - 1) * frameskip
+        # Goal must be within episode bounds
+        assert goal_local_idx < ep_lengths[goal_ep_idx], (
+            f'Goal local idx {goal_local_idx} should be < episode length {ep_lengths[goal_ep_idx]}'
         )
-
-        # Should be same episode
-        assert future_ep_idx == ep_idx
-        # Should be > current_end
-        assert future_local_idx > current_end
-        # Should be within episode bounds
-        assert future_local_idx < goal_dataset.episode_lengths[ep_idx]
-
-    def test_get_clip_info(self, sample_hdf5_for_goal):
-        """Test _get_clip_info returns correct episode and local start."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
-
-        for idx in range(min(5, len(goal_dataset))):
-            ep_idx, local_start = goal_dataset._get_clip_info(idx)
-            # Should match base dataset's clip_indices
-            expected = base_dataset.clip_indices[idx]
-            assert (ep_idx, local_start) == expected
-
-    def test_load_single_step(self, sample_hdf5_for_goal):
-        """Test _load_single_step loads correct data."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(base_dataset, seed=42)
-
-        step = goal_dataset._load_single_step(0, 5)
-
-        assert isinstance(step, dict)
-        assert 'pixels' in step
-        assert 'observation' in step
-        # Should be single step
-        assert step['observation'].shape[0] == 1
-
-    def test_getitem_current_goal(self, sample_hdf5_for_goal):
-        """Test __getitem__ with 'current' goal sampling."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
-            seed=42,
-        )
-
-        item = goal_dataset[0]
-
-        # Goal should match last frame of the clip
-        # The shapes should match
-        assert item['goal_pixels'].shape == item['pixels'][-1:].shape
-
-    def test_getitem_random_goal(self, sample_hdf5_for_goal):
-        """Test __getitem__ with 'random' goal sampling."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(1.0, 0.0, 0.0, 0.0),  # Always random
-            seed=42,
-        )
-
-        item = goal_dataset[0]
-
-        assert 'goal_pixels' in item
-        assert 'goal_proprio' in item
-        # Goal tensors should have shape (1, ...)
-        assert item['goal_pixels'].ndim >= 1
-
-    def test_getitem_future_goal(self, sample_hdf5_for_goal):
-        """Test __getitem__ with 'future' goal sampling."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
-            seed=42,
-        )
-
-        item = goal_dataset[0]
-
-        assert 'goal_pixels' in item
-        assert 'goal_proprio' in item
-
-    def test_seed_reproducibility(self, sample_hdf5_for_goal):
-        """Test that same seed produces same results."""
-        cache_dir, name = sample_hdf5_for_goal
-        base_dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-
-        goal_dataset1 = GoalDataset(base_dataset, seed=123)
-        goal_dataset2 = GoalDataset(base_dataset, seed=123)
-
-        # Sample should be deterministic with same seed
-        kind1 = [goal_dataset1._sample_goal_kind() for _ in range(10)]
-        kind2 = [goal_dataset2._sample_goal_kind() for _ in range(10)]
-        assert kind1 == kind2
-
-    def test_current_goal_equals_current_state(self, tmp_path):
-        """Test that with p_current=1, goal equals the last frame of the clip."""
-        # Create dataset with unique identifiable values per step
-        h5_path = tmp_path / 'current_goal_test.h5'
-        ep_lengths = np.array([10, 8])
-        ep_offsets = np.array([0, 10])
-        total_steps = sum(ep_lengths)
-
-        # Create unique pixel values for each step (step index encoded in pixels)
-        pixels = np.zeros((total_steps, 4, 4, 3), dtype=np.uint8)
-        proprio = np.zeros((total_steps, 3), dtype=np.float32)
-        for i in range(total_steps):
-            pixels[i] = i  # Each step has unique pixel value
-            proprio[i] = float(i)  # Each step has unique proprio value
-
-        with h5py.File(h5_path, 'w') as f:
-            f.create_dataset('ep_len', data=ep_lengths)
-            f.create_dataset('ep_offset', data=ep_offsets)
-            f.create_dataset('pixels', data=pixels)
-            f.create_dataset('proprio', data=proprio)
-            f.create_dataset(
-                'action', data=np.zeros((total_steps, 2), dtype=np.float32)
-            )
-
-        base_dataset = HDF5Dataset(
-            'current_goal_test', cache_dir=str(tmp_path)
-        )
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
-            seed=42,
-        )
-
-        # Test multiple samples
-        for idx in range(min(5, len(goal_dataset))):
-            item = goal_dataset[idx]
-            ep_idx, local_start = goal_dataset._get_clip_info(idx)
-
-            # Goal should be the last frame of the clip
-            # The goal is loaded as a single step, so it has shape (1, C, H, W) for pixels
-            last_frame_pixels = item['pixels'][
-                -1:
-            ]  # Last frame of current clip
-            goal_pixels = item['goal_pixels']
-
-            last_frame_proprio = item['proprio'][-1:]  # Last step proprio
-            goal_proprio = item['goal_proprio']
-
-            assert torch.allclose(goal_pixels, last_frame_pixels), (
-                f'Goal pixels should match last frame at idx {idx}'
-            )
-            assert torch.allclose(goal_proprio, last_frame_proprio), (
-                f'Goal proprio should match last frame at idx {idx}'
-            )
-
-    def test_future_goal_is_from_same_trajectory_future(self, tmp_path):
-        """Test that with p_future=1, goal is a future state from the same trajectory."""
-        # Create dataset with unique identifiable values per step
-        h5_path = tmp_path / 'future_goal_test.h5'
-        ep_lengths = np.array(
-            [20, 15]
-        )  # Long episodes to ensure future steps exist
-        ep_offsets = np.array([0, 20])
-        total_steps = sum(ep_lengths)
-
-        # Create unique values: encode (episode_idx * 1000 + local_step) for identification
-        pixels = np.zeros((total_steps, 4, 4, 3), dtype=np.uint8)
-        proprio = np.zeros((total_steps, 3), dtype=np.float32)
-
-        step = 0
-        for ep_idx, ep_len in enumerate(ep_lengths):
-            for local_idx in range(ep_len):
-                # Encode episode and local index in the data
-                unique_val = ep_idx * 1000 + local_idx
-                pixels[step] = unique_val % 256  # Keep in uint8 range
-                proprio[step, 0] = float(ep_idx)  # Episode index
-                proprio[step, 1] = float(local_idx)  # Local step index
-                proprio[step, 2] = float(unique_val)  # Unique identifier
-                step += 1
-
-        with h5py.File(h5_path, 'w') as f:
-            f.create_dataset('ep_len', data=ep_lengths)
-            f.create_dataset('ep_offset', data=ep_offsets)
-            f.create_dataset('pixels', data=pixels)
-            f.create_dataset('proprio', data=proprio)
-            f.create_dataset(
-                'action', data=np.zeros((total_steps, 2), dtype=np.float32)
-            )
-
-        base_dataset = HDF5Dataset('future_goal_test', cache_dir=str(tmp_path))
-        goal_dataset = GoalDataset(
-            base_dataset,
-            goal_probabilities=(0.0, 1.0, 0.0, 0.0),  # Always geometric future
-            gamma=0.99,
-            seed=42,
-        )
-
-        # Test multiple samples
-        for idx in range(min(10, len(goal_dataset))):
-            item = goal_dataset[idx]
-            ep_idx, local_start = goal_dataset._get_clip_info(idx)
-
-            # Calculate clip_end (last frame of the clip)
-            frameskip = base_dataset.frameskip
-            num_steps = base_dataset.num_steps
-            clip_end = local_start + (num_steps - 1) * frameskip
-
-            # Extract goal proprio info (encoded episode and local indices)
-            goal_proprio = item['goal_proprio']
-            goal_ep_idx = int(goal_proprio[0, 0].item())
-            goal_local_idx = int(goal_proprio[0, 1].item())
-
-            # Current state info
-            current_ep_idx = ep_idx
-
-            # Goal must be from the same episode
-            assert goal_ep_idx == current_ep_idx, (
-                f'Goal episode {goal_ep_idx} should match current episode {current_ep_idx}'
-            )
-
-            # Goal must be from a future or equal step (>= clip_end, the last frame of the clip)
-            assert goal_local_idx >= clip_end, (
-                f'Goal local idx {goal_local_idx} should be >= clip_end {clip_end}'
-            )
-
-            # Goal must be within episode bounds
-            assert goal_local_idx < ep_lengths[goal_ep_idx], (
-                f'Goal local idx {goal_local_idx} should be < episode length {ep_lengths[goal_ep_idx]}'
-            )
 
 
 @pytest.fixture
 def sample_hdf5_with_string_column(tmp_path):
     """Create a sample HDF5 dataset with a bytes string column."""
-    h5_path = tmp_path / 'string_col_test.h5'
+    h5_path = tmp_path / 'datasets' / 'string_col_test.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = np.array([10])
     ep_offsets = np.array([0])
@@ -1616,54 +1717,157 @@ def sample_hdf5_with_string_column(tmp_path):
     return tmp_path, 'string_col_test'
 
 
-class TestHDF5DatasetEdgeCases:
-    """Additional edge case tests for HDF5Dataset."""
+##############################################################################
+## TestHDF5DatasetEdgeCases — Additional edge case tests for HDF5Dataset    ##
+##############################################################################
 
-    def test_getitem_with_string_column(self, sample_hdf5_with_string_column):
-        """Test that loading a dataset with a bytes string column does not raise."""
-        cache_dir, name = sample_hdf5_with_string_column
-        dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+def test_hdf5_getitem_with_string_column(sample_hdf5_with_string_column):
+    """Test that loading a dataset with a bytes string column does not raise."""
+    cache_dir, name = sample_hdf5_with_string_column
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-        item = dataset[0]
+    item = dataset[0]
 
-        assert 'label' in item
-        assert isinstance(item['label'], str)
-
-    def test_grayscale_image_permutation(self, sample_hdf5_grayscale):
-        """Test that grayscale images (1 channel) are permuted correctly."""
-        cache_dir, name = sample_hdf5_grayscale
-        dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-
-        item = dataset[0]
-
-        assert 'pixels' in item
-        # Should be permuted to (T, 1, H, W)
-        assert item['pixels'].shape[-3] == 1  # 1 channel
-
-    def test_get_row_data_list_indices(self, sample_hdf5_grayscale):
-        """Test get_row_data with list of indices."""
-        cache_dir, name = sample_hdf5_grayscale
-        dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
-
-        row_data = dataset.get_row_data([0, 2, 5])
-
-        assert isinstance(row_data, dict)
-        assert 'action' in row_data
-        # Should have data for 3 rows
-        assert row_data['action'].shape[0] == 3
+    assert 'label' in item
+    assert isinstance(item['label'], str)
 
 
-class TestImageDatasetEdgeCases:
-    """Additional edge case tests for ImageDataset/FolderDataset."""
+def test_hdf5_grayscale_image_permutation(sample_hdf5_grayscale):
+    """Test that grayscale images (1 channel) are permuted correctly."""
+    cache_dir, name = sample_hdf5_grayscale
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
-    def test_get_row_data_list(self, sample_image_dataset):
-        """Test get_row_data with list of indices."""
-        cache_dir, name = sample_image_dataset
-        dataset = ImageDataset(name, cache_dir=str(cache_dir))
+    item = dataset[0]
 
-        row_data = dataset.get_row_data([0, 5, 10])
+    assert 'pixels' in item
+    # Should be permuted to (T, 1, H, W)
+    assert item['pixels'].shape[-3] == 1  # 1 channel
 
-        assert isinstance(row_data, dict)
-        assert 'observation' in row_data
-        assert 'action' in row_data
-        # pixels not in row_data (folder key)
+
+def test_hdf5_get_row_data_list_indices(sample_hdf5_grayscale):
+    """Test get_row_data with list of indices."""
+    cache_dir, name = sample_hdf5_grayscale
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+    row_data = dataset.get_row_data([0, 2, 5])
+
+    assert isinstance(row_data, dict)
+    assert 'action' in row_data
+    # Should have data for 3 rows
+    assert row_data['action'].shape[0] == 3
+
+
+##############################################################################
+## load_chunk goal offset semantics                                         ##
+## evaluate_from_dataset uses end = start + goal_offset_steps + 1 so that  ##
+## load_chunk (exclusive end) returns goal_offset_steps + 1 frames and the  ##
+## goal frame lands exactly goal_offset_steps steps after the init frame.   ##
+##############################################################################
+
+@pytest.fixture
+def sequential_hdf5(tmp_path):
+    """HDF5 dataset where observation[i] == i, making frame identity easy to verify."""
+    n_steps = 30
+    h5_path = tmp_path / 'datasets' / 'sequential.h5'
+    h5_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=np.array([n_steps]))
+        f.create_dataset('ep_offset', data=np.array([0]))
+        f.create_dataset(
+            'observation',
+            data=np.arange(n_steps, dtype=np.float32).reshape(n_steps, 1),
+        )
+        f.create_dataset(
+            'action',
+            data=np.zeros((n_steps, 2), dtype=np.float32),
+        )
+    return tmp_path, 'sequential'
+
+
+def test_goal_offset_1_distinct_from_init(sequential_hdf5):
+    """With goal_offset_steps=1, goal must be 1 step ahead of init (not equal)."""
+    cache_dir, name = sequential_hdf5
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+    start, goal_offset_steps = 5, 1
+    end = start + goal_offset_steps + 1  # the fixed formula
+
+    chunk = dataset.load_chunk(
+        np.array([0]), np.array([start]), np.array([end])
+    )
+    obs = chunk[0]['observation']  # shape (goal_offset_steps+1, 1)
+
+    assert obs.shape[0] == goal_offset_steps + 1, (
+        f'Expected {goal_offset_steps + 1} frames, got {obs.shape[0]}'
+    )
+    init_val = obs[0].item()
+    goal_val = obs[-1].item()
+    assert goal_val == init_val + goal_offset_steps, (
+        f'goal frame should be {goal_offset_steps} step(s) after init: '
+        f'init={init_val}, goal={goal_val}'
+    )
+
+
+@pytest.mark.parametrize('goal_offset_steps', [1, 5, 10])
+def test_goal_is_exactly_offset_steps_ahead(sequential_hdf5, goal_offset_steps):
+    """goal frame index equals start + goal_offset_steps for various offsets."""
+    cache_dir, name = sequential_hdf5
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+    start = 3
+    end = start + goal_offset_steps + 1  # fixed formula from evaluate_from_dataset
+
+    chunk = dataset.load_chunk(
+        np.array([0]), np.array([start]), np.array([end])
+    )
+    obs = chunk[0]['observation']
+
+    init_val = obs[0].item()
+    goal_val = obs[-1].item()
+
+    assert init_val == start, f'init frame should be step {start}, got {init_val}'
+    assert goal_val == start + goal_offset_steps, (
+        f'goal frame should be step {start + goal_offset_steps}, got {goal_val}'
+    )
+
+
+def test_old_formula_would_fail(sequential_hdf5):
+    """Demonstrate that the old formula (without +1) gave the wrong goal frame."""
+    cache_dir, name = sequential_hdf5
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+    start, goal_offset_steps = 5, 3
+    old_end = start + goal_offset_steps        # bug: off by one
+    fixed_end = start + goal_offset_steps + 1  # fix
+
+    old_chunk = dataset.load_chunk(
+        np.array([0]), np.array([start]), np.array([old_end])
+    )
+    fixed_chunk = dataset.load_chunk(
+        np.array([0]), np.array([start]), np.array([fixed_end])
+    )
+
+    old_goal = old_chunk[0]['observation'][-1].item()
+    fixed_goal = fixed_chunk[0]['observation'][-1].item()
+
+    # Old formula gives goal that is only (goal_offset_steps-1) ahead
+    assert old_goal == start + goal_offset_steps - 1
+    # Fixed formula gives goal that is exactly goal_offset_steps ahead
+    assert fixed_goal == start + goal_offset_steps
+
+
+##############################################################################
+## TestImageDatasetEdgeCases — Additional edge case tests for ImageDataset  ##
+##############################################################################
+
+def test_image_dataset_get_row_data_list(sample_image_dataset):
+    """Test get_row_data with list of indices."""
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(name, cache_dir=str(cache_dir))
+
+    row_data = dataset.get_row_data([0, 5, 10])
+
+    assert isinstance(row_data, dict)
+    assert 'observation' in row_data
+    assert 'action' in row_data
+    # pixels not in row_data (folder key)
