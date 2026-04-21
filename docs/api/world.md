@@ -62,13 +62,13 @@ world = World(
 )
 world.set_policy(RandomPolicy())
 
-# Record 50 episodes to a .h5 dataset
+# Record 50 episodes to a Lance table
 world.record_dataset(
     dataset_name="pusht_random",
     episodes=50,
-    cache_dir="./data"
+    cache_dir="./data",
 )
-# Result: ./data/pusht_random.h5
+# Result: ./data/datasets/pusht_random.lance
 ```
 ///
 

@@ -7,8 +7,8 @@ summary: Dataset handling
 
 ## **[ Storage Formats ]**
 
-/// tab | HDF5 Format (Recommended)
-The **`HDF5Dataset`** stores all data in a single `.h5` file. This is the default format for recording rollouts using `World.record_dataset`.
+/// tab | HDF5 Format (legacy)
+The **`HDF5Dataset`** reads a single `.h5` file. Kept for backwards compatibility with pre-existing datasets — new datasets recorded via `World.record_dataset` are written to LanceDB (see the next tab).
 
 **File Structure:**
 ```

@@ -192,18 +192,18 @@ Stable World-Model provides utilities for recording and loading episode datasets
 
 ### Recording a Dataset
 
-Use `world.record_dataset()` to collect episodes and save them in HDF5 format. The dataset is saved to `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). This is useful for collecting expert demonstrations, random exploration data, or rollouts from a trained policy.
+Use `world.record_dataset()` to collect episodes and save them as a LanceDB table. The dataset is written to `$STABLEWM_HOME/datasets/<dataset_name>.lance` (defaults to `~/.stable_worldmodel/datasets/`). Images are JPEG-encoded on write; numeric columns are stored as fixed-size float32 lists. Re-running with the same `dataset_name` appends new episodes to the existing table.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))
 policy = swm.policy.RandomPolicy(seed=42) # can be your JEPA or RL Policy
 world.set_policy(policy)
 
-# Record 100 episodes to HDF5
+# Record 100 episodes — written to ~/.stable_worldmodel/datasets/pusht_random.lance
 world.record_dataset(
     dataset_name='pusht_random',
     episodes=100,
-    seed=0
+    seed=0,
 )
 ```
 

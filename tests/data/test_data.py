@@ -8,7 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import h5py
+import lancedb
 import numpy as np
+import pyarrow as pa
 import pytest
 import torch
 from PIL import Image
@@ -20,7 +22,7 @@ from stable_worldmodel.data import (
 )
 from stable_worldmodel.data.utils import build_script_dataset, create_dataset, get_cache_dir
 from stable_worldmodel.utils import DEFAULT_CACHE_DIR
-
+from stable_worldmodel import World
 
 def test_get_cache_dir_default():
     """Test get_cache_dir returns default path when env var not set."""
@@ -112,9 +114,6 @@ def _build_shared_arrays() -> dict[str, np.ndarray]:
 @pytest.fixture
 def paired_datasets(tmp_path):
     """Create matching HDF5 and Lance datasets from the same arrays."""
-
-    lancedb = pytest.importorskip('lancedb')
-
     data = _build_shared_arrays()
     dataset_name = 'paired_dataset'
 
@@ -437,8 +436,6 @@ def test_lance_parity_with_hdf5(paired_datasets):
 def test_lance_convert_roundtrip_and_multi_camera(tmp_path):
     """Converter produces a table that loads correctly, including multi-camera
     datasets with dot-separated HDF5 names (transparently renamed for Lance)."""
-    pytest.importorskip('lancedb')
-
     datasets_dir = tmp_path / 'datasets'
     datasets_dir.mkdir()
     h5_path = datasets_dir / 'multi_cam.h5'
@@ -515,3 +512,96 @@ def test_lance_factories_and_pickling(paired_datasets, sample_h5_file):
     # Missing table_name + non-.lance URI should fail clearly.
     with pytest.raises(ValueError, match='table_name'):
         LanceDataset(uri=lance_cfg['uri'], num_steps=1)
+
+
+def test_world_record_dataset_writes_lance_and_appends(tmp_path):
+    """End-to-end test for the Lance-backed World.record_dataset writer.
+
+    Uses a real World object with ``__init__`` bypassed to avoid needing any
+    gym env — we exercise the Lance-specific plumbing (schema inference, JPEG
+    encoding, record-batch build, append, resume-counter) directly against
+    fabricated finished-episode dicts shaped like what ``_handle_done_ep``
+    produces.
+    """
+    ep_len = 5
+    rng = np.random.default_rng(0)
+    # Shape matches what _handle_done_ep yields: per-step lists keyed by
+    # columns from ``self.infos``.  Covers every schema branch: JPEG image,
+    # fixed-size numeric vector, scalar, and string.
+    def make_episode(ep_idx: int) -> dict:
+        return {
+            'step_idx': list(range(ep_len)),
+            'ep_idx': [ep_idx] * ep_len,
+            'pixels': [
+                rng.integers(0, 255, (12, 12, 3), dtype=np.uint8)
+                for _ in range(ep_len)
+            ],
+            'action': [
+                rng.standard_normal(2).astype(np.float32) for _ in range(ep_len)
+            ],
+            'proprio': [
+                rng.standard_normal(4).astype(np.float32) for _ in range(ep_len)
+            ],
+            'reward': [float(x) for x in rng.standard_normal(ep_len)],
+            'env_name': ['pushT'] * ep_len,
+        }
+
+    world = World.__new__(World)  # bypass gym-env construction
+
+    db = lancedb.connect(str(tmp_path))
+    ep0 = make_episode(0)
+
+    # Lazy init writes the first episode atomically.
+    table, rows_written = world._init_table(
+        db, 'recording_test', ep0, jpeg_quality=90
+    )
+    assert rows_written == ep_len
+    assert table.count_rows() == ep_len
+
+    # Schema sanity: index columns, JPEG-binary image, fixed-size numeric
+    # lists, scalar float32, string.
+    schema = table.schema
+    name_to_type = {f.name: f.type for f in schema}
+    assert name_to_type['episode_idx'] == pa.int32()
+    assert name_to_type['step_idx'] == pa.int32()
+    assert pa.types.is_binary(name_to_type['pixels'])
+    assert name_to_type['action'] == pa.list_(pa.float32(), 2)
+    assert name_to_type['proprio'] == pa.list_(pa.float32(), 4)
+    assert name_to_type['reward'] == pa.float32()
+    assert pa.types.is_large_string(name_to_type['env_name']) or pa.types.is_string(
+        name_to_type['env_name']
+    )
+
+    # Second episode appends.
+    ep1 = make_episode(1)
+    rows2 = world._write_episode(table, ep1, jpeg_quality=90)
+    assert rows2 == ep_len
+    assert table.count_rows() == 2 * ep_len
+
+    # Resume counter: should report 2 episodes, 2*ep_len rows.
+    n_eps, n_rows = World._count_progress(table)
+    assert n_eps == 2
+    assert n_rows == 2 * ep_len
+
+    # Read back via LanceDataset (shorthand URI, auto image-detect).
+    ds = LanceDataset(
+        uri=str(tmp_path / 'recording_test.lance'),
+        num_steps=2,
+        frameskip=1,
+    )
+    assert ds.image_columns == {'pixels'}
+    # Both episodes visible with correct lengths.
+    assert list(ds.lengths) == [ep_len, ep_len]
+    sample = ds[0]
+    assert sample['pixels'].shape == (2, 3, 12, 12)  # T, C, H, W — JPEG round-tripped
+    assert sample['action'].shape == (2, 2)
+    assert sample['proprio'].shape == (2, 4)
+    assert sample['reward'].shape == (2,)
+    # String column collapses to a scalar per-sample (same as HDF5 behaviour).
+    assert sample['env_name'] == 'pushT'
+
+    # Numeric values round-trip exactly for the first two steps of ep0.
+    expected_action = torch.tensor(np.stack(ep0['action'][:2]))
+    assert torch.allclose(sample['action'], expected_action, atol=1e-6)
+    expected_proprio = torch.tensor(np.stack(ep0['proprio'][:2]))
+    assert torch.allclose(sample['proprio'], expected_proprio, atol=1e-6)

@@ -17,7 +17,6 @@ dependencies = [
   "torch",
   "torchvision",
   "numpy",
-  "pyarrow>=16.0.0",
   "loguru",
   "tabulate",
   "gymnasium",
