@@ -113,29 +113,36 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
 )
 
-register(
-    id='swm/FetchReach-v3',
-    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
-    kwargs={'env_id': 'FetchReach-v4'}
-)
+_FETCH_ENTRY = 'stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper'
 
-register(
-    id='swm/FetchPush-v3',
-    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
-    kwargs={'env_id': 'FetchPush-v4'}
-)
+# Sparse reward + flattened Box obs (default; good for behavior cloning / simple SAC)
+for _swm_id, _gym_id in [
+    ('swm/FetchReach-v3',        'FetchReach-v4'),
+    ('swm/FetchPush-v3',         'FetchPush-v4'),
+    ('swm/FetchSlide-v3',        'FetchSlide-v4'),
+    ('swm/FetchPickAndPlace-v3', 'FetchPickAndPlace-v4'),
+]:
+    register(id=_swm_id, entry_point=_FETCH_ENTRY, kwargs={'env_id': _gym_id})
 
-register(
-    id='swm/FetchSlide-v3',
-    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
-    kwargs={'env_id': 'FetchSlide-v4'}
-)
+# Dense reward + flattened Box obs (standard SAC with shaped reward)
+for _swm_id, _gym_id in [
+    ('swm/FetchReachDense-v3',        'FetchReachDense-v4'),
+    ('swm/FetchPushDense-v3',         'FetchPushDense-v4'),
+    ('swm/FetchSlideDense-v3',        'FetchSlideDense-v4'),
+    ('swm/FetchPickAndPlaceDense-v3', 'FetchPickAndPlaceDense-v4'),
+]:
+    register(id=_swm_id, entry_point=_FETCH_ENTRY, kwargs={'env_id': _gym_id})
 
-register(
-    id='swm/FetchPickAndPlace-v3',
-    entry_point='stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper',
-    kwargs={'env_id': 'FetchPickAndPlace-v4'}
-)
+# Sparse reward + Dict obs (observation/achieved_goal/desired_goal preserved)
+# Required by goal-conditioned algorithms such as SB3's HerReplayBuffer.
+for _swm_id, _gym_id in [
+    ('swm/FetchReachDict-v3',        'FetchReach-v4'),
+    ('swm/FetchPushDict-v3',         'FetchPush-v4'),
+    ('swm/FetchSlideDict-v3',        'FetchSlide-v4'),
+    ('swm/FetchPickAndPlaceDict-v3', 'FetchPickAndPlace-v4'),
+]:
+    register(id=_swm_id, entry_point=_FETCH_ENTRY,
+             kwargs={'env_id': _gym_id, 'flatten': False})
 
 ############
 # DISCRETE #

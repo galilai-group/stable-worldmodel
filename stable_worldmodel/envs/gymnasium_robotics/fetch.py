@@ -22,30 +22,39 @@ DEFAULT_VARIATIONS = (
 )
 
 class FetchWrapper(gym.Wrapper):
-    """Wrapper for Gymnasium Robotics Fetch environments, flattening observations
-    and adding visual and physical domain randomization support via variation_space.
+    """Wrapper for Gymnasium Robotics Fetch environments, adding visual and
+    physical domain randomization via variation_space.
+
+    By default, observations are flattened (observation + desired_goal) into a
+    single Box space. Set ``flatten=False`` to preserve the original Dict
+    observation space (``observation``/``achieved_goal``/``desired_goal``),
+    which is required by goal-conditioned algorithms such as SB3's
+    HerReplayBuffer.
     """
 
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 25}
 
-    def __init__(self, env_id, init_value=None, resolution=224, render_mode=None, **kwargs):
+    def __init__(self, env_id, init_value=None, resolution=224, render_mode=None,
+                 flatten=True, **kwargs):
         env = gym.make(env_id, render_mode=render_mode, **kwargs)
         super().__init__(env)
 
         self.env_name = env_id
         self.render_size = resolution
+        self._flatten = flatten
 
         # Original observation space is a Dict
         orig_obs_space = env.observation_space
 
-        # flatten observation + desired_goal
         obs_dim = orig_obs_space["observation"].shape[0]
         goal_dim = orig_obs_space["desired_goal"].shape[0]
-        flat_dim = obs_dim + goal_dim
 
-        self.observation_space = gym.spaces.Box(
-            low=-np.inf, high=np.inf, shape=(flat_dim,), dtype=np.float32
-        )
+        if self._flatten:
+            flat_dim = obs_dim + goal_dim
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf, high=np.inf, shape=(flat_dim,), dtype=np.float32
+            )
+        # else: keep env.observation_space as-is (Dict), inherited from super().__init__
 
         has_object = obs_dim >= 25
 
@@ -78,10 +87,21 @@ class FetchWrapper(gym.Wrapper):
         }
 
         # Inject explicit physical object placements only if the target object exists
+        self._object_body_id = -1
         if has_object:
+            default_mass = 2.0
+            if mujoco is not None:
+                body_id = mujoco.mj_name2id(
+                    env.unwrapped.model, mujoco.mjtObj.mjOBJ_BODY, "object0"
+                )
+                if body_id >= 0:
+                    self._object_body_id = body_id
+                    default_mass = float(env.unwrapped.model.body_mass[body_id])
+
             space_dict["block"] = swm_spaces.Dict({
                 "start_position": swm_spaces.Box(low=np.array([1.15, 0.6]), high=np.array([1.45, 0.9]), dtype=np.float64, init_value=np.array([1.3, 0.74])),
-                "angle": swm_spaces.Box(low=-np.pi, high=np.pi, shape=(1,), dtype=np.float64, init_value=np.array([0.0]))
+                "angle": swm_spaces.Box(low=-np.pi, high=np.pi, shape=(1,), dtype=np.float64, init_value=np.array([0.0])),
+                "mass": swm_spaces.Box(low=0.01, high=50.0, shape=(1,), dtype=np.float64, init_value=np.array([default_mass])),
             })
 
         self.variation_space = swm_spaces.Dict(space_dict)
@@ -115,6 +135,12 @@ class FetchWrapper(gym.Wrapper):
             self._apply_physical_variations(active_variations)
             changed_physics = True
 
+        # Always push current mass to the model — fixed-per-run via init_value sticks,
+        # and randomized-per-reset picks up the freshly sampled value.
+        if self._object_body_id >= 0 and mujoco is not None:
+            mass = float(self.variation_space["block"]["mass"].value[0])
+            self.env.unwrapped.model.body_mass[self._object_body_id] = mass
+
         if changed_physics and mujoco is not None:
             mujoco.mj_forward(self.env.unwrapped.model, self.env.unwrapped.data)
             obs = self.env.unwrapped._get_obs()
@@ -125,7 +151,7 @@ class FetchWrapper(gym.Wrapper):
         info["state"] = flat_obs
         info["goal_state"] = obs["desired_goal"]
 
-        return flat_obs, info
+        return (flat_obs if self._flatten else obs), info
 
     def _apply_physical_variations(self, variations):
         """Manually overrides the generated MuJoCo physics states with strict variation parameters."""
@@ -163,7 +189,7 @@ class FetchWrapper(gym.Wrapper):
         info["proprio"] = obs["observation"]
         info["state"] = flat_obs
         info["goal_state"] = obs["desired_goal"]
-        return flat_obs, reward, terminated, truncated, info
+        return (flat_obs if self._flatten else obs), reward, terminated, truncated, info
 
     def render(self):
         """Returns standard render output scaled to the explicit target environment resolution."""
