@@ -92,8 +92,11 @@ The environment supports extensive domain randomization across both visual textu
 | `agent.start_position` | Box([1.25, 0.6], [1.45, 0.9]) | Starting 2D (x,y) coordinates for the initial gripper spawn targeting |
 | `block.start_position` | Box([1.15, 0.6], [1.45, 0.9]) | Explicit 2D (x,y) override intercepting initial qpos spawning |
 | `block.angle` | Box(-π, π) | Explicit Z-rotation override intercepting initial qpos quaternions |
+| `block.mass` | Box(0.01, 50.0) | Mass of the manipulated block (kg); default inherits the MuJoCo model's `body_mass` |
 | `goal.start_position` | Box([1.15, 0.6, 0.424], [1.45, 0.9, 0.424]) | Explicit XYZ override redefining visual and reward goal markers |
 | `rendering.transparent_arm` | Discrete(2) | When set to `1`, natively lowers the PyMuJoCo alpha channels mapping to the robot body, making the robot translucent (see-through) |
+
+> `block.start_position`, `block.angle`, and `block.mass` are only present in environments with a manipulated object (`FetchPush-v3`, `FetchSlide-v3`, `FetchPickAndPlace-v3`). `FetchReach-v3` exposes the remaining 8 factors.
 
 #### Default Configuration
 
