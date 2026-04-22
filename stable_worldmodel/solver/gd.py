@@ -9,7 +9,8 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
-from .solver import Costable
+from stable_worldmodel.protocols import Costable
+from stable_worldmodel.solver.utils import prepare_init_action
 
 
 class GradientSolver(torch.nn.Module):
@@ -95,18 +96,12 @@ class GradientSolver(torch.nn.Module):
         """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action(self, actions: torch.Tensor | None = None) -> None:
+    def init_action(self, actions: torch.Tensor) -> None:
         """Initialize the action tensor for optimization."""
-        if actions is None:
-            actions = torch.zeros((self._n_envs, 0, self.action_dim))
-
-        # fill remaining action
-        remaining = self.horizon - actions.shape[1]
-
-        if remaining > 0:
-            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
-            actions = torch.cat([actions, new_actions], dim=1).to(self.device)
-
+        assert actions.shape == (self.n_envs, self.horizon, self.action_dim), (
+            f'Expected actions shape ({self.n_envs}, {self.horizon}, {self.action_dim}), '
+            f'got {tuple(actions.shape)}'
+        )
         actions = actions.unsqueeze(1).repeat_interleave(
             self.num_samples, dim=1
         )  # add sample dim
@@ -136,6 +131,14 @@ class GradientSolver(torch.nn.Module):
         }
 
         with torch.no_grad():
+            init_action = prepare_init_action(
+                self.model,
+                info_dict,
+                init_action,
+                self.horizon,
+                n_envs=self.n_envs,
+                action_dim=self.action_dim,
+            )
             self.init_action(init_action)
 
         # Determine batch size (default to all envs if not specified which can cause memory issues)

@@ -9,7 +9,8 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
-from .solver import Costable
+from stable_worldmodel.protocols import Costable
+from stable_worldmodel.solver.utils import prepare_init_action
 
 
 class CEMSolver:
@@ -34,7 +35,7 @@ class CEMSolver:
         var_scale: float = 1,
         n_steps: int = 30,
         topk: int = 30,
-        device: str | torch.device = "cpu",
+        device: str | torch.device = 'cpu',
         seed: int = 1234,
     ) -> None:
         self.model = model
@@ -46,7 +47,9 @@ class CEMSolver:
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
-    def configure(self, *, action_space: gym.Space, n_envs: int, config: Any) -> None:
+    def configure(
+        self, *, action_space: gym.Space, n_envs: int, config: Any
+    ) -> None:
         """Configure the solver with environment specifications."""
         self._action_space = action_space
         self._n_envs = n_envs
@@ -55,7 +58,9 @@ class CEMSolver:
         self._configured = True
 
         if not isinstance(action_space, Box):
-            logging.warning(f"Action space is discrete, got {type(action_space)}. CEMSolver may not work as expected.")
+            logging.warning(
+                f'Action space is discrete, got {type(action_space)}. CEMSolver may not work as expected.'
+            )
 
     @property
     def n_envs(self) -> int:
@@ -77,19 +82,17 @@ class CEMSolver:
         return self.solve(*args, **kwargs)
 
     def init_action_distrib(
-        self, actions: torch.Tensor | None = None
+        self, actions: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Initialize the action distribution parameters (mean and variance)."""
-        var = self.var_scale * torch.ones([self.n_envs, self.horizon, self.action_dim])
-        mean = torch.zeros([self.n_envs, 0, self.action_dim]) if actions is None else actions
-
-        remaining = self.horizon - mean.shape[1]
-        if remaining > 0:
-            device = mean.device
-            new_mean = torch.zeros([self.n_envs, remaining, self.action_dim])
-            mean = torch.cat([mean, new_mean], dim=1).to(device)
-
-        return mean, var
+        assert actions.shape == (self.n_envs, self.horizon, self.action_dim), (
+            f'Expected actions shape ({self.n_envs}, {self.horizon}, {self.action_dim}), '
+            f'got {tuple(actions.shape)}'
+        )
+        var = self.var_scale * torch.ones(
+            [self.n_envs, self.horizon, self.action_dim]
+        )
+        return actions, var
 
     @torch.inference_mode()
     def solve(
@@ -98,10 +101,20 @@ class CEMSolver:
         """Solve the planning problem using Cross Entropy Method."""
         start_time = time.time()
         outputs = {
-            "costs": [],
-            "mean": [],  # History of means
-            "var": [],  # History of vars
+            'costs': [],
+            'mean': [],  # History of means
+            'var': [],  # History of vars
         }
+
+        # -- warm-start from actor if model is Actionable, else zero-pad
+        init_action = prepare_init_action(
+            self.model,
+            info_dict,
+            init_action,
+            self.horizon,
+            n_envs=self.n_envs,
+            action_dim=self.action_dim,
+        )
 
         # -- initialize the action distribution globally
         mean, var = self.init_action_distrib(init_action)
@@ -129,9 +142,13 @@ class CEMSolver:
                     # Add sample dim: (batch, 1, ...)
                     v_batch = v_batch.unsqueeze(1)
                     # Expand: (batch, num_samples, ...)
-                    v_batch = v_batch.expand(current_bs, self.num_samples, *v_batch.shape[2:])
+                    v_batch = v_batch.expand(
+                        current_bs, self.num_samples, *v_batch.shape[2:]
+                    )
                 elif isinstance(v, np.ndarray):
-                    v_batch = np.repeat(v_batch[:, None, ...], self.num_samples, axis=1)
+                    v_batch = np.repeat(
+                        v_batch[:, None, ...], self.num_samples, axis=1
+                    )
                 expanded_infos[k] = v_batch
 
             # Optimization Loop
@@ -149,7 +166,9 @@ class CEMSolver:
                 )
 
                 # Scale and shift: (Batch, N, H, D) * (Batch, 1, H, D) + (Batch, 1, H, D)
-                candidates = candidates * batch_var.unsqueeze(1) + batch_mean.unsqueeze(1)
+                candidates = candidates * batch_var.unsqueeze(
+                    1
+                ) + batch_mean.unsqueeze(1)
 
                 # Force the first sample to be the current mean
                 candidates[:, 0] = batch_mean
@@ -159,18 +178,30 @@ class CEMSolver:
                 # Evaluate candidates
                 costs = self.model.get_cost(current_info, candidates)
 
-                assert isinstance(costs, torch.Tensor), f"Expected cost to be a torch.Tensor, got {type(costs)}"
-                assert costs.ndim == 2 and costs.shape[0] == current_bs and costs.shape[1] == self.num_samples, (
-                    f"Expected cost to be of shape ({current_bs}, {self.num_samples}), got {costs.shape}"
+                assert isinstance(costs, torch.Tensor), (
+                    f'Expected cost to be a torch.Tensor, got {type(costs)}'
+                )
+                assert (
+                    costs.ndim == 2
+                    and costs.shape[0] == current_bs
+                    and costs.shape[1] == self.num_samples
+                ), (
+                    f'Expected cost to be of shape ({current_bs}, {self.num_samples}), got {costs.shape}'
                 )
 
                 # Select Top-K
                 # topk_vals: (Batch, K), topk_inds: (Batch, K)
-                topk_vals, topk_inds = torch.topk(costs, k=self.topk, dim=1, largest=False)
+                topk_vals, topk_inds = torch.topk(
+                    costs, k=self.topk, dim=1, largest=False
+                )
 
                 # Gather Top-K Candidates
                 # We need to select the specific candidates corresponding to topk_inds
-                batch_indices = torch.arange(current_bs, device=self.device).unsqueeze(1).expand(-1, self.topk)
+                batch_indices = (
+                    torch.arange(current_bs, device=self.device)
+                    .unsqueeze(1)
+                    .expand(-1, self.topk)
+                )
 
                 # Indexing: candidates[batch_idx, sample_idx]
                 # Result shape: (Batch, K, Horizon, Dim)
@@ -189,11 +220,11 @@ class CEMSolver:
             var[start_idx:end_idx] = batch_var
 
             # Store history/metadata
-            outputs["costs"].extend(final_batch_cost)
+            outputs['costs'].extend(final_batch_cost)
 
-        outputs["actions"] = mean.detach().cpu()
-        outputs["mean"] = [mean.detach().cpu()]
-        outputs["var"] = [var.detach().cpu()]
+        outputs['actions'] = mean.detach().cpu()
+        outputs['mean'] = [mean.detach().cpu()]
+        outputs['var'] = [var.detach().cpu()]
 
-        print(f"CEM solve time: {time.time() - start_time:.4f} seconds")
+        print(f'CEM solve time: {time.time() - start_time:.4f} seconds')
         return outputs

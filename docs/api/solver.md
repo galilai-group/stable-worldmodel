@@ -81,6 +81,21 @@ summary: Model-based planning solvers for action optimization
 
 ::: stable_worldmodel.solver.LagrangianSolver.solve
 
+## **[ Warm-start with Actionable Models ]**
+
+All solvers support warm-starting via the `init_action` argument of `solve()`.  When the solver's model also implements the **Actionable protocol** (i.e. has a `get_action` method), the solvers automatically extend a partial `init_action` to the full planning horizon by calling `model.get_action(info_dict, horizon=remaining)`.
+
+This means that in a receding-horizon loop, the shifted tail of the previous plan is completed by the model's actor rather than being left uninitialised or zero-padded:
+
+```
+previous plan:  [a0, a1, a2, a3, a4]   (horizon = 5)
+execute a0
+shifted tail:   [a1, a2, a3, a4]        (t = 4 steps)
+actor fills:    [a1, a2, a3, a4, a_new] (actor provides the last step)
+```
+
+If the model is not Actionable, `init_action` is forwarded unchanged (and the solver handles any missing steps with its own initialisation strategy, e.g. mean of the previous distribution for CEM/ICEM).
+
 ## **[ Example: Constrained Planning with LagrangianSolver ]**
 
 The `LagrangianSolver` extends gradient-based planning to handle **inequality

@@ -1,7 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 from collections.abc import Callable
 
 import numpy as np
@@ -11,6 +11,7 @@ from torchvision import tv_tensors
 
 import stable_worldmodel as swm
 from stable_worldmodel.solver import Solver
+from stable_worldmodel.protocols import Actionable, Transformable
 
 
 @dataclass(frozen=True)
@@ -35,42 +36,6 @@ class PlanConfig:
     def plan_len(self) -> int:
         """Total plan length in environment steps."""
         return self.horizon * self.action_block
-
-
-class Transformable(Protocol):
-    """Protocol for reversible data transformations (e.g., normalizers, scalers)."""
-
-    def transform(self, x: np.ndarray) -> np.ndarray:  # pragma: no cover
-        """Apply preprocessing to input data.
-
-        Args:
-            x: Input data as a numpy array.
-
-        Returns:
-            Preprocessed data as a numpy array.
-        """
-        ...
-
-    def inverse_transform(
-        self, x: np.ndarray
-    ) -> np.ndarray:  # pragma: no cover
-        """Reverse the preprocessing transformation.
-
-        Args:
-            x: Preprocessed data as a numpy array.
-
-        Returns:
-            Original data as a numpy array.
-        """
-        ...
-
-
-class Actionable(Protocol):
-    """Protocol for model action computation."""
-
-    def get_action(info) -> torch.Tensor:  # pragma: no cover
-        """Compute action from observation and goal"""
-        ...
 
 
 class BasePolicy:
@@ -391,8 +356,6 @@ class WorldModelPolicy(BasePolicy):
             The selected action(s) as a numpy array.
         """
         assert hasattr(self, 'env'), 'Environment not set for the policy'
-        assert 'pixels' in info_dict, "'pixels' must be provided in info_dict"
-        assert 'goal' in info_dict, "'goal' must be provided in info_dict"
 
         info_dict = self._prepare_info(info_dict)
 

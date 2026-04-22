@@ -58,13 +58,13 @@ def test_base_policy_init():
     """Test BasePolicy initialization."""
     policy = BasePolicy()
     assert policy.env is None
-    assert policy.type == "base"
+    assert policy.type == 'base'
 
 
 def test_base_policy_kwargs():
     """Test BasePolicy with kwargs."""
-    policy = BasePolicy(custom_arg="value", another=42)
-    assert policy.custom_arg == "value"
+    policy = BasePolicy(custom_arg='value', another=42)
+    assert policy.custom_arg == 'value'
     assert policy.another == 42
 
 
@@ -91,7 +91,7 @@ def test_base_policy_set_env():
 def test_random_policy_init():
     """Test RandomPolicy initialization."""
     policy = RandomPolicy()
-    assert policy.type == "random"
+    assert policy.type == 'random'
     assert policy.seed is None
 
 
@@ -137,7 +137,7 @@ def test_random_policy_set_seed_no_env():
 def test_expert_policy_init():
     """Test ExpertPolicy initialization."""
     policy = ExpertPolicy()
-    assert policy.type == "expert"
+    assert policy.type == 'expert'
 
 
 def test_expert_policy_get_action():
@@ -168,63 +168,66 @@ class MockTransformable:
 def test_prepare_info_basic():
     """Test _prepare_info with basic numpy array conversion."""
     policy = BasePolicy()
-    info = {"state": np.array([1.0, 2.0, 3.0], dtype=np.float32)}
+    info = {'state': np.array([1.0, 2.0, 3.0], dtype=np.float32)}
     result = policy._prepare_info(info)
-    assert torch.is_tensor(result["state"])
-    torch.testing.assert_close(result["state"], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.is_tensor(result['state'])
+    torch.testing.assert_close(result['state'], torch.tensor([1.0, 2.0, 3.0]))
 
 
 def test_prepare_info_with_process():
     """Test _prepare_info with process dict."""
     policy = BasePolicy()
-    policy.process = {"state": MockTransformable(scale=2.0)}
-    info = {"state": np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)}
+    policy.process = {'state': MockTransformable(scale=2.0)}
+    info = {'state': np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)}
     result = policy._prepare_info(info)
     expected = torch.tensor([[2.0, 4.0], [6.0, 8.0]])
-    torch.testing.assert_close(result["state"], expected)
+    torch.testing.assert_close(result['state'], expected)
 
 
 def test_prepare_info_with_process_3d():
     """Test _prepare_info with process dict and 3D array (flattening)."""
     policy = BasePolicy()
-    policy.process = {"state": MockTransformable(scale=2.0)}
+    policy.process = {'state': MockTransformable(scale=2.0)}
     # Shape: (batch=2, time=2, features=3)
     info = {
-        "state": np.array(
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]],
+        'state': np.array(
+            [
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]],
+            ],
             dtype=np.float32,
         )
     }
     result = policy._prepare_info(info)
     # Should preserve shape after processing
-    assert result["state"].shape == (2, 2, 3)
+    assert result['state'].shape == (2, 2, 3)
 
 
 def test_prepare_info_process_non_numpy_raises():
     """Test _prepare_info raises ValueError for non-numpy in process."""
     policy = BasePolicy()
-    policy.process = {"state": MockTransformable()}
-    info = {"state": torch.tensor([1.0, 2.0])}  # Tensor instead of numpy
-    with pytest.raises(ValueError, match="Expected numpy array"):
+    policy.process = {'state': MockTransformable()}
+    info = {'state': torch.tensor([1.0, 2.0])}  # Tensor instead of numpy
+    with pytest.raises(ValueError, match='Expected numpy array'):
         policy._prepare_info(info)
 
 
 def test_prepare_info_string_dtype_not_converted():
     """Test _prepare_info doesn't convert string arrays to tensor."""
     policy = BasePolicy()
-    info = {"name": np.array(["test", "name"])}
+    info = {'name': np.array(['test', 'name'])}
     result = policy._prepare_info(info)
     # String arrays should not be converted
-    assert isinstance(result["name"], np.ndarray)
+    assert isinstance(result['name'], np.ndarray)
 
 
 def test_prepare_info_non_numpy_passthrough():
     """Test _prepare_info passes through non-numpy types without process."""
     policy = BasePolicy()
-    info = {"tensor": torch.tensor([1.0, 2.0]), "scalar": 42}
+    info = {'tensor': torch.tensor([1.0, 2.0]), 'scalar': 42}
     result = policy._prepare_info(info)
-    assert torch.is_tensor(result["tensor"])
-    assert result["scalar"] == 42
+    assert torch.is_tensor(result['tensor'])
+    assert result['scalar'] == 42
 
 
 ###########################
@@ -242,7 +245,7 @@ class MockActionableModel(torch.nn.Module):
 
     def get_action(self, info: dict) -> torch.Tensor:
         # Return fixed action for testing
-        batch_size = info.get("pixels", info.get("goal")).shape[0]
+        batch_size = info.get('pixels', info.get('goal')).shape[0]
         return torch.zeros(batch_size, self.action_dim)
 
 
@@ -250,7 +253,7 @@ def test_feedforward_policy_init():
     """Test FeedForwardPolicy initialization."""
     model = MockActionableModel()
     policy = FeedForwardPolicy(model=model)
-    assert policy.type == "feed_forward"
+    assert policy.type == 'feed_forward'
     assert policy.model is model
     assert policy.process == {}
     assert policy.transform == {}
@@ -259,9 +262,11 @@ def test_feedforward_policy_init():
 def test_feedforward_policy_init_with_process_transform():
     """Test FeedForwardPolicy initialization with process and transform."""
     model = MockActionableModel()
-    process = {"action": MockTransformable()}
-    transform = {"pixels": lambda x: x}
-    policy = FeedForwardPolicy(model=model, process=process, transform=transform)
+    process = {'action': MockTransformable()}
+    transform = {'pixels': lambda x: x}
+    policy = FeedForwardPolicy(
+        model=model, process=process, transform=transform
+    )
     assert policy.process is process
     assert policy.transform is transform
 
@@ -276,8 +281,8 @@ def test_feedforward_policy_get_action():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 64, 64, 3).astype(np.float32),
     }
     action = policy.get_action(info)
     assert isinstance(action, np.ndarray)
@@ -287,7 +292,7 @@ def test_feedforward_policy_get_action():
 def test_feedforward_policy_get_action_with_process():
     """Test FeedForwardPolicy.get_action with action post-processing."""
     model = MockActionableModel(action_dim=2)
-    process = {"action": MockTransformable(scale=2.0)}
+    process = {'action': MockTransformable(scale=2.0)}
     policy = FeedForwardPolicy(model=model, process=process)
 
     mock_env = MagicMock()
@@ -295,8 +300,8 @@ def test_feedforward_policy_get_action_with_process():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 64, 64, 3).astype(np.float32),
     }
     action = policy.get_action(info)
     # Action should be inverse transformed (divided by 2)
@@ -317,7 +322,7 @@ def test_feedforward_policy_no_goal_raises():
     mock_env = MagicMock()
     policy.set_env(mock_env)
     with pytest.raises(AssertionError, match="'goal' must be provided"):
-        policy.get_action({"pixels": np.array([1.0])})
+        policy.get_action({'pixels': np.array([1.0])})
 
 
 ###########################
@@ -354,7 +359,11 @@ class MockSolver:
 
     def solve(self, info_dict, init_action=None):
         action_dim = self._action_space.shape[0]
-        return {"actions": torch.zeros(self._n_envs, self._config.horizon, action_dim)}
+        return {
+            'actions': torch.zeros(
+                self._n_envs, self._config.horizon, action_dim
+            )
+        }
 
     def __call__(self, info_dict, init_action=None):
         return self.solve(info_dict, init_action)
@@ -366,7 +375,7 @@ def test_worldmodel_policy_init():
     config = PlanConfig(horizon=10, receding_horizon=2, action_block=2)
     policy = WorldModelPolicy(solver=solver, config=config)
 
-    assert policy.type == "world_model"
+    assert policy.type == 'world_model'
     assert policy.solver is solver
     assert policy.cfg is config
     assert policy.process == {}
@@ -422,8 +431,8 @@ def test_worldmodel_policy_get_action():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
     }
     action = policy.get_action(info)
     assert isinstance(action, np.ndarray)
@@ -442,17 +451,17 @@ def test_worldmodel_policy_get_action_uses_buffer():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
     }
 
     # First call should plan
-    action1 = policy.get_action(info)
+    policy.get_action(info)
     # Buffer should have receding_horizon - 1 actions left
     assert len(policy._action_buffer) == 1
 
     # Second call should use buffer (no new planning)
-    action2 = policy.get_action(info)
+    policy.get_action(info)
     assert len(policy._action_buffer) == 0
 
 
@@ -460,7 +469,7 @@ def test_worldmodel_policy_get_action_with_process():
     """Test WorldModelPolicy.get_action with action post-processing."""
     solver = MockSolver()
     config = PlanConfig(horizon=10, receding_horizon=1, action_block=1)
-    process = {"action": MockTransformable(scale=2.0)}
+    process = {'action': MockTransformable(scale=2.0)}
     policy = WorldModelPolicy(solver=solver, config=config, process=process)
 
     mock_env = MagicMock()
@@ -469,8 +478,8 @@ def test_worldmodel_policy_get_action_with_process():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
     }
     action = policy.get_action(info)
     # Action should be inverse transformed
@@ -483,7 +492,7 @@ def test_worldmodel_policy_no_env_raises():
     config = PlanConfig(horizon=10, receding_horizon=2)
     policy = WorldModelPolicy(solver=solver, config=config)
     with pytest.raises(TypeError):
-        policy.get_action({"pixels": np.array([1.0]), "goal": np.array([1.0])})
+        policy.get_action({'pixels': np.array([1.0]), 'goal': np.array([1.0])})
 
 
 def test_worldmodel_policy_no_pixels_raises():
@@ -494,7 +503,7 @@ def test_worldmodel_policy_no_pixels_raises():
     mock_env = MagicMock()
     policy.set_env(mock_env)
     with pytest.raises(AssertionError, match="'pixels' must be provided"):
-        policy.get_action({"goal": np.array([1.0])})
+        policy.get_action({'goal': np.array([1.0])})
 
 
 def test_worldmodel_policy_no_goal_raises():
@@ -505,13 +514,15 @@ def test_worldmodel_policy_no_goal_raises():
     mock_env = MagicMock()
     policy.set_env(mock_env)
     with pytest.raises(AssertionError, match="'goal' must be provided"):
-        policy.get_action({"pixels": np.array([1.0])})
+        policy.get_action({'pixels': np.array([1.0])})
 
 
 def test_worldmodel_policy_warm_start():
     """Test WorldModelPolicy warm start feature."""
     solver = MockSolver()
-    config = PlanConfig(horizon=10, receding_horizon=2, action_block=1, warm_start=True)
+    config = PlanConfig(
+        horizon=10, receding_horizon=2, action_block=1, warm_start=True
+    )
     policy = WorldModelPolicy(solver=solver, config=config)
 
     mock_env = MagicMock()
@@ -520,8 +531,8 @@ def test_worldmodel_policy_warm_start():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
     }
 
     # First call triggers planning
@@ -544,13 +555,194 @@ def test_worldmodel_policy_no_warm_start():
     policy.set_env(mock_env)
 
     info = {
-        "pixels": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
-        "goal": np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
     }
 
     policy.get_action(info)
     # Without warm start, _next_init should be None
     assert policy._next_init is None
+
+
+###############################################
+## WorldModelPolicy warm-start from actor   ##
+###############################################
+
+
+class MockActionableCostableModel(torch.nn.Module):
+    """Mock model implementing both Costable and Actionable protocols."""
+
+    def __init__(self, action_dim: int = 2, fill_value: float = 0.5):
+        super().__init__()
+        self.action_dim = action_dim
+        self.fill_value = fill_value
+        self.get_action_calls: list[int] = []  # records horizon per call
+
+    def get_action(
+        self,
+        info_dict: dict,
+        horizon: int = 1,
+        prefix_actions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        self.get_action_calls.append(horizon)
+        n_envs = next(iter(info_dict.values())).shape[0]
+        actions = torch.full(
+            (n_envs, horizon, self.action_dim), self.fill_value
+        )
+        if horizon == 1:
+            return actions[:, 0]
+        return actions
+
+    def get_cost(
+        self, _info_dict: dict, action_candidates: torch.Tensor
+    ) -> torch.Tensor:
+        B, N = action_candidates.shape[:2]
+        return torch.zeros(B, N)
+
+
+class MockSolverWithWarmStart:
+    """Mock solver that calls prepare_init_action exactly as real solvers do."""
+
+    def __init__(self, model):
+        self.model = model
+        self.received_init_action = None
+
+    def configure(self, *, action_space, n_envs, config):
+        self._n_envs = n_envs
+        self._config = config
+        self._action_space = action_space
+        self._action_dim = int(np.prod(action_space.shape))
+
+    @property
+    def action_dim(self) -> int:
+        return self._action_dim * self._config.action_block
+
+    @property
+    def n_envs(self) -> int:
+        return self._n_envs
+
+    @property
+    def horizon(self) -> int:
+        return self._config.horizon
+
+    def solve(self, info_dict: dict, init_action=None) -> dict:
+        from stable_worldmodel.solver.utils import prepare_init_action
+
+        init_action = prepare_init_action(
+            self.model,
+            info_dict,
+            init_action,
+            self.horizon,
+            n_envs=self.n_envs,
+            action_dim=self.action_dim,
+        )
+        self.received_init_action = init_action
+        return {
+            'actions': torch.zeros(
+                self._n_envs, self._config.horizon, self._action_dim
+            )
+        }
+
+    def __call__(self, info_dict, init_action=None):
+        return self.solve(info_dict, init_action)
+
+
+@pytest.fixture
+def actionable_setup():
+    """Common setup: 1 env, horizon=5, receding_horizon=2, action_dim=2."""
+    action_dim = 2
+    model = MockActionableCostableModel(action_dim=action_dim, fill_value=0.5)
+    solver = MockSolverWithWarmStart(model)
+    config = PlanConfig(
+        horizon=5, receding_horizon=2, action_block=1, warm_start=True
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+    mock_env = MagicMock()
+    mock_env.num_envs = 1
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(action_dim,))
+    policy.set_env(mock_env)
+    info = {
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+    }
+    return policy, solver, model, info
+
+
+def test_worldmodel_policy_warmstart_calls_get_action(actionable_setup):
+    """On the first plan, model.get_action is called for the full horizon."""
+    policy, solver, model, info = actionable_setup
+
+    policy.get_action(info)
+
+    assert len(model.get_action_calls) == 1
+    assert model.get_action_calls[0] == policy.cfg.horizon  # full horizon = 5
+
+
+def test_worldmodel_policy_warmstart_init_action_shape(actionable_setup):
+    """Solver receives an init_action of shape (n_envs, horizon, action_dim)."""
+    policy, solver, model, info = actionable_setup
+
+    policy.get_action(info)
+
+    assert solver.received_init_action is not None
+    assert solver.received_init_action.shape == (1, 5, 2)
+
+
+def test_worldmodel_policy_warmstart_init_action_values(actionable_setup):
+    """init_action passed to solver matches model.get_action output."""
+    policy, solver, model, info = actionable_setup
+
+    policy.get_action(info)
+
+    expected = torch.full((1, 5, 2), 0.5)
+    torch.testing.assert_close(solver.received_init_action, expected)
+
+
+def test_worldmodel_policy_warmstart_extends_partial_plan(actionable_setup):
+    """On re-plan, warm-start extends the partial previous plan with actor tail."""
+    policy, solver, model, info = actionable_setup
+
+    # horizon=5, receding_horizon=2 → _next_init will have 3 steps after first plan
+    policy.get_action(
+        info
+    )  # triggers first plan; buffer has 2, pops 1 → 1 left
+    policy.get_action(info)  # drains buffer; no replan
+    # buffer is now empty, _next_init.shape == (1, 3, 2)
+    assert policy._next_init.shape == (1, 3, 2)
+
+    model.get_action_calls.clear()
+
+    policy.get_action(info)  # triggers second plan
+
+    # Actor fills only the remaining 2 steps
+    assert len(model.get_action_calls) == 1
+    assert model.get_action_calls[0] == 2
+
+    # Solver receives a full 5-step init_action (3 from prev plan + 2 from actor)
+    assert solver.received_init_action.shape == (1, 5, 2)
+
+
+def test_worldmodel_policy_no_warmstart_without_actionable():
+    """Solver receives a full zero init_action when model does not implement Actionable."""
+    non_actionable_model = MagicMock(spec=['get_cost'])
+    solver = MockSolverWithWarmStart(model=non_actionable_model)
+    config = PlanConfig(
+        horizon=5, receding_horizon=2, action_block=1, warm_start=False
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+    mock_env = MagicMock()
+    mock_env.num_envs = 1
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    policy.set_env(mock_env)
+    info = {
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+    }
+
+    policy.get_action(info)
+
+    assert solver.received_init_action.shape == (1, 5, 2)
+    assert solver.received_init_action.eq(0).all()
 
 
 ###########################
@@ -598,12 +790,12 @@ def mock_checkpoint_dir(tmp_path):
 def test_load_model_with_attribute_direct(mock_checkpoint_dir):
     """Test _load_model_with_attribute finds attribute directly from directory."""
     model = MockModuleWithGetAction()
-    ckpt_path = mock_checkpoint_dir / "direct_object.ckpt"
+    ckpt_path = mock_checkpoint_dir / 'direct_object.ckpt'
     torch.save(model, ckpt_path)
 
     # Pass directory - it will find the *_object.ckpt file
-    result = _load_model_with_attribute(str(mock_checkpoint_dir), "get_action")
-    assert hasattr(result, "get_action")
+    result = _load_model_with_attribute(str(mock_checkpoint_dir), 'get_action')
+    assert hasattr(result, 'get_action')
 
 
 def test_load_model_with_attribute_nested(mock_checkpoint_dir):
@@ -611,73 +803,75 @@ def test_load_model_with_attribute_nested(mock_checkpoint_dir):
     child = MockModuleWithGetAction()
     parent = MockParentModule(child)
     # Create a subdirectory for this test
-    nested_dir = mock_checkpoint_dir / "nested_test"
+    nested_dir = mock_checkpoint_dir / 'nested_test'
     nested_dir.mkdir()
-    ckpt_path = nested_dir / "model_object.ckpt"
+    ckpt_path = nested_dir / 'model_object.ckpt'
     torch.save(parent, ckpt_path)
 
-    result = _load_model_with_attribute(str(nested_dir), "get_action")
-    assert hasattr(result, "get_action")
+    result = _load_model_with_attribute(str(nested_dir), 'get_action')
+    assert hasattr(result, 'get_action')
 
 
 def test_load_model_with_attribute_from_dir(mock_checkpoint_dir):
     """Test _load_model_with_attribute loads from directory."""
     model = MockModuleWithGetAction()
-    subdir = mock_checkpoint_dir / "from_dir"
+    subdir = mock_checkpoint_dir / 'from_dir'
     subdir.mkdir()
-    ckpt_path = subdir / "model_object.ckpt"
+    ckpt_path = subdir / 'model_object.ckpt'
     torch.save(model, ckpt_path)
 
-    result = _load_model_with_attribute(str(subdir), "get_action")
-    assert hasattr(result, "get_action")
+    result = _load_model_with_attribute(str(subdir), 'get_action')
+    assert hasattr(result, 'get_action')
 
 
 def test_load_model_with_attribute_not_found(mock_checkpoint_dir):
     """Test _load_model_with_attribute raises when attribute not found."""
     model = torch.nn.Linear(4, 2)  # No get_action
-    subdir = mock_checkpoint_dir / "no_attr"
+    subdir = mock_checkpoint_dir / 'no_attr'
     subdir.mkdir()
-    ckpt_path = subdir / "test_object.ckpt"
+    ckpt_path = subdir / 'test_object.ckpt'
     torch.save(model, ckpt_path)
 
-    with pytest.raises(RuntimeError, match="No module with 'get_action' found"):
-        _load_model_with_attribute(str(subdir), "get_action")
+    with pytest.raises(
+        RuntimeError, match="No module with 'get_action' found"
+    ):
+        _load_model_with_attribute(str(subdir), 'get_action')
 
 
 def test_load_model_with_attribute_cache_dir(mock_checkpoint_dir):
     """Test _load_model_with_attribute uses cache_dir."""
     model = MockModuleWithGetAction()
-    run_name = "my_model"
+    run_name = 'my_model'
     run_dir = mock_checkpoint_dir / run_name
     run_dir.mkdir()
-    ckpt_path = run_dir / "epoch_0_object.ckpt"
+    ckpt_path = run_dir / 'epoch_0_object.ckpt'
     torch.save(model, ckpt_path)
 
     result = _load_model_with_attribute(
-        run_name, "get_action", cache_dir=mock_checkpoint_dir
+        run_name, 'get_action', cache_dir=mock_checkpoint_dir
     )
-    assert hasattr(result, "get_action")
+    assert hasattr(result, 'get_action')
 
 
 def test_auto_actionable_model(mock_checkpoint_dir):
     """Test AutoActionableModel function."""
     model = MockModuleWithGetAction()
-    subdir = mock_checkpoint_dir / "actionable"
+    subdir = mock_checkpoint_dir / 'actionable'
     subdir.mkdir()
-    ckpt_path = subdir / "test_object.ckpt"
+    ckpt_path = subdir / 'test_object.ckpt'
     torch.save(model, ckpt_path)
 
     result = AutoActionableModel(str(subdir))
-    assert hasattr(result, "get_action")
+    assert hasattr(result, 'get_action')
 
 
 def test_auto_cost_model(mock_checkpoint_dir):
     """Test AutoCostModel function."""
     model = MockModuleWithGetCost()
-    subdir = mock_checkpoint_dir / "costable"
+    subdir = mock_checkpoint_dir / 'costable'
     subdir.mkdir()
-    ckpt_path = subdir / "test_object.ckpt"
+    ckpt_path = subdir / 'test_object.ckpt'
     torch.save(model, ckpt_path)
 
     result = AutoCostModel(str(subdir))
-    assert hasattr(result, "get_cost")
+    assert hasattr(result, 'get_cost')

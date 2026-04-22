@@ -76,6 +76,35 @@ where $\lambda$ is the only hyperparameter.
 | OGB Cube | 74% | NA |
 
 
+## TD-MPC2
+
+TD-MPC2 (TDMPC2) is a model-based reinforcement learning algorithm introduced by [Hansen et al., 2023](https://arxiv.org/pdf/2310.16828). It jointly learns a latent dynamics model, a reward predictor, an ensemble of Q-functions, and a stochastic actor. At test time, optimal actions are found by planning with MPPI using the Q-functions as a cost signal, while the actor provides warm-start initializations for the solver (via the Actionable protocol).
+
+The model encodes observations and goals into a latent state using a CNN backbone (for pixels) and MLP encoders (for extra modalities), followed by [SimNorm](https://arxiv.org/pdf/2204.00485) regularization. Rewards and Q-values are represented with two-hot encoding over a fixed bin range, and a running scale normalizes the temporal-difference targets.
+
+### Training Objective
+
+Training jointly optimizes four losses:
+
+- $\mathcal{L}_{\text{cons}}$: latent consistency loss — $\ell_2$ between predicted and target next latent states (teacher-forcing)
+- $\mathcal{L}_{\text{rew}}$: reward prediction loss — cross-entropy between predicted and two-hot encoded rewards
+- $\mathcal{L}_{Q}$: Q-function loss — cross-entropy against two-hot encoded TD targets using a target Q-network ensemble
+- $\mathcal{L}_{\pi}$: actor loss — maximize the minimum Q-value over the ensemble
+
+$$ \mathcal{L}_{\text{TDMPC2}} = \mathcal{L}_{\text{cons}} + \mathcal{L}_{\text{rew}} + \mathcal{L}_{Q} + \mathcal{L}_{\pi} $$
+
+At planning time, the cost for a candidate action sequence is the negative discounted return with an **uncertainty penalty** on the terminal Q-value:
+
+$$ \text{cost} = -\left( G_{0:H} + \gamma^H \left( \bar{Q}(z_H, \mu_H) - c \cdot |\bar{Q}| \cdot \sigma_Q \right) \right) $$
+
+where $\bar{Q}$ and $\sigma_Q$ are the mean and standard deviation of the Q-ensemble, and $c$ controls the conservatism.
+
+### Benchmark
+
+| Environment | Success Rate | Checkpoint |
+|-------------|--------------|------------|
+| ? | ? | NA |
+
 ## Goal-Conditioned Behavioural Cloning
 
 Goal-Conditioned Behavioural Cloning (GCBC) is a simple imitation learning baseline introduced by [Ghosh et al., 2019](https://arxiv.org/pdf/1912.06088). A goal-conditioned policy $\pi_\theta(a \mid s, g)$ is trained via supervised learning to reproduce expert actions given the current state and a goal observation. In our implementation, observations and goals are encoded into DINOv2 patch embeddings before being fed to the policy network.

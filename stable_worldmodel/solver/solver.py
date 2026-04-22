@@ -1,42 +1,16 @@
 from typing import Any, Protocol, runtime_checkable
 
-import gymnasium as gym
 import torch
-
-
-class Costable(Protocol):
-    """Protocol for world model cost functions."""
-
-    def criterion(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
-        """Compute the cost criterion for action candidates.
-
-        Args:
-            info_dict: Dictionary containing environment state information.
-            action_candidates: Tensor of proposed actions.
-
-        Returns:
-            A tensor of cost values for each action candidate.
-        """
-        ...
-
-    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:  # pragma: no cover
-        """Compute cost for given action candidates based on info dictionary.
-
-        Args:
-            info_dict: Dictionary containing environment state information.
-            action_candidates: Tensor of proposed actions.
-
-        Returns:
-            A tensor of cost values for each action candidate.
-        """
-        ...
+import gymnasium as gym
 
 
 @runtime_checkable
 class Solver(Protocol):
     """Protocol for model-based planning solvers."""
 
-    def configure(self, *, action_space: gym.Space, n_envs: int, config: Any) -> None:
+    def configure(
+        self, *, action_space: gym.Space, n_envs: int, config: Any
+    ) -> None:
         """Configure the solver with environment and planning specifications.
 
         Args:
@@ -61,7 +35,9 @@ class Solver(Protocol):
         """Planning horizon length in timesteps."""
         ...
 
-    def solve(self, info_dict: dict, init_action: torch.Tensor | None = None) -> dict:
+    def solve(
+        self, info_dict: dict, init_action: torch.Tensor | None = None
+    ) -> dict:
         """Solve the planning optimization problem to find optimal actions.
 
         Args:
