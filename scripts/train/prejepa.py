@@ -87,18 +87,7 @@ def get_img_preprocessor(source, target, img_size=224):
     )
 
 
-def get_column_normalizer(dataset, source, target):
-    data = torch.from_numpy(dataset.get_col_data(source)[:])
-    data = data[~torch.isnan(data).any(dim=1)]
-    mean, std = (
-        data.mean(0, keepdim=True).clone(),
-        data.std(0, keepdim=True).clone(),
-    )
-    return spt.data.transforms.WrapTorchTransform(
-        lambda x: ((x - mean) / std).float(),
-        source=source,
-        target=target,
-    )
+from stable_worldmodel.wm.utils import column_normalizer as get_column_normalizer  # noqa: F401 — picklable normalizer for spawn workers
 
 
 class VideoPipeline(spt.data.transforms.Transform):
@@ -233,15 +222,13 @@ def run(cfg):
     encoding_keys = list(cfg.wm.get('encoding', {}).keys())
     keys_to_load = ['pixels'] + encoding_keys
 
-    dataset = swm.data.HDF5Dataset(
-        cfg.dataset_name,
-        num_steps=cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
-        cache_dir=cfg.get('cache_dir', None),
+    dataset = swm.data.build_script_dataset(
+        cfg,
         keys_to_load=keys_to_load,
         keys_to_cache=encoding_keys,
+        cache_dir=cfg.get('cache_dir', None),
     )
+    dataset.transform = None
 
     normalizers = [
         get_column_normalizer(dataset, col, col)

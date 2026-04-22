@@ -61,7 +61,7 @@ Here is a quick start example: collect a dataset and perform an evaluation.
 
 ```python
 import stable_worldmodel as swm
-from stable_worldmodel.data import HDF5Dataset
+from stable_worldmodel.data import HDF5Dataset, LanceDataset
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
@@ -84,6 +84,12 @@ dataset = HDF5Dataset(
     frameskip=1,
     num_steps=16,
     keys_to_load=['pixels', 'action', 'state']
+)
+# or connect to LanceDB directly — full .lance table path (local or s3://)
+lance_dataset = LanceDataset(
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
+    frameskip=5,
+    num_steps=16,
 )
 
 # model predictive control

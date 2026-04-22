@@ -62,24 +62,30 @@ world = World(
 )
 world.set_policy(RandomPolicy())
 
-# Record 50 episodes to a .h5 dataset
+# Record 50 episodes to a Lance table
 world.record_dataset(
     dataset_name="pusht_random",
     episodes=50,
-    cache_dir="./data"
+    cache_dir="./data",
 )
-# Result: ./data/pusht_random.h5
+# Result: ./data/datasets/pusht_random.lance
 ```
 ///
 
 /// tab | Evaluation
 ```python
 from stable_worldmodel import World
-from stable_worldmodel.data import HDF5Dataset
+from stable_worldmodel.data import HDF5Dataset, LanceDataset
 from stable_worldmodel.policy import RandomPolicy # or your trained policy
 
 # 1. Load a dataset for initial states
 dataset = HDF5Dataset("pusht_random", cache_dir="./data")
+# or stream straight from LanceDB — full .lance path, table inferred
+lance_dataset = LanceDataset(
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
+    num_steps=4,
+    frameskip=5,
+)
 
 # 2. Setup World
 world = World(env_name="swm/PushT-v1", num_envs=4, image_shape=(64, 64))
@@ -88,7 +94,7 @@ world.set_policy(RandomPolicy())
 # 3. Evaluate starting from dataset states
 results = world.evaluate_from_dataset(
     dataset=dataset,
-    episodes_idx=[0, 1, 2, 3],  # Episodes to test on
+    episodes_idx=[0, 1, 2, 3],  # Episodes to test
     start_steps=[0, 0, 0, 0],   # Start from beginning
     goal_offset_steps=50,       # Goal is state at t=50
     eval_budget=100             # Max steps to reach goal
@@ -97,6 +103,9 @@ results = world.evaluate_from_dataset(
 print(f"Success Rate: {results['success_rate']}%")
 ```
 ///
+
+!!! info "Lance datasets"
+    When you pass a `LanceDataset`, `evaluate_from_dataset` streams only the requested rows and never stages the full table on disk. Provide credentials or custom endpoints through the dataset's `connect_kwargs` field.
 
 !!! tip "Performance"
     The `World` class uses a custom `SyncWorld` vectorized environment for synchronized execution, ensuring deterministic and batched stepping across multiple environments.

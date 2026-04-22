@@ -31,21 +31,7 @@ def get_img_preprocessor(source: str, target: str, img_size: int = 224):
     return dt.transforms.Compose(to_image, resize)
 
 
-def get_column_normalizer(dataset, source: str, target: str):
-    """Get normalizer for a specific column in the dataset."""
-    col_data = dataset.get_col_data(source)
-    data = torch.from_numpy(np.array(col_data))
-    data = data[~torch.isnan(data).any(dim=1)]
-    mean = data.mean(0, keepdim=True).clone()
-    std = data.std(0, keepdim=True).clone()
-
-    def norm_fn(x):
-        return ((x - mean) / std).float()
-
-    normalizer = dt.transforms.WrapTorchTransform(
-        norm_fn, source=source, target=target
-    )
-    return normalizer
+from stable_worldmodel.wm.utils import column_normalizer as get_column_normalizer  # noqa: F401 — picklable normalizer for spawn workers
 
 
 class SaveCkptCallback(Callback):
@@ -113,7 +99,8 @@ def run(cfg):
     ##       dataset       ##
     #########################
 
-    dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+    dataset = swm.data.create_dataset(cfg.data.dataset)
+    dataset.transform = None
     transforms = [
         get_img_preprocessor(
             source='pixels', target='pixels', img_size=cfg.img_size

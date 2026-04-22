@@ -2,7 +2,9 @@ import json
 import os
 import subprocess
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from loguru import logger as logging
 from tqdm import tqdm
@@ -29,6 +31,107 @@ def get_cache_dir(
 def ensure_dir_exists(path: Path):
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
+
+
+def _config_to_dict(config: Any) -> dict[str, Any]:
+    if config is None:
+        return {}
+    if isinstance(config, Mapping):
+        return dict(config)
+
+    try:  # Lazy import to avoid Hydra dependency during runtime.
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(config):
+            return OmegaConf.to_container(config, resolve=True)  # type: ignore[arg-type]
+    except Exception:  # pragma: no cover - OmegaConf optional
+        pass
+
+    raise TypeError(
+        'Dataset config must be a mapping or OmegaConf object; '
+        f'got {type(config)}'
+    )
+
+
+def create_dataset(config: Any):
+    """Instantiate the configured dataset backend.
+
+    Args:
+        config: Mapping/OmegaConf with at least a ``type`` key (``hdf5`` or
+            ``lance``). Remaining keys are forwarded to the dataset class.
+    """
+
+    cfg = _config_to_dict(config)
+    dataset_type = cfg.pop('type', None)
+    if dataset_type is None:
+        if 'uri' in cfg or 'table_name' in cfg:
+            dataset_type = 'lance'
+        else:
+            dataset_type = 'hdf5'
+    dataset_type = str(dataset_type).lower()
+
+    from stable_worldmodel.data.dataset import HDF5Dataset, LanceDataset
+
+    if dataset_type == 'hdf5':
+        return HDF5Dataset(**cfg)
+    if dataset_type in {'lance', 'lancedb', 'lance_dataset'}:
+        return LanceDataset(**cfg)
+    raise ValueError(
+        f"Unsupported dataset type '{dataset_type}'. Expected 'hdf5' or 'lance'."
+    )
+
+
+def build_script_dataset(
+    cfg: Any,
+    *,
+    keys_to_load: list[str],
+    keys_to_cache: list[str] | None = None,
+    cache_dir: str | Path | None = None,
+    extra: dict[str, Any] | None = None,
+):
+    """Dataset factory for the flat-config training scripts (gcbc, prejepa, …).
+
+    These scripts use scalar config keys (``cfg.dataset_name``, ``cfg.n_steps``,
+    ``cfg.frameskip``) rather than a ``cfg.data.dataset`` block, so they can't
+    just forward a sub-config to :func:`create_dataset`.  This helper bridges
+    the two styles:
+
+    * By default it builds an :class:`HDF5Dataset` from ``cfg.dataset_name``.
+    * If ``cfg.dataset_uri`` is set (e.g. via ``+dataset_uri=…`` on the CLI)
+      it routes to :class:`LanceDataset` instead.  The URI can be a full
+      ``.../foo.lance`` path (table name inferred) or a database URI paired
+      with ``cfg.dataset_table_name``.
+
+    ``extra`` is merged last and wins over inferred keys.
+    """
+    def _read(key, default=None):
+        if isinstance(cfg, Mapping):
+            return cfg.get(key, default)
+        return getattr(cfg, key, default)
+
+    dataset_uri = _read('dataset_uri')
+    table_name = _read('dataset_table_name')
+
+    params: dict[str, Any] = {
+        'num_steps': _read('n_steps'),
+        'frameskip': _read('frameskip'),
+        'keys_to_load': list(keys_to_load),
+    }
+    if keys_to_cache is not None:
+        params['keys_to_cache'] = list(keys_to_cache)
+
+    if dataset_uri:
+        params['uri'] = dataset_uri
+        if table_name:
+            params['table_name'] = table_name
+    else:
+        params['name'] = _read('dataset_name')
+        if cache_dir is not None:
+            params['cache_dir'] = cache_dir
+
+    if extra:
+        params.update(extra)
+    return create_dataset(params)
 
 
 def load_dataset(name: str, cache_dir: str = None, **kwargs):
@@ -203,4 +306,10 @@ def _extract_zst(archive: Path) -> None:
         )
 
 
-__all__ = ['load_dataset', 'get_cache_dir', 'ensure_dir_exists']
+__all__ = [
+    'load_dataset',
+    'get_cache_dir',
+    'ensure_dir_exists',
+    'create_dataset',
+    'build_script_dataset',
+]

@@ -11,15 +11,22 @@ from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
-import h5py
-import hdf5plugin
+import lancedb
 import numpy as np
+import pyarrow as pa
 import torch
 from gymnasium.vector import VectorEnv
 from loguru import logger as logging
 from rich import print
 from tqdm import tqdm
 
+from stable_worldmodel.data.lance_conversion import (
+    DEFAULT_JPEG_QUALITY,
+    _encode_frame,
+    _is_image_column,
+    _table_exists,
+    _to_lance_name,
+)
 from stable_worldmodel.data.utils import get_cache_dir
 from stable_worldmodel.policy import Policy
 
@@ -305,15 +312,25 @@ class World:
         seed: int | None = None,
         cache_dir: os.PathLike | str | None = None,
         options: dict | None = None,
+        jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     ) -> None:
-        """Records episodes from the environment into an HDF5 dataset.
+        """Record episodes into a LanceDB table.
+
+        The table lives at ``<cache_dir>/datasets/<dataset_name>.lance`` and
+        follows the same schema as :func:`convert_hdf5_to_lance` — two index
+        columns (``episode_idx``, ``step_idx``), images stored as JPEG blobs
+        (``pa.binary``), and numeric columns as fixed-size float32 lists.
+        If the table already exists, new episodes are appended.
 
         Args:
-            dataset_name: Name of the dataset file (without extension).
-            episodes: Total number of episodes to record.
+            dataset_name: Name of the Lance table (written as
+                ``<dataset_name>.lance``).
+            episodes: Total number of episodes to record (resumes from
+                existing table if present).
             seed: Initial random seed.
-            cache_dir: Directory to save the dataset. Defaults to standard cache.
+            cache_dir: Directory containing the ``datasets/`` folder.
             options: Reset options passed to environments.
+            jpeg_quality: JPEG encoding quality for image columns (0–100).
 
         Raises:
             NotImplementedError: If history_size > 1.
@@ -323,157 +340,181 @@ class World:
                 'Frame history > 1 not supported for dataset recording.'
             )
 
-        path = (
-            get_cache_dir(cache_dir, sub_folder='datasets')
-            / f'{dataset_name}.h5'
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
+        datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
+        datasets_dir.mkdir(parents=True, exist_ok=True)
+        db = lancedb.connect(str(datasets_dir))
+
+        # Resume if the table already exists: count rows & episodes on disk
+        # and rehydrate the schema-derived state so subsequent _write_episode
+        # calls can build matching RecordBatches.
+        if _table_exists(db, dataset_name):
+            table = db.open_table(dataset_name)
+            n_ep_recorded, global_step_ptr = self._count_progress(table)
+            self._load_schema_state(table)
+            seed = None if seed is None else (seed + n_ep_recorded)
+            logging.info(
+                f'Resuming: {n_ep_recorded} episodes already on disk.'
+            )
+        else:
+            table = None  # created lazily after the first finished episode
+            n_ep_recorded = 0
+            global_step_ptr = 0
 
         self.terminateds = np.zeros(self.num_envs, dtype=bool)
         self.truncateds = np.zeros(self.num_envs, dtype=bool)
-
         episode_buffers = [defaultdict(list) for _ in range(self.num_envs)]
 
-        h5_kwargs = {
-            'name': str(path),
-            'mode': 'a' if path.exists() else 'w',
-            'libver': 'latest',
-        }
+        self.reset(seed, options=options)
+        seed = None if seed is None else (seed + self.num_envs)
+        self._dump_step_data(episode_buffers)  # record initial state
 
-        if not path.exists():  # creation only args
-            h5_kwargs.update(
-                {'fs_strategy': 'page', 'fs_page_size': 4 * 1024 * 1024}
-            )
+        with tqdm(total=episodes, initial=n_ep_recorded, desc='Recording') as pbar:
+            while n_ep_recorded < episodes:
+                self.step()
+                self._dump_step_data(episode_buffers)
 
-        with h5py.File(**h5_kwargs) as f:
-            f.swmr_mode = True  # avoid issue when killed
+                for i in range(self.num_envs):
+                    if not (self.terminateds[i] or self.truncateds[i]):
+                        continue
 
-            if 'ep_len' in f:
-                n_ep_recorded = f['ep_len'].shape[0]
-                global_step_ptr = (
-                    f['ep_offset'][-1] + f['ep_len'][-1]
-                    if n_ep_recorded > 0
-                    else 0
-                )
-                initialized = True
-                seed = None if seed is None else (seed + n_ep_recorded)
-                logging.info(
-                    f'Resuming: {n_ep_recorded} episodes already on disk.'
-                )
-            else:
-                n_ep_recorded = 0
-                global_step_ptr = 0
-                initialized = False
+                    finished_ep = self._handle_done_ep(
+                        episode_buffers, i, n_ep_recorded
+                    )
 
-            self.reset(seed, options=options)
-            seed = None if seed is None else (seed + self.num_envs)
-            self._dump_step_data(episode_buffers)  # record initial state
+                    if table is None:
+                        table, steps_written = self._init_table(
+                            db, dataset_name, finished_ep, jpeg_quality
+                        )
+                    else:
+                        steps_written = self._write_episode(
+                            table, finished_ep, jpeg_quality
+                        )
+                    global_step_ptr += steps_written
+                    n_ep_recorded += 1
+                    pbar.update(1)
 
-            with tqdm(
-                total=episodes, initial=n_ep_recorded, desc='Recording'
-            ) as pbar:
-                while n_ep_recorded < episodes:
-                    self.step()
-                    self._dump_step_data(episode_buffers)
+                    if n_ep_recorded >= episodes:
+                        break
 
-                    for i in range(self.num_envs):
-                        if self.terminateds[i] or self.truncateds[i]:
-                            finished_ep = self._handle_done_ep(
-                                episode_buffers, i, n_ep_recorded
-                            )
-
-                            # lazy dataset initialization
-                            if not initialized:
-                                self._init_h5_datasets(f, finished_ep)
-                                initialized = True
-
-                            # contiguous writing
-                            steps_written = self._write_episode(
-                                f, finished_ep, global_step_ptr
-                            )
-                            global_step_ptr += steps_written
-                            n_ep_recorded += 1
-                            pbar.update(1)
-
-                            f.flush()  # flush metadata to avoid corruption
-
-                            if n_ep_recorded >= episodes:
-                                break
-
-                            # reset terminated env and record initial state
-                            n_seed = (
-                                None
-                                if seed is None
-                                else (seed + n_ep_recorded)
-                            )
-                            self._reset_single_env(i, n_seed, options)
-                            self._dump_step_data(episode_buffers, env_idx=i)
+                    n_seed = None if seed is None else (seed + n_ep_recorded)
+                    self._reset_single_env(i, n_seed, options)
+                    self._dump_step_data(episode_buffers, env_idx=i)
 
         logging.info(f'Recording complete. Total frames: {global_step_ptr}')
 
-    def _init_h5_datasets(
-        self, f: h5py.File, sample_episode: dict[str, list[Any]]
-    ) -> None:
-        """Initialize resizable HDF5 datasets based on the first episode.
+    @staticmethod
+    def _count_progress(table) -> tuple[int, int]:
+        """Return (n_episodes, n_rows) for an existing Lance table.
 
-        Args:
-            f: The open HDF5 file handle.
-            sample_episode: A dictionary containing data from a single episode,
-                used to determine shapes and dtypes.
+        Streams the ``episode_idx`` column (int32, ~4 B/row) to find its max,
+        never materialising any other column in memory.
         """
+        n_rows = table.count_rows()
+        if n_rows == 0:
+            return 0, 0
+        max_ep = -1
+        reader = table.to_lance().scanner(columns=['episode_idx']).to_reader()
+        for batch in reader:
+            col = batch.column(batch.schema.get_field_index('episode_idx'))
+            batch_max = col.to_numpy().max()
+            if batch_max > max_ep:
+                max_ep = int(batch_max)
+        return max_ep + 1, n_rows
+
+    @staticmethod
+    def _recording_schema(
+        sample_episode: dict[str, list[Any]],
+    ) -> tuple[pa.Schema, dict[str, str], set[str], dict[str, int]]:
+        """Derive the Lance schema from the first finished episode.
+
+        Returns ``(schema, rename_map, image_keys, dims)`` keyed by
+        Lance-sanitised column names.  ``rename_map`` keeps the mapping from
+        the original env column name to the Lance-safe one so the writer can
+        look buffer keys up.
+        """
+        rename_map: dict[str, str] = {}
+        image_keys: set[str] = set()
+        dims: dict[str, int] = {}
+        fields: list[pa.Field] = [
+            pa.field('episode_idx', pa.int32()),
+            pa.field('step_idx', pa.int32()),
+        ]
+
         for key, data_list in sample_episode.items():
-            if key in ['ep_len', 'ep_idx', 'policy']:
+            if key in ('ep_len', 'ep_idx', 'policy', 'episode_idx', 'step_idx'):
+                continue
+            if not data_list:
                 continue
 
-            key = key.replace('/', '_')  # sanitize keys for h5
+            lance_key = _to_lance_name(key)
+            rename_map[key] = lance_key
 
-            # determine array shape and dtype from sample data
-            sample_data = np.array(data_list[0])
-            shape = (0,) + sample_data.shape
-            maxshape = (None,) + sample_data.shape
+            if _is_image_column(lance_key):
+                image_keys.add(lance_key)
+                fields.append(pa.field(lance_key, pa.binary()))
+                continue
 
-            # determine chunk size and compression
-            if sample_data.ndim >= 2:
-                chunks = (100,) + sample_data.shape
-                compression = hdf5plugin.Blosc(
-                    cname='lz4', clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE
-                )
-
+            sample = np.asarray(data_list[0])
+            if sample.dtype.kind in ('U', 'S', 'O'):
+                fields.append(pa.field(lance_key, pa.large_string()))
+            elif sample.ndim == 0:
+                fields.append(pa.field(lance_key, pa.float32()))
+                dims[lance_key] = 1
             else:
-                chunks = (1000,) + sample_data.shape
-                compression = None
+                dim = int(np.prod(sample.shape))
+                dims[lance_key] = dim
+                fields.append(pa.field(lance_key, pa.list_(pa.float32(), dim)))
 
-            dtype = sample_data.dtype
-            if np.issubdtype(dtype, np.str_) or np.issubdtype(
-                dtype, np.bytes_
-            ):
-                dtype = h5py.string_dtype()
+        return pa.schema(fields), rename_map, image_keys, dims
 
-            f.create_dataset(
-                key,
-                shape=shape,
-                maxshape=maxshape,
-                dtype=dtype,
-                chunks=chunks,
-                compression=compression,
-            )
+    def _init_table(
+        self,
+        db,
+        dataset_name: str,
+        sample_episode: dict[str, list[Any]],
+        jpeg_quality: int,
+    ):
+        """Infer schema, create the table, and write the first episode.
 
-        # index metadata
-        f.create_dataset(
-            'ep_offset', shape=(0,), maxshape=(None,), dtype=np.int64
-        )
-        f.create_dataset(
-            'ep_len', shape=(0,), maxshape=(None,), dtype=np.int32
-        )
+        Returns ``(table, rows_written)`` so the main loop doesn't write the
+        seed episode twice.
+        """
+        schema, rename_map, image_keys, dims = self._recording_schema(sample_episode)
+        self._record_schema = schema
+        self._record_rename_map = rename_map
+        self._record_image_keys = image_keys
+        self._record_dims = dims
+        batch = self._episode_to_record_batch(sample_episode, jpeg_quality)
+        table = db.create_table(dataset_name, data=[batch], schema=schema)
+        return table, batch.num_rows
 
-        # per-step episode index
-        f.create_dataset(
-            'ep_idx',
-            shape=(0,),
-            maxshape=(None,),
-            dtype=np.int32,
-            chunks=(1000,),
-        )
+    def _load_schema_state(self, table) -> None:
+        """Rehydrate ``_record_*`` state from an existing Lance table.
+
+        Called when ``record_dataset`` resumes into a pre-existing table —
+        ``_write_episode`` relies on these fields to build matching
+        RecordBatches, but the ``_init_table`` path that normally populates
+        them is skipped on resume.
+        """
+        schema = table.schema
+        self._record_schema = schema
+        self._record_image_keys = {
+            f.name
+            for f in schema
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
+        }
+        self._record_dims = {
+            f.name: f.type.list_size
+            for f in schema
+            if pa.types.is_fixed_size_list(f.type)
+        }
+        # The converter's only name mangling is dot→underscore.  Rebuild the
+        # rename map by assuming the env column name matches the Lance name
+        self._record_rename_map = {
+            name: name
+            for name in schema.names
+            if name not in ('episode_idx', 'step_idx')
+        }
 
     def _reset_single_env(
         self,
@@ -532,40 +573,71 @@ class World:
         return out
 
     def _write_episode(
-        self, f: h5py.File, ep_data: dict[str, list[Any]], global_ptr: int
+        self, table, ep_data: dict[str, list[Any]], jpeg_quality: int
     ) -> int:
-        """Write a single contiguous episode to the HDF5 file.
+        """Append a single episode to the Lance table, return the row count."""
+        batch = self._episode_to_record_batch(ep_data, jpeg_quality)
+        table.add(batch)
+        return batch.num_rows
 
-        Args:
-            f: The open HDF5 file handle.
-            ep_data: The episode data dictionary.
-            global_ptr: The global step index where this episode starts.
+    def _episode_to_record_batch(
+        self, ep_data: dict[str, list[Any]], jpeg_quality: int
+    ) -> pa.RecordBatch:
+        """Build a Lance ``RecordBatch`` from one finished episode.
 
-        Returns:
-            The length of the episode written.
+        Images are JPEG-encoded; numeric arrays are flattened and packed as
+        fixed-size lists matching ``self._record_dims``.  Columns are
+        dropped if the schema doesn't know about them — schema is frozen
+        after the first episode so late-appearing env keys are ignored.
         """
+        schema: pa.Schema = self._record_schema
+        rename_map: dict[str, str] = self._record_rename_map
+        image_keys: set[str] = self._record_image_keys
+        dims: dict[str, int] = self._record_dims
+
         ep_len = len(ep_data['step_idx'])
+        arrays: dict[str, pa.Array] = {}
 
-        # append data to each dataset
-        for key in ep_data:
-            h5_key = key.replace('/', '_')  # sanitize keys for h5
-            if h5_key in ['ep_len', 'policy']:
+        ep_idx_values = ep_data.get('ep_idx') or ep_data.get('episode_idx')
+        arrays['episode_idx'] = pa.array(
+            np.asarray(ep_idx_values, dtype=np.int32), type=pa.int32()
+        )
+        arrays['step_idx'] = pa.array(
+            np.asarray(ep_data['step_idx'], dtype=np.int32), type=pa.int32()
+        )
+
+        for orig_key, lance_key in rename_map.items():
+            values = ep_data.get(orig_key)
+            if values is None:
                 continue
+            field = schema.field(lance_key)
+            if lance_key in image_keys:
+                blobs = [_encode_frame(np.asarray(v), jpeg_quality) for v in values]
+                arrays[lance_key] = pa.array(blobs, type=pa.binary())
+            elif pa.types.is_large_string(field.type) or pa.types.is_string(field.type):
+                arrays[lance_key] = pa.array([str(v) for v in values], type=field.type)
+            elif pa.types.is_fixed_size_list(field.type):
+                # Lance treats fixed-size float lists as vector columns and
+                # rejects NaN on table.add().  ``_handle_done_ep`` inserts NaN
+                # at episode boundaries as a sentinel, which every training
+                # script already promotes to 0 via ``torch.nan_to_num``.  Do
+                # the promotion at write time so Lance accepts the batch.
+                flat_arr = np.nan_to_num(
+                    np.asarray(values, dtype=np.float32), nan=0.0
+                ).reshape(ep_len, -1).tolist()
+                arrays[lance_key] = pa.array(
+                    flat_arr, type=pa.list_(pa.float32(), dims[lance_key])
+                )
+            else:
+                # scalar column
+                arrays[lance_key] = pa.array(
+                    np.nan_to_num(np.asarray(values, dtype=np.float32), nan=0.0),
+                    type=field.type,
+                )
 
-            ds = f[h5_key]
-            curr_size = ds.shape[0]
-            ds.resize(curr_size + ep_len, axis=0)
-            ds[curr_size:] = np.array(ep_data[key])
-
-        # update metadata
-        meta_idx = f['ep_offset'].shape[0]
-        f['ep_offset'].resize(meta_idx + 1, axis=0)
-        f['ep_len'].resize(meta_idx + 1, axis=0)
-
-        f['ep_offset'][meta_idx] = global_ptr
-        f['ep_len'][meta_idx] = ep_len
-
-        return ep_len
+        # Respect schema field order.
+        ordered = {name: arrays[name] for name in schema.names if name in arrays}
+        return pa.record_batch(ordered, schema=schema)
 
     def _dump_step_data(
         self,

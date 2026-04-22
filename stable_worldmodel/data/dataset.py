@@ -1,5 +1,6 @@
 """Dataset classes for episode-based reinforcement learning data."""
 
+import io
 import logging
 from collections.abc import Callable
 from functools import lru_cache
@@ -9,8 +10,11 @@ from typing import Any
 
 import h5py
 import hdf5plugin  # noqa: F401
+import lancedb
 import numpy as np
+import pyarrow as pa
 import torch
+from lancedb.permutation import Permutation
 from PIL import Image
 
 from stable_worldmodel.data.utils import get_cache_dir
@@ -107,13 +111,18 @@ class HDF5Dataset(Dataset):
     Uses SWMR mode for robust reading while writing.
 
     Args:
-        name: Name of the dataset (filename without extension).
+        name: Name of the dataset (filename without extension), or a full path
+            when ``file`` is also provided (used as label only).
         frameskip: Number of frames to skip between samples.
         num_steps: Number of steps per sample sequence.
         transform: Optional data transform callable.
         keys_to_load: Specific keys to load (defaults to all except metadata).
         keys_to_cache: Keys to load entirely into memory for faster access.
-        cache_dir: Directory containing the dataset file.
+        cache_dir: Root cache directory. The file is expected at
+            ``<cache_dir>/datasets/<name>.h5``. Ignored when ``file`` is given.
+        file: Pre-opened file-like object accepted by :func:`h5py.File` (e.g.
+            an ``s3fs`` file handle). When provided, ``cache_dir`` is ignored
+            and SWMR is disabled (SWMR requires a local path, not a handle).
     """
 
     def __init__(
@@ -126,13 +135,20 @@ class HDF5Dataset(Dataset):
         keys_to_cache: list[str] | None = None,
         keys_to_merge: dict[str, list[str] | str] | None = None,
         cache_dir: str | Path | None = None,
+        file: Any | None = None,
     ) -> None:
-        datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
-        self.h5_path = Path(datasets_dir, f'{name}.h5')
+        self._file_handle = file
+        if file is not None:
+            # name is informational; h5py will open via the handle.
+            self.h5_path = Path(name)
+        else:
+            datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
+            self.h5_path = Path(datasets_dir, f'{name}.h5')
         self.h5_file: h5py.File | None = None
         self._cache: dict[str, np.ndarray] = {}
 
-        with h5py.File(self.h5_path, 'r') as f:
+        _open_target: Any = self._file_handle if self._file_handle is not None else self.h5_path
+        with h5py.File(_open_target, 'r') as f:
             lengths, offsets = f['ep_len'][:], f['ep_offset'][:]
             self._keys = keys_to_load or [
                 k for k in f.keys() if k not in ('ep_len', 'ep_offset')
@@ -154,8 +170,12 @@ class HDF5Dataset(Dataset):
 
     def _open(self) -> None:
         if self.h5_file is None:
+            # SWMR requires a real filesystem path; disable it for file handles
+            # (e.g. s3fs objects) which h5py accepts but doesn't support SWMR on.
+            target: Any = self._file_handle if self._file_handle is not None else self.h5_path
+            swmr = self._file_handle is None
             self.h5_file = h5py.File(
-                self.h5_path, 'r', swmr=True, rdcc_nbytes=256 * 1024 * 1024
+                target, 'r', swmr=swmr, rdcc_nbytes=256 * 1024 * 1024
             )
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
@@ -215,6 +235,430 @@ class HDF5Dataset(Dataset):
         data = self.get_col_data(col)
         return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
+
+class LanceDataset(Dataset):
+    """Dataset backed by a LanceDB table of flattened timesteps.
+
+    The table carries two index columns (``episode_idx``, ``step_idx``); rows
+    must be episode-contiguous (``convert_hdf5_to_lance`` guarantees this).
+
+    On Linux, construction forces the multiprocessing start method to
+    ``spawn`` (Lance's tokio pool is not fork-safe).  See
+    ``docs/lance_implementation.md`` for the full design notes, including
+    why ``keys_to_cache`` is normally unnecessary here.
+
+    Args:
+        uri: LanceDB database URI, or a full ``.../foo.lance`` path (table
+            name is then inferred from the ``.lance`` stem).
+        table_name: Table inside the database; optional when ``uri`` ends
+            in ``.lance``.
+        frameskip, num_steps, transform, keys_to_load, keys_to_cache,
+            keys_to_merge: mirror :class:`HDF5Dataset`.
+        image_columns: optional override — every ``pa.binary`` /
+            ``pa.large_binary`` column is treated as an encoded image by
+            default.
+        episode_index_column, step_index_column: index column names.
+        connect_kwargs: forwarded to :func:`lancedb.connect` (e.g. S3 creds).
+    """
+
+    _fork_warning_emitted = False
+
+    def __init__(
+        self,
+        uri: str,
+        table_name: str | None = None,
+        *,
+        frameskip: int = 1,
+        num_steps: int = 1,
+        transform: Callable[[dict], dict] | None = None,
+        keys_to_load: list[str] | None = None,
+        keys_to_cache: list[str] | None = None,
+        keys_to_merge: dict[str, list[str] | str] | None = None,
+        image_columns: list[str] | None = None,
+        episode_index_column: str = 'episode_idx',
+        step_index_column: str = 'step_idx',
+        connect_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        uri, table_name = self._resolve_uri_and_table(uri, table_name)
+        self.uri = uri
+        self.table_name = table_name
+        self.connect_kwargs = connect_kwargs or {}
+        self._index_columns = (episode_index_column, step_index_column)
+        self._cache: dict[str, np.ndarray] = {}
+        self._perm = None
+        self._fetch_columns: list[str] | None = None
+
+        self._maybe_warn_fork_start_method()
+        table = self._connect_table()
+        self._schema_names = list(table.schema.names)
+        available = [c for c in self._schema_names if c not in self._index_columns]
+        if not available:
+            raise ValueError('Lance table has no data columns (only index columns).')
+
+        self._keys = keys_to_load or available
+        missing = [k for k in self._keys if k not in available]
+        if missing:
+            raise KeyError(f"Columns {missing} missing from Lance table '{table_name}'")
+
+        # Binary columns → encoded image blobs (what the converter emits).
+        binary_cols = {
+            f.name for f in table.schema
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
+        }
+        self.image_columns = (
+            binary_cols & set(self._keys) if image_columns is None
+            else {c for c in image_columns if c in self._keys}
+        )
+
+        lengths, offsets = self._compute_episode_structure(table)
+
+        if keys_to_cache:
+            logging.warning(
+                'LanceDataset: keys_to_cache=%s is unnecessary — __getitems__ '
+                'already batches reads; caching risks OOM. Drop it from your config.',
+                keys_to_cache,
+            )
+            for key in keys_to_cache:
+                if key not in self._keys:
+                    raise KeyError(f"Cannot cache missing column '{key}'")
+                self._cache[key] = self._load_full_column(table, key)
+
+        self._update_fetch_columns()
+
+        super().__init__(lengths, offsets, frameskip, num_steps, transform)
+
+        if keys_to_merge:
+            for target, source in keys_to_merge.items():
+                self.merge_col(source, target)
+
+    @property
+    def column_names(self) -> list[str]:
+        return list(self._keys)
+
+    def __getstate__(self) -> dict:
+        # _perm wraps an unpicklable Rust reader; workers reopen on first use.
+        state = self.__dict__.copy()
+        state['_perm'] = None
+        return state
+
+    def _connect_table(self):
+        db = lancedb.connect(self.uri, **self.connect_kwargs)
+        return db.open_table(self.table_name)
+
+    @staticmethod
+    def _resolve_uri_and_table(
+        uri: str, table_name: str | None
+    ) -> tuple[str, str]:
+        """Split ``.../foo.lance`` into ``(parent_uri, foo)`` when ``table_name`` is None."""
+        if table_name is not None:
+            return uri, table_name
+
+        stripped = uri.rstrip('/')
+        if not stripped.lower().endswith('.lance'):
+            raise ValueError(
+                "LanceDataset: ``table_name`` was not provided and ``uri`` "
+                f"({uri!r}) does not end in '.lance'. Either pass "
+                "``table_name`` explicitly, or point ``uri`` at the full "
+                "table path, e.g. './store/foo.lance'."
+            )
+        sep = stripped.rfind('/')
+        parent, leaf = (stripped[:sep], stripped[sep + 1:]) if sep >= 0 else ('.', stripped)
+        inferred_name = leaf[: -len('.lance')]
+        if not inferred_name:
+            raise ValueError(f'LanceDataset: could not infer table name from uri {uri!r}.')
+        return parent, inferred_name
+
+    @classmethod
+    def _maybe_warn_fork_start_method(cls) -> None:
+        """On Linux, switch ``fork`` → ``spawn`` (Lance is not fork-safe)."""
+        if cls._fork_warning_emitted:
+            return
+        import multiprocessing as mp
+        import sys
+
+        cls._fork_warning_emitted = True
+        if sys.platform != 'linux':
+            return
+        current = mp.get_start_method(allow_none=True)
+        if current not in (None, 'fork'):
+            return
+        try:
+            mp.set_start_method('spawn', force=True)
+            logging.info(
+                "LanceDataset: multiprocessing start method set to 'spawn' (was %s).",
+                current or 'default (fork)',
+            )
+        except RuntimeError as exc:
+            logging.warning(
+                "LanceDataset could not switch multiprocessing to 'spawn' (%s); "
+                'DataLoader workers may deadlock. Set it explicitly at startup.',
+                exc,
+            )
+
+    def _compute_episode_structure(self, table) -> tuple[np.ndarray, np.ndarray]:
+        """Scan episode_idx once and return per-episode (lengths, offsets).
+
+        Assumes rows are in episode-contiguous (non-decreasing) order.
+        """
+        ep_col, _ = self._index_columns
+        reader = table.to_lance().scanner(columns=[ep_col]).to_reader()
+        chunks = [
+            batch.column(batch.schema.get_field_index(ep_col)).to_numpy()
+            for batch in reader
+        ]
+        if not chunks:
+            return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+
+        all_ep_ids = np.concatenate(chunks)
+        if len(all_ep_ids) > 1 and (np.diff(all_ep_ids) < 0).any():
+            raise ValueError(
+                f"Lance table '{self.table_name}' at '{self.uri}' is not "
+                'episode-contiguous (episode_idx decreases). Rebuild with '
+                'convert_hdf5_to_lance(..., overwrite=True).'
+            )
+
+        change_positions = np.flatnonzero(np.diff(all_ep_ids) != 0) + 1
+        offsets = np.concatenate([[0], change_positions]).astype(np.int64)
+        lengths = np.diff(np.concatenate([offsets, [len(all_ep_ids)]])).astype(np.int64)
+        return lengths, offsets
+
+    def _load_full_column(self, table, key: str) -> np.ndarray:
+        data: list[np.ndarray | np.generic | list[Any] | bytes] = []
+        reader = table.to_lance().scanner(columns=[key]).to_reader()
+        for batch in reader:
+            values = self._batch_column_pylist(batch, key)
+            if not values:
+                continue
+            data.append(self._pylist_to_numpy(values, key))
+
+        if not data:
+            return np.array([], dtype=np.float32)
+
+        return np.concatenate(data, axis=0)
+
+    def _update_fetch_columns(self) -> None:
+        cached = set(self._cache.keys())
+        self._fetch_columns = [k for k in self._keys if k not in cached]
+        if not self._fetch_columns:
+            self._perm = None
+
+    def _ensure_open(self) -> None:
+        if not self._fetch_columns:
+            return
+        if self._perm is None:
+            table = self._connect_table()
+            self._perm = (
+                Permutation.identity(table)
+                .select_columns(self._fetch_columns)
+                .with_format('arrow')
+            )
+
+    def _fetch_rows(self, rows: list[int]):
+        if not self._fetch_columns:
+            return None
+        self._ensure_open()
+        return self._perm.__getitems__(rows)
+
+    def _batch_column_pylist(self, batch, key: str) -> list[Any]:
+        idx = batch.schema.get_field_index(key)
+        if idx == -1:
+            raise KeyError(f"Column '{key}' not found in batch")
+        return batch.column(idx).to_pylist()
+
+    def _extract_column(self, batch, key: str):
+        """Zero-copy numpy for fixed-size lists / scalars; pylist otherwise."""
+        col_idx = batch.schema.get_field_index(key)
+        if col_idx == -1:
+            raise KeyError(f"Column '{key}' not found in batch")
+        col = batch.column(col_idx)
+        col_type = col.type
+
+        if pa.types.is_binary(col_type) or pa.types.is_large_binary(col_type):
+            return col.to_pylist()
+        if pa.types.is_fixed_size_list(col_type):
+            dim = col_type.list_size
+            flat = col.flatten()
+            return flat.to_numpy(zero_copy_only=False).reshape(len(col), dim)
+        if pa.types.is_string(col_type) or pa.types.is_large_string(col_type):
+            return col.to_pylist()
+        if pa.types.is_list(col_type):
+            return col.to_pylist()
+        return col.to_numpy(zero_copy_only=False)
+
+    def _pylist_to_numpy(self, values: list[Any], key: str) -> np.ndarray:
+        if not values:
+            return np.array([], dtype=np.float32)
+        first = values[0]
+
+        if isinstance(first, (bytes, bytearray, memoryview)):
+            return np.asarray(values, dtype=object)
+        if isinstance(first, str):
+            return np.asarray(values, dtype=object)
+        if isinstance(first, (list, tuple)):
+            return np.asarray(values, dtype=np.float32)
+        if isinstance(first, (int, float, np.integer, np.floating)):
+            dtype = np.float32 if isinstance(first, (float, np.floating)) else np.int64
+            return np.asarray(values, dtype=dtype)
+        if isinstance(first, np.ndarray):
+            return np.stack(values)
+
+        logging.warning(
+            f"Column '{key}' produced unrecognized type {type(first)}; "
+            'falling back to object array.'
+        )
+        return np.asarray(values, dtype=object)
+
+    def _decode_image(self, blob: bytes) -> torch.Tensor:
+        # from_numpy is safe here — torch.stack() in _process_batch copies
+        # each frame into a fresh resizable tensor before collation sees it.
+        with Image.open(io.BytesIO(blob)) as img:
+            arr = np.array(img.convert('RGB'))
+        return torch.from_numpy(arr).permute(2, 0, 1)
+
+    def _prepare_numeric_tensor(self, data: np.ndarray, downsample: bool) -> torch.Tensor:
+        # torch.tensor (not from_numpy): collation under __getitems__ calls
+        # storage.resize_(), which fails on numpy-backed non-resizable tensors.
+        if downsample:
+            data = data[:: self.frameskip]
+        tensor = torch.tensor(data)
+        if tensor.ndim == 4 and tensor.shape[-1] in (1, 3):
+            tensor = tensor.permute(0, 3, 1, 2)
+        return tensor
+
+    def _process_batch(self, ep_idx: int, g_start: int, batch) -> dict:
+        """Assemble one sample dict from a pre-fetched Arrow batch (no I/O)."""
+        g_end = g_start + self.span
+        steps: dict[str, Any] = {}
+
+        for col in self._keys:
+            if col in self._cache:
+                values = self._cache[col][g_start:g_end]
+            elif batch is None:
+                raise KeyError(f"Column '{col}' not cached and no batch provided")
+            else:
+                values = self._extract_column(batch, col)
+
+            if col in self.image_columns:
+                blobs = values[:: self.frameskip]
+                if isinstance(blobs, np.ndarray):
+                    blobs = blobs.tolist()
+                frames = [self._decode_image(v) for v in blobs]
+                steps[col] = torch.stack(frames) if frames else torch.empty(0, dtype=torch.uint8)
+                continue
+
+            data = values if isinstance(values, np.ndarray) else self._pylist_to_numpy(values, col)
+
+            if data.dtype == object and data.size > 0:
+                first = data.flat[0]
+                if isinstance(first, (bytes, bytearray)):
+                    steps[col] = first.decode() if isinstance(first, bytes) else first
+                    continue
+                if isinstance(first, str):
+                    steps[col] = first
+                    continue
+
+            steps[col] = self._prepare_numeric_tensor(data, downsample=col != 'action')
+
+        return steps
+
+    def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
+        g_start = int(self.offsets[ep_idx] + start)
+        rows = list(range(g_start, g_start + (end - start)))
+        batch = self._fetch_rows(rows)
+        steps = self._process_batch(ep_idx, g_start, batch)
+        return self.transform(steps) if self.transform else steps
+
+    def __getitems__(self, indices: list[int]) -> list[dict]:
+        """Batch fetch: one Lance ``take`` for the whole DataLoader batch.
+
+        Called by PyTorch DataLoader ≥ 2.0 when defined, collapsing
+        ``batch_size`` HTTP round-trips to one on remote storage.
+        """
+        all_rows: list[int] = []
+        row_offsets: list[int] = []
+        sample_meta: list[tuple[int, int]] = []
+        for idx in indices:
+            ep_idx, start = self.clip_indices[idx]
+            g_start = int(self.offsets[ep_idx] + start)
+            row_offsets.append(len(all_rows))
+            all_rows.extend(range(g_start, g_start + self.span))
+            sample_meta.append((ep_idx, g_start))
+
+        big_batch = None
+        if self._fetch_columns and all_rows:
+            self._ensure_open()
+            unique_rows = sorted(set(all_rows))
+            unique_batch = self._perm.__getitems__(unique_rows)
+            if len(unique_rows) == len(all_rows) and all_rows == unique_rows:
+                big_batch = unique_batch
+            else:
+                row_lookup = {row: i for i, row in enumerate(unique_rows)}
+                gather = pa.array([row_lookup[r] for r in all_rows], type=pa.int64())
+                big_batch = unique_batch.take(gather)
+
+        results: list[dict] = []
+        for i, (ep_idx, g_start) in enumerate(sample_meta):
+            sub_batch = big_batch.slice(row_offsets[i], self.span) if big_batch is not None else None
+            steps = self._process_batch(ep_idx, g_start, sub_batch)
+            if self.transform:
+                steps = self.transform(steps)
+            if 'action' in steps:
+                steps['action'] = steps['action'].reshape(self.num_steps, -1)
+            results.append(steps)
+        return results
+
+    def get_col_data(self, col: str) -> np.ndarray:
+        if col in self._cache:
+            return self._cache[col]
+        table = self._connect_table()
+        data = self._load_full_column(table, col)
+        self._cache[col] = data
+        self._update_fetch_columns()
+        return data
+
+    def get_row_data(self, row_idx: int | list[int]) -> dict:
+        if isinstance(row_idx, (list, tuple, np.ndarray)):
+            idxs = [int(i) for i in row_idx]
+        else:
+            idxs = [int(row_idx)]
+        batch = self._fetch_rows(idxs)
+        out: dict[str, Any] = {}
+        for col in self._keys:
+            if col in self._cache:
+                values = self._cache[col][idxs]
+            else:
+                if batch is None:
+                    raise KeyError(
+                        f"Column '{col}' missing from cached columns and fetch columns"
+                    )
+                values = self._batch_column_pylist(batch, col)
+            if isinstance(values, np.ndarray):
+                arr = values
+            else:
+                arr = self._pylist_to_numpy(values, col)
+            out[col] = arr
+        return out
+
+    def merge_col(
+        self,
+        source: list[str] | str,
+        target: str,
+        dim: int = -1,
+    ) -> None:
+        if isinstance(source, str):
+            pattern = re.compile(source)
+            cols = [k for k in self._keys if pattern.match(k)]
+        else:
+            cols = source
+        merged = np.concatenate([self.get_col_data(c) for c in cols], axis=dim)
+        self._cache[target] = merged
+        if target not in self._keys:
+            self._keys.append(target)
+        self._update_fetch_columns()
+
+    def get_dim(self, col: str) -> int:
+        data = self.get_col_data(col)
+        return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
 class FolderDataset(Dataset):
     """Dataset loading from folder structure.
@@ -813,6 +1257,7 @@ class GoalDataset:
 __all__ = [
     'Dataset',
     'HDF5Dataset',
+    'LanceDataset',
     'FolderDataset',
     'ImageDataset',
     'VideoDataset',

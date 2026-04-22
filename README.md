@@ -24,7 +24,7 @@
 
 ```python
 import stable_worldmodel as swm
-from stable_worldmodel.data import HDF5Dataset
+from stable_worldmodel.data import HDF5Dataset, LanceDataset
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
@@ -33,8 +33,15 @@ world = swm.World('swm/PushT-v1', num_envs=8)
 world.set_policy(your_expert_policy)
 world.record_dataset(dataset_name='pusht_demo', episodes=100)
 
-# load dataset and train your world model
+# load dataset (HDF5 or Lance) and train your world model
 dataset = HDF5Dataset(name='pusht_demo', num_steps=16)
+# or stream directly from LanceDB — point at the full .lance table path
+# (local folder or s3:// bucket); table name is inferred from the suffix
+lance_dataset = LanceDataset(
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
+    num_steps=16,
+    frameskip=5,
+)
 world_model = ...  # your world-model
 
 # evaluate with model predictive control
@@ -51,7 +58,31 @@ To foster research in MPC for world models, several planning solvers are already
 
 ### Efficiency
 
-We support multiple dataset formats to optimize efficiency: MP4 enables fast and convenient visualization, while HDF5 ensures high-performance data loading, reduces CPU bottlenecks, and improves overall GPU utilization.
+We support multiple dataset formats to optimize efficiency: MP4 enables fast and convenient visualization, HDF5 ensures high-performance local data loading, and the new LanceDB backend streams JPEG-compressed frames directly from local disks or S3/object storage without touching the filesystem.
+
+### Converting Datasets to Lance
+
+Use `scripts/data/convert_to_lance.py` to turn any supported HDF5 dataset (local file or HuggingFace repo) into a LanceDB table:
+
+```bash
+python scripts/data/convert_to_lance.py \
+  --dataset pusht \
+  --lance-uri ./lance_store \
+  --max-episodes 2 \
+  --overwrite
+```
+
+Pass `--source <path-or-hf-repo>` and `--columns ...` to convert custom datasets, or point `--lance-uri` at `s3://` endpoints for remote storage.
+
+Training configs remain untouched: override Lance-specific fields at launch time instead of duplicating YAML files. Example:
+
+```bash
+python scripts/train/lewm.py \
+  +data.dataset.uri=./lewm_lance/lewm_pusht.lance \
+  data.dataset.keys_to_load='[pixels,action,proprio,state]'
+```
+
+Whenever `uri` is present, `swm.data.create_dataset` automatically switches to `LanceDataset`, so existing HDF5 configs stay fully backward compatible. `uri` can be the full `.../foo.lance` table path (table name is inferred from the suffix) or an explicit `uri=<db>` + `table_name=<foo>` pair if you prefer.
 
 <p align="center">
   <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">

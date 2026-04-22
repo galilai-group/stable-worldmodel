@@ -34,21 +34,7 @@ def get_data(cfg, goal_probabilities):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    def get_column_normalizer(dataset, source: str, target: str):
-        """Get normalizer for a specific column in the dataset."""
-        data = torch.from_numpy(dataset.get_col_data(source)[:])
-        data = data[~torch.isnan(data).any(dim=1)]
-        mean = data.mean(0, keepdim=True).clone()
-        std = data.std(0, keepdim=True).clone()
-
-        def norm_fn(x):
-            return ((x - mean) / std).float()
-
-        normalizer = spt.data.transforms.WrapTorchTransform(
-            norm_fn, source=source, target=target
-        )
-
-        return normalizer
+    from stable_worldmodel.wm.utils import column_normalizer as get_column_normalizer  # noqa: F401 — picklable normalizer for spawn workers
 
     cache_dir = None
     if not hasattr(cfg, 'local_cache_dir'):
@@ -58,15 +44,13 @@ def get_data(cfg, goal_probabilities):
     keys_to_load = ['pixels', 'action'] + (['proprio'] if use_proprio else [])
     keys_to_cache = ['action'] + (['proprio'] if use_proprio else [])
 
-    dataset = swm.data.HDF5Dataset(
-        cfg.dataset_name,
-        num_steps=cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
-        cache_dir=cache_dir,
+    dataset = swm.data.build_script_dataset(
+        cfg,
         keys_to_load=keys_to_load,
         keys_to_cache=keys_to_cache,
+        cache_dir=cache_dir,
     )
+    dataset.transform = None
 
     norm_action_transform = get_column_normalizer(dataset, 'action', 'action')
 

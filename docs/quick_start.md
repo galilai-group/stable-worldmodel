@@ -192,18 +192,18 @@ Stable World-Model provides utilities for recording and loading episode datasets
 
 ### Recording a Dataset
 
-Use `world.record_dataset()` to collect episodes and save them in HDF5 format. The dataset is saved to `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). This is useful for collecting expert demonstrations, random exploration data, or rollouts from a trained policy.
+Use `world.record_dataset()` to collect episodes and save them as a LanceDB table. The dataset is written to `$STABLEWM_HOME/datasets/<dataset_name>.lance` (defaults to `~/.stable_worldmodel/datasets/`). Images are JPEG-encoded on write; numeric columns are stored as fixed-size float32 lists. Re-running with the same `dataset_name` appends new episodes to the existing table.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))
 policy = swm.policy.RandomPolicy(seed=42) # can be your JEPA or RL Policy
 world.set_policy(policy)
 
-# Record 100 episodes to HDF5
+# Record 100 episodes — written to ~/.stable_worldmodel/datasets/pusht_random.lance
 world.record_dataset(
     dataset_name='pusht_random',
     episodes=100,
-    seed=0
+    seed=0,
 )
 ```
 
@@ -212,16 +212,29 @@ world.record_dataset(
 
 ### Loading a Dataset
 
-Load recorded datasets using `HDF5Dataset`. The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample. This makes it easy to train models on temporal sequences of observations and actions.
+Load recorded datasets using either `HDF5Dataset` (local files) or `LanceDataset` (local LanceDB tables, Hugging Face datasets, or object storage like s3 etc). The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample regardless of backend.
 
 ```python
-from stable_worldmodel.data import HDF5Dataset
+from stable_worldmodel.data import HDF5Dataset, LanceDataset
 
+# Local HDF5 file
 dataset = HDF5Dataset(
     name='pusht_random',
     frameskip=1,  # stride between frames
     num_steps=4,  # sequence length
-    keys_to_load=['pixels', 'action', 'state']
+    keys_to_load=['pixels', 'action', 'state'],
+)
+
+# LanceDB table — point at the full .lance table path (local folder,
+# hf:// dataset, or s3:// bucket). The table name is inferred from the suffix.
+# Image columns are auto-detected from the Arrow schema (any pa.binary column),
+# so no extra image_columns arg is needed in the common case.
+lance_dataset = LanceDataset(
+    uri='s3://my-bucket/lewm/lewm_pusht.lance',
+    frameskip=5,
+    num_steps=4,
+    keys_to_load=['pixels', 'action', 'proprio'],
+    connect_kwargs={'aws_access_key_id': '***', 'aws_secret_access_key': '***'},
 )
 
 # Access samples
@@ -230,6 +243,7 @@ print(sample['pixels'].shape)   # (4, 3, H, W)
 print(sample['action'].shape)   # (4, action_dim)
 ```
 
+`LanceDataset` streams only the requested columns via LanceDB's permutation API, never materializes the entire table in RAM, and decodes JPEG frames inside DataLoader workers. When reading from secure endpoints, provide the needed credentials or custom endpoints through `connect_kwargs`.
 ```python
 from stable_worldmodel.data import LeRobotAdapter
 
