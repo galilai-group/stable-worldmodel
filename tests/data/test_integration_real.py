@@ -302,10 +302,16 @@ class TestVideoDatasetReal:
         np.savez(root / 'ep_offset.npz', ep_offsets)
         np.savez(root / 'action.npz', action)
 
+        # 64×64 is the smallest size that reliably round-trips through H.264
+        # without the encoder padding the frames (which confuses decord on
+        # read back).  16×16 triggers codec-alignment rewrites.
+        frame_h, frame_w = 64, 64
         video_dir = root / 'video'
         video_dir.mkdir()
         for ep_idx, length in enumerate(ep_lengths.tolist()):
-            frames = rng.integers(0, 255, (length, 16, 16, 3), dtype=np.uint8)
+            frames = rng.integers(
+                0, 255, (length, frame_h, frame_w, 3), dtype=np.uint8
+            )
             imageio.imwrite(video_dir / f'ep_{ep_idx}.mp4', frames, fps=30)
 
         dataset = VideoDataset(
@@ -317,4 +323,6 @@ class TestVideoDatasetReal:
         sample = dataset[0]
         assert 'video' in sample
         assert isinstance(sample['video'], torch.Tensor)
+        # (T, C, H, W) — channels first after VideoDataset's permute.
         assert sample['video'].shape[-3] == 3
+        assert sample['video'].shape[-2:] == (frame_h, frame_w)
