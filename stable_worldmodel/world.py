@@ -344,10 +344,13 @@ class World:
         datasets_dir.mkdir(parents=True, exist_ok=True)
         db = lancedb.connect(str(datasets_dir))
 
-        # Resume if the table already exists: count rows & episodes on disk.
+        # Resume if the table already exists: count rows & episodes on disk
+        # and rehydrate the schema-derived state so subsequent _write_episode
+        # calls can build matching RecordBatches.
         if _table_exists(db, dataset_name):
             table = db.open_table(dataset_name)
             n_ep_recorded, global_step_ptr = self._count_progress(table)
+            self._load_schema_state(table)
             seed = None if seed is None else (seed + n_ep_recorded)
             logging.info(
                 f'Resuming: {n_ep_recorded} episodes already on disk.'
@@ -484,6 +487,34 @@ class World:
         batch = self._episode_to_record_batch(sample_episode, jpeg_quality)
         table = db.create_table(dataset_name, data=[batch], schema=schema)
         return table, batch.num_rows
+
+    def _load_schema_state(self, table) -> None:
+        """Rehydrate ``_record_*`` state from an existing Lance table.
+
+        Called when ``record_dataset`` resumes into a pre-existing table —
+        ``_write_episode`` relies on these fields to build matching
+        RecordBatches, but the ``_init_table`` path that normally populates
+        them is skipped on resume.
+        """
+        schema = table.schema
+        self._record_schema = schema
+        self._record_image_keys = {
+            f.name
+            for f in schema
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
+        }
+        self._record_dims = {
+            f.name: f.type.list_size
+            for f in schema
+            if pa.types.is_fixed_size_list(f.type)
+        }
+        # The converter's only name mangling is dot→underscore.  Rebuild the
+        # rename map by assuming the env column name matches the Lance name
+        self._record_rename_map = {
+            name: name
+            for name in schema.names
+            if name not in ('episode_idx', 'step_idx')
+        }
 
     def _reset_single_env(
         self,

@@ -139,6 +139,48 @@ class TestRealDataCollection:
             _ = dataset[0]
             assert seen.get('was_called') is True
 
+    def test_record_dataset_resume_appends(self, temp_cache_dir):
+        """Calling ``record_dataset`` twice with the same name must append to
+        the existing Lance table, not fail or overwrite.
+
+        Regression guard: two bugs previously lived on the resume path —
+        ``_table_exists`` mis-reading the ``ListTablesResponse`` shape, and
+        ``_episode_to_record_batch`` needing schema state that only
+        ``_init_table`` set up.  Both are silent until the *second* call.
+        """
+        world = World(
+            env_name='swm/PushT-v1',
+            num_envs=2,
+            image_shape=(64, 64),
+            max_episode_steps=15,
+            verbose=0,
+        )
+        world.set_policy(RandomPolicy())
+
+        dataset_name = 'test_resume'
+        world.record_dataset(
+            dataset_name=dataset_name,
+            episodes=2,
+            seed=42,
+            cache_dir=temp_cache_dir,
+        )
+        first = LanceDataset(uri=str(self._lance_path(temp_cache_dir, dataset_name)))
+        assert len(first.lengths) == 2
+
+        # Second call — must hit the resume branch and grow the table.
+        world.record_dataset(
+            dataset_name=dataset_name,
+            episodes=4,
+            seed=42,
+            cache_dir=temp_cache_dir,
+        )
+        world.envs.close()
+
+        resumed = LanceDataset(uri=str(self._lance_path(temp_cache_dir, dataset_name)))
+        assert len(resumed.lengths) == 4, (
+            f'resume should have grown to 4 episodes, got {len(resumed.lengths)}'
+        )
+
     def test_dataset_keys_to_cache(self, temp_cache_dir):
         """``keys_to_cache`` is accepted (with the usual warning) on Lance too."""
         world = World(

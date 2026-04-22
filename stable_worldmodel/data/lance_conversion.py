@@ -17,12 +17,7 @@ import lancedb
 
 
 def _table_exists(db: Any, name: str) -> bool:
-    for entry in db.list_tables():
-        if isinstance(entry, str) and entry == name:
-            return True
-        if isinstance(entry, dict) and entry.get('name') == name:
-            return True
-    return False
+    return name in db.list_tables().tables
 
 DEFAULT_JPEG_QUALITY = 95
 DEFAULT_BATCH_ROWS = 4096
