@@ -50,7 +50,7 @@ env = [
     "minigrid",
     "gymnasium[all]",
     "opencv-python",
-    "stable_baselines3",
+    "stable_baselines3>=2.0.0",
 ]
 
 lerobot = [

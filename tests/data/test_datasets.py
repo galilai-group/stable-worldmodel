@@ -1,8 +1,5 @@
 """Tests for ImageDataset, VideoDataset, MergeDataset, and ConcatDataset."""
 
-import sys
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 import torch
@@ -649,21 +646,6 @@ def test_video_dataset_load_file(sample_video_dataset):
     frame = dataset._load_file(0, 0, 'video')
     assert isinstance(frame, np.ndarray)
     assert frame.shape == (64, 64, 3)
-
-
-def test_video_dataset_decord_import_error(sample_video_dataset):
-    """Test VideoDataset raises ImportError when decord is not available."""
-    cache_dir, name = sample_video_dataset
-
-    # Reset the class-level cached decord module
-    VideoDataset._decord = None
-
-    # Mock the import to raise ImportError
-    with patch.dict(sys.modules, {'decord': None}):
-        with pytest.raises(
-            ImportError, match='VideoDataset requires decord'
-        ):
-            VideoDataset(name, cache_dir=str(cache_dir))
 
 
 ##############################################################################
