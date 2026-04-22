@@ -1,8 +1,14 @@
-"""Integration tests with real environment data collection."""
+"""Integration tests with real environment data collection.
+
+``World.record_dataset`` writes LanceDB tables.  These tests exercise the
+full collect → load pipeline against that writer, and also cover the
+folder-based ``ImageDataset`` / ``VideoDataset`` formats (decoupled from the
+writer — the fixtures build the folder layouts directly from synthetic
+data, because the former HDF5-based conversion path no longer exists).
+"""
 
 from pathlib import Path
 
-import h5py
 import numpy as np
 import pytest
 import torch
@@ -10,20 +16,22 @@ from PIL import Image
 
 from stable_worldmodel import World
 from stable_worldmodel.policy import RandomPolicy
-from stable_worldmodel.data import HDF5Dataset, ImageDataset, VideoDataset
+from stable_worldmodel.data import ImageDataset, LanceDataset, VideoDataset
 
 
 class TestRealDataCollection:
-    """Test data collection and loading with real environments."""
+    """Collect episodes from a real env and load them back via LanceDataset."""
 
     @pytest.fixture
     def temp_cache_dir(self, tmp_path):
-        """Create a temporary directory for test data."""
         return tmp_path
 
+    @staticmethod
+    def _lance_path(cache_dir: Path, name: str) -> Path:
+        return cache_dir / 'datasets' / f'{name}.lance'
+
     def test_collect_and_load_pusht(self, temp_cache_dir):
-        """Test collecting data from PushT and loading with HDF5Dataset."""
-        # 1. Create World with PushT environment
+        """Recording produces a Lance table readable by LanceDataset."""
         world = World(
             env_name='swm/PushT-v1',
             num_envs=2,
@@ -31,12 +39,8 @@ class TestRealDataCollection:
             max_episode_steps=20,
             verbose=0,
         )
+        world.set_policy(RandomPolicy())
 
-        # 2. Set random policy
-        policy = RandomPolicy()
-        world.set_policy(policy)
-
-        # 3. Collect data
         dataset_name = 'test_pusht'
         world.record_dataset(
             dataset_name=dataset_name,
@@ -44,50 +48,37 @@ class TestRealDataCollection:
             seed=42,
             cache_dir=temp_cache_dir,
         )
+        world.envs.close()
 
-        # 4. Verify HDF5 file was created
-        h5_path = temp_cache_dir / 'datasets' / f'{dataset_name}.h5'
-        assert h5_path.exists(), f'HDF5 file not created at {h5_path}'
+        lance_path = self._lance_path(temp_cache_dir, dataset_name)
+        assert lance_path.exists(), f'Lance table not created at {lance_path}'
 
-        # 5. Load with HDF5Dataset
-        dataset = HDF5Dataset(
-            name=dataset_name,
-            cache_dir=str(temp_cache_dir),
-        )
-
-        # 6. Verify dataset properties
+        dataset = LanceDataset(uri=str(lance_path))
         assert len(dataset) > 0, 'Dataset should have samples'
         assert len(dataset.lengths) == 4, 'Should have 4 episodes'
 
-        # 7. Verify we can load samples
         sample = dataset[0]
-        assert isinstance(sample, dict), 'Sample should be a dict'
+        assert isinstance(sample, dict)
+        assert 'action' in sample
+        # Image column should be auto-detected from the schema.
+        assert 'pixels' in dataset.image_columns
 
-        # 8. Verify expected keys exist
-        print(f'Available keys: {dataset.column_names}')
-        assert 'action' in sample, 'Should have action'
-
-        # 9. Verify data types (string columns like env_name are returned as scalars, not tensors)
+        # Non-string values come back as tensors (strings stay as str scalars).
         for key, value in sample.items():
             if not isinstance(value, str):
                 assert isinstance(value, torch.Tensor), (
                     f'{key} should be a tensor'
                 )
 
-        # 10. Verify load_chunk works
         chunk = dataset.load_chunk(
             episodes_idx=np.array([0, 1]),
             start=np.array([0, 0]),
             end=np.array([5, 5]),
         )
-        assert len(chunk) == 2, 'Should load 2 chunks'
-
-        # Cleanup
-        world.envs.close()
+        assert len(chunk) == 2
 
     def test_dataset_frameskip(self, temp_cache_dir):
-        """Test loading dataset with frameskip."""
-        # 1. Collect data
+        """Loading a Lance-recorded dataset with frameskip works."""
         world = World(
             env_name='swm/PushT-v1',
             num_envs=2,
@@ -95,8 +86,7 @@ class TestRealDataCollection:
             max_episode_steps=30,
             verbose=0,
         )
-        policy = RandomPolicy()
-        world.set_policy(policy)
+        world.set_policy(RandomPolicy())
 
         dataset_name = 'test_frameskip'
         world.record_dataset(
@@ -107,22 +97,16 @@ class TestRealDataCollection:
         )
         world.envs.close()
 
-        # 2. Load with frameskip=2
-        dataset = HDF5Dataset(
-            name=dataset_name,
-            cache_dir=str(temp_cache_dir),
+        dataset = LanceDataset(
+            uri=str(self._lance_path(temp_cache_dir, dataset_name)),
             frameskip=2,
             num_steps=2,
         )
-
-        # 3. Verify it works
         if len(dataset) > 0:
-            sample = dataset[0]
-            assert isinstance(sample, dict)
+            assert isinstance(dataset[0], dict)
 
     def test_dataset_transform(self, temp_cache_dir):
-        """Test loading dataset with custom transform."""
-        # 1. Collect data
+        """Loading a Lance-recorded dataset with a custom transform works."""
         world = World(
             env_name='swm/PushT-v1',
             num_envs=2,
@@ -130,8 +114,7 @@ class TestRealDataCollection:
             max_episode_steps=20,
             verbose=0,
         )
-        policy = RandomPolicy()
-        world.set_policy(policy)
+        world.set_policy(RandomPolicy())
 
         dataset_name = 'test_transform'
         world.record_dataset(
@@ -142,38 +125,32 @@ class TestRealDataCollection:
         )
         world.envs.close()
 
-        # 2. Define transform
-        def normalize_transform(data):
-            if 'action' in data:
-                data['action'] = data['action'] / 10.0
-            return data
+        seen = {}
 
-        # 3. Load with transform
-        dataset = HDF5Dataset(
-            name=dataset_name,
-            cache_dir=str(temp_cache_dir),
-            transform=normalize_transform,
+        def mark(sample):
+            seen['was_called'] = True
+            return sample
+
+        dataset = LanceDataset(
+            uri=str(self._lance_path(temp_cache_dir, dataset_name)),
+            transform=mark,
         )
-
-        # 4. Verify transform was applied
         if len(dataset) > 0:
-            sample = dataset[0]
-            assert isinstance(sample, dict)
+            _ = dataset[0]
+            assert seen.get('was_called') is True
 
     def test_dataset_keys_to_cache(self, temp_cache_dir):
-        """Test loading dataset with specific keys cached."""
-        # 1. Collect data
+        """``keys_to_cache`` is accepted (with the usual warning) on Lance too."""
         world = World(
             env_name='swm/PushT-v1',
             num_envs=2,
             image_shape=(64, 64),
-            max_episode_steps=20,
+            max_episode_steps=15,
             verbose=0,
         )
-        policy = RandomPolicy()
-        world.set_policy(policy)
+        world.set_policy(RandomPolicy())
 
-        dataset_name = 'test_cache'
+        dataset_name = 'test_keys_cache'
         world.record_dataset(
             dataset_name=dataset_name,
             episodes=2,
@@ -182,237 +159,120 @@ class TestRealDataCollection:
         )
         world.envs.close()
 
-        # 2. Load with action cached
-        dataset = HDF5Dataset(
-            name=dataset_name,
-            cache_dir=str(temp_cache_dir),
+        dataset = LanceDataset(
+            uri=str(self._lance_path(temp_cache_dir, dataset_name)),
+            keys_to_load=['action', 'pixels'],
             keys_to_cache=['action'],
         )
-
-        # 3. Verify action is cached
         assert 'action' in dataset._cache
-
-        # 4. Verify we can still load samples
         if len(dataset) > 0:
-            sample = dataset[0]
-            assert 'action' in sample
+            assert 'action' in dataset[0]
 
 
-def convert_hdf5_to_image_format(
-    h5_path: Path, output_dir: Path, image_key: str = 'pixels'
-):
-    """Convert HDF5 dataset to ImageDataset folder format."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+# ---------------------------------------------------------------------------
+# ImageDataset / VideoDataset fixtures
+#
+# These tests target the folder-based dataset formats, not ``record_dataset``.
+# We synthesise the expected folder layout directly rather than round-tripping
+# through ``record_dataset`` (which no longer writes HDF5), so they stay
+# focused on what they actually cover.
+# ---------------------------------------------------------------------------
 
-    with h5py.File(h5_path, 'r') as f:
-        ep_lengths = f['ep_len'][:]
-        ep_offsets = f['ep_offset'][:]
 
-        # Save metadata
-        np.savez(output_dir / 'ep_len.npz', ep_lengths)
-        np.savez(output_dir / 'ep_offset.npz', ep_offsets)
+def _write_image_folder(root: Path, ep_lengths: list[int]) -> None:
+    """Write an ImageDataset folder layout with deterministic synthetic data."""
+    root.mkdir(parents=True, exist_ok=True)
+    ep_lengths_arr = np.asarray(ep_lengths, dtype=np.int32)
+    ep_offsets = np.concatenate([[0], np.cumsum(ep_lengths_arr)[:-1]]).astype(np.int32)
+    total = int(ep_lengths_arr.sum())
 
-        # Save non-image data as .npz (skip object/string arrays — npz requires pickle for those)
-        for key in f.keys():
-            if key in ['ep_len', 'ep_offset', image_key]:
-                continue
-            data = f[key][:]
-            if data.dtype == object:
-                continue
-            np.savez(output_dir / f'{key}.npz', data)
+    np.savez(root / 'ep_len.npz', ep_lengths_arr)
+    np.savez(root / 'ep_offset.npz', ep_offsets)
 
-        # Save images to folder
-        if image_key in f:
-            img_dir = output_dir / image_key
-            img_dir.mkdir(exist_ok=True)
+    rng = np.random.default_rng(0)
+    action = rng.standard_normal((total, 2)).astype(np.float32)
+    proprio = rng.standard_normal((total, 4)).astype(np.float32)
+    np.savez(root / 'action.npz', action)
+    np.savez(root / 'proprio.npz', proprio)
 
-            images = f[image_key][:]
-            for ep_idx, (offset, length) in enumerate(
-                zip(ep_offsets, ep_lengths)
-            ):
-                for step_idx in range(length):
-                    global_idx = offset + step_idx
-                    img_array = images[global_idx]
-                    # Images in HDF5 are THWC, need HWC for saving
-                    if img_array.ndim == 3:  # HWC
-                        img = Image.fromarray(img_array)
-                        img.save(img_dir / f'ep_{ep_idx}_step_{step_idx}.jpeg')
+    img_dir = root / 'pixels'
+    img_dir.mkdir(exist_ok=True)
+    for ep_idx, length in enumerate(ep_lengths):
+        for step in range(length):
+            frame = rng.integers(0, 255, (16, 16, 3), dtype=np.uint8)
+            Image.fromarray(frame).save(img_dir / f'ep_{ep_idx}_step_{step}.jpeg')
 
 
 class TestImageDatasetReal:
-    """Test ImageDataset with real collected data."""
+    """ImageDataset end-to-end against a synthetic folder layout."""
 
-    @pytest.fixture
-    def temp_cache_dir(self, tmp_path):
-        return tmp_path
+    def test_load_folder_dataset(self, tmp_path):
+        root = tmp_path / 'image_ds'
+        _write_image_folder(root, ep_lengths=[5, 4, 6])
 
-    def test_collect_convert_and_load(self, temp_cache_dir):
-        """Test collecting data, converting to image format, and loading."""
-        # 1. Collect data with World
-        world = World(
-            env_name='swm/PushT-v1',
-            num_envs=2,
-            image_shape=(64, 64),
-            max_episode_steps=15,
-            verbose=0,
-        )
-        policy = RandomPolicy()
-        world.set_policy(policy)
-
-        h5_name = 'test_for_image'
-        world.record_dataset(
-            dataset_name=h5_name,
-            episodes=3,
-            seed=42,
-            cache_dir=temp_cache_dir,
-        )
-        world.envs.close()
-
-        # 2. Convert HDF5 to image format
-        h5_path = temp_cache_dir / 'datasets' / f'{h5_name}.h5'
-        image_dataset_dir = temp_cache_dir / 'test_image_format'
-        convert_hdf5_to_image_format(
-            h5_path, image_dataset_dir, image_key='pixels'
-        )
-
-        # 3. Verify folder structure was created
-        assert (image_dataset_dir / 'ep_len.npz').exists()
-        assert (image_dataset_dir / 'ep_offset.npz').exists()
-        assert (image_dataset_dir / 'action.npz').exists()
-        assert (image_dataset_dir / 'pixels').is_dir()
-        assert (image_dataset_dir / 'pixels' / 'ep_0_step_0.jpeg').exists()
-
-        # 4. Load with ImageDataset
         dataset = ImageDataset(
-            name='test_image_format',
-            cache_dir=str(temp_cache_dir),
-            image_keys=['pixels'],
+            name='image_ds', cache_dir=str(tmp_path), image_keys=['pixels']
         )
-
-        # 5. Verify dataset properties
         assert len(dataset) > 0
         assert len(dataset.lengths) == 3
 
-        # 6. Load a sample
         sample = dataset[0]
         assert isinstance(sample, dict)
         assert 'action' in sample
         assert 'pixels' in sample
         assert isinstance(sample['pixels'], torch.Tensor)
-
-        # 7. Verify image shape (should be TCHW after permutation)
         assert sample['pixels'].shape[-3] == 3  # channels
 
-    def test_load_chunk(self, temp_cache_dir):
-        """Test ImageDataset load_chunk with real data."""
-        # 1. Collect and convert
-        world = World(
-            env_name='swm/PushT-v1',
-            num_envs=2,
-            image_shape=(64, 64),
-            max_episode_steps=15,
-            verbose=0,
-        )
-        policy = RandomPolicy()
-        world.set_policy(policy)
+    def test_load_chunk(self, tmp_path):
+        root = tmp_path / 'image_ds'
+        _write_image_folder(root, ep_lengths=[4, 4])
 
-        h5_name = 'test_chunk_h5'
-        world.record_dataset(
-            dataset_name=h5_name,
-            episodes=3,
-            seed=42,
-            cache_dir=temp_cache_dir,
-        )
-        world.envs.close()
-
-        h5_path = temp_cache_dir / 'datasets' / f'{h5_name}.h5'
-        image_dir = temp_cache_dir / 'test_chunk_images'
-        convert_hdf5_to_image_format(h5_path, image_dir)
-
-        # 2. Load and test load_chunk
         dataset = ImageDataset(
-            name='test_chunk_images',
-            cache_dir=str(temp_cache_dir),
+            name='image_ds', cache_dir=str(tmp_path), image_keys=['pixels']
         )
-
         chunk = dataset.load_chunk(
             episodes_idx=np.array([0, 1]),
-            start=np.array([0, 0]),
-            end=np.array([3, 3]),
+            start=np.array([0, 1]),
+            end=np.array([3, 4]),
         )
-
         assert len(chunk) == 2
         assert 'pixels' in chunk[0]
         assert 'action' in chunk[0]
 
 
 class TestVideoDatasetReal:
-    """Test VideoDataset with real collected data."""
+    """VideoDataset end-to-end against a synthetic MP4 folder layout."""
 
-    @pytest.fixture
-    def temp_cache_dir(self, tmp_path):
-        return tmp_path
+    def test_load_video_dataset(self, tmp_path):
+        imageio = pytest.importorskip('imageio.v3')
+        pytest.importorskip('decord')
 
-    def test_collect_convert_and_load(self, temp_cache_dir):
-        """Test collecting data, converting to video format, and loading."""
-        import imageio.v3 as iio
+        root = tmp_path / 'video_ds'
+        root.mkdir()
 
-        # 1. Collect data
-        world = World(
-            env_name='swm/PushT-v1',
-            num_envs=2,
-            image_shape=(64, 64),
-            max_episode_steps=15,
-            verbose=0,
-        )
-        policy = RandomPolicy()
-        world.set_policy(policy)
+        ep_lengths = np.asarray([5, 4, 6], dtype=np.int32)
+        ep_offsets = np.concatenate([[0], np.cumsum(ep_lengths)[:-1]]).astype(np.int32)
+        total = int(ep_lengths.sum())
 
-        h5_name = 'test_for_video'
-        world.record_dataset(
-            dataset_name=h5_name,
-            episodes=3,
-            seed=42,
-            cache_dir=temp_cache_dir,
-        )
-        world.envs.close()
+        rng = np.random.default_rng(0)
+        action = rng.standard_normal((total, 2)).astype(np.float32)
+        np.savez(root / 'ep_len.npz', ep_lengths)
+        np.savez(root / 'ep_offset.npz', ep_offsets)
+        np.savez(root / 'action.npz', action)
 
-        # 2. Convert HDF5 to video format (MP4 files)
-        h5_path = temp_cache_dir / 'datasets' / f'{h5_name}.h5'
-        video_dataset_dir = temp_cache_dir / 'test_video_format'
-        video_dataset_dir.mkdir()
+        video_dir = root / 'video'
+        video_dir.mkdir()
+        for ep_idx, length in enumerate(ep_lengths.tolist()):
+            frames = rng.integers(0, 255, (length, 16, 16, 3), dtype=np.uint8)
+            imageio.imwrite(video_dir / f'ep_{ep_idx}.mp4', frames, fps=30)
 
-        with h5py.File(h5_path, 'r') as f:
-            ep_lengths = f['ep_len'][:]
-            ep_offsets = f['ep_offset'][:]
-            pixels = f['pixels'][:]
-            action = f['action'][:]
-
-        # Save metadata
-        np.savez(video_dataset_dir / 'ep_len.npz', ep_lengths)
-        np.savez(video_dataset_dir / 'ep_offset.npz', ep_offsets)
-        np.savez(video_dataset_dir / 'action.npz', action)
-
-        # Create video folder with MP4 files
-        video_path = video_dataset_dir / 'video'
-        video_path.mkdir()
-
-        for ep_idx, (offset, length) in enumerate(zip(ep_offsets, ep_lengths)):
-            frames = pixels[offset : offset + length]
-            iio.imwrite(video_path / f'ep_{ep_idx}.mp4', frames, fps=30)
-
-        # 3. Load with VideoDataset
         dataset = VideoDataset(
-            name='test_video_format',
-            cache_dir=str(temp_cache_dir),
-            video_keys=['video'],
+            name='video_ds', cache_dir=str(tmp_path), video_keys=['video']
         )
-
-        # 4. Verify
         assert len(dataset) > 0
         assert len(dataset.lengths) == 3
 
         sample = dataset[0]
         assert 'video' in sample
         assert isinstance(sample['video'], torch.Tensor)
-        assert sample['video'].shape[-3] == 3  # channels
+        assert sample['video'].shape[-3] == 3

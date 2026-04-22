@@ -586,14 +586,22 @@ class World:
             elif pa.types.is_large_string(field.type) or pa.types.is_string(field.type):
                 arrays[lance_key] = pa.array([str(v) for v in values], type=field.type)
             elif pa.types.is_fixed_size_list(field.type):
-                flat = np.asarray(values, dtype=np.float32).reshape(ep_len, -1).tolist()
+                # Lance treats fixed-size float lists as vector columns and
+                # rejects NaN on table.add().  ``_handle_done_ep`` inserts NaN
+                # at episode boundaries as a sentinel, which every training
+                # script already promotes to 0 via ``torch.nan_to_num``.  Do
+                # the promotion at write time so Lance accepts the batch.
+                flat_arr = np.nan_to_num(
+                    np.asarray(values, dtype=np.float32), nan=0.0
+                ).reshape(ep_len, -1).tolist()
                 arrays[lance_key] = pa.array(
-                    flat, type=pa.list_(pa.float32(), dims[lance_key])
+                    flat_arr, type=pa.list_(pa.float32(), dims[lance_key])
                 )
             else:
                 # scalar column
                 arrays[lance_key] = pa.array(
-                    np.asarray(values, dtype=np.float32), type=field.type
+                    np.nan_to_num(np.asarray(values, dtype=np.float32), nan=0.0),
+                    type=field.type,
                 )
 
         # Respect schema field order.
