@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from stable_worldmodel import World
-from stable_worldmodel.data import GoalDataset, HDF5Dataset, LeRobotAdapter
+from stable_worldmodel.data import GoalDataset, LanceDataset, LeRobotAdapter
 from stable_worldmodel.policy import RandomPolicy
 
 # Lightweight public dataset used as the integration target.
@@ -119,7 +119,7 @@ def test_lerobot_adapter_goal_dataset_compatibility():
 
 
 def test_lerobot_adapter_pusht_matches_native_swm_dataset(tmp_path):
-    """Hub `lerobot/pusht` via LeRobotAdapter matches native `swm/PushT-v1` HDF5 layout.
+    """Hub `lerobot/pusht` via LeRobotAdapter matches native `swm/PushT-v1` Lance layout.
 
     Records PushT with `World.record_dataset` (the supported path) at the same
     resolution as the Hub dataset, then checks that `__getitem__` batches agree
@@ -154,13 +154,11 @@ def test_lerobot_adapter_pusht_matches_native_swm_dataset(tmp_path):
     )
     world.envs.close()
 
-    native = HDF5Dataset(
-        name=dataset_name,
-        cache_dir=str(tmp_path),
+    native = LanceDataset(
+        uri=str(tmp_path / 'datasets' / f'{dataset_name}.lance'),
         num_steps=NUM_STEPS,
         frameskip=FRAMESKIP,
         keys_to_load=['pixels', 'action'],
-        keys_to_cache=['action'],
     )
     assert len(native) > 0
     native_item = native[0]
