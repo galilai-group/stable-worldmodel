@@ -145,7 +145,8 @@ class PLDM(nn.Module):
         goal.pop('action')
         goal = self.encode(goal)
 
-        info_dict['goal_emb'] = goal['emb']
+        S = action_candidates.size(1)
+        info_dict['goal_emb'] = goal['emb'].unsqueeze(1).expand(-1, S, -1, -1)
         info_dict = self.rollout(info_dict, action_candidates)
 
         cost = self.criterion(info_dict)

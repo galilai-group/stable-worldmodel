@@ -1,0 +1,24 @@
+_target_: stable_worldmodel.solver.grasp.GRASPSolver
+model: ???
+n_steps: 300              # Up from 200
+batch_size: 50
+lr_s: 0.1
+lr_a: 0.001
+gd_interval: 30
+gd_opt_steps: 10          # Up from 5
+gd_lr: 0.01
+
+sync_mode: cem
+cem_sync_samples: 256     # Up from 64
+cem_sync_topk: 25         # Up from 10
+cem_sync_var_scale: 1.0
+cem_sync_var_min: 0.01
+
+schedule_decay: true      # Turned ON
+init_noise_scale: 0.1
+min_noise_scale: 0.0
+init_goal_weight: 2.0
+min_goal_weight: 1.0
+
+device: "cuda"
+seed: ${seed}

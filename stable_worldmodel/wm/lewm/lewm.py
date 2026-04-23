@@ -142,8 +142,10 @@ class LeWM(nn.Module):
 
         goal.pop('action')
         goal = self.encode(goal)
+        
+        S = action_candidates.size(1)
+        info_dict['goal_emb'] = goal['emb'].unsqueeze(1).expand(-1, S, -1, -1)
 
-        info_dict['goal_emb'] = goal['emb']
         info_dict = self.rollout(info_dict, action_candidates)
 
         cost = self.criterion(info_dict)
