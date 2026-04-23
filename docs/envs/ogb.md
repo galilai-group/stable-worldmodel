@@ -6,7 +6,9 @@ external_links:
     github: https://github.com/seohongpark/ogbench
 ---
 
-<!-- ![ogbench](assets/env/ogbench/cube.gif) -->
+!!! warning "Python 3.10 only"
+    OGBench and its dependencies only provide wheels for **Python 3.10**.
+    Install with `python=3.10` to use these environments.
 
 ## Description
 

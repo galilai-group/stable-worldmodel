@@ -19,19 +19,23 @@ Stable World-Model is an open-source library to conduct world model research.  Y
         :::bash
         pip install stable-worldmodel
 
-=== "uv (all dependencies)"
+=== "uv (robotics)"
 
         :::bash
-        uv add stable-worldmodel --all-extras
+        uv add stable-worldmodel --extra train --extra robotics
 
-=== "pip (all dependencies)"
+=== "pip (robotics)"
 
         :::bash
-        pip install stable-worldmodel[env, train]
+        pip install stable-worldmodel[robotics, train]
 
 
 !!! note ""
     ⚠️ The base installation does not include environment (`env`) or training (`train`) dependencies. Install them separately or use the "all dependencies" option above if you need to run simulations or train models.
+
+!!! warning "Python version constraints"
+    - The `robotics` extra (OGBench, ManiSkill) requires **Python 3.10** due to upstream wheel availability.
+    - The `lerobot` extra requires **Python 3.12+**.
 
 A **world model** is a learned simulator that predicts how an environment evolves in response to actions, enabling agents to plan by imagining future outcomes. Stable World-Model provides a unified research ecosystem that simplifies the entire pipeline: from data collection to model training and evaluation.
 
@@ -47,7 +51,7 @@ git clone https://github.com/galilai-group/stable-worldmodel
 cd stable-worldmodel/
 uv venv --python=3.10
 source .venv/bin/activate
-uv sync --all-extras --group dev
+uv sync --extra train --extra robotics --group dev
 ```
 
 !!! warning ""

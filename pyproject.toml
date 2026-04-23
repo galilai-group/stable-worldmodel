@@ -44,11 +44,16 @@ env = [
     "pygame",
     "pymunk",
     "shapely",
-    "ogbench",
     "minigrid",
     "gymnasium[all]",
     "opencv-python",
     "stable_baselines3>=2.0.0",
+]
+
+robotics = [
+    "stable-worldmodel[env]",
+    "ogbench",
+    "mani_skill",
 ]
 
 lerobot = [
@@ -73,6 +78,15 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+prerelease = "allow"
+conflicts = [
+    [
+        { extra = "robotics" },
+        { extra = "lerobot" },
+    ],
+]
 
 [tool.uv.build-backend]
 module-root = "."
