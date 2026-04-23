@@ -152,6 +152,23 @@ class HDF5Dataset(Dataset):
     def column_names(self) -> list[str]:
         return self._keys
 
+    def __getstate__(self) -> dict:
+        """Return picklable state; drop the live h5py handle.
+
+        The handle will be re-opened lazily in the child process on first
+        access via ``_open``. This is required so the dataset can be shipped
+        to ``DataLoader`` workers under the ``spawn`` / ``forkserver`` start
+        methods (the defaults on macOS and Windows, and the default on
+        non-macOS POSIX platforms starting with Python 3.14), where pickling
+        is used instead of ``fork``.
+        """
+        state = self.__dict__.copy()
+        state['h5_file'] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+
     def _open(self) -> None:
         if self.h5_file is None:
             self.h5_file = h5py.File(
