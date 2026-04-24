@@ -63,6 +63,10 @@ class ICEMSolver:
         self.return_mean = return_mean
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
+        try:
+            self._dtype = next(model.parameters()).dtype
+        except (AttributeError, StopIteration):
+            self._dtype = torch.float32
 
     def configure(
         self, *, action_space: gym.Space, n_envs: int, config: Any
@@ -105,7 +109,7 @@ class ICEMSolver:
 
     @property
     def dtype(self) -> torch.dtype:
-        return next(self.model.parameters()).dtype
+        return self._dtype
 
     def __call__(self, *args: Any, **kwargs: Any) -> dict:
         """Make solver callable, forwarding to solve()."""

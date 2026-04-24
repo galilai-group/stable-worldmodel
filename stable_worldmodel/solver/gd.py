@@ -56,6 +56,11 @@ class GradientSolver(torch.nn.Module):
             optimizer_kwargs if optimizer_kwargs is not None else {'lr': 1.0}
         )
 
+        try:
+            self._dtype = next(model.parameters()).dtype
+        except (AttributeError, StopIteration):
+            self._dtype = torch.float32
+
         self._configured = False
         self._n_envs = None
         self._action_dim = None
@@ -93,7 +98,7 @@ class GradientSolver(torch.nn.Module):
 
     @property
     def dtype(self) -> torch.dtype:
-        return next(self.model.parameters()).dtype
+        return self._dtype
 
     def __call__(self, *args: Any, **kwargs: Any) -> dict:
         """Make solver callable, forwarding to solve()."""
