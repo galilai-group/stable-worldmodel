@@ -29,7 +29,6 @@ class TestRealDataCollection:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=20,
-            verbose=0,
         )
 
         # 2. Set random policy
@@ -38,11 +37,10 @@ class TestRealDataCollection:
 
         # 3. Collect data
         dataset_name = 'test_pusht'
-        world.record_dataset(
-            dataset_name=dataset_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=4,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
 
         # 4. Verify HDF5 file was created
@@ -93,17 +91,15 @@ class TestRealDataCollection:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=30,
-            verbose=0,
         )
         policy = RandomPolicy()
         world.set_policy(policy)
 
         dataset_name = 'test_frameskip'
-        world.record_dataset(
-            dataset_name=dataset_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=2,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
         world.envs.close()
 
@@ -128,17 +124,15 @@ class TestRealDataCollection:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=20,
-            verbose=0,
         )
         policy = RandomPolicy()
         world.set_policy(policy)
 
         dataset_name = 'test_transform'
-        world.record_dataset(
-            dataset_name=dataset_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=2,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
         world.envs.close()
 
@@ -168,17 +162,15 @@ class TestRealDataCollection:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=20,
-            verbose=0,
         )
         policy = RandomPolicy()
         world.set_policy(policy)
 
         dataset_name = 'test_cache'
-        world.record_dataset(
-            dataset_name=dataset_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=2,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
         world.envs.close()
 
@@ -254,17 +246,15 @@ class TestImageDatasetReal:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=15,
-            verbose=0,
         )
         policy = RandomPolicy()
         world.set_policy(policy)
 
         h5_name = 'test_for_image'
-        world.record_dataset(
-            dataset_name=h5_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{h5_name}.h5',
             episodes=3,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
         world.envs.close()
 
@@ -311,17 +301,15 @@ class TestImageDatasetReal:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=15,
-            verbose=0,
         )
         policy = RandomPolicy()
         world.set_policy(policy)
 
         h5_name = 'test_chunk_h5'
-        world.record_dataset(
-            dataset_name=h5_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{h5_name}.h5',
             episodes=3,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
         world.envs.close()
 
@@ -363,17 +351,15 @@ class TestVideoDatasetReal:
             num_envs=2,
             image_shape=(64, 64),
             max_episode_steps=15,
-            verbose=0,
         )
         policy = RandomPolicy()
         world.set_policy(policy)
 
         h5_name = 'test_for_video'
-        world.record_dataset(
-            dataset_name=h5_name,
+        world.collect(
+            temp_cache_dir / 'datasets' / f'{h5_name}.h5',
             episodes=3,
             seed=42,
-            cache_dir=temp_cache_dir,
         )
         world.envs.close()
 

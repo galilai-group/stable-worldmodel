@@ -395,6 +395,7 @@ def test_worldmodel_policy_set_env():
     mock_env = MagicMock()
     mock_env.num_envs = 4
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     assert solver.configured
@@ -410,6 +411,7 @@ def test_worldmodel_policy_set_env_no_num_envs():
 
     mock_env = MagicMock(spec=[])  # No num_envs attribute
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     assert solver.n_envs == 1  # Default
@@ -424,6 +426,7 @@ def test_worldmodel_policy_get_action():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     info = {
@@ -444,6 +447,7 @@ def test_worldmodel_policy_get_action_uses_buffer():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     info = {
@@ -471,6 +475,7 @@ def test_worldmodel_policy_get_action_with_process():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     info = {
@@ -522,6 +527,7 @@ def test_worldmodel_policy_warm_start():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     info = {
@@ -544,6 +550,7 @@ def test_worldmodel_policy_selective_replan():
     mock_env = MagicMock()
     mock_env.num_envs = 2
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2, 2))
+    mock_env.single_action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
     policy.set_env(mock_env)
 
     info = {
@@ -589,6 +596,7 @@ def test_worldmodel_policy_no_warm_start():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
 
     info = {

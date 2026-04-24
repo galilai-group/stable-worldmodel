@@ -261,18 +261,19 @@ class World:
                 for col, data in world.infos.items():
                     if col.startswith('_'):
                         continue
-                    if (
-                        isinstance(data, np.ndarray)
-                        and data.ndim > 1
-                        and data.shape[1] == 1
-                    ):
-                        data = np.squeeze(data, axis=1)
+                    if not isinstance(data, (np.ndarray, torch.Tensor)):
+                        continue
+                    if data.ndim > 1 and data.shape[1] == 1:
+                        if isinstance(data, torch.Tensor):
+                            data = data.squeeze(1)
+                        else:
+                            data = np.squeeze(data, axis=1)
                     for i in range(world.num_envs):
-                        val = (
-                            data[i].copy()
-                            if isinstance(data[i], np.ndarray)
-                            else data[i]
-                        )
+                        val = data[i]
+                        if isinstance(val, torch.Tensor):
+                            val = val.detach().cpu().numpy()
+                        elif isinstance(val, np.ndarray):
+                            val = val.copy()
                         buffers[i][col].append(val)
 
             def on_done(env_idx, ep_idx, world):
