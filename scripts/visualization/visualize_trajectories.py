@@ -320,14 +320,14 @@ def collect_embeddings(cfg, exp_cfg):
         trajs_pixels.append(traj['pixels'].squeeze(0).cpu().detach())
 
         # Encode trajectory
-        traj = world_model.encode(traj, target='embed')
+        traj = world_model.encode(traj, target='emb')
         if exp_cfg.world_model.get(
             'backbone_only', False
         ):  # use only vision backbone embeddings
-            flat_embed = rearrange(traj['pixels_embed'][0], 't p d ->t (p d)')
+            flat_embed = rearrange(traj['pixels_emb'][0], 't p d ->t (p d)')
             trajs_embeddings.append(flat_embed.cpu().detach())
         else:  # use full model embeddings (proropio + action + vision)
-            flat_embed = rearrange(traj['embed'][0], 't p d ->t (p d)')
+            flat_embed = rearrange(traj['emb'][0], 't p d ->t (p d)')
             trajs_embeddings.append(flat_embed.cpu().detach())
 
         # predict trajectory
@@ -338,7 +338,7 @@ def collect_embeddings(cfg, exp_cfg):
             'backbone_only', False
         ):  # use only vision backbone embeddings
             flat_predicted = rearrange(
-                traj['predicted_pixels_embed'][0, 0], 't p d ->t (p d)'
+                traj['predicted_pixels_emb'][0, 0], 't p d ->t (p d)'
             )
             predicted_embeddings.append(flat_predicted.cpu().detach())
         else:  # use full model embeddings (proropio + action + vision)

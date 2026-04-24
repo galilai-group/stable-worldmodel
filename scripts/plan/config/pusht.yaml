@@ -44,5 +44,8 @@ eval:
         goal_state:
           value: goal_state
 
+compile: false
+bf16: false
+
 output:
   filename: pusht_results.txt

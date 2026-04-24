@@ -463,7 +463,7 @@ class WorldModelPolicy(BasePolicy):
                 action[i] = self._action_buffer[i].popleft()
 
         action = action.reshape(*self.env.action_space.shape)
-        action = action.numpy()
+        action = action.float().numpy()
 
         if 'action' in self.process:
             action = self.process['action'].inverse_transform(action)

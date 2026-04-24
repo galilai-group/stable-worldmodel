@@ -142,7 +142,12 @@ class SaveCkptCallback(Callback):
             self._save(pl_module.model, epoch)
 
     def _save(self, model, epoch):
-        save_pretrained(model, run_name=self.run_name, config=self.cfg, filename=f'weights_epoch_{epoch}.pt')
+        save_pretrained(
+            model,
+            run_name=self.run_name,
+            config=self.cfg,
+            filename=f'weights_epoch_{epoch}.pt',
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -165,23 +170,23 @@ def dinowm_forward(self, batch, stage, cfg):
 
     batch = self.model.encode(
         batch,
-        target='embed',
+        target='emb',
         is_video=cfg.backbone.get('is_video_encoder', False),
     )
 
-    embedding = batch['embed'][:, : cfg.wm.history_size, ...]
+    embedding = batch['emb'][:, : cfg.wm.history_size, ...]
     pred_embedding = self.model.predict(embedding)
-    target_embedding = batch['embed'][:, cfg.wm.num_preds :, ...].detach()
+    target_embedding = batch['emb'][:, cfg.wm.num_preds :, ...].detach()
 
     # Per-modality losses
-    pixels_dim = batch['pixels_embed'].size(-1)
+    pixels_dim = batch['pixels_emb'].size(-1)
     batch['pixels_loss'] = F.mse_loss(
         pred_embedding[..., :pixels_dim], target_embedding[..., :pixels_dim]
     )
 
     start, action_range = pixels_dim, [0, 0]
     for key in self.model.extra_encoders:
-        dim = batch[f'{key}_embed'].size(-1)
+        dim = batch[f'{key}_emb'].size(-1)
         lo, hi = start, start + dim
         if key == 'action':
             action_range = [lo, hi]
@@ -193,22 +198,18 @@ def dinowm_forward(self, batch, stage, cfg):
         start = hi
 
     # Actionless embeddings (for probes and total loss)
-    batch['actionless_embed'] = _strip_action_dims(
-        batch['embed'], action_range
-    )
-    batch['actionless_prev_embed'] = _strip_action_dims(
-        embedding, action_range
-    )
-    batch['actionless_pred_embed'] = _strip_action_dims(
+    batch['actionless_emb'] = _strip_action_dims(batch['emb'], action_range)
+    batch['actionless_prev_emb'] = _strip_action_dims(embedding, action_range)
+    batch['actionless_pred_emb'] = _strip_action_dims(
         pred_embedding, action_range
     )
-    batch['actionless_target_embed'] = _strip_action_dims(
+    batch['actionless_target_emb'] = _strip_action_dims(
         target_embedding, action_range
     )
 
     batch['loss'] = F.mse_loss(
-        batch['actionless_pred_embed'],
-        batch['actionless_target_embed'].detach(),
+        batch['actionless_pred_emb'],
+        batch['actionless_target_emb'].detach(),
     )
 
     if batch['loss'].isnan():

@@ -31,7 +31,7 @@ class PreJEPA(torch.nn.Module):
         pixels_key='pixels',
         emb_keys=None,
         prefix=None,
-        target='embed',
+        target='emb',
         is_video=False,
     ):
         assert target not in info, f'{target} key already in info_dict'
@@ -141,8 +141,8 @@ class PreJEPA(torch.nn.Module):
         return preds
 
     def decode(self, info):
-        assert 'pixels_embed' in info, 'pixels_embed not in info_dict'
-        pixels_embed = info['pixels_embed']
+        assert 'pixels_emb' in info, 'pixels_emb not in info_dict'
+        pixels_embed = info['pixels_emb']
         num_frames = pixels_embed.shape[1]
 
         pixels, diff = self.decoder(
@@ -162,14 +162,14 @@ class PreJEPA(torch.nn.Module):
         pixel_dim = embedding.shape[-1] - sum(extra_dims)
 
         # == pixels embedding
-        split_embed['pixels_embed'] = embedding[..., :pixel_dim]
+        split_embed['pixels_emb'] = embedding[..., :pixel_dim]
 
         # == extra embeddings
         start_dim = pixel_dim
         for i, (key, _) in enumerate(self.extra_encoders.items()):
             dim = extra_dims[i]
             extra_emb = embedding[..., start_dim : start_dim + dim]
-            split_embed[f'{key}_embed'] = extra_emb[
+            split_embed[f'{key}_emb'] = extra_emb[
                 :, :, :, 0
             ]  # all patches are the same
             start_dim += dim
@@ -258,37 +258,37 @@ class PreJEPA(torch.nn.Module):
             init_info_dict = self.encode(
                 init_info_dict,
                 pixels_key='pixels',
-                target='embed',
+                target='emb',
             )
             # repeat copy for each action candidate
-            init_info_dict['embed'] = (
-                init_info_dict['embed']
+            init_info_dict['emb'] = (
+                init_info_dict['emb']
                 .unsqueeze(1)
                 .expand(
                     -1,
                     action_sequence.shape[1],
-                    *([-1] * (init_info_dict['embed'].ndim - 1)),
+                    *([-1] * (init_info_dict['emb'].ndim - 1)),
                 )
                 .clone()
             )
-            init_info_dict['pixels_embed'] = (
-                init_info_dict['pixels_embed']
+            init_info_dict['pixels_emb'] = (
+                init_info_dict['pixels_emb']
                 .unsqueeze(1)
                 .expand(
                     -1,
                     action_sequence.shape[1],
-                    *([-1] * (init_info_dict['pixels_embed'].ndim - 1)),
+                    *([-1] * (init_info_dict['pixels_emb'].ndim - 1)),
                 )
             )
 
             for key in emb_keys:
-                init_info_dict[f'{key}_embed'] = (
-                    init_info_dict[f'{key}_embed']
+                init_info_dict[f'{key}_emb'] = (
+                    init_info_dict[f'{key}_emb']
                     .unsqueeze(1)
                     .expand(
                         -1,
                         action_sequence.shape[1],
-                        *([-1] * (init_info_dict[f'{key}_embed'].ndim - 1)),
+                        *([-1] * (init_info_dict[f'{key}_emb'].ndim - 1)),
                     )
                 )
 
@@ -298,26 +298,26 @@ class PreJEPA(torch.nn.Module):
             }
             self._init_cached_info = init_info_dict
 
-        info['embed'] = init_info_dict['embed']
-        info['pixels_embed'] = init_info_dict['pixels_embed']
+        info['emb'] = init_info_dict['emb']
+        info['pixels_emb'] = init_info_dict['pixels_emb']
 
         for key in emb_keys:
-            info[f'{key}_embed'] = init_info_dict[f'{key}_embed']
+            info[f'{key}_emb'] = init_info_dict[f'{key}_emb']
 
         # actually compute the embedding of action for each candidate
-        info['embed'] = self.replace_action_in_embedding(
-            info['embed'], action_sequence[:, :, :n_obs]
+        info['emb'] = self.replace_action_in_embedding(
+            info['emb'], action_sequence[:, :, :n_obs]
         )
 
-        action_dim = init_info_dict['action_embed'].shape[-1]
-        info['action_embed'] = info['embed'][:, :, :n_obs, 0, -action_dim:]
+        action_dim = init_info_dict['action_emb'].shape[-1]
+        info['action_emb'] = info['emb'][:, :, :n_obs, 0, -action_dim:]
 
         # number of step to predict
         act_pred = action_sequence[:, :, n_obs:]
         n_steps = act_pred.shape[2]
 
         # == initial embedding
-        z = info['embed']
+        z = info['emb']
         B, N = z.shape[:2]
 
         # we flatten B and N to process all candidates in a single batch in the predictor
@@ -352,9 +352,9 @@ class PreJEPA(torch.nn.Module):
 
         extra_dims = []
         for key in self.extra_encoders:
-            if f'{key}_embed' not in info:
-                raise ValueError(f'{key}_embed not in info dict')
-            extra_dims.append(info[f'{key}_embed'].shape[-1])
+            if f'{key}_emb' not in info:
+                raise ValueError(f'{key}_emb not in info dict')
+            extra_dims.append(info[f'{key}_emb'].shape[-1])
 
         splitted_embed = self.split_embedding(z, extra_dims)
         info.update({f'predicted_{k}': v for k, v in splitted_embed.items()})
@@ -367,8 +367,8 @@ class PreJEPA(torch.nn.Module):
         cost = 0.0
 
         for key in emb_keys + ['pixels']:
-            preds = info_dict[f'predicted_{key}_embed']
-            goal = info_dict[f'{key}_goal_embed']
+            preds = info_dict[f'predicted_{key}_emb']
+            goal = info_dict[f'{key}_goal_emb']
             cost = cost + F.mse_loss(
                 preds[:, :, -1:], goal, reduction='none'
             ).mean(dim=tuple(range(2, preds.ndim)))
@@ -377,11 +377,6 @@ class PreJEPA(torch.nn.Module):
     def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
         assert 'action' in info_dict, 'action key must be in info_dict'
         assert 'pixels' in info_dict, 'pixels key must be in info_dict'
-
-        # move to device and unsqueeze time
-        for k, v in info_dict.items():
-            if torch.is_tensor(v):
-                info_dict[k] = v.to(next(self.parameters()).device)
 
         # == non action embeddings keys
         emb_keys = [k for k in self.extra_encoders.keys() if k != 'action']
@@ -412,43 +407,40 @@ class PreJEPA(torch.nn.Module):
                     goal_info_dict[k] = info_dict[k][:, 0]  # (B, ...)
             goal_info_dict = self.encode(
                 goal_info_dict,
-                target='goal_embed',
+                target='goal_emb',
                 pixels_key='goal',
                 prefix='goal_',
                 emb_keys=emb_keys,
             )
 
-            goal_info_dict['goal_embed'] = (
-                goal_info_dict['goal_embed']
+            goal_info_dict['goal_emb'] = (
+                goal_info_dict['goal_emb']
                 .unsqueeze(1)
                 .expand(
                     -1,
                     action_candidates.shape[1],
-                    *([-1] * (goal_info_dict['goal_embed'].ndim - 1)),
+                    *([-1] * (goal_info_dict['goal_emb'].ndim - 1)),
                 )
             )
 
-            goal_info_dict['pixels_goal_embed'] = (
-                goal_info_dict['pixels_goal_embed']
+            goal_info_dict['pixels_goal_emb'] = (
+                goal_info_dict['pixels_goal_emb']
                 .unsqueeze(1)
                 .expand(
                     -1,
                     action_candidates.shape[1],
-                    *([-1] * (goal_info_dict['pixels_goal_embed'].ndim - 1)),
+                    *([-1] * (goal_info_dict['pixels_goal_emb'].ndim - 1)),
                 )
             )
 
             for key in emb_keys:
-                goal_info_dict[f'{key}_goal_embed'] = (
-                    goal_info_dict[f'{key}_goal_embed']
+                goal_info_dict[f'{key}_goal_emb'] = (
+                    goal_info_dict[f'{key}_goal_emb']
                     .unsqueeze(1)
                     .expand(
                         -1,
                         action_candidates.shape[1],
-                        *(
-                            [-1]
-                            * (goal_info_dict[f'{key}_goal_embed'].ndim - 1)
-                        ),
+                        *([-1] * (goal_info_dict[f'{key}_goal_emb'].ndim - 1)),
                     )
                 )
 
@@ -458,13 +450,11 @@ class PreJEPA(torch.nn.Module):
             }
             self._goal_cached_info = goal_info_dict
 
-        info_dict['goal_embed'] = goal_info_dict['goal_embed']
-        info_dict['pixels_goal_embed'] = goal_info_dict['pixels_goal_embed']
+        info_dict['goal_emb'] = goal_info_dict['goal_emb']
+        info_dict['pixels_goal_emb'] = goal_info_dict['pixels_goal_emb']
 
         for key in emb_keys:
-            info_dict[f'{key}_goal_embed'] = goal_info_dict[
-                f'{key}_goal_embed'
-            ]
+            info_dict[f'{key}_goal_emb'] = goal_info_dict[f'{key}_goal_emb']
 
         # == run world model
         info_dict = self.rollout(info_dict, action_candidates)

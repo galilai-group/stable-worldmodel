@@ -13,8 +13,7 @@ from stable_worldmodel.envs.two_room.env import TwoRoomEnv
 class LeWMAdapter(nn.Module):
     """Wraps LeWM for visualization.
 
-    Skips NaN-valued action at reset and renames 'emb' -> 'embed' to match
-    the interface expected by the visualization code.
+    Skips NaN-valued action at reset boundaries.
     """
 
     def __init__(self, model):
@@ -23,7 +22,7 @@ class LeWMAdapter(nn.Module):
         # LeWM has no extra_encoders dict; provide an empty one for compatibility
         self.extra_encoders = {}
 
-    def encode(self, info, pixels_key='pixels', target='embed'):
+    def encode(self, info, pixels_key='pixels', target='emb'):
         encode_info = dict(info)
         if (
             'action' in encode_info
@@ -32,7 +31,6 @@ class LeWMAdapter(nn.Module):
         ):
             encode_info.pop('action')
         result = self.model.encode(encode_info)
-        result['embed'] = result.pop('emb')
         info.update(result)
         return info
 
@@ -51,7 +49,7 @@ class PreJEPAAdapter(nn.Module):
         self._n_patches = None
         self._d = None
 
-    def encode(self, info, pixels_key='pixels', target='embed'):
+    def encode(self, info, pixels_key='pixels', target='emb'):
         emb_keys = [
             k
             for k in self.model.extra_encoders

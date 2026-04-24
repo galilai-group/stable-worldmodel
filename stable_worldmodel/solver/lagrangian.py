@@ -234,6 +234,10 @@ class LagrangianSolver(torch.nn.Module):
                     batch_v = v
                 expanded_infos[k] = batch_v
 
+            for k, v in expanded_infos.items():
+                if torch.is_tensor(v):
+                    expanded_infos[k] = v.to(self.device)
+
             rho = self.rho_init
             batch_cost_history = []
             costs = None
@@ -313,12 +317,14 @@ class LagrangianSolver(torch.nn.Module):
                 with torch.no_grad():
                     mean_cost = costs.mean().item()
                     if constraints is not None:
-                        viol = F.relu(final_constraints).mean(dim=(0, 1))  # (C,)
+                        viol = F.relu(final_constraints).mean(
+                            dim=(0, 1)
+                        )  # (C,)
                         lam = lambdas_batch.mean(dim=0)  # (C,)
                         viol_str = ', '.join(f'{v:.4f}' for v in viol.tolist())
-                        lam_str = ', '.join(f'{l:.4f}' for l in lam.tolist())
+                        lam_str = ', '.join(f'{lv:.4f}' for lv in lam.tolist())
                         print(
-                            f'  [outer {_outer+1}/{self.n_outer_steps}] '
+                            f'  [outer {_outer + 1}/{self.n_outer_steps}] '
                             f'cost={mean_cost:.4f} | '
                             f'constraint_viol=[{viol_str}] | '
                             f'lambdas=[{lam_str}] | '
@@ -326,7 +332,7 @@ class LagrangianSolver(torch.nn.Module):
                         )
                     else:
                         print(
-                            f'  [outer {_outer+1}/{self.n_outer_steps}] '
+                            f'  [outer {_outer + 1}/{self.n_outer_steps}] '
                             f'cost={mean_cost:.4f}'
                         )
 

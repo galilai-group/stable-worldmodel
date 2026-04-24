@@ -17,11 +17,11 @@ from torchvision.transforms import v2 as transforms
 import stable_worldmodel as swm
 
 
-def img_transform(cfg):
+def img_transform(cfg, dtype=torch.float32):
     transform = transforms.Compose(
         [
             transforms.ToImage(),
-            transforms.ToDtype(torch.float32, scale=True),
+            transforms.ToDtype(dtype, scale=True),
             transforms.Normalize(**spt.data.dataset_stats.ImageNet),
             transforms.Resize(size=cfg.eval.img_size),
         ]
@@ -65,9 +65,10 @@ def run(cfg: DictConfig):
     world = swm.World(**cfg.world, image_shape=(224, 224))
 
     # create the transform
+    img_dtype = torch.bfloat16 if cfg.get('bf16', False) else torch.float32
     transform = {
-        'pixels': img_transform(cfg),
-        'goal': img_transform(cfg),
+        'pixels': img_transform(cfg, img_dtype),
+        'goal': img_transform(cfg, img_dtype),
     }
 
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
@@ -97,10 +98,22 @@ def run(cfg: DictConfig):
 
     if policy != 'random':
         model = swm.wm.utils.load_pretrained(cfg.policy)
+        if cfg.get('bf16', False):
+            model = model.to(torch.bfloat16)
         model = model.to('cuda')
         model = model.eval()
         model.requires_grad_(False)
         model.interpolate_pos_encoding = True
+        if cfg.get('compile', False):
+            encoder_attr = (
+                'backbone' if hasattr(model, 'backbone') else 'encoder'
+            )
+            setattr(
+                model,
+                encoder_attr,
+                torch.compile(getattr(model, encoder_attr)),
+            )
+            model.predictor = torch.compile(model.predictor)
         config = swm.PlanConfig(**cfg.plan_config)
         solver = hydra.utils.instantiate(cfg.solver, model=model)
         policy = swm.policy.WorldModelPolicy(
@@ -157,18 +170,47 @@ def run(cfg: DictConfig):
 
     world.set_policy(policy)
 
-    start_time = time.time()
-    metrics = world.evaluate_from_dataset(
-        dataset,
-        start_steps=eval_start_idx.tolist(),
-        goal_offset_steps=cfg.eval.goal_offset_steps,
-        eval_budget=cfg.eval.eval_budget,
-        episodes_idx=eval_episodes.tolist(),
-        callables=OmegaConf.to_container(
-            cfg.eval.get('callables'), resolve=True
-        ),
-        video_path=results_path,
+    autocast_ctx = torch.autocast(
+        device_type='cuda',
+        dtype=torch.bfloat16,
+        enabled=cfg.get('bf16', False),
     )
+
+    if cfg.get('compile', False):
+        print('Warming up compiled model...')
+        warmup_autocast_ctx = torch.autocast(
+            device_type='cuda',
+            dtype=torch.bfloat16,
+            enabled=cfg.get('bf16', False),
+        )
+        with warmup_autocast_ctx:
+            n = world.num_envs
+            world.evaluate_from_dataset(
+                dataset,
+                start_steps=eval_start_idx.tolist()[:n],
+                goal_offset_steps=cfg.eval.goal_offset_steps,
+                eval_budget=cfg.eval.eval_budget,
+                episodes_idx=eval_episodes.tolist()[:n],
+                callables=OmegaConf.to_container(
+                    cfg.eval.get('callables'), resolve=True
+                ),
+                video_path=results_path,
+            )
+        print('Warmup done.')
+
+    start_time = time.time()
+    with autocast_ctx:
+        metrics = world.evaluate_from_dataset(
+            dataset,
+            start_steps=eval_start_idx.tolist(),
+            goal_offset_steps=cfg.eval.goal_offset_steps,
+            eval_budget=cfg.eval.eval_budget,
+            episodes_idx=eval_episodes.tolist(),
+            callables=OmegaConf.to_container(
+                cfg.eval.get('callables'), resolve=True
+            ),
+            video_path=results_path,
+        )
     end_time = time.time()
 
     print(metrics)

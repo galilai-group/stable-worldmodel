@@ -36,7 +36,7 @@ class MPPISolver:
         n_steps: int = 30,
         topk: int = 30,
         temperature: float = 0.5,
-        device: str | torch.device = "cpu",
+        device: str | torch.device = 'cpu',
         seed: int = 1234,
     ) -> None:
         self.model = model
@@ -49,7 +49,9 @@ class MPPISolver:
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
-    def configure(self, *, action_space: gym.Space, n_envs: int, config: Any) -> None:
+    def configure(
+        self, *, action_space: gym.Space, n_envs: int, config: Any
+    ) -> None:
         """Configure the solver with environment specifications."""
         self._action_space = action_space
         self._n_envs = n_envs
@@ -59,7 +61,7 @@ class MPPISolver:
 
         if not isinstance(action_space, Box):
             logging.warning(
-                f"Action space is discrete, got {type(action_space)}. MPPISolver may not work as expected."
+                f'Action space is discrete, got {type(action_space)}. MPPISolver may not work as expected.'
             )
 
     @property
@@ -77,6 +79,10 @@ class MPPISolver:
         """Planning horizon in timesteps."""
         return self._config.horizon
 
+    @property
+    def dtype(self) -> torch.dtype:
+        return next(self.model.parameters()).dtype
+
     def __call__(self, *args: Any, **kwargs: Any) -> dict:
         """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
@@ -85,13 +91,21 @@ class MPPISolver:
         self, n_envs: int, actions: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Initialize the action distribution parameters (mean and variance)."""
-        var = self.var_scale * torch.ones([n_envs, self.horizon, self.action_dim])
-        mean = torch.zeros([n_envs, 0, self.action_dim]) if actions is None else actions
+        var = self.var_scale * torch.ones(
+            [n_envs, self.horizon, self.action_dim], dtype=self.dtype
+        )
+        mean = (
+            torch.zeros([n_envs, 0, self.action_dim], dtype=self.dtype)
+            if actions is None
+            else actions
+        )
 
         remaining = self.horizon - mean.shape[1]
         if remaining > 0:
             device = mean.device
-            new_mean = torch.zeros([n_envs, remaining, self.action_dim])
+            new_mean = torch.zeros(
+                [n_envs, remaining, self.action_dim], dtype=self.dtype
+            )
             mean = torch.cat([mean, new_mean], dim=1).to(device)
 
         return mean, var
@@ -103,9 +117,9 @@ class MPPISolver:
         """Solve the planning problem using MPPI."""
         start_time = time.time()
         outputs = {
-            "costs": [],
-            "mean": [],
-            "var": [],
+            'costs': [],
+            'mean': [],
+            'var': [],
         }
 
         # Batch size is taken from info_dict so callers can solve for a subset of envs
@@ -125,17 +139,24 @@ class MPPISolver:
             batch_mean = mean[start_idx:end_idx]
             batch_var = var[start_idx:end_idx]
 
-            # Expand Info Dict for current batch (Same as CEM)
             expanded_infos = {}
             for k, v in info_dict.items():
                 v_batch = v[start_idx:end_idx]
                 if torch.is_tensor(v):
-                    # Add sample dim: (batch, 1, ...)
-                    v_batch = v_batch.unsqueeze(1)
-                    # Expand: (batch, num_samples, ...)
-                    v_batch = v_batch.expand(current_bs, self.num_samples, *v_batch.shape[2:])
+                    target_dtype = (
+                        self.dtype if v_batch.is_floating_point() else None
+                    )
+                    v_batch = (
+                        v_batch.to(device=self.device, dtype=target_dtype)
+                        .unsqueeze(1)
+                        .expand(
+                            current_bs, self.num_samples, *v_batch.shape[1:]
+                        )
+                    )
                 elif isinstance(v, np.ndarray):
-                    v_batch = np.repeat(v_batch[:, None, ...], self.num_samples, axis=1)
+                    v_batch = np.repeat(
+                        v_batch[:, None, ...], self.num_samples, axis=1
+                    )
                 expanded_infos[k] = v_batch
 
             # Optimization Loop
@@ -150,29 +171,43 @@ class MPPISolver:
                     self.action_dim,
                     generator=self.torch_gen,
                     device=self.device,
+                    dtype=self.dtype,
                 )
 
                 # MPPI Logic: candidates = mean + noise * sigma
-                candidates = batch_mean.unsqueeze(1) + noise * batch_var.unsqueeze(1)
+                candidates = batch_mean.unsqueeze(
+                    1
+                ) + noise * batch_var.unsqueeze(1)
 
                 # Force the first sample to be the current mean (Zero noise)
                 candidates[:, 0] = batch_mean
 
-                # Evaluate candidates
                 costs = self.model.get_cost(expanded_infos, candidates)
 
-                assert isinstance(costs, torch.Tensor), f"Expected cost to be a torch.Tensor, got {type(costs)}"
-                assert costs.ndim == 2 and costs.shape[0] == current_bs and costs.shape[1] == self.num_samples, (
-                    f"Expected cost to be of shape ({current_bs}, {self.num_samples}), got {costs.shape}"
+                assert isinstance(costs, torch.Tensor), (
+                    f'Expected cost to be a torch.Tensor, got {type(costs)}'
+                )
+                assert (
+                    costs.ndim == 2
+                    and costs.shape[0] == current_bs
+                    and costs.shape[1] == self.num_samples
+                ), (
+                    f'Expected cost to be of shape ({current_bs}, {self.num_samples}), got {costs.shape}'
                 )
 
                 # Select Elites (Optional, based on topk)
                 if self.topk is not None and self.topk < self.num_samples:
                     # topk_vals: (Batch, K), topk_inds: (Batch, K)
-                    topk_vals, topk_inds = torch.topk(costs, k=self.topk, dim=1, largest=False)
+                    topk_vals, topk_inds = torch.topk(
+                        costs, k=self.topk, dim=1, largest=False
+                    )
 
                     # Gather Top-K Candidates
-                    batch_indices = torch.arange(current_bs, device=self.device).unsqueeze(1).expand(-1, self.topk)
+                    batch_indices = (
+                        torch.arange(current_bs, device=self.device)
+                        .unsqueeze(1)
+                        .expand(-1, self.topk)
+                    )
                     # (Batch, K, Horizon, Dim)
                     relevant_candidates = candidates[batch_indices, topk_inds]
                     relevant_costs = topk_vals
@@ -184,12 +219,16 @@ class MPPISolver:
                 # Stabilize softmax by subtracting min cost
                 min_cost = relevant_costs.min(dim=1, keepdim=True)[0]
                 scaled_costs = relevant_costs - min_cost
-                weights = torch.softmax(-scaled_costs / self.temperature, dim=1)  # (Batch, K)
+                weights = torch.softmax(
+                    -scaled_costs / self.temperature, dim=1
+                )  # (Batch, K)
 
                 # Update Mean: weighted sum of candidates
                 # Reshape weights for broadcasting: (Batch, K, 1, 1)
                 weights_expanded = weights.unsqueeze(-1).unsqueeze(-1)
-                batch_mean = (weights_expanded * relevant_candidates).sum(dim=1)
+                batch_mean = (weights_expanded * relevant_candidates).sum(
+                    dim=1
+                )
 
                 # Store average cost of the utilized samples for logging
                 final_batch_cost = relevant_costs.mean(dim=1).cpu().tolist()
@@ -199,11 +238,11 @@ class MPPISolver:
             # We do not update var in standard MPPI
 
             # Store history/metadata
-            outputs["costs"].extend(final_batch_cost)
+            outputs['costs'].extend(final_batch_cost)
 
-        outputs["actions"] = mean.detach().cpu()
-        outputs["mean"] = [mean.detach().cpu()]
-        outputs["var"] = [var.detach().cpu()]
+        outputs['actions'] = mean.detach().cpu()
+        outputs['mean'] = [mean.detach().cpu()]
+        outputs['var'] = [var.detach().cpu()]
 
-        print(f"MPPI solve time: {time.time() - start_time:.4f} seconds")
+        print(f'MPPI solve time: {time.time() - start_time:.4f} seconds')
         return outputs
