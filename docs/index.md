@@ -66,21 +66,22 @@ from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
 
-world = swm.World('swm/PushT-v1', num_envs=8)
+world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(64, 64))
 world.set_policy(your_expert_policy)
 
-world.record_dataset(dataset_name='pusht_demo',
-                     episodes=100,
-                     seed=0,
-                     options={"variation":["all"],
-                })
+world.collect(
+    'data/pusht_demo.h5',
+    episodes=100,
+    seed=0,
+    options={'variation': ['all']},
+)
 
 # ... train your world model with pusht_demo...
 world_model = ... # your world-model implementing get_cost
 
 # evaluation
 dataset = HDF5Dataset(
-    name='pusht_demo',
+    'data/pusht_demo.h5',
     frameskip=1,
     num_steps=16,
     keys_to_load=['pixels', 'action', 'state']

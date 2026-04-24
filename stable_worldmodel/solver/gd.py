@@ -95,16 +95,16 @@ class GradientSolver(torch.nn.Module):
         """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action(self, actions: torch.Tensor | None = None) -> None:
+    def init_action(self, n_envs: int, actions: torch.Tensor | None = None) -> None:
         """Initialize the action tensor for optimization."""
         if actions is None:
-            actions = torch.zeros((self._n_envs, 0, self.action_dim))
+            actions = torch.zeros((n_envs, 0, self.action_dim))
 
         # fill remaining action
         remaining = self.horizon - actions.shape[1]
 
         if remaining > 0:
-            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
+            new_actions = torch.zeros(n_envs, remaining, self.action_dim)
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
         actions = actions.unsqueeze(1).repeat_interleave(
@@ -119,10 +119,12 @@ class GradientSolver(torch.nn.Module):
             * self.var_scale
         )  # add small noise to all samples except the first one
 
-        # reset actions
-        if hasattr(self, 'init'):
+        # reset actions — re-register when shape differs (batch size may vary across calls)
+        if hasattr(self, 'init') and self.init.shape == actions.shape:
             self.init.copy_(actions)
         else:
+            if 'init' in self._parameters:
+                del self._parameters['init']
             self.register_parameter('init', torch.nn.Parameter(actions))
 
     def solve(
@@ -135,14 +137,16 @@ class GradientSolver(torch.nn.Module):
             'actions': None,
         }
 
+        # Batch size is taken from info_dict so callers can solve for a subset of envs
+        total_envs = len(next(iter(info_dict.values())))
+
         with torch.no_grad():
-            self.init_action(init_action)
+            self.init_action(total_envs, init_action)
 
         # Determine batch size (default to all envs if not specified which can cause memory issues)
         batch_size = (
-            self.batch_size if self.batch_size is not None else self.n_envs
+            self.batch_size if self.batch_size is not None else total_envs
         )
-        total_envs = self.n_envs
 
         # Lists to hold results from each batch to be concatenated later
         batch_top_actions_list = []

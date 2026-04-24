@@ -703,7 +703,6 @@ class RoboCasa(gym.Env):
             goal_eef_pos = None
             success = False
 
-        # Always include these keys in info for consistency with StackedWrapper
         info['goal'] = self._goal
         info['goal_eef_pos'] = self._goal_eef_pos
         info['goal_sampling_success'] = self._goal_sampling_success

@@ -77,16 +77,16 @@ class CEMSolver:
         return self.solve(*args, **kwargs)
 
     def init_action_distrib(
-        self, actions: torch.Tensor | None = None
+        self, n_envs: int, actions: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Initialize the action distribution parameters (mean and variance)."""
-        var = self.var_scale * torch.ones([self.n_envs, self.horizon, self.action_dim])
-        mean = torch.zeros([self.n_envs, 0, self.action_dim]) if actions is None else actions
+        var = self.var_scale * torch.ones([n_envs, self.horizon, self.action_dim])
+        mean = torch.zeros([n_envs, 0, self.action_dim]) if actions is None else actions
 
         remaining = self.horizon - mean.shape[1]
         if remaining > 0:
             device = mean.device
-            new_mean = torch.zeros([self.n_envs, remaining, self.action_dim])
+            new_mean = torch.zeros([n_envs, remaining, self.action_dim])
             mean = torch.cat([mean, new_mean], dim=1).to(device)
 
         return mean, var
@@ -103,12 +103,13 @@ class CEMSolver:
             "var": [],  # History of vars
         }
 
+        # Batch size is taken from info_dict so callers can solve for a subset of envs
+        total_envs = len(next(iter(info_dict.values())))
+
         # -- initialize the action distribution globally
-        mean, var = self.init_action_distrib(init_action)
+        mean, var = self.init_action_distrib(total_envs, init_action)
         mean = mean.to(self.device)
         var = var.to(self.device)
-
-        total_envs = self.n_envs
 
         # --- Iterate over batches ---
         for start_idx in range(0, total_envs, self.batch_size):

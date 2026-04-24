@@ -123,6 +123,7 @@ class BasePolicy:
 
         Applies preprocessing (via `self.process`) and transformations (via `self.transform`)
         to observation data. Used by subclasses like FeedForwardPolicy and WorldModelPolicy.
+        Returns a new dict; the input is not mutated.
 
         Args:
             info_dict: Raw observation dictionary from the environment.
@@ -133,6 +134,7 @@ class BasePolicy:
         Raises:
             ValueError: If an expected numpy array is missing for processing.
         """
+        out = {}
         for k, v in info_dict.items():
             is_numpy = isinstance(v, (np.ndarray | np.generic))
 
@@ -176,9 +178,9 @@ class BasePolicy:
             if is_numpy and v.dtype.kind not in 'USO':
                 v = torch.from_numpy(v)
 
-            info_dict[k] = v
+            out[k] = v
 
-        return info_dict
+        return out
 
 
 class RandomPolicy(BasePolicy):
@@ -350,12 +352,9 @@ class WorldModelPolicy(BasePolicy):
         self.type = 'world_model'
         self.cfg = config
         self.solver = solver
-        self.action_buffer: deque[torch.Tensor] = deque(
-            maxlen=self.flatten_receding_horizon
-        )
         self.process = process or {}
         self.transform = transform or {}
-        self._action_buffer: deque[torch.Tensor] | None = None
+        self._action_buffer: list[deque[torch.Tensor]] | None = None
         self._next_init: torch.Tensor | None = None
 
     @property
@@ -374,7 +373,9 @@ class WorldModelPolicy(BasePolicy):
         self.solver.configure(
             action_space=env.action_space, n_envs=n_envs, config=self.cfg
         )
-        self._action_buffer = deque(maxlen=self.flatten_receding_horizon)
+        self._action_buffer = [
+            deque(maxlen=self.flatten_receding_horizon) for _ in range(n_envs)
+        ]
 
         assert isinstance(self.solver, Solver), (
             'Solver must implement the Solver protocol'
@@ -395,33 +396,79 @@ class WorldModelPolicy(BasePolicy):
         assert 'goal' in info_dict, "'goal' must be provided in info_dict"
 
         info_dict = self._prepare_info(info_dict)
+        n_envs = self.env.num_envs
 
-        # need to replan if action buffer is empty
-        if len(self._action_buffer) == 0:
-            outputs = self.solver(info_dict, init_action=self._next_init)
+        needs_flush = info_dict.pop('_needs_flush', None)
+        if needs_flush is not None:
+            for i in range(n_envs):
+                if needs_flush[i]:
+                    self._action_buffer[i].clear()
+                    if self._next_init is not None:
+                        self._next_init[i] = 0
 
-            actions = outputs['actions']  # (num_envs, horizon, action_dim)
+        terminated = info_dict.get('terminated')
+        dead = np.asarray(terminated, dtype=bool) if terminated is not None else np.zeros(n_envs, dtype=bool)
+
+        replan_idx = [
+            i for i in range(n_envs)
+            if len(self._action_buffer[i]) == 0 and not dead[i]
+        ]
+
+        if replan_idx:
+            idx_tensor = torch.as_tensor(replan_idx, dtype=torch.long)
+            sliced = {}
+            for k, v in info_dict.items():
+                if torch.is_tensor(v):
+                    sliced[k] = v[idx_tensor]
+                elif isinstance(v, np.ndarray):
+                    sliced[k] = v[replan_idx]
+                elif isinstance(v, list):
+                    sliced[k] = [v[i] for i in replan_idx]
+                else:
+                    sliced[k] = v
+
+            sliced_init = (
+                self._next_init[idx_tensor]
+                if self._next_init is not None
+                else None
+            )
+
+            outputs = self.solver(sliced, init_action=sliced_init)
+
+            actions = outputs['actions']
             keep_horizon = self.cfg.receding_horizon
             plan = actions[:, :keep_horizon]
             rest = actions[:, keep_horizon:]
-            self._next_init = rest if self.cfg.warm_start else None
 
-            # frameskip back to timestep
+            if self.cfg.warm_start and rest.shape[1] > 0:
+                if self._next_init is None:
+                    self._next_init = torch.zeros(
+                        n_envs, rest.shape[1], rest.shape[2], dtype=rest.dtype
+                    )
+                self._next_init[idx_tensor] = rest
+            elif not self.cfg.warm_start:
+                self._next_init = None
+
             plan = plan.reshape(
-                self.env.num_envs, self.flatten_receding_horizon, -1
+                len(replan_idx), self.flatten_receding_horizon, -1
             )
 
-            self._action_buffer.extend(plan.transpose(0, 1))
+            for row, env_i in enumerate(replan_idx):
+                self._action_buffer[env_i].extend(plan[row])
 
-        action = self._action_buffer.popleft()
+        action_dim = self.env.single_action_space.shape[-1]
+        action = torch.full((n_envs, action_dim), float('nan'))
+        for i in range(n_envs):
+            if not dead[i]:
+                action[i] = self._action_buffer[i].popleft()
+
         action = action.reshape(*self.env.action_space.shape)
         action = action.numpy()
 
-        # post-process action
         if 'action' in self.process:
             action = self.process['action'].inverse_transform(action)
 
-        return action  # (num_envs, action_dim)
+        return action
 
 
 def _load_model_with_attribute(run_name, attribute_name, cache_dir=None):

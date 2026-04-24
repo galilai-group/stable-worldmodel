@@ -69,7 +69,7 @@ def test_cem_solver_init_action_distrib():
     config = PlanConfig(horizon=5, receding_horizon=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
 
-    mean, var = solver.init_action_distrib()
+    mean, var = solver.init_action_distrib(2)
     assert mean.shape == (2, 5, 3)
     assert var.shape == (2, 5, 3)
 
@@ -83,7 +83,7 @@ def test_cem_solver_init_action_distrib_with_init():
     solver.configure(action_space=action_space, n_envs=2, config=config)
 
     init_actions = torch.randn(2, 2, 3)
-    mean, var = solver.init_action_distrib(init_actions)
+    mean, var = solver.init_action_distrib(2, init_actions)
     assert mean.shape == (2, 5, 3)  # Padded to horizon
 
 
@@ -144,7 +144,7 @@ def test_icem_solver_init_action_distrib():
     config = PlanConfig(horizon=5, receding_horizon=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
 
-    mean, var = solver.init_action_distrib()
+    mean, var = solver.init_action_distrib(2)
     assert mean.shape == (2, 5, 3)
     assert var.shape == (2, 5, 3)
 
@@ -216,7 +216,7 @@ def test_mppi_solver_init_action_distrib():
     config = PlanConfig(horizon=5, receding_horizon=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
 
-    mean, var = solver.init_action_distrib()
+    mean, var = solver.init_action_distrib(2)
     assert mean.shape == (2, 5, 3)
     assert var.shape == (2, 5, 3)
 
@@ -273,7 +273,7 @@ def test_gradient_solver_init_action():
     config = PlanConfig(horizon=5, receding_horizon=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
 
-    solver.init_action()
+    solver.init_action(2)
     assert hasattr(solver, "init")
     assert solver.init.shape == (2, 3, 5, 3)  # (n_envs, num_samples, horizon, action_dim)
 

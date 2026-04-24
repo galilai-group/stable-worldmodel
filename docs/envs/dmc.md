@@ -624,7 +624,7 @@ world.set_policy(
     )
 )
 
-world.record_video('./', max_steps=500)
+world.evaluate(episodes=4, seed=0, video='./')
 ```
 
 ### API Reference

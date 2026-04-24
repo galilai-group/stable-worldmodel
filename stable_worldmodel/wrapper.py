@@ -1,19 +1,11 @@
-from copy import deepcopy
 import re
 import time
-from collections import deque
 from collections.abc import Callable, Iterable
 from typing import Any, Sequence
 
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces.utils import is_space_dtype_shape_equiv
-from gymnasium.vector import VectorWrapper
-from gymnasium.vector.utils import (
-    batch_differing_spaces,
-    batch_space,
-)
 
 from stable_worldmodel.utils import get_in
 
@@ -496,142 +488,6 @@ class ResizeGoalWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
-class StackedWrapper(gym.Wrapper):
-    """Stacks specified key(s) in the info dict over the last k steps."""
-
-    def __init__(
-        self,
-        env: gym.Env,
-        key: str | list[str],
-        history_size: int = 1,
-        frameskip: int = 1,
-    ):
-        """Initialize the wrapper.
-
-        Args:
-            env: The environment to wrap.
-            key: Key(s) in info dict to stack.
-            history_size: Number of steps to stack.
-            frameskip: Number of steps to skip between stacked frames.
-        """
-        super().__init__(env)
-        self.keys = [key] if isinstance(key, str) else key
-        self.history_size = history_size
-        self.frameskip = frameskip
-        self.buffers: dict[str, deque[Any]] = {
-            k: deque([], maxlen=self.capacity) for k in self.keys
-        }
-
-    @property
-    def capacity(self) -> int:
-        """Total capacity of the buffers in environment steps."""
-        return self.history_size * self.frameskip
-
-    def get_buffer_data(self, key: str) -> Any:
-        """Retrieve stacked data from the buffer for a given key.
-
-        Args:
-            key: Key to retrieve data for.
-
-        Returns:
-            Stacked data as a numpy array or torch tensor.
-
-        Raises:
-            AssertionError: If buffer length is incorrect.
-        """
-        buffer = self.buffers[key]
-        if not buffer:
-            return []
-
-        new_info = list(buffer)[:: -self.frameskip][::-1]
-        assert len(new_info) == self.history_size, (
-            f'Buffer for key {key} has incorrect length.'
-        )
-
-        return self._stack_elements(new_info)
-
-    def _stack_elements(self, elements: list[Any]) -> Any:
-        """Stack elements based on their type.
-
-        Args:
-            elements: List of elements to stack.
-
-        Returns:
-            Stacked collection of elements.
-        """
-        if not elements:
-            return elements
-
-        first_elem = elements[0]
-
-        if torch.is_tensor(first_elem):
-            return torch.stack(elements)
-        elif isinstance(first_elem, np.ndarray):
-            return np.stack(elements)
-        elif isinstance(first_elem, (int, float, bool)) or issubclass(
-            type(first_elem), np.number
-        ):
-            return np.array(elements)
-        else:
-            return elements
-
-    def init_buffer(self, info: dict) -> dict:
-        """Initialize buffers with data from the current info dict.
-
-        Args:
-            info: Current environment info dict.
-
-        Returns:
-            Updated info dict with stacked data.
-
-        Raises:
-            AssertionError: If a required key is missing from info.
-        """
-        for k in self.keys:
-            assert k in info, (
-                f'Key {k} not found in info dict during buffer initialization.'
-            )
-            data = info[k]
-            buffer = self.buffers[k]
-            buffer.clear()
-            buffer.extend([data] * self.capacity)
-            info[k] = self.get_buffer_data(k)
-        return info
-
-    def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:
-        """Reset environment and initialize stacking buffers.
-
-        Args:
-            *args: Positional arguments for reset.
-            **kwargs: Keyword arguments for reset.
-
-        Returns:
-            Standard Gymnasium reset results.
-        """
-        obs, info = self.env.reset(*args, **kwargs)
-        info = self.init_buffer(info)
-        return obs, info
-
-    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
-        """Perform step and update stacking buffers.
-
-        Args:
-            action: Action to perform.
-
-        Returns:
-            Standard Gymnasium step results.
-
-        Raises:
-            AssertionError: If a required key is missing from info.
-        """
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        for k in self.keys:
-            assert k in info, f'Key {k} not found in info dict during step.'
-            self.buffers[k].append(info[k])
-            info[k] = self.get_buffer_data(k)
-        return obs, reward, terminated, truncated, info
-
-
 class MegaWrapper(gym.Wrapper):
     """Combines multiple wrappers for comprehensive environment preprocessing."""
 
@@ -643,8 +499,6 @@ class MegaWrapper(gym.Wrapper):
         goal_transform: Callable[[Any], Any] | None = None,
         required_keys: Iterable[str] | None = None,
         separate_goal: bool = True,
-        history_size: int = 1,
-        frame_skip: int = 1,
     ):
         """Initialize the mega wrapper pipeline.
 
@@ -655,226 +509,19 @@ class MegaWrapper(gym.Wrapper):
             goal_transform: Optional transform for goal images.
             required_keys: Keys that must be present in info dict.
             separate_goal: Whether to handle goal separately.
-            history_size: Number of frames to stack.
-            frame_skip: Number of frames to skip for stacking.
         """
         super().__init__(env)
 
         req_keys = list(required_keys) if required_keys is not None else []
         req_keys.append(r'^pixels(?:\..*)?$')
 
-        # Build pipeline
         # this adds `pixels` key to info with optional transform
         env = AddPixelsWrapper(env, image_shape, pixels_transform)
         # this removes the info output, everything is in observation!
         env = EverythingToInfoWrapper(env)
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, req_keys)
-        # check goal is provided
-        # env = EnsureGoalInfoWrapper(env, check_reset=separate_goal, check_step=separate_goal)
         env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
-        # We will wrap with StackedWrapper dynamically after we know the keys
         self.env = env
-        self._history_size = history_size
-        self._frameskip = frame_skip
-        self._stack_initialized = False
 
-    def _init_stack(self, info: dict) -> None:
-        """Attach a StackedWrapper around self.env dynamically.
-
-        Args:
-            info: Current environment info dict to determine keys to stack.
-        """
-        keys = list(info.keys())
-        self.env = StackedWrapper(
-            self.env, keys, self._history_size, self._frameskip
-        )
-        self._stack_initialized = True
-        self.env.init_buffer(info)
-
-    def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:
-        """Reset environment and initialize stack if needed.
-
-        Args:
-            *args: Positional arguments for reset.
-            **kwargs: Keyword arguments for reset.
-
-        Returns:
-            Standard Gymnasium reset results.
-        """
-        obs, info = self.env.reset(*args, **kwargs)
-
-        if not self._stack_initialized:
-            self._init_stack(info)
-
-        return obs, info
-
-    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
-        """Perform environment step.
-
-        Args:
-            action: Action to perform.
-
-        Returns:
-            Standard Gymnasium step results.
-
-        Raises:
-            RuntimeError: If reset() has not been called yet.
-        """
-        if not self._stack_initialized:
-            raise RuntimeError(
-                'StackedWrapper not yet initialized — call reset() first.'
-            )
-        return self.env.step(action)
-
-
-class SyncWorld(gym.vector.SyncVectorEnv):
-    """Synchronous vectorized environment with per-environment options support.
-
-    Extends SyncVectorEnv to allow passing different options to each
-    sub-environment during reset, enabling per-environment variations
-    and configurations.
-
-    This is useful for scenarios where each environment in the vector
-    needs different initialization parameters, such as different
-    variation values or seeds.
-
-    Example:
-        >>> env_fns = [lambda: gym.make("MyEnv-v0") for _ in range(3)]
-        >>> vec_env = SyncWorld(env_fns)
-        >>> # Reset with per-env options
-        >>> options = [{"variation": ["color"]}, {"variation": ["size"]}, None]
-        >>> obs, infos = vec_env.reset(options=options)
-    """
-
-    def reset(
-        self,
-        *,
-        seed: int | list[int | None] | None = None,
-        options: dict[str, Any] | list[dict[str, Any] | None] | None = None,
-    ):
-        """Reset all environments with optional per-environment configuration.
-
-        Args:
-            seed: Random seed(s) for reproducibility. Can be:
-                - None: No seeding
-                - int: Base seed, each env gets seed + env_index
-                - list[int | None]: Explicit seed per environment
-            options: Reset options. Can be:
-                - None: No options for any environment
-                - dict: Same options applied to all environments
-                - list[dict | None]: Per-environment options (must match num_envs)
-
-        Returns:
-            A tuple of (observations, infos) where observations is the
-            concatenated observations from all environments and infos
-            is a dictionary with batched info from each environment.
-
-        Raises:
-            AssertionError: If options list length doesn't match num_envs.
-        """
-
-        if seed is None:
-            seed = [None for _ in range(self.num_envs)]
-        elif isinstance(seed, int):
-            seed = [seed + i for i in range(self.num_envs)]
-
-        if options is None:
-            options_list = [None for _ in range(self.num_envs)]
-        elif isinstance(options, list):
-            assert len(options) == self.num_envs, (
-                f'options list length must match num_envs={self.num_envs}'
-            )
-            options_list = options
-        else:
-            options_list = [options for _ in range(self.num_envs)]
-
-        self._terminations = np.zeros((self.num_envs,), dtype=np.bool_)
-        self._truncations = np.zeros((self.num_envs,), dtype=np.bool_)
-        self._autoreset_envs = np.zeros((self.num_envs,), dtype=np.bool_)
-
-        infos = {}
-        for i, (env, single_seed, single_options) in enumerate(
-            zip(self.envs, seed, options_list, strict=True)
-        ):
-            self._env_obs[i], env_info = env.reset(
-                seed=single_seed, options=single_options
-            )
-            infos = self._add_info(infos, env_info, i)
-
-        self._observations = gym.vector.utils.concatenate(
-            self.single_observation_space, self._env_obs, self._observations
-        )
-
-        return (
-            deepcopy(self._observations) if self.copy else self._observations
-        ), infos
-
-
-class VariationWrapper(VectorWrapper):
-    """Manages variation spaces for vectorized environments."""
-
-    def __init__(
-        self,
-        env: gym.vector.VectorEnv,
-        variation_mode: str | gym.Space = 'same',
-    ):
-        """Initialize the variation wrapper.
-
-        Args:
-            env: The vectorized environment to wrap.
-            variation_mode: Either 'same', 'different', or a custom Gymnasium space.
-
-        Raises:
-            ValueError: If variation_mode is invalid or sub-environments are incompatible.
-        """
-        super().__init__(env)
-
-        base_env = env.envs[0].unwrapped
-
-        if not hasattr(base_env, 'variation_space'):
-            self.single_variation_space: gym.Space | None = None
-            self.variation_space: gym.Space | None = None
-            return
-
-        if variation_mode == 'same':
-            self.single_variation_space = base_env.variation_space
-            self.variation_space = batch_space(
-                self.single_variation_space, self.num_envs
-            )
-
-        elif variation_mode == 'different':
-            self.single_variation_space = base_env.variation_space
-            self.variation_space = batch_differing_spaces(
-                [sub_env.unwrapped.variation_space for sub_env in env.envs]
-            )
-
-        else:
-            raise ValueError(
-                f"Invalid `variation_mode`, expected: 'same' or 'different' or tuple of single and batch variation space, actual got {variation_mode}"
-            )
-
-        # check sub-environment obs and action spaces
-        for sub_env in env.envs:
-            if variation_mode == 'same':
-                if not is_space_dtype_shape_equiv(
-                    sub_env.unwrapped.observation_space,
-                    self.single_observation_space,
-                ):
-                    raise ValueError(
-                        f"VariationWrapper(..., variation_mode='same') however the sub-environments observation spaces do not share a common shape and dtype, single_observation_space={self.single_observation_space}, sub-environment observation_space={sub_env.observation_space}"
-                    )
-            else:
-                if not is_space_dtype_shape_equiv(
-                    sub_env.unwrapped.observation_space,
-                    self.single_observation_space,
-                ):
-                    raise ValueError(
-                        f"VariationWrapper(..., variation_mode='different' or custom space) however the sub-environments observation spaces do not share a common shape and dtype, single_observation_space={self.single_observation_space}, sub-environment observation_space={sub_env.observation_space}"
-                    )
-
-    @property
-    def envs(self) -> list[gym.Env] | None:
-        """Access sub-environments if available."""
-        return getattr(self.env, 'envs', None)

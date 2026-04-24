@@ -24,7 +24,7 @@ from transformers import AutoModel, AutoModelForImageClassification
 
 import stable_worldmodel as swm
 from stable_worldmodel.wm.prejepa.module import CausalPredictor, Embedder
-from stable_worldmodel.wrapper import MegaWrapper, VariationWrapper
+from stable_worldmodel.wrapper import MegaWrapper
 
 from utils import (
     LeWMAdapter,
@@ -67,8 +67,6 @@ def get_env(cfg):
                 image_shape=(cfg.image_size, cfg.image_size),
                 pixels_transform=None,
                 goal_transform=None,
-                history_size=cfg.env.history_size,
-                frame_skip=cfg.env.frame_skip,
             )
         ]
         + ([]),
@@ -76,7 +74,6 @@ def get_env(cfg):
         render_mode='rgb_array',
     )
 
-    env = VariationWrapper(env)
     env.unwrapped.autoreset_mode = gym.vector.AutoresetMode.DISABLED
 
     # create the transform

@@ -136,11 +136,7 @@ policy = WeakPolicy(dist_constraint=50)  # Tighter constraint for more interacti
 world.set_policy(policy)
 
 # Collect data
-world.record_dataset(
-    dataset_name='pusht_weak_expert',
-    episodes=100,
-    seed=42
-)
+world.collect('data/pusht_weak_expert.h5', episodes=100, seed=42)
 ```
 
 ### Discrete Action Space
