@@ -36,6 +36,7 @@ Quick start::
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from copy import deepcopy
 from functools import partial
 from pathlib import Path
@@ -100,9 +101,9 @@ class World:
         max_episode_steps: int = 100,
         goal_conditioned: bool = True,
         extra_wrappers: list | None = None,
-        image_transform=None,
-        goal_transform=None,
-        **kwargs,
+        image_transform: Callable | None = None,
+        goal_transform: Callable | None = None,
+        **kwargs: Any,
     ):
         wrappers = [
             partial(
