@@ -121,7 +121,7 @@ def test_lerobot_adapter_goal_dataset_compatibility():
 def test_lerobot_adapter_pusht_matches_native_swm_dataset(tmp_path):
     """Hub `lerobot/pusht` via LeRobotAdapter matches native `swm/PushT-v1` HDF5 layout.
 
-    Records PushT with `World.record_dataset` (the supported path) at the same
+    Records PushT with `World.collect` (the supported path) at the same
     resolution as the Hub dataset, then checks that `__getitem__` batches agree
     on tensor types and shapes for `pixels` (T, C, H, W) and `action` (T, D).
     Trajectories differ (different sources); this test locks the *contract*.
@@ -142,15 +142,13 @@ def test_lerobot_adapter_pusht_matches_native_swm_dataset(tmp_path):
         num_envs=2,
         image_shape=(H, W),
         max_episode_steps=40,
-        verbose=0,
     )
     world.set_policy(RandomPolicy())
     dataset_name = 'native_pusht_lerobot_compare'
-    world.record_dataset(
-        dataset_name=dataset_name,
+    world.collect(
+        tmp_path / 'datasets' / f'{dataset_name}.h5',
         episodes=3,
         seed=123,
-        cache_dir=tmp_path,
     )
     world.envs.close()
 
