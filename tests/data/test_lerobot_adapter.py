@@ -176,4 +176,3 @@ def test_lerobot_adapter_pusht_matches_native_swm_dataset(tmp_path):
     c = hub_item['pixels'].shape[1]
     assert c in (1, 3)
     assert native_item['pixels'].shape[1] == c
-

@@ -1,7 +1,8 @@
 """Extended Gymnasium spaces with state tracking and constraint support."""
 
 import time
-from typing import Any, Callable, Generator, Iterable, Sequence
+from typing import Any
+from collections.abc import Callable, Generator, Iterable, Sequence
 
 from gymnasium import spaces
 from loguru import logger as logging

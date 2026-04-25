@@ -37,7 +37,7 @@ def test_discrete_space_vanilla_sample():
 
 
 def test_discrete_space_vanilla_empty():
-    with pytest.raises(AssertionError, match="have to be positive"):
+    with pytest.raises(AssertionError, match='have to be positive'):
         spaces.Discrete(0)
 
 
@@ -114,7 +114,7 @@ def test_discrete_space_constraint_function_warn_sample():
     constraint_fn = MagicMock(return_value=False)
     space = spaces.Discrete(5, init_value=2, constrain_fn=constraint_fn)
 
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         with pytest.raises(RuntimeError):
             space.sample(max_tries=1, warn_after_s=0.0)
         mock_warning.assert_called()
@@ -132,7 +132,9 @@ def test_discrete_space_constraint_function_pass():
 
 def test_discrete_space_constraint_real_logic():
     """Test with actual constraint logic (e.g., only even numbers)."""
-    space = spaces.Discrete(10, init_value=2, constrain_fn=lambda x: x % 2 == 0)
+    space = spaces.Discrete(
+        10, init_value=2, constrain_fn=lambda x: x % 2 == 0
+    )
     sample = space.sample()
     assert sample % 2 == 0
     assert space.contains(sample)
@@ -149,7 +151,9 @@ def test_discrete_space_constraint_rejection_succeeds():
 
 def test_discrete_space_sample_without_setting_value_constraint():
     """Test set_value=False with constraint function."""
-    space = spaces.Discrete(10, init_value=2, constrain_fn=lambda x: x % 2 == 0)
+    space = spaces.Discrete(
+        10, init_value=2, constrain_fn=lambda x: x % 2 == 0
+    )
     original_value = space.value
     sample = space.sample(set_value=False)
     assert space.value == original_value
@@ -159,7 +163,7 @@ def test_discrete_space_sample_without_setting_value_constraint():
 def test_discrete_space_check_warning_on_constraint_fail():
     """Test that check() logs warning when constraint fails."""
     space = spaces.Discrete(5, init_value=2, constrain_fn=lambda x: False)
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         result = space.check()
         assert not result
         mock_warning.assert_called_once()
@@ -167,7 +171,9 @@ def test_discrete_space_check_warning_on_constraint_fail():
 
 def test_discrete_space_init_value_violates_constraint():
     """Test behavior when init_value doesn't satisfy constraint."""
-    space = spaces.Discrete(10, init_value=1, constrain_fn=lambda x: x % 2 == 0)
+    space = spaces.Discrete(
+        10, init_value=1, constrain_fn=lambda x: x % 2 == 0
+    )
     assert not space.contains(space.value)
     assert not space.check()
 
@@ -199,9 +205,15 @@ def test_multidiscrete_space_vanilla_contains():
     space = spaces.MultiDiscrete([3, 4, 5])
     assert space.contains(np.array([0, 0, 0]))
     assert space.contains(np.array([2, 3, 4]))
-    assert not space.contains(np.array([3, 0, 0]))  # First element out of bounds
-    assert not space.contains(np.array([0, 4, 0]))  # Second element out of bounds
-    assert not space.contains(np.array([0, 0, 5]))  # Third element out of bounds
+    assert not space.contains(
+        np.array([3, 0, 0])
+    )  # First element out of bounds
+    assert not space.contains(
+        np.array([0, 4, 0])
+    )  # Second element out of bounds
+    assert not space.contains(
+        np.array([0, 0, 5])
+    )  # Third element out of bounds
     assert not space.contains(np.array([-1, 0, 0]))  # Negative value
 
 
@@ -272,7 +284,9 @@ def test_multidiscrete_space_sample_sets_value():
 
 def test_multidiscrete_space_constraint_function_fails():
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
+    space = spaces.MultiDiscrete(
+        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
+    )
     assert not space.check()
     assert not space.contains(np.array([0, 0, 0]))
     assert not space.contains(np.array([2, 3, 4]))
@@ -280,7 +294,9 @@ def test_multidiscrete_space_constraint_function_fails():
 
 def test_multidiscrete_space_constraint_function_fail_sample():
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
+    space = spaces.MultiDiscrete(
+        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
+    )
 
     with pytest.raises(RuntimeError):
         space.sample(max_tries=3)
@@ -288,9 +304,11 @@ def test_multidiscrete_space_constraint_function_fail_sample():
 
 def test_multidiscrete_space_constraint_function_warn_sample():
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
+    space = spaces.MultiDiscrete(
+        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
+    )
 
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         with pytest.raises(RuntimeError):
             space.sample(max_tries=1, warn_after_s=0.0)
         mock_warning.assert_called()
@@ -298,7 +316,9 @@ def test_multidiscrete_space_constraint_function_warn_sample():
 
 def test_multidiscrete_space_constraint_function_pass():
     constraint_fn = MagicMock(return_value=True)
-    space = spaces.MultiDiscrete([3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn)
+    space = spaces.MultiDiscrete(
+        [3, 4, 5], init_value=np.array([1, 2, 3]), constrain_fn=constraint_fn
+    )
     assert space.check()
     assert space.contains(np.array([0, 0, 0]))
     assert space.contains(np.array([2, 3, 4]))
@@ -321,7 +341,11 @@ def test_multidiscrete_space_constraint_real_logic():
 def test_multidiscrete_space_constraint_rejection_succeeds():
     """Test that rejection sampling eventually succeeds."""
     # Only accept arrays where first element >= 2
-    space = spaces.MultiDiscrete([5, 5, 5], init_value=np.array([2, 1, 1]), constrain_fn=lambda x: x[0] >= 2)
+    space = spaces.MultiDiscrete(
+        [5, 5, 5],
+        init_value=np.array([2, 1, 1]),
+        constrain_fn=lambda x: x[0] >= 2,
+    )
     for _ in range(10):
         sample = space.sample()
         assert sample[0] >= 2
@@ -329,7 +353,11 @@ def test_multidiscrete_space_constraint_rejection_succeeds():
 
 def test_multidiscrete_space_sample_without_setting_value_constraint():
     """Test set_value=False with constraint function."""
-    space = spaces.MultiDiscrete([10, 10], init_value=np.array([2, 4]), constrain_fn=lambda x: np.sum(x) % 2 == 0)
+    space = spaces.MultiDiscrete(
+        [10, 10],
+        init_value=np.array([2, 4]),
+        constrain_fn=lambda x: np.sum(x) % 2 == 0,
+    )
     original_value = space.value.copy()
     sample = space.sample(set_value=False)
     assert np.array_equal(space.value, original_value)
@@ -338,8 +366,10 @@ def test_multidiscrete_space_sample_without_setting_value_constraint():
 
 def test_multidiscrete_space_check_warning_on_constraint_fail():
     """Test that check() logs warning when constraint fails."""
-    space = spaces.MultiDiscrete([5, 5], init_value=np.array([2, 2]), constrain_fn=lambda x: False)
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    space = spaces.MultiDiscrete(
+        [5, 5], init_value=np.array([2, 2]), constrain_fn=lambda x: False
+    )
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         result = space.check()
         assert not result
         mock_warning.assert_called_once()
@@ -347,7 +377,11 @@ def test_multidiscrete_space_check_warning_on_constraint_fail():
 
 def test_multidiscrete_space_init_value_violates_constraint():
     """Test behavior when init_value doesn't satisfy constraint."""
-    space = spaces.MultiDiscrete([10, 10], init_value=np.array([1, 2]), constrain_fn=lambda x: np.sum(x) % 2 == 0)
+    space = spaces.MultiDiscrete(
+        [10, 10],
+        init_value=np.array([1, 2]),
+        constrain_fn=lambda x: np.sum(x) % 2 == 0,
+    )
     assert not space.contains(space.value)
     assert not space.check()
 
@@ -382,8 +416,12 @@ def test_box_space_vanilla_properties():
     space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
     assert space.shape == (3,)
     assert space.dtype == np.float32
-    assert np.array_equal(space.low, np.array([0.0, 0.0, 0.0], dtype=np.float32))
-    assert np.array_equal(space.high, np.array([1.0, 1.0, 1.0], dtype=np.float32))
+    assert np.array_equal(
+        space.low, np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    )
+    assert np.array_equal(
+        space.high, np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    )
 
 
 def test_box_space_vanilla_contains():
@@ -421,7 +459,9 @@ def test_box_space_vanilla_reset():
 
 def test_box_space_properties():
     init_val = np.array([0.5, 0.7], dtype=np.float32)
-    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
+    )
     assert np.array_equal(space.init_value, init_val)
     assert np.array_equal(space.value, init_val)
     assert space.contains(init_val)
@@ -429,20 +469,26 @@ def test_box_space_properties():
 
 def test_box_space_check():
     init_val = np.array([0.5, 0.7], dtype=np.float32)
-    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
+    )
     assert space.check()
 
 
 def test_box_space_outbound():
     init_val = np.array([1.5, 0.7], dtype=np.float32)
-    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
+    )
     assert not space.contains(space.value)
     assert not space.check()
 
 
 def test_box_space_reset():
     init_val = np.array([0.5, 0.7], dtype=np.float32)
-    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
+    )
     space.sample()
     assert not np.array_equal(space.value, space.init_value)
     space.reset()
@@ -451,7 +497,9 @@ def test_box_space_reset():
 
 def test_box_space_sample_sets_value():
     init_val = np.array([0.5, 0.5], dtype=np.float32)
-    space = spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=0.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
+    )
     sample1 = space.sample()
     assert np.array_equal(space.value, sample1)
     space.reset()
@@ -505,7 +553,7 @@ def test_box_space_constraint_function_warn_sample():
         constrain_fn=constraint_fn,
     )
 
-    with patch("loguru.logger.warning") as mock_warning:
+    with patch('loguru.logger.warning') as mock_warning:
         with pytest.raises(RuntimeError):
             space.sample(max_tries=5, warn_after_s=0.0)
         mock_warning.assert_called()
@@ -590,7 +638,7 @@ def test_box_space_check_warning_on_constraint_fail():
         init_value=init_val,
         constrain_fn=lambda x: False,
     )
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         result = space.check()
         assert not result
         mock_warning.assert_called_once()
@@ -614,7 +662,9 @@ def test_box_space_init_value_violates_constraint():
 def test_box_space_multiple_samples():
     """Test that value updates correctly across multiple samples."""
     init_val = np.array([0.0, 0.0], dtype=np.float32)
-    space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=-1.0, high=1.0, shape=(2,), dtype=np.float32, init_value=init_val
+    )
     values = [space.sample() for _ in range(5)]
     assert np.array_equal(space.value, values[-1])
 
@@ -696,7 +746,9 @@ def test_box_space_asymmetric_bounds():
     low = np.array([0.0, -5.0, 10.0], dtype=np.float32)
     high = np.array([1.0, 5.0, 20.0], dtype=np.float32)
     init_val = np.array([0.5, 0.0, 15.0], dtype=np.float32)
-    space = spaces.Box(low=low, high=high, dtype=np.float32, init_value=init_val)
+    space = spaces.Box(
+        low=low, high=high, dtype=np.float32, init_value=init_val
+    )
 
     assert space.contains(init_val)
     sample = space.sample()
@@ -725,10 +777,14 @@ def test_rgbbox_space_vanilla_properties():
 def test_rgbbox_space_invalid_shape():
     """Test that RGBBox raises error for invalid shapes."""
     # No dimension of size 3
-    with pytest.raises(ValueError, match="shape must have a channel of size 3"):
+    with pytest.raises(
+        ValueError, match='shape must have a channel of size 3'
+    ):
         spaces.RGBBox(shape=(64, 64))
 
-    with pytest.raises(ValueError, match="shape must have a channel of size 3"):
+    with pytest.raises(
+        ValueError, match='shape must have a channel of size 3'
+    ):
         spaces.RGBBox(shape=(64, 64, 4))
 
 
@@ -846,7 +902,9 @@ def test_rgbbox_space_constraint_function():
     def not_too_dark(img):
         return np.mean(img) > 100
 
-    space = spaces.RGBBox(shape=(4, 4, 3), init_value=init_img, constrain_fn=not_too_dark)
+    space = spaces.RGBBox(
+        shape=(4, 4, 3), init_value=init_img, constrain_fn=not_too_dark
+    )
 
     assert space.check()
     assert space.contains(init_img)
@@ -936,7 +994,9 @@ def test_rgbbox_space_constraint_fail_sample():
 
     # Impossible constraint
     constraint_fn = MagicMock(return_value=False)
-    space = spaces.RGBBox(shape=(3, 3, 3), init_value=init_img, constrain_fn=constraint_fn)
+    space = spaces.RGBBox(
+        shape=(3, 3, 3), init_value=init_img, constrain_fn=constraint_fn
+    )
 
     with pytest.raises(RuntimeError):
         space.sample(max_tries=3)
@@ -974,13 +1034,13 @@ def test_dict_space_one_level_properties():
     """Test basic properties of a one-level Dict space."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
-    assert "x" in space.spaces
-    assert "y" in space.spaces
+    assert 'x' in space.spaces
+    assert 'y' in space.spaces
     assert len(space.spaces) == 2
 
 
@@ -988,90 +1048,90 @@ def test_dict_space_one_level_init_value():
     """Test init_value property for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
     init_val = space.init_value
-    assert init_val["x"] == 2
-    assert init_val["y"] == 3
+    assert init_val['x'] == 2
+    assert init_val['y'] == 3
 
 
 def test_dict_space_one_level_value():
     """Test value property for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
     val = space.value
-    assert val["x"] == 2
-    assert val["y"] == 3
+    assert val['x'] == 2
+    assert val['y'] == 3
 
 
 def test_dict_space_one_level_sampling_order_default():
     """Test default sampling order (insertion order) for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
-            "z": spaces.Discrete(5, init_value=4),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
+            'z': spaces.Discrete(5, init_value=4),
         }
     )
 
     # Should use insertion order
-    assert space._sampling_order == ["x", "y", "z"]
+    assert space._sampling_order == ['x', 'y', 'z']
 
     # sampling_order property returns set of dotted paths
     order = space.sampling_order
-    assert set(order) == {"x", "y", "z"}
-    assert order == ["x", "y", "z"]  # Insertion order
+    assert set(order) == {'x', 'y', 'z'}
+    assert order == ['x', 'y', 'z']  # Insertion order
 
 
 def test_dict_space_one_level_sampling_order_explicit():
     """Test explicit sampling order for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
-            "z": spaces.Discrete(5, init_value=4),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
+            'z': spaces.Discrete(5, init_value=4),
         },
-        sampling_order=["z", "x", "y"],
+        sampling_order=['z', 'x', 'y'],
     )
 
-    assert space._sampling_order == ["z", "x", "y"]
+    assert space._sampling_order == ['z', 'x', 'y']
 
 
 def test_dict_space_one_level_sampling_order_partial():
     """Test partial sampling order (missing keys get appended)."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
-            "z": spaces.Discrete(5, init_value=4),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
+            'z': spaces.Discrete(5, init_value=4),
         },
-        sampling_order=["z", "x"],  # Missing "y"
+        sampling_order=['z', 'x'],  # Missing "y"
     )
 
     # Should append missing keys
-    assert space._sampling_order == ["z", "x", "y"]
+    assert space._sampling_order == ['z', 'x', 'y']
 
 
 def test_dict_space_one_level_sampling_order_partial_warning():
     """Test that warning is logged for partial sampling order."""
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         space = spaces.Dict(
             {
-                "x": spaces.Discrete(5, init_value=2),
-                "y": spaces.Discrete(5, init_value=3),
+                'x': spaces.Discrete(5, init_value=2),
+                'y': spaces.Discrete(5, init_value=3),
             },
-            sampling_order=["x"],  # Missing "y"
+            sampling_order=['x'],  # Missing "y"
         )
         mock_warning.assert_called_once()
-        assert space._sampling_order == ["x", "y"]  # Verify order was fixed
+        assert space._sampling_order == ['x', 'y']  # Verify order was fixed
 
 
 def test_dict_space_one_level_sampling_order_invalid():
@@ -1079,10 +1139,10 @@ def test_dict_space_one_level_sampling_order_invalid():
     with pytest.raises(ValueError):
         spaces.Dict(
             {
-                "x": spaces.Discrete(5, init_value=2),
-                "y": spaces.Discrete(5, init_value=3),
+                'x': spaces.Discrete(5, init_value=2),
+                'y': spaces.Discrete(5, init_value=3),
             },
-            sampling_order=["x", "invalid_key"],
+            sampling_order=['x', 'invalid_key'],
         )
 
 
@@ -1090,32 +1150,32 @@ def test_dict_space_one_level_contains():
     """Test contains method for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
-    assert space.contains({"x": 2, "y": 3})
-    assert space.contains({"x": 0, "y": 4})
-    assert not space.contains({"x": 5, "y": 3})  # x out of bounds
-    assert not space.contains({"x": 2, "y": 5})  # y out of bounds
-    assert not space.contains({"x": 2})  # missing key
-    assert not space.contains("not_a_dict")  # not a dict
+    assert space.contains({'x': 2, 'y': 3})
+    assert space.contains({'x': 0, 'y': 4})
+    assert not space.contains({'x': 5, 'y': 3})  # x out of bounds
+    assert not space.contains({'x': 2, 'y': 5})  # y out of bounds
+    assert not space.contains({'x': 2})  # missing key
+    assert not space.contains('not_a_dict')  # not a dict
 
 
 def test_dict_space_one_level_sample():
     """Test sampling for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
     sample = space.sample()
     assert isinstance(sample, dict)
-    assert "x" in sample
-    assert "y" in sample
+    assert 'x' in sample
+    assert 'y' in sample
     assert space.contains(sample)
 
 
@@ -1123,8 +1183,8 @@ def test_dict_space_one_level_sample_sets_value():
     """Test that sampling updates value in one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=-1),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=-1),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
@@ -1135,41 +1195,41 @@ def test_dict_space_one_level_sample_sets_value():
     space.reset()
     sample2 = space.sample(set_value=False)
     assert space.value == space.init_value
-    assert space.value == {"x": -1, "y": 3}
+    assert space.value == {'x': -1, 'y': 3}
     assert space.value != sample2
-    assert space.value == {"x": -1, "y": 3}
+    assert space.value == {'x': -1, 'y': 3}
 
 
 def test_dict_space_one_level_reset():
     """Test reset for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
     space.sample()
     space.reset()
 
-    assert space.value == {"x": 2, "y": 3}
-    assert space["x"].value == 2
-    assert space["y"].value == 3
+    assert space.value == {'x': 2, 'y': 3}
+    assert space['x'].value == 2
+    assert space['y'].value == 3
 
 
 def test_dict_space_one_level_check():
     """Test check method for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
     assert space.check()
 
     # Manually set invalid value
-    space["x"]._value = 10
+    space['x']._value = 10
     assert not space.check()
 
 
@@ -1177,12 +1237,12 @@ def test_dict_space_one_level_check_debug():
     """Test check with debug flag."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=10),  # Out of bounds
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=10),  # Out of bounds
         }
     )
 
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         result = space.check(debug=True)
         assert not result
         mock_warning.assert_called()
@@ -1192,27 +1252,27 @@ def test_dict_space_one_level_names():
     """Test names method for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
-            "y": spaces.Discrete(5, init_value=3),
+            'x': spaces.Discrete(5, init_value=2),
+            'y': spaces.Discrete(5, init_value=3),
         }
     )
 
     names = space.names()
-    assert set(names) == {"x", "y"}
+    assert set(names) == {'x', 'y'}
 
 
 def test_dict_space_one_level_constraint_function():
     """Test constraint function for one-level Dict."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(10, init_value=2),
-            "y": spaces.Discrete(10, init_value=3),
+            'x': spaces.Discrete(10, init_value=2),
+            'y': spaces.Discrete(10, init_value=3),
         },
-        constrain_fn=lambda d: d["x"] + d["y"] < 10,
+        constrain_fn=lambda d: d['x'] + d['y'] < 10,
     )
 
-    assert space.contains({"x": 2, "y": 3})
-    assert not space.contains({"x": 8, "y": 8})
+    assert space.contains({'x': 2, 'y': 3})
+    assert not space.contains({'x': 8, 'y': 8})
 
 
 def test_dict_space_one_level_constraint_fail_sample():
@@ -1220,12 +1280,12 @@ def test_dict_space_one_level_constraint_fail_sample():
     constraint_fn = MagicMock(return_value=False)
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
+            'x': spaces.Discrete(5, init_value=2),
         },
         constrain_fn=constraint_fn,
     )
 
-    with pytest.raises(RuntimeError, match="constrain_fn not satisfied"):
+    with pytest.raises(RuntimeError, match='constrain_fn not satisfied'):
         space.sample(max_tries=3)
 
 
@@ -1234,12 +1294,12 @@ def test_dict_space_one_level_constraint_warn_sample():
     constraint_fn = MagicMock(return_value=False)
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=2),
+            'x': spaces.Discrete(5, init_value=2),
         },
         constrain_fn=constraint_fn,
     )
 
-    with patch("stable_worldmodel.spaces.logging.warning") as mock_warning:
+    with patch('stable_worldmodel.spaces.logging.warning') as mock_warning:
         with pytest.raises(RuntimeError):
             space.sample(max_tries=5, warn_after_s=0.0)
         mock_warning.assert_called()
@@ -1252,95 +1312,95 @@ def test_dict_space_two_level_properties():
     """Test properties of a two-level nested Dict space."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=5),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=5),
                 }
             ),
-            "enemy": spaces.Dict(
+            'enemy': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=8),
-                    "y": spaces.Discrete(10, init_value=8),
+                    'x': spaces.Discrete(10, init_value=8),
+                    'y': spaces.Discrete(10, init_value=8),
                 }
             ),
         }
     )
 
-    assert "player" in space.spaces
-    assert "enemy" in space.spaces
-    assert isinstance(space["player"], spaces.Dict)
-    assert isinstance(space["enemy"], spaces.Dict)
+    assert 'player' in space.spaces
+    assert 'enemy' in space.spaces
+    assert isinstance(space['player'], spaces.Dict)
+    assert isinstance(space['enemy'], spaces.Dict)
 
 
 def test_dict_space_two_level_init_value():
     """Test init_value for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=6),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=6),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
     init_val = space.init_value
-    assert init_val["player"]["x"] == 5
-    assert init_val["player"]["y"] == 6
-    assert init_val["score"] == 0
+    assert init_val['player']['x'] == 5
+    assert init_val['player']['y'] == 6
+    assert init_val['score'] == 0
 
 
 def test_dict_space_two_level_value():
     """Test value property for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=6),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=6),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
     val = space.value
-    assert val["player"]["x"] == 5
-    assert val["player"]["y"] == 6
-    assert val["score"] == 0
+    assert val['player']['x'] == 5
+    assert val['player']['y'] == 6
+    assert val['score'] == 0
 
 
 def test_dict_space_two_level_sampling_order():
     """Test sampling order for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=6),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=6),
                 },
-                sampling_order=["y", "x"],
+                sampling_order=['y', 'x'],
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         },
-        sampling_order=["score", "player"],
+        sampling_order=['score', 'player'],
     )
 
     # Top-level order
-    assert space._sampling_order == ["score", "player"]
+    assert space._sampling_order == ['score', 'player']
 
     # Nested order
-    assert space["player"]._sampling_order == ["y", "x"]
+    assert space['player']._sampling_order == ['y', 'x']
 
     # Full sampling order with dotted paths
     order = space.sampling_order
-    assert "score" in order
-    assert "player" in order
-    assert "player.x" in order
-    assert "player.y" in order
+    assert 'score' in order
+    assert 'player' in order
+    assert 'player.x' in order
+    assert 'player.y' in order
     assert len(order) == 4
 
 
@@ -1348,43 +1408,47 @@ def test_dict_space_two_level_contains():
     """Test contains for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=5),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=5),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
-    assert space.contains({"player": {"x": 5, "y": 5}, "score": 0})
-    assert space.contains({"player": {"x": 0, "y": 9}, "score": 99})
-    assert not space.contains({"player": {"x": 10, "y": 5}, "score": 0})  # x out of bounds
-    assert not space.contains({"player": {"x": 5}, "score": 0})  # missing nested key
+    assert space.contains({'player': {'x': 5, 'y': 5}, 'score': 0})
+    assert space.contains({'player': {'x': 0, 'y': 9}, 'score': 99})
+    assert not space.contains(
+        {'player': {'x': 10, 'y': 5}, 'score': 0}
+    )  # x out of bounds
+    assert not space.contains(
+        {'player': {'x': 5}, 'score': 0}
+    )  # missing nested key
 
 
 def test_dict_space_two_level_sample():
     """Test sampling for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=5),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=5),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
     sample = space.sample()
     assert isinstance(sample, dict)
-    assert "player" in sample
-    assert "score" in sample
-    assert isinstance(sample["player"], dict)
-    assert "x" in sample["player"]
-    assert "y" in sample["player"]
+    assert 'player' in sample
+    assert 'score' in sample
+    assert isinstance(sample['player'], dict)
+    assert 'x' in sample['player']
+    assert 'y' in sample['player']
     assert space.contains(sample)
 
 
@@ -1392,42 +1456,42 @@ def test_dict_space_two_level_reset():
     """Test reset for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=6),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=6),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
     space.sample()
     space.reset()
 
-    assert space.value["player"]["x"] == 5
-    assert space.value["player"]["y"] == 6
-    assert space.value["score"] == 0
+    assert space.value['player']['x'] == 5
+    assert space.value['player']['y'] == 6
+    assert space.value['score'] == 0
 
 
 def test_dict_space_two_level_check():
     """Test check for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=6),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=6),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
     assert space.check()
 
     # Invalidate nested value
-    space["player"]["x"]._value = 20
+    space['player']['x']._value = 20
     assert not space.check()
 
 
@@ -1435,18 +1499,18 @@ def test_dict_space_two_level_names():
     """Test names method for two-level nested Dict."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=5),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=5),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
     names = space.names()
-    assert set(names) == {"player.x", "player.y", "score"}
+    assert set(names) == {'player.x', 'player.y', 'score'}
 
 
 def test_dict_space_two_level_constraint_function():
@@ -1454,22 +1518,22 @@ def test_dict_space_two_level_constraint_function():
     # Constraint: player x must be less than enemy x
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=2),
+                    'x': spaces.Discrete(10, init_value=2),
                 }
             ),
-            "enemy": spaces.Dict(
+            'enemy': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=8),
+                    'x': spaces.Discrete(10, init_value=8),
                 }
             ),
         },
-        constrain_fn=lambda d: d["player"]["x"] < d["enemy"]["x"],
+        constrain_fn=lambda d: d['player']['x'] < d['enemy']['x'],
     )
 
-    assert space.contains({"player": {"x": 2}, "enemy": {"x": 8}})
-    assert not space.contains({"player": {"x": 8}, "enemy": {"x": 2}})
+    assert space.contains({'player': {'x': 2}, 'enemy': {'x': 8}})
+    assert not space.contains({'player': {'x': 8}, 'enemy': {'x': 2}})
 
 
 # Three-level Dict tests
@@ -1479,127 +1543,127 @@ def test_dict_space_three_level_properties():
     """Test properties of a three-level nested Dict space."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=50),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=50),
                         }
                     ),
-                    "difficulty": spaces.Discrete(5, init_value=2),
+                    'difficulty': spaces.Discrete(5, init_value=2),
                 }
             ),
-            "score": spaces.Discrete(1000, init_value=0),
+            'score': spaces.Discrete(1000, init_value=0),
         }
     )
 
-    assert "game" in space.spaces
-    assert "world" in space["game"].spaces
-    assert "width" in space["game"]["world"].spaces
+    assert 'game' in space.spaces
+    assert 'world' in space['game'].spaces
+    assert 'width' in space['game']['world'].spaces
 
 
 def test_dict_space_three_level_init_value():
     """Test init_value for three-level nested Dict."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=60),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=60),
                         }
                     ),
-                    "difficulty": spaces.Discrete(5, init_value=2),
+                    'difficulty': spaces.Discrete(5, init_value=2),
                 }
             ),
         }
     )
 
     init_val = space.init_value
-    assert init_val["game"]["world"]["width"] == 50
-    assert init_val["game"]["world"]["height"] == 60
-    assert init_val["game"]["difficulty"] == 2
+    assert init_val['game']['world']['width'] == 50
+    assert init_val['game']['world']['height'] == 60
+    assert init_val['game']['difficulty'] == 2
 
 
 def test_dict_space_three_level_value():
     """Test value property for three-level nested Dict."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=60),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=60),
                         }
                     ),
-                    "difficulty": spaces.Discrete(5, init_value=2),
+                    'difficulty': spaces.Discrete(5, init_value=2),
                 }
             ),
         }
     )
 
     val = space.value
-    assert val["game"]["world"]["width"] == 50
-    assert val["game"]["world"]["height"] == 60
-    assert val["game"]["difficulty"] == 2
+    assert val['game']['world']['width'] == 50
+    assert val['game']['world']['height'] == 60
+    assert val['game']['difficulty'] == 2
 
 
 def test_dict_space_three_level_sampling_order():
     """Test sampling order for three-level nested Dict."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=60),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=60),
                         },
-                        sampling_order=["height", "width"],
+                        sampling_order=['height', 'width'],
                     ),
-                    "difficulty": spaces.Discrete(5, init_value=2),
+                    'difficulty': spaces.Discrete(5, init_value=2),
                 },
-                sampling_order=["difficulty", "world"],
+                sampling_order=['difficulty', 'world'],
             ),
         }
     )
 
     order = space.sampling_order
-    assert "game" in order
-    assert "game.world" in order
-    assert "game.world.width" in order
-    assert "game.world.height" in order
-    assert "game.difficulty" in order
+    assert 'game' in order
+    assert 'game.world' in order
+    assert 'game.world.width' in order
+    assert 'game.world.height' in order
+    assert 'game.difficulty' in order
 
 
 def test_dict_space_three_level_names():
     """Test names method for three-level nested Dict."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=60),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=60),
                         }
                     ),
-                    "difficulty": spaces.Discrete(5, init_value=2),
+                    'difficulty': spaces.Discrete(5, init_value=2),
                 }
             ),
-            "score": spaces.Discrete(1000, init_value=0),
+            'score': spaces.Discrete(1000, init_value=0),
         }
     )
 
     names = space.names()
     assert set(names) == {
-        "game.world.width",
-        "game.world.height",
-        "game.difficulty",
-        "score",
+        'game.world.width',
+        'game.world.height',
+        'game.difficulty',
+        'score',
     }
 
 
@@ -1607,26 +1671,26 @@ def test_dict_space_three_level_sample():
     """Test sampling for three-level nested Dict."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=60),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=60),
                         }
                     ),
-                    "difficulty": spaces.Discrete(5, init_value=2),
+                    'difficulty': spaces.Discrete(5, init_value=2),
                 }
             ),
         }
     )
 
     sample = space.sample()
-    assert "game" in sample
-    assert "world" in sample["game"]
-    assert "difficulty" in sample["game"]
-    assert "width" in sample["game"]["world"]
-    assert "height" in sample["game"]["world"]
+    assert 'game' in sample
+    assert 'world' in sample['game']
+    assert 'difficulty' in sample['game']
+    assert 'width' in sample['game']['world']
+    assert 'height' in sample['game']['world']
     assert space.contains(sample)
 
 
@@ -1634,12 +1698,12 @@ def test_dict_space_three_level_reset():
     """Test reset for three-level nested Dict."""
     space = spaces.Dict(
         {
-            "game": spaces.Dict(
+            'game': spaces.Dict(
                 {
-                    "world": spaces.Dict(
+                    'world': spaces.Dict(
                         {
-                            "width": spaces.Discrete(100, init_value=50),
-                            "height": spaces.Discrete(100, init_value=60),
+                            'width': spaces.Discrete(100, init_value=50),
+                            'height': spaces.Discrete(100, init_value=60),
                         }
                     ),
                 }
@@ -1650,8 +1714,8 @@ def test_dict_space_three_level_reset():
     space.sample()
     space.reset()
 
-    assert space.value["game"]["world"]["width"] == 50
-    assert space.value["game"]["world"]["height"] == 60
+    assert space.value['game']['world']['width'] == 50
+    assert space.value['game']['world']['height'] == 60
 
 
 # Mixed types Dict tests
@@ -1661,53 +1725,59 @@ def test_dict_space_mixed_types():
     """Test Dict with mixed space types."""
     space = spaces.Dict(
         {
-            "discrete": spaces.Discrete(5, init_value=2),
-            "box": spaces.Box(
+            'discrete': spaces.Discrete(5, init_value=2),
+            'box': spaces.Box(
                 low=0.0,
                 high=1.0,
                 shape=(2,),
                 dtype=np.float32,
                 init_value=np.array([0.5, 0.5], dtype=np.float32),
             ),
-            "multidiscrete": spaces.MultiDiscrete([3, 4], init_value=np.array([1, 2])),
+            'multidiscrete': spaces.MultiDiscrete(
+                [3, 4], init_value=np.array([1, 2])
+            ),
         }
     )
 
     init_val = space.init_value
-    assert init_val["discrete"] == 2
-    assert np.array_equal(init_val["box"], np.array([0.5, 0.5], dtype=np.float32))
-    assert np.array_equal(init_val["multidiscrete"], np.array([1, 2]))
+    assert init_val['discrete'] == 2
+    assert np.array_equal(
+        init_val['box'], np.array([0.5, 0.5], dtype=np.float32)
+    )
+    assert np.array_equal(init_val['multidiscrete'], np.array([1, 2]))
 
 
 def test_dict_space_mixed_nested():
     """Test deeply nested Dict with mixed types."""
     space = spaces.Dict(
         {
-            "config": spaces.Dict(
+            'config': spaces.Dict(
                 {
-                    "resolution": spaces.MultiDiscrete([1920, 1080], init_value=np.array([800, 600])),
-                    "settings": spaces.Dict(
+                    'resolution': spaces.MultiDiscrete(
+                        [1920, 1080], init_value=np.array([800, 600])
+                    ),
+                    'settings': spaces.Dict(
                         {
-                            "volume": spaces.Box(
+                            'volume': spaces.Box(
                                 low=0.0,
                                 high=1.0,
                                 shape=(1,),
                                 dtype=np.float32,
                                 init_value=np.array([0.7], dtype=np.float32),
                             ),
-                            "difficulty": spaces.Discrete(5, init_value=2),
+                            'difficulty': spaces.Discrete(5, init_value=2),
                         }
                     ),
                 }
             ),
-            "player_id": spaces.Discrete(1000, init_value=42),
+            'player_id': spaces.Discrete(1000, init_value=42),
         }
     )
 
     val = space.value
-    assert np.array_equal(val["config"]["resolution"], np.array([800, 600]))
-    assert val["config"]["settings"]["difficulty"] == 2
-    assert val["player_id"] == 42
+    assert np.array_equal(val['config']['resolution'], np.array([800, 600]))
+    assert val['config']['settings']['difficulty'] == 2
+    assert val['player_id'] == 42
 
 
 # Update method tests
@@ -1717,67 +1787,71 @@ def test_dict_space_update_single_key():
     """Test update method with single key."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(10, init_value=5),
-            "y": spaces.Discrete(10, init_value=5),
+            'x': spaces.Discrete(10, init_value=5),
+            'y': spaces.Discrete(10, init_value=5),
         }
     )
 
-    original_x = space["x"].value
-    original_y = space["y"].value
+    original_x = space['x'].value
+    original_y = space['y'].value
 
-    space.update({"x"})
+    space.update({'x'})
 
     # x should have changed, y should not
-    assert space["x"].value != original_x or original_x == space["x"].value  # Might sample same value
-    assert space["y"].value == original_y  # Should not change
+    assert (
+        space['x'].value != original_x or original_x == space['x'].value
+    )  # Might sample same value
+    assert space['y'].value == original_y  # Should not change
 
 
 def test_dict_space_update_nested_key():
     """Test update method with nested key."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=5),
-                    "y": spaces.Discrete(10, init_value=6),
+                    'x': spaces.Discrete(10, init_value=5),
+                    'y': spaces.Discrete(10, init_value=6),
                 }
             ),
-            "score": spaces.Discrete(100, init_value=0),
+            'score': spaces.Discrete(100, init_value=0),
         }
     )
 
-    original_score = space["score"].value
+    original_score = space['score'].value
 
-    space.update({"player.x"})
+    space.update({'player.x'})
 
     # Score should not change
-    assert space["score"].value == original_score
+    assert space['score'].value == original_score
 
 
 def test_dict_space_update_invalid_key():
     """Test update method with invalid key raises ValueError."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(10, init_value=5),
+            'x': spaces.Discrete(10, init_value=5),
         }
     )
 
-    with patch("stable_worldmodel.spaces.Dict._get_sampling_order") as mock_get:
-        mock_get.return_value = ["x", "invalid_key"]
+    with patch(
+        'stable_worldmodel.spaces.Dict._get_sampling_order'
+    ) as mock_get:
+        mock_get.return_value = ['x', 'invalid_key']
         with pytest.raises(ValueError):
-            space.update({"invalid_key"})
+            space.update({'invalid_key'})
 
 
 def test_dict_space_update_check_assertion():
     """Test that update asserts check passes."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(10, init_value=5),
+            'x': spaces.Discrete(10, init_value=5),
         }
     )
 
     # Normal update should pass
-    space.update({"x"})
+    space.update({'x'})
     assert space.check()
 
 
@@ -1785,47 +1859,47 @@ def test_dict_space_update_all():
     """Test update method with 'all' key to resample all values."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(10, init_value=5),
-            "y": spaces.Discrete(10, init_value=6),
-            "z": spaces.Discrete(10, init_value=7),
+            'x': spaces.Discrete(10, init_value=5),
+            'y': spaces.Discrete(10, init_value=6),
+            'z': spaces.Discrete(10, init_value=7),
         }
     )
 
     # Update with "all" should resample all keys
-    space.update({"all"})
+    space.update({'all'})
 
     # All values should be valid (within their spaces)
     assert space.check()
     assert space.contains(space.value)
 
     # Verify the values are within their valid ranges
-    assert 0 <= space["x"].value < 10
-    assert 0 <= space["y"].value < 10
-    assert 0 <= space["z"].value < 10
+    assert 0 <= space['x'].value < 10
+    assert 0 <= space['y'].value < 10
+    assert 0 <= space['z'].value < 10
 
 
 def test_dict_space_sampling_order_invalid_key(monkeypatch):
     """Test update method with invalid key raises ValueError."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(10, init_value=5),
+            'x': spaces.Discrete(10, init_value=5),
         }
     )
 
-    monkeypatch.setattr(space, "_sampling_order", ["x", "invalid_key"])
+    monkeypatch.setattr(space, '_sampling_order', ['x', 'invalid_key'])
 
-    assert ["x"] == list(space._get_sampling_order())
+    assert ['x'] == list(space._get_sampling_order())
 
 
 def test_dict_space_correct_sampling_order_property():
     """Test that update respects sampling order."""
     space = spaces.Dict(
         {
-            "a": spaces.Discrete(10, init_value=1),
-            "b": spaces.Discrete(10, init_value=2),
-            "c": spaces.Discrete(10, init_value=3),
+            'a': spaces.Discrete(10, init_value=1),
+            'b': spaces.Discrete(10, init_value=2),
+            'c': spaces.Discrete(10, init_value=3),
         },
-        sampling_order=["c", "b", "a"],
+        sampling_order=['c', 'b', 'a'],
     )
 
     assert space.sampling_order == list(space.sampling_order)
@@ -1841,15 +1915,17 @@ def test_dict_space_value_without_init_value():
 
     space = spaces.Dict(
         {
-            "custom": gym_spaces.Discrete(5),  # Vanilla gym space without init_value
-            "extended": spaces.Discrete(5, init_value=2),
+            'custom': gym_spaces.Discrete(
+                5
+            ),  # Vanilla gym space without init_value
+            'extended': spaces.Discrete(5, init_value=2),
         }
     )
 
     # init_value should sample for vanilla gym space
     init_val = space.init_value
-    assert "custom" in init_val
-    assert init_val["extended"] == 2
+    assert 'custom' in init_val
+    assert init_val['extended'] == 2
 
 
 def test_dict_space_value_property_error():
@@ -1858,12 +1934,12 @@ def test_dict_space_value_property_error():
 
     space = spaces.Dict(
         {
-            "custom": gym_spaces.Discrete(5),
+            'custom': gym_spaces.Discrete(5),
         }
     )
 
     # Accessing value should raise ValueError
-    with pytest.raises(ValueError, match="does not have value property"):
+    with pytest.raises(ValueError, match='does not have value property'):
         _ = space.value
 
 
@@ -1882,129 +1958,134 @@ def test_dict_space_single_element():
     """Test Dict with single element."""
     space = spaces.Dict(
         {
-            "only": spaces.Discrete(5, init_value=3),
+            'only': spaces.Discrete(5, init_value=3),
         }
     )
 
-    assert space.value == {"only": 3}
-    assert space.contains({"only": 3})
+    assert space.value == {'only': 3}
+    assert space.contains({'only': 3})
 
 
 def test_dict_space_constraint_with_nested_access():
     """Test constraint function accessing nested values correctly."""
     space = spaces.Dict(
         {
-            "player": spaces.Dict(
+            'player': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=2),
-                    "y": spaces.Discrete(10, init_value=3),
+                    'x': spaces.Discrete(10, init_value=2),
+                    'y': spaces.Discrete(10, init_value=3),
                 }
             ),
-            "target": spaces.Dict(
+            'target': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=7),
-                    "y": spaces.Discrete(10, init_value=8),
+                    'x': spaces.Discrete(10, init_value=7),
+                    'y': spaces.Discrete(10, init_value=8),
                 }
             ),
         },
         # Constraint: player must not be at same position as target
-        constrain_fn=lambda d: d["player"]["x"] != d["target"]["x"] or d["player"]["y"] != d["target"]["y"],
+        constrain_fn=lambda d: d['player']['x'] != d['target']['x']
+        or d['player']['y'] != d['target']['y'],
     )
 
-    assert space.contains({"player": {"x": 2, "y": 3}, "target": {"x": 7, "y": 8}})
-    assert not space.contains({"player": {"x": 5, "y": 5}, "target": {"x": 5, "y": 5}})
+    assert space.contains(
+        {'player': {'x': 2, 'y': 3}, 'target': {'x': 7, 'y': 8}}
+    )
+    assert not space.contains(
+        {'player': {'x': 5, 'y': 5}, 'target': {'x': 5, 'y': 5}}
+    )
 
 
 def test_dict_space_set_init_value():
     """Test Dict set_init_value method."""
     space = spaces.Dict(
         {
-            "a": spaces.Discrete(10, init_value=1),
-            "b": spaces.Discrete(10, init_value=2),
+            'a': spaces.Discrete(10, init_value=1),
+            'b': spaces.Discrete(10, init_value=2),
         }
     )
 
-    space.set_init_value({"a": 5})
-    assert space["a"].init_value == 5
-    assert space["b"].init_value == 2
+    space.set_init_value({'a': 5})
+    assert space['a'].init_value == 5
+    assert space['b'].init_value == 2
 
 
 def test_dict_space_set_init_value_nested():
     """Test Dict set_init_value with nested keys."""
     space = spaces.Dict(
         {
-            "nested": spaces.Dict(
+            'nested': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=1),
+                    'x': spaces.Discrete(10, init_value=1),
                 }
             ),
         }
     )
 
-    space.set_init_value({"nested.x": 7})
-    assert space["nested"]["x"].init_value == 7
+    space.set_init_value({'nested.x': 7})
+    assert space['nested']['x'].init_value == 7
 
 
 def test_dict_space_set_init_value_invalid_key():
     """Test Dict set_init_value raises error for invalid key."""
-    space = spaces.Dict({"a": spaces.Discrete(10, init_value=1)})
+    space = spaces.Dict({'a': spaces.Discrete(10, init_value=1)})
 
-    with pytest.raises(ValueError, match="not found"):
-        space.set_init_value({"invalid": 5})
+    with pytest.raises(ValueError, match='not found'):
+        space.set_init_value({'invalid': 5})
 
 
 def test_dict_space_set_value():
     """Test Dict set_value method."""
     space = spaces.Dict(
         {
-            "a": spaces.Discrete(10, init_value=1),
-            "b": spaces.Discrete(10, init_value=2),
+            'a': spaces.Discrete(10, init_value=1),
+            'b': spaces.Discrete(10, init_value=2),
         }
     )
 
-    space.set_value({"a": 8})
-    assert space["a"].value == 8
-    assert space["b"].value == 2  # unchanged
+    space.set_value({'a': 8})
+    assert space['a'].value == 8
+    assert space['b'].value == 2  # unchanged
 
 
 def test_dict_space_set_value_nested():
     """Test Dict set_value with nested keys."""
     space = spaces.Dict(
         {
-            "nested": spaces.Dict(
+            'nested': spaces.Dict(
                 {
-                    "x": spaces.Discrete(10, init_value=1),
+                    'x': spaces.Discrete(10, init_value=1),
                 }
             ),
         }
     )
 
-    space.set_value({"nested.x": 9})
-    assert space["nested"]["x"].value == 9
+    space.set_value({'nested.x': 9})
+    assert space['nested']['x'].value == 9
 
 
 def test_dict_space_set_value_invalid_key():
     """Test Dict set_value raises error for invalid key."""
-    space = spaces.Dict({"a": spaces.Discrete(10, init_value=1)})
+    space = spaces.Dict({'a': spaces.Discrete(10, init_value=1)})
 
-    with pytest.raises(ValueError, match="not found"):
-        space.set_value({"missing": 5})
+    with pytest.raises(ValueError, match='not found'):
+        space.set_value({'missing': 5})
 
 
 def test_dict_space_to_str():
     """Test Dict to_str method."""
     space = spaces.Dict(
         {
-            "x": spaces.Discrete(5, init_value=1),
-            "nested": spaces.Dict(
+            'x': spaces.Discrete(5, init_value=1),
+            'nested': spaces.Dict(
                 {
-                    "y": spaces.Discrete(3, init_value=0),
+                    'y': spaces.Discrete(3, init_value=0),
                 }
             ),
         }
     )
 
     result = space.to_str()
-    assert "x" in result
-    assert "nested" in result
-    assert "y" in result
+    assert 'x' in result
+    assert 'nested' in result
+    assert 'y' in result

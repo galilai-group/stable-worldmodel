@@ -1,6 +1,5 @@
 import os
 from collections import OrderedDict
-from pathlib import Path
 
 import hydra
 import lightning as pl
@@ -755,9 +754,7 @@ def setup_pl_logger(cfg, postfix=''):
 class SaveCkptCallback(Callback):
     """Callback to save model checkpoint after each epoch using save_pretrained."""
 
-    def __init__(
-        self, run_name, cfg, epoch_interval: int = 1
-    ):
+    def __init__(self, run_name, cfg, epoch_interval: int = 1):
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
@@ -775,7 +772,12 @@ class SaveCkptCallback(Callback):
                 self._save(pl_module.model, trainer.current_epoch + 1)
 
     def _save(self, model, epoch):
-        save_pretrained(model, run_name=self.run_name, config=self.cfg, filename=f'weights_epoch_{epoch}.pt')
+        save_pretrained(
+            model,
+            run_name=self.run_name,
+            config=self.cfg,
+            filename=f'weights_epoch_{epoch}.pt',
+        )
 
 
 # ============================================================================

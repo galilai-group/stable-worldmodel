@@ -312,9 +312,7 @@ class LeRobotAdapter(Dataset):
         length = int(end - start)
         obs_indices = tuple(range(0, length, self.frameskip))
         action_indices = tuple(range(length))
-        row = dict(
-            self._window_dataset(obs_indices, action_indices)[g_start]
-        )
+        row = dict(self._window_dataset(obs_indices, action_indices)[g_start])
         row['_row_idx'] = g_start
         steps: dict[str, Any] = {}
         for key in self._keys:

@@ -40,16 +40,6 @@ repos:
       - id: shellcheck
         require_serial: true
 
-  # Word spelling linter
-  - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.1
-    hooks:
-      - id: codespell
-        require_serial: true
-        args:
-          - --skip=logs/**,data/**,*.ipynb
-          - --ignore-words-list=socio-economic
-
   # Check for common Python anti-patterns
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.15.2
@@ -64,12 +54,3 @@ repos:
   #     - id: prettier
   #       types_or: [markdown, yaml, json]
   #       exclude: ^docs/
-
-  # Check docstrings
-  - repo: https://github.com/PyCQA/pydocstyle
-    rev: 6.3.0
-    hooks:
-      - id: pydocstyle
-        additional_dependencies: [tomli]
-        args: [--convention=google]
-        exclude: ".*" # ^(tests/|docs/)

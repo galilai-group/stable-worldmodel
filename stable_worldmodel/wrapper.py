@@ -1,11 +1,11 @@
 import re
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, Sequence
+from typing import Any
+from collections.abc import Sequence
 
 import gymnasium as gym
 import numpy as np
-import torch
 
 from stable_worldmodel.utils import get_in
 
@@ -524,4 +524,3 @@ class MegaWrapper(gym.Wrapper):
         env = ResizeGoalWrapper(env, image_shape, goal_transform)
 
         self.env = env
-

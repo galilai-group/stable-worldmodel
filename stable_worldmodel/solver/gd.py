@@ -104,7 +104,9 @@ class GradientSolver(torch.nn.Module):
         """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action(self, n_envs: int, actions: torch.Tensor | None = None) -> None:
+    def init_action(
+        self, n_envs: int, actions: torch.Tensor | None = None
+    ) -> None:
         """Initialize the action tensor for optimization."""
         if actions is None:
             actions = torch.zeros(

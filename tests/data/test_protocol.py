@@ -11,20 +11,25 @@ from stable_worldmodel.data import Dataset, HDF5Dataset
 @pytest.fixture
 def sample_h5_file(tmp_path):
     """Create a sample HDF5 file for testing."""
-    h5_path = tmp_path / "datasets" / "test_dataset.h5"
+    h5_path = tmp_path / 'datasets' / 'test_dataset.h5'
     h5_path.parent.mkdir(parents=True, exist_ok=True)
 
     ep_lengths = [10, 10]
     ep_offsets = [0, 10]
     total_steps = sum(ep_lengths)
 
-    with h5py.File(h5_path, "w") as f:
-        f.create_dataset("ep_len", data=np.array(ep_lengths))
-        f.create_dataset("ep_offset", data=np.array(ep_offsets))
-        f.create_dataset("observation", data=np.random.rand(total_steps, 4).astype(np.float32))
-        f.create_dataset("action", data=np.random.rand(total_steps, 2).astype(np.float32))
+    with h5py.File(h5_path, 'w') as f:
+        f.create_dataset('ep_len', data=np.array(ep_lengths))
+        f.create_dataset('ep_offset', data=np.array(ep_offsets))
+        f.create_dataset(
+            'observation',
+            data=np.random.rand(total_steps, 4).astype(np.float32),
+        )
+        f.create_dataset(
+            'action', data=np.random.rand(total_steps, 2).astype(np.float32)
+        )
 
-    return tmp_path, "test_dataset"
+    return tmp_path, 'test_dataset'
 
 
 def test_hdf5_dataset_is_dataset_subclass(sample_h5_file):
@@ -89,7 +94,7 @@ def test_dataset_base_class_raises_not_implemented():
         dataset._load_slice(0, 0, 1)
 
     with pytest.raises(NotImplementedError):
-        dataset.get_col_data("col")
+        dataset.get_col_data('col')
 
     with pytest.raises(NotImplementedError):
         dataset.get_row_data(0)

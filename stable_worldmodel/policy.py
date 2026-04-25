@@ -407,10 +407,15 @@ class WorldModelPolicy(BasePolicy):
                         self._next_init[i] = 0
 
         terminated = info_dict.get('terminated')
-        dead = np.asarray(terminated, dtype=bool) if terminated is not None else np.zeros(n_envs, dtype=bool)
+        dead = (
+            np.asarray(terminated, dtype=bool)
+            if terminated is not None
+            else np.zeros(n_envs, dtype=bool)
+        )
 
         replan_idx = [
-            i for i in range(n_envs)
+            i
+            for i in range(n_envs)
             if len(self._action_buffer[i]) == 0 and not dead[i]
         ]
 

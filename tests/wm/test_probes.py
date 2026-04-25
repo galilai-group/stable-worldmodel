@@ -148,4 +148,6 @@ def test_load_probe_state_dict_updates_weights(tmp_path):
 
     load_probe(model, 'p', path)
 
-    assert torch.allclose(get_probe(model, 'p').fc.weight, torch.full_like(probe.fc.weight, 99.0))
+    assert torch.allclose(
+        get_probe(model, 'p').fc.weight, torch.full_like(probe.fc.weight, 99.0)
+    )

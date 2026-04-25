@@ -1,8 +1,6 @@
 """Tests for stable_worldmodel.data.utils."""
 
 import json
-import os
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -146,7 +144,7 @@ def test_resolve_dataset_hf_repo(tmp_path):
 
 
 def test_resolve_dataset_invalid_name_raises(tmp_path):
-    with pytest.raises(ValueError, match="Cannot resolve"):
+    with pytest.raises(ValueError, match='Cannot resolve'):
         _resolve_dataset('not_a_valid_name', tmp_path)
 
 
@@ -176,9 +174,17 @@ def test_resolve_dataset_hf_downloads_tar_zst(tmp_path):
         (dest / 'dataset.h5').touch()
 
     with (
-        patch('stable_worldmodel.data.utils._hf_dataset_find_archive', return_value='dataset.tar.zst'),
-        patch('stable_worldmodel.data.utils._download', side_effect=fake_download),
-        patch('stable_worldmodel.data.utils._extract_zst_tar', side_effect=fake_extract),
+        patch(
+            'stable_worldmodel.data.utils._hf_dataset_find_archive',
+            return_value='dataset.tar.zst',
+        ),
+        patch(
+            'stable_worldmodel.data.utils._download', side_effect=fake_download
+        ),
+        patch(
+            'stable_worldmodel.data.utils._extract_zst_tar',
+            side_effect=fake_extract,
+        ),
     ):
         result = _resolve_dataset_hf(repo_id, tmp_path)
 
@@ -198,9 +204,17 @@ def test_resolve_dataset_hf_downloads_h5_zst(tmp_path):
         archive.with_suffix('').touch()
 
     with (
-        patch('stable_worldmodel.data.utils._hf_dataset_find_archive', return_value=archive_name),
-        patch('stable_worldmodel.data.utils._download', side_effect=fake_download),
-        patch('stable_worldmodel.data.utils._extract_zst', side_effect=fake_extract),
+        patch(
+            'stable_worldmodel.data.utils._hf_dataset_find_archive',
+            return_value=archive_name,
+        ),
+        patch(
+            'stable_worldmodel.data.utils._download', side_effect=fake_download
+        ),
+        patch(
+            'stable_worldmodel.data.utils._extract_zst',
+            side_effect=fake_extract,
+        ),
     ):
         result = _resolve_dataset_hf(repo_id, tmp_path)
 
@@ -210,7 +224,9 @@ def test_resolve_dataset_hf_downloads_h5_zst(tmp_path):
 def test_resolve_dataset_hf_constructs_correct_url(tmp_path):
     repo_id = 'myorg/mydata'
     archive_name = 'dataset.tar.zst'
-    expected_url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
+    expected_url = (
+        f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
+    )
     captured = {}
 
     def fake_download(url, dest):
@@ -222,9 +238,17 @@ def test_resolve_dataset_hf_constructs_correct_url(tmp_path):
         (dest / 'dataset.h5').touch()
 
     with (
-        patch('stable_worldmodel.data.utils._hf_dataset_find_archive', return_value=archive_name),
-        patch('stable_worldmodel.data.utils._download', side_effect=fake_download),
-        patch('stable_worldmodel.data.utils._extract_zst_tar', side_effect=fake_extract),
+        patch(
+            'stable_worldmodel.data.utils._hf_dataset_find_archive',
+            return_value=archive_name,
+        ),
+        patch(
+            'stable_worldmodel.data.utils._download', side_effect=fake_download
+        ),
+        patch(
+            'stable_worldmodel.data.utils._extract_zst_tar',
+            side_effect=fake_extract,
+        ),
     ):
         _resolve_dataset_hf(repo_id, tmp_path)
 
@@ -245,14 +269,25 @@ def test_resolve_dataset_hf_url_includes_datasets_prefix(tmp_path):
         (dest / 'dataset.h5').touch()
 
     with (
-        patch('stable_worldmodel.data.utils._hf_dataset_find_archive', return_value='dataset.tar.zst'),
-        patch('stable_worldmodel.data.utils._download', side_effect=fake_download),
-        patch('stable_worldmodel.data.utils._extract_zst_tar', side_effect=fake_extract),
+        patch(
+            'stable_worldmodel.data.utils._hf_dataset_find_archive',
+            return_value='dataset.tar.zst',
+        ),
+        patch(
+            'stable_worldmodel.data.utils._download', side_effect=fake_download
+        ),
+        patch(
+            'stable_worldmodel.data.utils._extract_zst_tar',
+            side_effect=fake_extract,
+        ),
     ):
         _resolve_dataset_hf(repo_id, tmp_path)
 
     assert '/datasets/' in captured['url']
-    assert captured['url'] != f'{HF_BASE_URL}/{repo_id}/resolve/main/dataset.tar.zst'
+    assert (
+        captured['url']
+        != f'{HF_BASE_URL}/{repo_id}/resolve/main/dataset.tar.zst'
+    )
 
 
 def test_resolve_dataset_hf_dispatches_tar_zst_to_extract_zst_tar(tmp_path):
@@ -268,9 +303,17 @@ def test_resolve_dataset_hf_dispatches_tar_zst_to_extract_zst_tar(tmp_path):
         (dest / 'dataset.h5').touch()
 
     with (
-        patch('stable_worldmodel.data.utils._hf_dataset_find_archive', return_value='data.tar.zst'),
-        patch('stable_worldmodel.data.utils._download', side_effect=fake_download),
-        patch('stable_worldmodel.data.utils._extract_zst_tar', side_effect=fake_tar),
+        patch(
+            'stable_worldmodel.data.utils._hf_dataset_find_archive',
+            return_value='data.tar.zst',
+        ),
+        patch(
+            'stable_worldmodel.data.utils._download', side_effect=fake_download
+        ),
+        patch(
+            'stable_worldmodel.data.utils._extract_zst_tar',
+            side_effect=fake_tar,
+        ),
         patch('stable_worldmodel.data.utils._extract_zst') as mock_zst,
     ):
         _resolve_dataset_hf(repo_id, tmp_path)
@@ -292,9 +335,16 @@ def test_resolve_dataset_hf_dispatches_h5_zst_to_extract_zst(tmp_path):
         archive.with_suffix('').touch()
 
     with (
-        patch('stable_worldmodel.data.utils._hf_dataset_find_archive', return_value='data.h5.zst'),
-        patch('stable_worldmodel.data.utils._download', side_effect=fake_download),
-        patch('stable_worldmodel.data.utils._extract_zst', side_effect=fake_zst),
+        patch(
+            'stable_worldmodel.data.utils._hf_dataset_find_archive',
+            return_value='data.h5.zst',
+        ),
+        patch(
+            'stable_worldmodel.data.utils._download', side_effect=fake_download
+        ),
+        patch(
+            'stable_worldmodel.data.utils._extract_zst', side_effect=fake_zst
+        ),
         patch('stable_worldmodel.data.utils._extract_zst_tar') as mock_tar,
     ):
         _resolve_dataset_hf(repo_id, tmp_path)
@@ -397,7 +447,9 @@ def test_extract_zst_failure_raises(tmp_path):
     archive.touch()
 
     with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stderr='decompress failed')
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr='decompress failed'
+        )
         with pytest.raises(RuntimeError, match='Failed to decompress'):
             _extract_zst(archive)
 
@@ -424,7 +476,9 @@ def test_extract_zst_tar_failure_raises(tmp_path):
     archive.touch()
 
     with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stderr='extraction failed')
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr='extraction failed'
+        )
         with pytest.raises(RuntimeError, match='Failed to extract'):
             _extract_zst_tar(archive, tmp_path)
 
@@ -451,7 +505,9 @@ def test_download_handles_no_content_length(tmp_path):
     content = b'data'
 
     mock_response = MagicMock()
-    mock_response.headers.get.return_value = '0'  # zero → treated as None by `or None`
+    mock_response.headers.get.return_value = (
+        '0'  # zero → treated as None by `or None`
+    )
     mock_response.read.side_effect = [content, b'']
 
     with patch('urllib.request.urlopen', return_value=mock_response):
@@ -468,8 +524,12 @@ def _make_h5(path: Path):
     with h5py.File(path, 'w') as f:
         f.create_dataset('ep_len', data=np.array([5]))
         f.create_dataset('ep_offset', data=np.array([0]))
-        f.create_dataset('observation', data=np.random.rand(5, 4).astype(np.float32))
-        f.create_dataset('action', data=np.random.rand(5, 2).astype(np.float32))
+        f.create_dataset(
+            'observation', data=np.random.rand(5, 4).astype(np.float32)
+        )
+        f.create_dataset(
+            'action', data=np.random.rand(5, 2).astype(np.float32)
+        )
 
 
 def test_load_dataset_from_local_h5(tmp_path):

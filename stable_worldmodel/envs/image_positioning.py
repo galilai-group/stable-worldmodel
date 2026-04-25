@@ -7,8 +7,8 @@ from PIL import Image, ImageOps
 
 
 # Get the default color cycle from Matplotlib's rcParams
-prop_cycle = plt.rcParams["axes.prop_cycle"]
-colors_hex = prop_cycle.by_key()["color"]
+prop_cycle = plt.rcParams['axes.prop_cycle']
+colors_hex = prop_cycle.by_key()['color']
 
 # Convert hex colors to RGBA tuples
 COLORS = np.asarray([mcolors.to_rgba(hex_color) for hex_color in colors_hex])
@@ -17,7 +17,7 @@ COLORS = [tuple(u) for u in COLORS]
 
 
 class ImagePositioning(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
+    metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 4}
 
     def __init__(
         self,
@@ -33,35 +33,70 @@ class ImagePositioning(gym.Env):
         # Dict space gives us structured, human-readable observations
         self.observation_space = gym.spaces.Dict(
             {
-                "current_background": gym.spaces.Box(0, 0.9, shape=(2, 1), dtype=float),
-                "current_locations": gym.spaces.Box(0, 0.9, shape=(len(images), 2), dtype=float),
-                "current_rotations": gym.spaces.Box(0, 1, shape=(len(images), 1), dtype=float),
-                "target_background": gym.spaces.Box(0, 1, shape=(2, 1), dtype=float),
-                "target_locations": gym.spaces.Box(0, 0.9, shape=(len(images), 2), dtype=float),
-                "target_rotations": gym.spaces.Box(0, 1, shape=(len(images), 1), dtype=float),
+                'current_background': gym.spaces.Box(
+                    0, 0.9, shape=(2, 1), dtype=float
+                ),
+                'current_locations': gym.spaces.Box(
+                    0, 0.9, shape=(len(images), 2), dtype=float
+                ),
+                'current_rotations': gym.spaces.Box(
+                    0, 1, shape=(len(images), 1), dtype=float
+                ),
+                'target_background': gym.spaces.Box(
+                    0, 1, shape=(2, 1), dtype=float
+                ),
+                'target_locations': gym.spaces.Box(
+                    0, 0.9, shape=(len(images), 2), dtype=float
+                ),
+                'target_rotations': gym.spaces.Box(
+                    0, 1, shape=(len(images), 1), dtype=float
+                ),
             }
         )
 
         # Initialize positions - will be set randomly in reset()
         # Using -1,-1 as "uninitialized" state
-        self._current_locations = np.empty(self.observation_space["current_locations"].shape, dtype=float)
-        self._target_locations = np.array(self.observation_space["target_locations"].shape, dtype=float)
-        self._current_rotations = np.empty(self.observation_space["current_rotations"].shape, dtype=float)
-        self._target_rotations = np.array(self.observation_space["target_rotations"].shape, dtype=float)
-        self._current_background = np.empty(self.observation_space["current_background"].shape, dtype=float)
-        self._target_background = np.array(self.observation_space["target_background"].shape, dtype=float)
+        self._current_locations = np.empty(
+            self.observation_space['current_locations'].shape, dtype=float
+        )
+        self._target_locations = np.array(
+            self.observation_space['target_locations'].shape, dtype=float
+        )
+        self._current_rotations = np.empty(
+            self.observation_space['current_rotations'].shape, dtype=float
+        )
+        self._target_rotations = np.array(
+            self.observation_space['target_rotations'].shape, dtype=float
+        )
+        self._current_background = np.empty(
+            self.observation_space['current_background'].shape, dtype=float
+        )
+        self._target_background = np.array(
+            self.observation_space['target_background'].shape, dtype=float
+        )
 
         # Define what actions are available (4 directions)
         self.action_space = gym.spaces.Dict(
             {
-                "delta_background": gym.spaces.Box(low=-0.1, high=0.1, shape=(2, 1)),
-                "delta_locations": gym.spaces.Box(low=-0.1, high=0.1, shape=(len(images), 2)),
-                "delta_rotations": gym.spaces.Box(low=-0.1, high=0.1, shape=(len(images), 1)),
+                'delta_background': gym.spaces.Box(
+                    low=-0.1, high=0.1, shape=(2, 1)
+                ),
+                'delta_locations': gym.spaces.Box(
+                    low=-0.1, high=0.1, shape=(len(images), 2)
+                ),
+                'delta_rotations': gym.spaces.Box(
+                    low=-0.1, high=0.1, shape=(len(images), 1)
+                ),
             }
         )
-        self.images = [ImageOps.expand(img, border=5, fill=c).convert("RGBA") for img, c in zip(images, COLORS)]
+        self.images = [
+            ImageOps.expand(img, border=5, fill=c).convert('RGBA')
+            for img, c in zip(images, COLORS)
+        ]
 
-        assert render_mode is None or render_mode in self.metadata["render_modes"]
+        assert (
+            render_mode is None or render_mode in self.metadata['render_modes']
+        )
         self.render_mode = render_mode
 
         """
@@ -81,12 +116,12 @@ class ImagePositioning(gym.Env):
             dict: Observation with agent and target positions
         """
         return {
-            "current_background": self._current_background,
-            "current_locations": self._current_locations,
-            "current_rotations": self._current_rotations,
-            "target_background": self._target_background,
-            "target_locations": self._target_locations,
-            "target_rotations": self._target_rotations,
+            'current_background': self._current_background,
+            'current_locations': self._current_locations,
+            'current_rotations': self._current_rotations,
+            'target_background': self._target_background,
+            'target_locations': self._target_locations,
+            'target_rotations': self._target_rotations,
         }
 
     def _get_info(self):
@@ -96,9 +131,15 @@ class ImagePositioning(gym.Env):
             dict: Info with distance between agent and target
         """
         return {
-            "location_distance": np.linalg.norm(self._current_locations - self._target_locations, ord=1),
-            "rotation_distance": np.linalg.norm(self._current_rotations - self._target_rotations, ord=1),
-            "background_distance": np.linalg.norm(self._current_background - self._target_background, ord=1),
+            'location_distance': np.linalg.norm(
+                self._current_locations - self._target_locations, ord=1
+            ),
+            'rotation_distance': np.linalg.norm(
+                self._current_rotations - self._target_rotations, ord=1
+            ),
+            'background_distance': np.linalg.norm(
+                self._current_background - self._target_background, ord=1
+            ),
         }
 
     def reset(self, seed: int | None = None, options: dict | None = None):
@@ -115,12 +156,24 @@ class ImagePositioning(gym.Env):
         super().reset(seed=seed)
 
         # Randomly place the agent anywhere on the grid
-        self._current_background = self.np_random.random(size=(2, 1), dtype=float)
-        self._current_locations = self.np_random.random(size=(len(self.images), 2), dtype=float)
-        self._current_rotations = self.np_random.random(size=(len(self.images), 2), dtype=float)
-        self._target_background = self.np_random.random(size=(2, 1), dtype=float)
-        self._target_locations = self.np_random.random(size=(len(self.images), 2), dtype=float)
-        self._target_rotations = self.np_random.random(size=(len(self.images), 1), dtype=float)
+        self._current_background = self.np_random.random(
+            size=(2, 1), dtype=float
+        )
+        self._current_locations = self.np_random.random(
+            size=(len(self.images), 2), dtype=float
+        )
+        self._current_rotations = self.np_random.random(
+            size=(len(self.images), 2), dtype=float
+        )
+        self._target_background = self.np_random.random(
+            size=(2, 1), dtype=float
+        )
+        self._target_locations = self.np_random.random(
+            size=(len(self.images), 2), dtype=float
+        )
+        self._target_rotations = self.np_random.random(
+            size=(len(self.images), 1), dtype=float
+        )
 
         white_noise = np.random.randn(self.resolution * 2, self.resolution * 2)
         rows, cols = white_noise.shape
@@ -160,44 +213,44 @@ class ImagePositioning(gym.Env):
         Returns:
             tuple: (observation, reward, terminated, truncated, info)
         """
-        action["delta_background"] = np.clip(
-            action["delta_background"],
-            self.action_space["delta_background"].low,
-            self.action_space["delta_background"].high,
+        action['delta_background'] = np.clip(
+            action['delta_background'],
+            self.action_space['delta_background'].low,
+            self.action_space['delta_background'].high,
         )
-        action["delta_locations"] = np.clip(
-            action["delta_locations"],
-            self.action_space["delta_locations"].low,
-            self.action_space["delta_locations"].high,
+        action['delta_locations'] = np.clip(
+            action['delta_locations'],
+            self.action_space['delta_locations'].low,
+            self.action_space['delta_locations'].high,
         )
-        action["delta_rotations"] = np.clip(
-            action["delta_rotations"],
-            self.action_space["delta_rotations"].low,
-            self.action_space["delta_rotations"].high,
+        action['delta_rotations'] = np.clip(
+            action['delta_rotations'],
+            self.action_space['delta_rotations'].low,
+            self.action_space['delta_rotations'].high,
         )
         self._current_background = np.clip(
-            self._current_background + action["delta_background"],
-            self.observation_space["current_background"].low,
-            self.observation_space["current_background"].high,
+            self._current_background + action['delta_background'],
+            self.observation_space['current_background'].low,
+            self.observation_space['current_background'].high,
         )
         self._current_locations = np.clip(
-            self._current_locations + action["delta_locations"],
-            self.observation_space["current_locations"].low,
-            self.observation_space["current_locations"].high,
+            self._current_locations + action['delta_locations'],
+            self.observation_space['current_locations'].low,
+            self.observation_space['current_locations'].high,
         )
         self._current_rotations = np.clip(
-            self._current_rotations + action["delta_rotations"],
-            self.observation_space["current_rotations"].low,
-            self.observation_space["current_rotations"].high,
+            self._current_rotations + action['delta_rotations'],
+            self.observation_space['current_rotations'].low,
+            self.observation_space['current_rotations'].high,
         )
 
         observation = self._get_obs()
         info = self._get_info()
         # Check if agent reached the target
         terminated = (
-            info["location_distance"] < 1e-2
-            and info["rotation_distance"] < 1e-2
-            and info["background_distance"] < 1e-2
+            info['location_distance'] < 1e-2
+            and info['rotation_distance'] < 1e-2
+            and info['background_distance'] < 1e-2
         )
 
         # We don't use truncation in this simple environment
@@ -215,52 +268,78 @@ class ImagePositioning(gym.Env):
         locations = self._current_locations - self._target_locations
         background = self._current_background - self._target_background
         return {
-            "delta_background": -background,
-            "delta_locations": -locations,
-            "delta_rotations": -rotations,
+            'delta_background': -background,
+            'delta_locations': -locations,
+            'delta_rotations': -rotations,
         }
 
-    def render(self, mode="current"):
-        if self.render_mode == "rgb_array":
+    def render(self, mode='current'):
+        if self.render_mode == 'rgb_array':
             return self._render_frame(mode=mode)
 
     def _render_frame(self, mode):
-        if self.window is None and self.render_mode in ["human", "rgb_array"]:
+        if self.window is None and self.render_mode in ['human', 'rgb_array']:
             pygame.init()
             pygame.display.init()
-            self.window = pygame.display.set_mode((self.resolution, self.resolution))
-        if self.clock is None and self.render_mode in ["human", "rgb_array"]:
+            self.window = pygame.display.set_mode(
+                (self.resolution, self.resolution)
+            )
+        if self.clock is None and self.render_mode in ['human', 'rgb_array']:
             self.clock = pygame.time.Clock()
 
         # canvas = pygame.Surface((self.resolution, self.resolution))
         # canvas.fill((255, 255, 255))
 
         # get the image
-        if mode == "current":
+        if mode == 'current':
             x = int(self.resolution * self._current_background[0, 0])
             y = int(self.resolution * self._current_background[1, 0])
-            new_background = Image.fromarray(self.pink_noise[x : x + self.resolution, y : y + self.resolution :])
+            new_background = Image.fromarray(
+                self.pink_noise[
+                    x : x + self.resolution, y : y + self.resolution :
+                ]
+            )
         else:
             x = int(self.resolution * self._target_background[0, 0])
             y = int(self.resolution * self._target_background[1, 0])
-            new_background = Image.fromarray(self.pink_noise[x : x + self.resolution, y : y + self.resolution :])
+            new_background = Image.fromarray(
+                self.pink_noise[
+                    x : x + self.resolution, y : y + self.resolution :
+                ]
+            )
         for i, img in enumerate(self.images):
-            if mode == "current":
+            if mode == 'current':
                 box = [
                     int(self._current_locations[i, 0] * self.resolution),
                     int(self._current_locations[i, 1] * self.resolution),
-                    int(self._current_locations[i, 0] * self.resolution + img.height),
-                    int(self._current_locations[i, 1] * self.resolution + img.width),
+                    int(
+                        self._current_locations[i, 0] * self.resolution
+                        + img.height
+                    ),
+                    int(
+                        self._current_locations[i, 1] * self.resolution
+                        + img.width
+                    ),
                 ]
-                new_background.paste(img.rotate(self._current_rotations[i, 0] * 360), box)
+                new_background.paste(
+                    img.rotate(self._current_rotations[i, 0] * 360), box
+                )
             else:
                 box = [
                     int(self._target_locations[i, 0] * self.resolution),
                     int(self._target_locations[i, 1] * self.resolution),
-                    int(self._target_locations[i, 0] * self.resolution + img.height),
-                    int(self._target_locations[i, 1] * self.resolution + img.width),
+                    int(
+                        self._target_locations[i, 0] * self.resolution
+                        + img.height
+                    ),
+                    int(
+                        self._target_locations[i, 1] * self.resolution
+                        + img.width
+                    ),
                 ]
-                new_background.paste(img.rotate(self._target_rotations[i, 0] * 360), box)
+                new_background.paste(
+                    img.rotate(self._target_rotations[i, 0] * 360), box
+                )
 
         # get the surface
         # Get image data, size, and mode from PIL Image
@@ -269,12 +348,14 @@ class ImagePositioning(gym.Env):
         image_mode = new_background.mode
 
         # Create a Pygame Surface from the PIL image data
-        pygame_surface = pygame.image.frombytes(image_bytes, image_size, image_mode)
+        pygame_surface = pygame.image.frombytes(
+            image_bytes, image_size, image_mode
+        )
         self.window.blit(pygame_surface, (0, 0))  # Blit at position (0,0)
 
         # Update the display
         pygame.display.flip()
-        if self.render_mode == "human":
+        if self.render_mode == 'human':
             # The following line copies our drawings from `canvas` to the visible window
             # self.window.blit(canvas, canvas.get_rect())
             pygame.event.pump()
@@ -282,9 +363,12 @@ class ImagePositioning(gym.Env):
 
             # We need to ensure that human-rendering occurs at the predefined framerate.
             # The following line will automatically add a delay to keep the framerate stable.
-            self.clock.tick(self.metadata["render_fps"])
+            self.clock.tick(self.metadata['render_fps'])
         else:  # rgb_array
-            return np.transpose(np.array(pygame.surfarray.pixels3d(pygame_surface)), axes=(1, 0, 2))
+            return np.transpose(
+                np.array(pygame.surfarray.pixels3d(pygame_surface)),
+                axes=(1, 0, 2),
+            )
 
     def close(self):
         if self.window is not None:
@@ -292,7 +376,7 @@ class ImagePositioning(gym.Env):
             pygame.quit()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import gymnasium as gym
     import matplotlib.pyplot as plt
     import numpy as np
@@ -304,16 +388,16 @@ if __name__ == "__main__":
     # Create a CartPole environment with "rgb_array" render mode to get image data
     images = [
         swm.utils.create_pil_image_from_url(
-            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK5OnlnP3_GHXI2y1LoIHbMROdN8_DYyLEGg&s"
+            'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK5OnlnP3_GHXI2y1LoIHbMROdN8_DYyLEGg&s'
         ).resize((64, 64)),
         swm.utils.create_pil_image_from_url(
-            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjrFGrhOLwgYP0cdjTIBEWMpy9MHBcya4c5Q&s"
+            'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjrFGrhOLwgYP0cdjTIBEWMpy9MHBcya4c5Q&s'
         ).resize((32, 32)),
     ]
 
     env = gym.make(
-        "swm/ImagePositioning",
-        render_mode="rgb_array",
+        'swm/ImagePositioning',
+        render_mode='rgb_array',
         resolution=224,
         images=images,
         background_power_decay=2,
@@ -323,8 +407,8 @@ if __name__ == "__main__":
     swm.collect.random_action(env, num_episodes=1)
     env = RecordVideo(
         env,
-        video_folder="cartpole-agent",  # Folder to save videos
-        name_prefix="eval",  # Prefix for video filenames
+        video_folder='cartpole-agent',  # Folder to save videos
+        name_prefix='eval',  # Prefix for video filenames
         episode_trigger=lambda x: True,  # Record every episode
     )
 
@@ -343,19 +427,19 @@ if __name__ == "__main__":
     axs[0].imshow(rgb_array)
     axs[0].set_xticks([])
     axs[0].set_yticks([])
-    axs[0].set_title("Init.")
-    rgb_array = env.unwrapped.render(mode="target")
+    axs[0].set_title('Init.')
+    rgb_array = env.unwrapped.render(mode='target')
     axs[1].imshow(rgb_array)
     axs[1].set_xticks([])
     axs[1].set_yticks([])
-    axs[1].set_title("Target")
-    plt.savefig("cartpole_observation.png")
+    axs[1].set_title('Target')
+    plt.savefig('cartpole_observation.png')
     plt.close()  # Close the plot to free up memory
     for i in range(5):
         action = env.unwrapped._get_optimal_action()
         env.step(action)
 
-    print("Saved CartPole observation as cartpole_observation.png")
+    print('Saved CartPole observation as cartpole_observation.png')
 
     # 5. Close the environment
     env.close()
