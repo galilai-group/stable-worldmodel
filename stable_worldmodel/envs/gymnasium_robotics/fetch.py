@@ -216,7 +216,7 @@ class FetchWrapper(gym.Wrapper):
 
         obs, info = super().reset(seed=seed, options=options)
 
-        self._apply_visual_variations()
+        self._apply_visual_variations(active_variations)
 
         changed_physics = False
         if any(
@@ -327,13 +327,38 @@ class FetchWrapper(gym.Wrapper):
             return []
         return [i for i in range(model.ngeom) if model.geom_matid[i] == mat_id]
 
-    def _apply_visual_variations(self):
-        """Modifies the underlying MuJoCo model to apply visual variations."""
+    def _apply_visual_variations(self, active_variations):
+        """Modifies the underlying MuJoCo model to apply visual variations.
+
+        Only variations whose key appears in ``active_variations`` are applied —
+        anything else is left untouched so the original MJCF defaults (skybox,
+        floor, table, etc.) are preserved on unmodified resets.
+        """
         if mujoco is None:
             return
 
         model = self.env.unwrapped.model
         if model is None:
+            return
+
+        active = set(active_variations)
+        needs_table = 'table.color' in active
+        needs_bg = 'background.color' in active
+        needs_object = 'object.color' in active
+        needs_light = 'light.intensity' in active
+        needs_camera = 'camera.angle_delta' in active
+        needs_arm = 'rendering.transparent_arm' in active
+
+        if not any(
+            [
+                needs_table,
+                needs_bg,
+                needs_object,
+                needs_light,
+                needs_camera,
+                needs_arm,
+            ]
+        ):
             return
 
         if not hasattr(self, '_table_geoms'):
@@ -366,85 +391,87 @@ class FetchWrapper(gym.Wrapper):
             ):
                 model.geom_matid[i] = -1
 
-        # Now we can safely modify geom_rgba
-        table_color = self.variation_space['table']['color'].value
-        for i in self._table_geoms:
-            model.geom_rgba[i][:3] = table_color
+        if needs_table:
+            table_color = self.variation_space['table']['color'].value
+            for i in self._table_geoms:
+                model.geom_rgba[i][:3] = table_color
 
-        bg_color = self.variation_space['background']['color'].value
-        for i in self._floor_geoms:
-            model.geom_rgba[i][:3] = bg_color
+        if needs_bg:
+            bg_color = self.variation_space['background']['color'].value
+            for i in self._floor_geoms:
+                model.geom_rgba[i][:3] = bg_color
 
-        if getattr(self, '_skybox_tex_id', -1) >= 0:
-            skybox_tex_id = self._skybox_tex_id
-            bg_color_uint8 = (bg_color * 255).astype(np.uint8)
-            start_idx = model.tex_adr[skybox_tex_id]
-            channels = model.tex_nchannel[skybox_tex_id]
-            num_pixels = (
-                model.tex_width[skybox_tex_id]
-                * model.tex_height[skybox_tex_id]
+            if getattr(self, '_skybox_tex_id', -1) >= 0:
+                skybox_tex_id = self._skybox_tex_id
+                bg_color_uint8 = (bg_color * 255).astype(np.uint8)
+                start_idx = model.tex_adr[skybox_tex_id]
+                channels = model.tex_nchannel[skybox_tex_id]
+                num_pixels = (
+                    model.tex_width[skybox_tex_id]
+                    * model.tex_height[skybox_tex_id]
+                )
+
+                if channels >= 3:
+                    view = model.tex_data[
+                        start_idx : start_idx + num_pixels * channels
+                    ].reshape(-1, channels)
+                    view[:, :3] = bg_color_uint8[:3]
+
+                if hasattr(self.env, 'unwrapped') and hasattr(
+                    self.env.unwrapped, 'mujoco_renderer'
+                ):
+                    renderer = self.env.unwrapped.mujoco_renderer
+                    if renderer is not None and hasattr(renderer, 'viewer'):
+                        viewer = renderer.viewer
+                        if getattr(viewer, 'con', None) is not None:
+                            mujoco.mjr_uploadTexture(
+                                model, viewer.con, skybox_tex_id
+                            )
+
+        if needs_object:
+            object_color = self.variation_space['object']['color'].value
+            for i in self._object_geoms:
+                model.geom_rgba[i][:3] = object_color
+
+        if needs_light:
+            light_id = mujoco.mj_name2id(
+                model, mujoco.mjtObj.mjOBJ_LIGHT, 'light0'
             )
+            if light_id >= 0:
+                intensity = self.variation_space['light']['intensity'].value[0]
+                model.light_diffuse[light_id][:3] = np.array(
+                    [intensity, intensity, intensity]
+                )
 
-            if channels >= 3:
-                view = model.tex_data[
-                    start_idx : start_idx + num_pixels * channels
-                ].reshape(-1, channels)
-                view[:, :3] = bg_color_uint8[:3]
+        if needs_camera:
+            angle_delta = self.variation_space['camera']['angle_delta'].value[
+                0
+            ]
+            for cam_id in range(model.ncam):
+                model.cam_pos[cam_id] = self._default_cam_pos[cam_id]
+                model.cam_quat[cam_id] = self._default_cam_quat[cam_id]
 
-            if hasattr(self.env, 'unwrapped') and hasattr(
-                self.env.unwrapped, 'mujoco_renderer'
-            ):
-                renderer = self.env.unwrapped.mujoco_renderer
-                if renderer is not None and hasattr(renderer, 'viewer'):
-                    viewer = renderer.viewer
-                    if getattr(viewer, 'con', None) is not None:
-                        mujoco.mjr_uploadTexture(
-                            model, viewer.con, skybox_tex_id
-                        )
+                azimuth_rad = np.radians(angle_delta[0])
+                elevation_rad = np.radians(angle_delta[1])
 
-        object_color = self.variation_space['object']['color'].value
-        for i in self._object_geoms:
-            model.geom_rgba[i][:3] = object_color
+                pos = model.cam_pos[cam_id].copy()
+                cos_az, sin_az = np.cos(azimuth_rad), np.sin(azimuth_rad)
+                x, y = pos[0], pos[1]
+                pos[0] = x * cos_az - y * sin_az
+                pos[1] = x * sin_az + y * cos_az
 
-        # Apply light intensity
-        light_id = mujoco.mj_name2id(
-            model, mujoco.mjtObj.mjOBJ_LIGHT, 'light0'
-        )
-        if light_id >= 0:
-            intensity = self.variation_space['light']['intensity'].value[0]
-            model.light_diffuse[light_id][:3] = np.array(
-                [intensity, intensity, intensity]
+                cos_el, sin_el = np.cos(elevation_rad), np.sin(elevation_rad)
+                z, r = pos[2], np.sqrt(pos[0] ** 2 + pos[1] ** 2)
+                pos[2] = z * cos_el + r * sin_el
+
+                model.cam_pos[cam_id] = pos
+
+        if needs_arm:
+            is_transparent = (
+                self.variation_space['rendering']['transparent_arm'].value == 1
             )
-
-        # Apply camera angle perturbation (azimuth, elevation offsets in degrees)
-        angle_delta = self.variation_space['camera']['angle_delta'].value[0]
-        for cam_id in range(model.ncam):
-            model.cam_pos[cam_id] = self._default_cam_pos[cam_id]
-            model.cam_quat[cam_id] = self._default_cam_quat[cam_id]
-
-            azimuth_rad = np.radians(angle_delta[0])
-            elevation_rad = np.radians(angle_delta[1])
-
-            # Rotate camera position around the look-at point using azimuth offset
-            pos = model.cam_pos[cam_id].copy()
-            cos_az, sin_az = np.cos(azimuth_rad), np.sin(azimuth_rad)
-            x, y = pos[0], pos[1]
-            pos[0] = x * cos_az - y * sin_az
-            pos[1] = x * sin_az + y * cos_az
-
-            # Apply elevation offset by tilting Z
-            cos_el, sin_el = np.cos(elevation_rad), np.sin(elevation_rad)
-            z, r = pos[2], np.sqrt(pos[0] ** 2 + pos[1] ** 2)
-            pos[2] = z * cos_el + r * sin_el
-
-            model.cam_pos[cam_id] = pos
-
-        # Optional: Manipulate the alpha (transparency) channels of the entire robotic arm
-        is_transparent = (
-            self.variation_space['rendering']['transparent_arm'].value == 1
-        )
-        alpha_val = 0.3 if is_transparent else 1.0
-        for i in range(model.ngeom):
-            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i)
-            if name and 'robot0:' in name:
-                model.geom_rgba[i][3] = alpha_val
+            alpha_val = 0.3 if is_transparent else 1.0
+            for i in range(model.ngeom):
+                name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i)
+                if name and 'robot0:' in name:
+                    model.geom_rgba[i][3] = alpha_val

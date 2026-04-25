@@ -36,10 +36,10 @@ world = swm.World('swm/FetchPickAndPlace-v3', num_envs=4, image_shape=(224, 224)
 ## Fetch Manipulation Suite
 
 <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-  <img src="../../assets/env/gymnasium_robotics/fetch/push.gif" alt="fetch push" style="width: 24%; object-fit: contain;">
-  <img src="../../assets/env/gymnasium_robotics/fetch/slide.gif" alt="fetch slide" style="width: 24%; object-fit: contain;">
-  <img src="../../assets/env/gymnasium_robotics/fetch/pick_and_place.gif" alt="fetch pick and place" style="width: 24%; object-fit: contain;">
-  <img src="../../assets/env/gymnasium_robotics/fetch/reach.gif" alt="fetch reach" style="width: 24%; object-fit: contain;">
+  <img src="../../assets/fetch_push.gif" alt="fetch push" style="width: 24%; object-fit: contain;">
+  <img src="../../assets/fetch_slide.gif" alt="fetch slide" style="width: 24%; object-fit: contain;">
+  <img src="../../assets/fetch_pickandplace.gif" alt="fetch pick and place" style="width: 24%; object-fit: contain;">
+  <img src="../../assets/fetch_reach.gif" alt="fetch reach" style="width: 24%; object-fit: contain;">
 </div>
 
 An agent controls a 7-DoF Fetch robotic arm. The agent manipulates explicit Cartesian coordinates to move the gripper and actuate the fingers to interact with the environment.
