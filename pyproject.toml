@@ -47,6 +47,7 @@ env = [
     "ogbench",
     "minigrid",
     "gymnasium[all]",
+    "gymnasium-robotics",
     "opencv-python",
     "stable_baselines3>=2.0.0",
 ]

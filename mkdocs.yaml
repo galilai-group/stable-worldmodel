@@ -24,6 +24,7 @@ nav:
       - envs/dmc.md
       - envs/ogb.md
       - envs/tworoom.md
+      - envs/gymnasium_robotics.md
   - Guides:
       - guides/checkpoints.md
   - cli.md
