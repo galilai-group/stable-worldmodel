@@ -68,7 +68,10 @@ world_model = ...  # your model
 
 # 3. Evaluate with model-predictive control
 solver = CEMSolver(model=world_model, num_samples=300)
-policy = WorldModelPolicy(solver=solver, config=PlanConfig(horizon=10))
+policy = WorldModelPolicy(
+    solver=solver,
+    config=PlanConfig(horizon=10, receding_horizon=5),
+)
 
 world.set_policy(policy)
 results = world.evaluate(episodes=50)
