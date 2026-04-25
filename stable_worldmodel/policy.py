@@ -10,6 +10,7 @@ from loguru import logger as logging
 from torchvision import tv_tensors
 
 import stable_worldmodel as swm
+from stable_worldmodel.buffer import HistoryBuffer
 from stable_worldmodel.solver import Solver
 
 
@@ -20,7 +21,13 @@ class PlanConfig:
     Attributes:
         horizon: Planning horizon in number of steps.
         receding_horizon: Number of steps to execute before re-planning.
-        history_len: Number of past observations to consider.
+        history_len: Number of past observations to sample (strided by
+            ``action_block``) when querying the history buffer.
+        history_max_len: Capacity (in env steps) of the per-env history
+            buffer. ``None`` means derive ``history_len * action_block``
+            — the smallest size that yields ``history_len`` action
+            blocks (and ``history_len`` strided samples for non-block
+            keys). Set higher to retain more raw history than you sample.
         action_block: Number of times each action is repeated (frameskip).
         warm_start: Whether to use the previous plan to initialize the next one.
     """
@@ -28,6 +35,7 @@ class PlanConfig:
     horizon: int
     receding_horizon: int
     history_len: int = 1
+    history_max_len: int | None = None
     action_block: int = 1
     warm_start: bool = True
 
@@ -356,6 +364,7 @@ class WorldModelPolicy(BasePolicy):
         self.transform = transform or {}
         self._action_buffer: list[deque[torch.Tensor]] | None = None
         self._next_init: torch.Tensor | None = None
+        self._history_buffer: HistoryBuffer | None = None
 
     @property
     def flatten_receding_horizon(self) -> int:
@@ -376,6 +385,18 @@ class WorldModelPolicy(BasePolicy):
         self._action_buffer = [
             deque(maxlen=self.flatten_receding_horizon) for _ in range(n_envs)
         ]
+        if self.cfg.history_len > 1:
+            max_len = self.cfg.history_max_len
+            if max_len is None:
+                max_len = self.cfg.history_len * self.cfg.action_block
+            self._history_buffer = HistoryBuffer(
+                n_envs=n_envs,
+                max_len=max_len,
+                action_block=self.cfg.action_block,
+                block_keys=('action',),
+            )
+        else:
+            self._history_buffer = None
 
         assert isinstance(self.solver, Solver), (
             'Solver must implement the Solver protocol'
@@ -395,7 +416,6 @@ class WorldModelPolicy(BasePolicy):
         assert 'pixels' in info_dict, "'pixels' must be provided in info_dict"
         assert 'goal' in info_dict, "'goal' must be provided in info_dict"
 
-        info_dict = self._prepare_info(info_dict)
         n_envs = self.env.num_envs
 
         needs_flush = info_dict.pop('_needs_flush', None)
@@ -405,12 +425,33 @@ class WorldModelPolicy(BasePolicy):
                     self._action_buffer[i].clear()
                     if self._next_init is not None:
                         self._next_init[i] = 0
+            if self._history_buffer is not None:
+                flush_ids = [i for i in range(n_envs) if bool(needs_flush[i])]
+                if flush_ids:
+                    self._history_buffer.reset(flush_ids)
 
-        terminated = info_dict.get('terminated')
-        dead = np.asarray(terminated, dtype=bool) if terminated is not None else np.zeros(n_envs, dtype=bool)
+        raw_terminated = info_dict.get('terminated')
+
+        info_dict = self._prepare_info(info_dict)
+
+        if self._history_buffer is not None:
+            self._history_buffer.append(
+                {k: v for k, v in info_dict.items() if not k.startswith('_')}
+            )
+            history = self._history_buffer.get(self.cfg.history_len)
+            if history is not None:
+                info_dict = history
+
+        terminated = raw_terminated
+        dead = (
+            np.asarray(terminated, dtype=bool)
+            if terminated is not None
+            else np.zeros(n_envs, dtype=bool)
+        )
 
         replan_idx = [
-            i for i in range(n_envs)
+            i
+            for i in range(n_envs)
             if len(self._action_buffer[i]) == 0 and not dead[i]
         ]
 

@@ -209,6 +209,29 @@ def test_prepare_info_process_non_numpy_raises():
         policy._prepare_info(info)
 
 
+def test_prepare_info_with_block_aggregated_key():
+    """Process keys whose last dim is a multiple of n_features_in_ flatten to (-1, n_features_in_).
+
+    Mirrors the action history path where HistoryBuffer with block_keys=('action',)
+    returns shape (n_envs, k, action_block * D) but the scaler was fit on D features.
+    """
+    policy = BasePolicy()
+    scaler = MockTransformable(scale=2.0)
+    scaler.n_features_in_ = 2  # sklearn convention
+    policy.process = {"action": scaler}
+    # Shape: (n_envs=1, k=2, action_block * D = 2 * 2 = 4)
+    info = {
+        "action": np.array(
+            [[[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]],
+            dtype=np.float32,
+        )
+    }
+    result = policy._prepare_info(info)
+    assert result["action"].shape == (1, 2, 4)
+    expected = torch.tensor([[[2.0, 4.0, 6.0, 8.0], [10.0, 12.0, 14.0, 16.0]]])
+    torch.testing.assert_close(result["action"], expected)
+
+
 def test_prepare_info_string_dtype_not_converted():
     """Test _prepare_info doesn't convert string arrays to tensor."""
     policy = BasePolicy()
@@ -401,6 +424,57 @@ def test_worldmodel_policy_set_env():
     assert solver.configured
     assert solver.n_envs == 4
     assert policy._action_buffer is not None
+
+
+def test_worldmodel_policy_history_buffer_max_len():
+    """Auto-derived max_len must hold history_len full action blocks.
+
+    Block keys need k * action_block raw entries to surface k blocks
+    (buffer.py:115-116). Using the strided formula was one short.
+    """
+    solver = MockSolver()
+    config = PlanConfig(
+        horizon=10, receding_horizon=2, history_len=4, action_block=3
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+
+    mock_env = MagicMock()
+    mock_env.num_envs = 1
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
+    policy.set_env(mock_env)
+
+    assert policy._history_buffer is not None
+    assert policy._history_buffer.max_len == 12  # history_len * action_block
+
+    for i in range(12):
+        policy._history_buffer.append(
+            {'action': np.full((1, 1, 2), i, dtype=np.float32)}
+        )
+    out = policy._history_buffer.get(config.history_len)
+    assert out is not None
+    assert out['action'].shape == (1, 4, 6)  # (n_envs, history_len, action_block * D)
+
+
+def test_worldmodel_policy_history_max_len_explicit():
+    """Explicit history_max_len overrides the auto-derivation."""
+    solver = MockSolver()
+    config = PlanConfig(
+        horizon=10,
+        receding_horizon=2,
+        history_len=3,
+        history_max_len=20,
+        action_block=2,
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+
+    mock_env = MagicMock()
+    mock_env.num_envs = 1
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
+    policy.set_env(mock_env)
+
+    assert policy._history_buffer.max_len == 20
 
 
 def test_worldmodel_policy_set_env_no_num_envs():
