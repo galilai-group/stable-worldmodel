@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 import urllib.request
 from pathlib import Path
 
@@ -102,7 +101,10 @@ def _resolve_dataset(name: str, datasets_dir: Path) -> Path:
     """Resolve *name* (local path or HF repo id) to a local path.
 
     Returns whatever exists on disk — file or directory. Format detection
-    happens after this in :func:`load_dataset`.
+    happens after this in :func:`load_dataset`. Local layout for cached
+    datasets is a directory under ``<datasets_dir>/<name>/``; the directory
+    may hold a ``foo.lance/`` table, a ``foo.h5`` file, or any other
+    layout a registered format can detect.
     """
     local = Path(name)
     if not local.is_absolute():
@@ -120,68 +122,99 @@ def _resolve_dataset(name: str, datasets_dir: Path) -> Path:
     )
 
 
-def _resolve_dataset_folder(folder: Path) -> Path:
-    """Return the single HDF5 file inside *folder*."""
-    h5_files = list(folder.glob('*.h5')) + list(folder.glob('*.hdf5'))
-    if not h5_files:
-        raise FileNotFoundError(f'No .h5 / .hdf5 file found in {folder}')
-    if len(h5_files) > 1:
-        raise ValueError(
-            f'Ambiguous dataset: multiple HDF5 files in {folder}. '
-            'Specify the file directly.'
-        )
-    logging.info(f'Using dataset at {h5_files[0]}')
-    return h5_files[0]
+# Suffixes we recognise on HF: a `.lance` directory (preferred) or a
+# `.h5` / `.hdf5` file. Each format is downloaded in its native shape — no
+# tar/zst wrapping.
+_HF_FILE_SUFFIXES: tuple[str, ...] = ('.h5', '.hdf5')
+_HF_DIR_SUFFIXES: tuple[str, ...] = ('.lance',)
 
 
-def _hf_dataset_find_archive(repo_id: str) -> str:
-    """Return the filename of the first .h5.zst or .tar.zst in a HF dataset repo."""
-    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main'
+def _hf_list_tree(repo_id: str, sub_path: str = '') -> list[dict]:
+    """One HF API call: list entries at ``<repo>/tree/main/<sub_path>``."""
+    suffix = f'/{sub_path}' if sub_path else ''
+    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main{suffix}'
     with urllib.request.urlopen(api_url) as resp:
-        entries = json.loads(resp.read())
+        return json.loads(resp.read())
+
+
+def _hf_find_dataset_entry(repo_id: str) -> dict:
+    """Return the first top-level entry that looks like a dataset.
+
+    Preference: a ``*.lance`` directory wins over an ``*.h5`` file when
+    both are present, since lance is the default format.
+    """
+    entries = _hf_list_tree(repo_id)
+
     for entry in entries:
-        name = entry.get('path', '')
-        if name.endswith('.h5.zst') or name.endswith('.tar.zst'):
-            return name
+        path = entry.get('path', '')
+        if entry.get('type') == 'directory' and path.endswith(
+            _HF_DIR_SUFFIXES
+        ):
+            return entry
+    for entry in entries:
+        path = entry.get('path', '')
+        if entry.get('type') == 'file' and path.endswith(_HF_FILE_SUFFIXES):
+            return entry
+
     raise FileNotFoundError(
-        f'No .h5.zst or .tar.zst file found in HF dataset repo {repo_id}'
+        f'No dataset found in HF repo {repo_id}: expected a top-level '
+        f'`*.lance` directory or `*.h5`/`*.hdf5` file.'
     )
 
 
-def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
-    """Resolve a HF repo id, downloading and extracting when not cached.
+def _hf_walk_files(repo_id: str, sub_path: str) -> list[str]:
+    """Recursively list every *file* path under ``sub_path`` on HF."""
+    out: list[str] = []
+    stack = [sub_path]
+    while stack:
+        current = stack.pop()
+        for entry in _hf_list_tree(repo_id, current):
+            path = entry.get('path', '')
+            if entry.get('type') == 'directory':
+                stack.append(path)
+            else:
+                out.append(path)
+    return out
 
-    Local layout: ``<datasets_dir>/<user>--<repo>/dataset.h5``
-    The archive fetched from HF must be a ``.h5.zst`` or ``.tar.zst`` file.
+
+def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
+    """Resolve a HF repo id, downloading on first use.
+
+    Local layout: ``<datasets_dir>/<user>--<repo>/`` — the directory is
+    returned as-is and format detection picks up whatever lives inside
+    (``*.lance``, ``*.h5``, …).
     """
     local_dir = datasets_dir / repo_id.replace('/', '--')
 
-    if local_dir.is_dir():
-        h5_files = list(local_dir.glob('*.h5')) + list(
-            local_dir.glob('*.hdf5')
-        )
-        if h5_files:
-            logging.info(f'Using cached dataset for {repo_id} at {local_dir}')
-            return _resolve_dataset_folder(local_dir)
+    if local_dir.is_dir() and any(local_dir.iterdir()):
+        logging.info(f'Using cached dataset for {repo_id} at {local_dir}')
+        return local_dir
 
     logging.info(f'Downloading dataset {repo_id} from HuggingFace...')
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    archive_name = _hf_dataset_find_archive(repo_id)
-    url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
-    archive_path = local_dir / archive_name
+    entry = _hf_find_dataset_entry(repo_id)
+    entry_path = entry['path']
 
-    logging.info(f'Fetching {url}')
-    _download(url, archive_path)
-
-    logging.info(f'Extracting {archive_path} into {local_dir}')
-    if archive_name.endswith('.tar.zst'):
-        _extract_zst_tar(archive_path, local_dir)
+    if entry.get('type') == 'directory':
+        files = _hf_walk_files(repo_id, entry_path)
+        if not files:
+            raise FileNotFoundError(
+                f"HF repo {repo_id}: directory '{entry_path}' is empty."
+            )
+        for remote in tqdm(files, desc=f'Fetching {entry_path}'):
+            url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{remote}'
+            dest = local_dir / remote
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _download(url, dest)
     else:
-        _extract_zst(archive_path)
-    archive_path.unlink()
+        url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{entry_path}'
+        dest = local_dir / entry_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        logging.info(f'Fetching {url}')
+        _download(url, dest)
 
-    return _resolve_dataset_folder(local_dir)
+    return local_dir
 
 
 def _download(url: str, dest: Path) -> None:
@@ -199,47 +232,12 @@ def _download(url: str, dest: Path) -> None:
             chunk = response.read(8192)
 
 
-def _extract_zst_tar(archive: Path, dest: Path) -> None:
-    """Extract a ``.tar.zst`` archive into *dest* using the system ``tar`` command."""
-    result = subprocess.run(
-        [
-            'tar',
-            '--use-compress-program=unzstd',
-            '-xf',
-            str(archive),
-            '-C',
-            str(dest),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to extract {archive}:\n{result.stderr.strip()}'
-        )
-
-
-def _extract_zst(archive: Path) -> None:
-    """Decompress a plain ``.zst`` file in-place using ``unzstd``."""
-    result = subprocess.run(
-        ['unzstd', str(archive), '-o', str(archive.with_suffix(''))],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to decompress {archive}:\n{result.stderr.strip()}'
-        )
-
-
 def convert(
     source,
     dest,
     *,
     source_format: str | None = None,
-    dest_format: str = 'hdf5',
+    dest_format: str = 'lance',
     cache_dir: str | None = None,
     progress: bool = True,
     **dest_kwargs,
@@ -255,7 +253,7 @@ def convert(
         source: Path or identifier accepted by :func:`load_dataset`.
         dest: Output path for the destination writer.
         source_format: Force a source format (skips detection).
-        dest_format: Registered writer name (default ``'hdf5'``).
+        dest_format: Registered writer name (default ``'lance'``).
         cache_dir: Forwarded to the source loader for HF/local resolution.
         progress: Show a progress bar over episodes.
         **dest_kwargs: Forwarded to the destination writer.
@@ -263,7 +261,7 @@ def convert(
     Example::
 
         from stable_worldmodel.data import convert
-        convert('data.h5', 'data_video/', dest_format='video', fps=30)
+        convert('data.h5', 'data.lance')
     """
     from stable_worldmodel.data.format import get_format
 

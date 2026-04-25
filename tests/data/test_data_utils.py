@@ -10,11 +10,10 @@ import pytest
 
 from stable_worldmodel.data.utils import (
     _download,
-    _extract_zst,
-    _extract_zst_tar,
-    _hf_dataset_find_archive,
+    _hf_find_dataset_entry,
+    _hf_list_tree,
+    _hf_walk_files,
     _resolve_dataset,
-    _resolve_dataset_folder,
     _resolve_dataset_hf,
     ensure_dir_exists,
     get_cache_dir,
@@ -75,35 +74,6 @@ def test_ensure_dir_exists_existing_dir(tmp_path):
     assert tmp_path.exists()
 
 
-# ─── _resolve_dataset_folder ──────────────────────────────────────────────────
-
-
-def test_resolve_dataset_folder_single_h5(tmp_path):
-    h5 = tmp_path / 'data.h5'
-    h5.touch()
-    result = _resolve_dataset_folder(tmp_path)
-    assert result == h5
-
-
-def test_resolve_dataset_folder_single_hdf5(tmp_path):
-    h5 = tmp_path / 'data.hdf5'
-    h5.touch()
-    result = _resolve_dataset_folder(tmp_path)
-    assert result == h5
-
-
-def test_resolve_dataset_folder_no_h5_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        _resolve_dataset_folder(tmp_path)
-
-
-def test_resolve_dataset_folder_multiple_h5_raises(tmp_path):
-    (tmp_path / 'a.h5').touch()
-    (tmp_path / 'b.h5').touch()
-    with pytest.raises(ValueError, match='Ambiguous'):
-        _resolve_dataset_folder(tmp_path)
-
-
 # ─── _resolve_dataset ─────────────────────────────────────────────────────────
 
 
@@ -137,10 +107,10 @@ def test_resolve_dataset_directory(tmp_path):
 
 def test_resolve_dataset_hf_repo(tmp_path):
     with patch('stable_worldmodel.data.utils._resolve_dataset_hf') as mock_hf:
-        mock_hf.return_value = tmp_path / 'data.h5'
+        mock_hf.return_value = tmp_path / 'user--repo'
         result = _resolve_dataset('user/repo', tmp_path)
         mock_hf.assert_called_once_with('user/repo', tmp_path)
-        assert result == tmp_path / 'data.h5'
+        assert result == tmp_path / 'user--repo'
 
 
 def test_resolve_dataset_invalid_name_raises(tmp_path):
@@ -155,78 +125,69 @@ def test_resolve_dataset_hf_uses_cache(tmp_path):
     repo_id = 'user/repo'
     local_dir = tmp_path / 'user--repo'
     local_dir.mkdir()
-    h5 = local_dir / 'dataset.h5'
-    h5.touch()
+    (local_dir / 'dataset.h5').touch()
 
     result = _resolve_dataset_hf(repo_id, tmp_path)
-    assert result == h5
+    assert result == local_dir
 
 
-def test_resolve_dataset_hf_downloads_tar_zst(tmp_path):
+def test_resolve_dataset_hf_downloads_h5_file(tmp_path):
     repo_id = 'user/repo'
-    expected_h5 = tmp_path / 'user--repo' / 'dataset.h5'
+    expected_dir = tmp_path / 'user--repo'
 
     def fake_download(url, dest):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.touch()
 
-    def fake_extract(archive, dest):
-        (dest / 'dataset.h5').touch()
-
     with (
         patch(
-            'stable_worldmodel.data.utils._hf_dataset_find_archive',
-            return_value='dataset.tar.zst',
+            'stable_worldmodel.data.utils._hf_find_dataset_entry',
+            return_value={'path': 'dataset.h5', 'type': 'file'},
         ),
         patch(
             'stable_worldmodel.data.utils._download', side_effect=fake_download
         ),
-        patch(
-            'stable_worldmodel.data.utils._extract_zst_tar',
-            side_effect=fake_extract,
-        ),
     ):
         result = _resolve_dataset_hf(repo_id, tmp_path)
 
-    assert result == expected_h5
+    assert result == expected_dir
+    assert (expected_dir / 'dataset.h5').exists()
 
 
-def test_resolve_dataset_hf_downloads_h5_zst(tmp_path):
+def test_resolve_dataset_hf_downloads_lance_directory(tmp_path):
     repo_id = 'user/repo'
-    archive_name = 'mydata.h5.zst'
-    expected_h5 = tmp_path / 'user--repo' / 'mydata.h5'
+    expected_dir = tmp_path / 'user--repo'
 
     def fake_download(url, dest):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.touch()
 
-    def fake_extract(archive):
-        archive.with_suffix('').touch()
-
     with (
         patch(
-            'stable_worldmodel.data.utils._hf_dataset_find_archive',
-            return_value=archive_name,
+            'stable_worldmodel.data.utils._hf_find_dataset_entry',
+            return_value={'path': 'foo.lance', 'type': 'directory'},
+        ),
+        patch(
+            'stable_worldmodel.data.utils._hf_walk_files',
+            return_value=[
+                'foo.lance/data/0.lance',
+                'foo.lance/_versions/1.manifest',
+            ],
         ),
         patch(
             'stable_worldmodel.data.utils._download', side_effect=fake_download
         ),
-        patch(
-            'stable_worldmodel.data.utils._extract_zst',
-            side_effect=fake_extract,
-        ),
     ):
         result = _resolve_dataset_hf(repo_id, tmp_path)
 
-    assert result == expected_h5
+    assert result == expected_dir
+    assert (expected_dir / 'foo.lance' / 'data' / '0.lance').exists()
+    assert (expected_dir / 'foo.lance' / '_versions' / '1.manifest').exists()
 
 
-def test_resolve_dataset_hf_constructs_correct_url(tmp_path):
+def test_resolve_dataset_hf_constructs_correct_url_for_file(tmp_path):
     repo_id = 'myorg/mydata'
-    archive_name = 'dataset.tar.zst'
-    expected_url = (
-        f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
-    )
+    expected_url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/dataset.h5'
     captured = {}
 
     def fake_download(url, dest):
@@ -234,20 +195,13 @@ def test_resolve_dataset_hf_constructs_correct_url(tmp_path):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.touch()
 
-    def fake_extract(archive, dest):
-        (dest / 'dataset.h5').touch()
-
     with (
         patch(
-            'stable_worldmodel.data.utils._hf_dataset_find_archive',
-            return_value=archive_name,
+            'stable_worldmodel.data.utils._hf_find_dataset_entry',
+            return_value={'path': 'dataset.h5', 'type': 'file'},
         ),
         patch(
             'stable_worldmodel.data.utils._download', side_effect=fake_download
-        ),
-        patch(
-            'stable_worldmodel.data.utils._extract_zst_tar',
-            side_effect=fake_extract,
         ),
     ):
         _resolve_dataset_hf(repo_id, tmp_path)
@@ -255,232 +209,102 @@ def test_resolve_dataset_hf_constructs_correct_url(tmp_path):
     assert captured['url'] == expected_url
 
 
-def test_resolve_dataset_hf_url_includes_datasets_prefix(tmp_path):
-    """Regression: URL must use /datasets/ prefix, not bare /user/repo/."""
-    repo_id = 'myorg/mydata'
-    captured = {}
+# ─── _hf_find_dataset_entry ──────────────────────────────────────────────────
 
-    def fake_download(url, dest):
-        captured['url'] = url
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.touch()
 
-    def fake_extract(archive, dest):
-        (dest / 'dataset.h5').touch()
+def _mock_tree_response(entries):
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(entries).encode()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
 
-    with (
-        patch(
-            'stable_worldmodel.data.utils._hf_dataset_find_archive',
-            return_value='dataset.tar.zst',
-        ),
-        patch(
-            'stable_worldmodel.data.utils._download', side_effect=fake_download
-        ),
-        patch(
-            'stable_worldmodel.data.utils._extract_zst_tar',
-            side_effect=fake_extract,
-        ),
+
+def test_hf_find_dataset_entry_returns_h5_file():
+    entries = [
+        {'path': 'README.md', 'type': 'file'},
+        {'path': 'data.h5', 'type': 'file'},
+    ]
+    with patch(
+        'urllib.request.urlopen', return_value=_mock_tree_response(entries)
     ):
-        _resolve_dataset_hf(repo_id, tmp_path)
-
-    assert '/datasets/' in captured['url']
-    assert (
-        captured['url']
-        != f'{HF_BASE_URL}/{repo_id}/resolve/main/dataset.tar.zst'
-    )
+        entry = _hf_find_dataset_entry('user/repo')
+    assert entry['path'] == 'data.h5'
+    assert entry['type'] == 'file'
 
 
-def test_resolve_dataset_hf_dispatches_tar_zst_to_extract_zst_tar(tmp_path):
-    repo_id = 'user/repo'
-    called = {}
-
-    def fake_download(url, dest):
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.touch()
-
-    def fake_tar(archive, dest):
-        called['tar'] = True
-        (dest / 'dataset.h5').touch()
-
-    with (
-        patch(
-            'stable_worldmodel.data.utils._hf_dataset_find_archive',
-            return_value='data.tar.zst',
-        ),
-        patch(
-            'stable_worldmodel.data.utils._download', side_effect=fake_download
-        ),
-        patch(
-            'stable_worldmodel.data.utils._extract_zst_tar',
-            side_effect=fake_tar,
-        ),
-        patch('stable_worldmodel.data.utils._extract_zst') as mock_zst,
+def test_hf_find_dataset_entry_returns_lance_directory():
+    entries = [{'path': 'foo.lance', 'type': 'directory'}]
+    with patch(
+        'urllib.request.urlopen', return_value=_mock_tree_response(entries)
     ):
-        _resolve_dataset_hf(repo_id, tmp_path)
-
-    assert called.get('tar')
-    mock_zst.assert_not_called()
+        entry = _hf_find_dataset_entry('user/repo')
+    assert entry['path'] == 'foo.lance'
 
 
-def test_resolve_dataset_hf_dispatches_h5_zst_to_extract_zst(tmp_path):
-    repo_id = 'user/repo'
-    called = {}
-
-    def fake_download(url, dest):
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.touch()
-
-    def fake_zst(archive):
-        called['zst'] = True
-        archive.with_suffix('').touch()
-
-    with (
-        patch(
-            'stable_worldmodel.data.utils._hf_dataset_find_archive',
-            return_value='data.h5.zst',
-        ),
-        patch(
-            'stable_worldmodel.data.utils._download', side_effect=fake_download
-        ),
-        patch(
-            'stable_worldmodel.data.utils._extract_zst', side_effect=fake_zst
-        ),
-        patch('stable_worldmodel.data.utils._extract_zst_tar') as mock_tar,
+def test_hf_find_dataset_entry_prefers_lance_over_h5():
+    entries = [
+        {'path': 'data.h5', 'type': 'file'},
+        {'path': 'foo.lance', 'type': 'directory'},
+    ]
+    with patch(
+        'urllib.request.urlopen', return_value=_mock_tree_response(entries)
     ):
-        _resolve_dataset_hf(repo_id, tmp_path)
-
-    assert called.get('zst')
-    mock_tar.assert_not_called()
+        entry = _hf_find_dataset_entry('user/repo')
+    assert entry['path'] == 'foo.lance'
 
 
-# ─── _hf_dataset_find_archive ────────────────────────────────────────────────
+def test_hf_find_dataset_entry_raises_when_not_found():
+    entries = [
+        {'path': 'README.md', 'type': 'file'},
+        {'path': 'config.json', 'type': 'file'},
+    ]
+    with patch(
+        'urllib.request.urlopen', return_value=_mock_tree_response(entries)
+    ):
+        with pytest.raises(FileNotFoundError, match='No dataset found'):
+            _hf_find_dataset_entry('user/repo')
 
 
-def test_hf_dataset_find_archive_returns_h5_zst(monkeypatch):
-    entries = [{'path': 'README.md'}, {'path': 'data.h5.zst'}]
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps(entries).encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch('urllib.request.urlopen', return_value=mock_resp):
-        result = _hf_dataset_find_archive('user/repo')
-
-    assert result == 'data.h5.zst'
-
-
-def test_hf_dataset_find_archive_returns_tar_zst(monkeypatch):
-    entries = [{'path': 'dataset.tar.zst'}]
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps(entries).encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch('urllib.request.urlopen', return_value=mock_resp):
-        result = _hf_dataset_find_archive('user/repo')
-
-    assert result == 'dataset.tar.zst'
-
-
-def test_hf_dataset_find_archive_prefers_h5_zst_over_tar_zst():
-    entries = [{'path': 'data.h5.zst'}, {'path': 'data.tar.zst'}]
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps(entries).encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch('urllib.request.urlopen', return_value=mock_resp):
-        result = _hf_dataset_find_archive('user/repo')
-
-    assert result == 'data.h5.zst'
-
-
-def test_hf_dataset_find_archive_raises_when_not_found():
-    entries = [{'path': 'README.md'}, {'path': 'config.json'}]
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps(entries).encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch('urllib.request.urlopen', return_value=mock_resp):
-        with pytest.raises(FileNotFoundError, match='No .h5.zst or .tar.zst'):
-            _hf_dataset_find_archive('user/repo')
-
-
-def test_hf_dataset_find_archive_uses_datasets_api_url():
-    entries = [{'path': 'data.h5.zst'}]
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps(entries).encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
+def test_hf_list_tree_uses_datasets_api_url():
+    entries = [{'path': 'data.h5', 'type': 'file'}]
     captured = {}
 
     def fake_urlopen(url):
         captured['url'] = url
-        return mock_resp
+        return _mock_tree_response(entries)
 
     with patch('urllib.request.urlopen', side_effect=fake_urlopen):
-        _hf_dataset_find_archive('myorg/myrepo')
+        _hf_list_tree('myorg/myrepo')
 
     assert '/api/datasets/myorg/myrepo/tree/main' in captured['url']
 
 
-# ─── _extract_zst ─────────────────────────────────────────────────────────────
+def test_hf_walk_files_recurses_into_subdirs():
+    """Two-level walk: top → subdir → leaf files."""
+    pages = {
+        'foo.lance': [
+            {'path': 'foo.lance/data', 'type': 'directory'},
+            {'path': 'foo.lance/manifest', 'type': 'file'},
+        ],
+        'foo.lance/data': [
+            {'path': 'foo.lance/data/0.lance', 'type': 'file'},
+        ],
+    }
 
+    def fake_urlopen(url):
+        for sub, entries in pages.items():
+            if url.endswith(f'/tree/main/{sub}'):
+                return _mock_tree_response(entries)
+        raise AssertionError(f'unexpected url {url}')
 
-def test_extract_zst_success(tmp_path):
-    archive = tmp_path / 'data.h5.zst'
-    archive.touch()
+    with patch('urllib.request.urlopen', side_effect=fake_urlopen):
+        files = _hf_walk_files('user/repo', 'foo.lance')
 
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stderr='')
-        _extract_zst(archive)
-
-    cmd = mock_run.call_args[0][0]
-    assert 'unzstd' in cmd
-    assert str(archive) in cmd
-    assert str(archive.with_suffix('')) in cmd
-
-
-def test_extract_zst_failure_raises(tmp_path):
-    archive = tmp_path / 'data.h5.zst'
-    archive.touch()
-
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=1, stderr='decompress failed'
-        )
-        with pytest.raises(RuntimeError, match='Failed to decompress'):
-            _extract_zst(archive)
-
-
-# ─── _extract_zst_tar ─────────────────────────────────────────────────────────
-
-
-def test_extract_zst_tar_success(tmp_path):
-    archive = tmp_path / 'data.tar.zst'
-    archive.touch()
-
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stderr='')
-        _extract_zst_tar(archive, tmp_path)
-
-    cmd = mock_run.call_args[0][0]
-    assert '--use-compress-program=unzstd' in cmd
-    assert str(archive) in cmd
-    assert str(tmp_path) in cmd
-
-
-def test_extract_zst_tar_failure_raises(tmp_path):
-    archive = tmp_path / 'data.tar.zst'
-    archive.touch()
-
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=1, stderr='extraction failed'
-        )
-        with pytest.raises(RuntimeError, match='Failed to extract'):
-            _extract_zst_tar(archive, tmp_path)
+    assert sorted(files) == [
+        'foo.lance/data/0.lance',
+        'foo.lance/manifest',
+    ]
 
 
 # ─── _download ────────────────────────────────────────────────────────────────
