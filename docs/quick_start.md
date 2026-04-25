@@ -256,7 +256,7 @@ swm.data.load_dataset(
 ```
 
 !!! info "LeRobot Support"
-    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[lerobot]'`.
+    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[format]'`.
 
 The returned dataset is compatible with PyTorch `DataLoader` for batched training.
 
