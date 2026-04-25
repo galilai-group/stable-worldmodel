@@ -187,19 +187,30 @@ The `WorldModelPolicy` internally calls the solver to optimize action sequences 
 
 ## Dataset
 
-Stable World-Model provides utilities for recording and loading episode datasets in HDF5 format.
+Stable World-Model provides a small, pluggable data layer for recording and
+loading episode datasets. Recording, loading, and conversion all go through
+the same **format registry**, so the same code records to a single HDF5
+file or to a folder of MP4 episodes — only the `format=` flag changes. See
+the [Dataset API](api/dataset.md) for the full reference; the rest of this
+section covers the everyday workflow.
 
 ### Recording a Dataset
 
-Use `world.collect()` to roll out episodes and save them in HDF5 format. This is useful for collecting expert demonstrations, random exploration data, or rollouts from a trained policy. Each info key becomes a column in the resulting file.
+Use `world.collect()` to roll out episodes and dump their trajectories. Each
+info key becomes a column in the resulting file. The default writer is
+`hdf5`; pass `format='video'` or `'folder'` to switch backends.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))
-policy = swm.policy.RandomPolicy(seed=42)  # can be your JEPA or RL Policy
+policy = swm.policy.RandomPolicy(seed=42)  # can be your JEPA or RL policy
 world.set_policy(policy)
 
-# Record 100 episodes to an HDF5 file (parent dirs are auto-created).
+# Single HDF5 file (recommended for training).
 world.collect('data/pusht_random.h5', episodes=100, seed=0)
+
+# Or a directory with one MP4 per episode (compact, easy to inspect).
+world.collect('data/pusht_random_video', episodes=100, seed=0,
+              format='video')
 ```
 
 !!! info "Expert Policies"
@@ -207,41 +218,62 @@ world.collect('data/pusht_random.h5', episodes=100, seed=0)
 
 ### Loading a Dataset
 
-Load recorded datasets using `HDF5Dataset`. The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample. This makes it easy to train models on temporal sequences of observations and actions.
+`swm.data.load_dataset()` resolves a name to a local path and dispatches to
+the matching reader. It accepts a local path, a HuggingFace repo
+(`<user>/<repo>`, downloaded to `$STABLEWM_HOME/datasets/`), or a
+scheme-prefixed identifier such as `lerobot://lerobot/pusht`. `frameskip`
+controls the stride between frames; `num_steps` is the sequence length
+returned per sample.
 
 ```python
-from stable_worldmodel.data import HDF5Dataset
+import stable_worldmodel as swm
 
-dataset = HDF5Dataset(
-    name='pusht_random',
-    frameskip=1,  # stride between frames
-    num_steps=4,  # sequence length
-    keys_to_load=['pixels', 'action', 'state']
+dataset = swm.data.load_dataset(
+    'data/pusht_random.h5',                       # autodetected as hdf5
+    frameskip=1,
+    num_steps=4,
+    keys_to_load=['pixels', 'action', 'state'],
 )
 
-# Access samples
 sample = dataset[0]
 print(sample['pixels'].shape)   # (4, 3, H, W)
 print(sample['action'].shape)   # (4, action_dim)
 ```
 
-```python
-from stable_worldmodel.data import LeRobotAdapter
+The same call works for the other formats:
 
-dataset = LeRobotAdapter(
-    repo_id='lerobot/pusht',
-    primary_camera_key='observation.images.top',  # gets mapped to `pixels`
+```python
+# Folder / Video (autodetected from directory layout)
+swm.data.load_dataset('data/pusht_random_video', num_steps=4)
+
+# LeRobot Hub dataset
+swm.data.load_dataset(
+    'lerobot://lerobot/pusht',
+    primary_camera_key='observation.images.top',  # → `pixels`
     num_steps=4,
-    frameskip=1,
     keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
-    keys_to_cache=['action', 'proprio', 'ep_idx', 'step_idx'],
 )
 ```
 
 !!! info "LeRobot Support"
-    LeRobotAdapter support is read-only and requires Python 3.12+. You can install it passing in the optional dependency via `pip install 'stable-worldmodel[lerobot]'`.
+    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[lerobot]'`.
 
-The dataset is compatible with PyTorch `DataLoader` for batched training.
+The returned dataset is compatible with PyTorch `DataLoader` for batched training.
+
+### Converting Between Formats
+
+`swm.data.convert()` migrates a dataset from one format to another, episode
+by episode. Source format is autodetected; pass `dest_format` and any
+writer kwargs:
+
+```python
+swm.data.convert(
+    'data/pusht_random.h5',           # source
+    'data/pusht_random_video',        # destination
+    dest_format='video',
+    fps=30,
+)
+```
 
 Use the CLI to list all available datasets, or inspect a specific one:
 

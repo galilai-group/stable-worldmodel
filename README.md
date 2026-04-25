@@ -24,17 +24,16 @@
 
 ```python
 import stable_worldmodel as swm
-from stable_worldmodel.data import HDF5Dataset
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
-# collect a dataset
+# collect a dataset (default writer is hdf5; pass format='video' for MP4 episodes)
 world = swm.World('swm/PushT-v1', num_envs=8)
 world.set_policy(your_expert_policy)
-world.record_dataset(dataset_name='pusht_demo', episodes=100)
+world.collect('data/pusht_demo.h5', episodes=100, seed=0)
 
-# load dataset and train your world model
-dataset = HDF5Dataset(name='pusht_demo', num_steps=16)
+# load dataset and train your world model — format is autodetected
+dataset = swm.data.load_dataset('data/pusht_demo.h5', num_steps=16)
 world_model = ...  # your world-model
 
 # evaluate with model predictive control
@@ -49,9 +48,33 @@ print(f"Success Rate: {results['success_rate']:.1f}%")
 stable-worldmodel eases reproducibility by already implementing several baselines: [`scripts/train/prejepa.py`](scripts/train/prejepa.py) reproduces results from the [DINO-WM paper](https://arxiv.org/abs/2411.04983) and [`scripts/train/gcivl.py`](scripts/train/gcivl.py) implements several [goal-conditioned RL algorithms](https://arxiv.org/abs/2410.20092).
 To foster research in MPC for world models, several planning solvers are already implemented, including zeroth-order ([CEM](stable_worldmodel/solver/cem.py), [MPPI](stable_worldmodel/solver/mppi.py)), gradient-based ([GradientSolver](stable_worldmodel/solver/gd.py), [PGD](stable_worldmodel/solver/discrete_solvers.py)), and constrained gradient approaches ([LagrangianSolver](stable_worldmodel/solver/lagrangian.py)).
 
-### Efficiency
+### Data Formats
 
-We support multiple dataset formats to optimize efficiency: MP4 enables fast and convenient visualization, while HDF5 ensures high-performance data loading, reduces CPU bottlenecks, and improves overall GPU utilization.
+All datasets — recording, loading, and conversion — go through a small
+**format registry**. Pick a backend that suits the trade-off you care about,
+or [register your own](https://galilai-group.github.io/stable-worldmodel/api/dataset/#registering-a-custom-format):
+
+| Format     | On-disk layout                                  | Best for                                          |
+|------------|-------------------------------------------------|---------------------------------------------------|
+| `hdf5`     | single `.h5` file (one dataset per column)      | training — fast indexed reads, low CPU overhead   |
+| `folder`   | `.npz` columns + one JPEG per step              | inspection, partial-key streaming                 |
+| `video`    | `.npz` columns + one MP4 per episode (`decord`) | long episodes, compact image storage              |
+| `lerobot`  | `lerobot://<repo_id>` (read-only adapter)       | training/eval directly on LeRobot Hub datasets    |
+
+```python
+import stable_worldmodel as swm
+
+world.collect('data/pusht.h5', episodes=100)                    # default: hdf5
+world.collect('data/pusht_video', episodes=100, format='video') # mp4 episodes
+
+ds = swm.data.load_dataset('data/pusht.h5', num_steps=16)       # autodetect
+swm.data.convert('data/pusht.h5', 'data/pusht_video',
+                 dest_format='video', fps=30)                   # one-shot migration
+```
+
+HDF5 ensures high-performance data loading, reduces CPU bottlenecks, and
+improves overall GPU utilization; MP4 is convenient for visualization and
+keeps long-horizon datasets small.
 
 <p align="center">
   <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">

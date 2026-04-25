@@ -229,34 +229,34 @@ class World:
         episodes: int,
         seed: int | None = None,
         options: dict | None = None,
+        format: str = 'hdf5',
     ) -> None:
-        """Roll out ``episodes`` and dump their trajectories to HDF5.
+        """Roll out ``episodes`` and dump their trajectories using the writer
+        registered for ``format``.
 
         Each info key becomes a column. Leading length-1 time dims are
         squeezed. Columns starting with ``_`` (e.g. ``_needs_flush``)
-        are skipped. The file layout is::
-
-            <col>:       (total_steps, *value_shape)
-            ep_len:      (n_episodes,)      int32
-            ep_offset:   (n_episodes,)      int64  — index into <col>
+        are skipped.
 
         Args:
-            path: HDF5 file to create (parent dirs are auto-created).
+            path: Output path (file or directory, depending on the format).
+                Parent dirs are auto-created.
             episodes: Number of episodes to record.
             seed: Base seed for env resets.
             options: Reset options forwarded to ``envs.reset``.
+            format: Registered format name (default ``'hdf5'``). See
+                :func:`stable_worldmodel.data.list_formats` for available
+                writers; new formats can be added via
+                :func:`stable_worldmodel.data.register_format`.
         """
-        import h5py
         from tqdm import tqdm
 
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        buffers = [defaultdict(list) for _ in range(self.num_envs)]
-        ep_written = 0
-        global_ptr = 0
-        initialized = False
+        from stable_worldmodel.data.format import get_format
 
-        with h5py.File(str(path), 'w', libver='latest') as f:
+        writer_cls = get_format(format)
+        buffers = [defaultdict(list) for _ in range(self.num_envs)]
+
+        with writer_cls.open_writer(path) as writer:
 
             def on_step(world):
                 for col, data in world.infos.items():
@@ -278,16 +278,11 @@ class World:
                         buffers[i][col].append(val)
 
             def on_done(env_idx, ep_idx, world):
-                nonlocal ep_written, global_ptr, initialized
                 ep = {k: list(v) for k, v in buffers[env_idx].items()}
                 buffers[env_idx].clear()
                 if 'action' in ep:
                     ep['action'].append(ep['action'].pop(0))
-                if not initialized:
-                    _init_h5(f, ep)
-                    initialized = True
-                global_ptr += _write_h5_episode(f, ep, ep_written, global_ptr)
-                ep_written += 1
+                writer.write_episode(ep)
                 pbar.update(1)
 
             with tqdm(total=episodes, desc='Recording') as pbar:
@@ -536,30 +531,3 @@ def _apply_callables(env, callables, init_state):
             else:
                 prepared[name] = data.get('value')
         getattr(env, method)(**prepared)
-
-
-def _init_h5(f, sample_ep):
-    for col, vals in sample_ep.items():
-        sample = np.asarray(vals[0])
-        f.create_dataset(
-            col,
-            shape=(0, *sample.shape),
-            maxshape=(None, *sample.shape),
-            dtype=sample.dtype,
-            chunks=(1, *sample.shape),
-        )
-    f.create_dataset('ep_len', shape=(0,), maxshape=(None,), dtype=np.int32)
-    f.create_dataset('ep_offset', shape=(0,), maxshape=(None,), dtype=np.int64)
-
-
-def _write_h5_episode(f, ep_data, ep_idx, global_ptr):
-    ep_len = len(next(iter(ep_data.values())))
-    for col, vals in ep_data.items():
-        ds = f[col]
-        ds.resize(global_ptr + ep_len, axis=0)
-        ds[global_ptr : global_ptr + ep_len] = np.array(vals)
-    f['ep_len'].resize(ep_idx + 1, axis=0)
-    f['ep_len'][ep_idx] = ep_len
-    f['ep_offset'].resize(ep_idx + 1, axis=0)
-    f['ep_offset'][ep_idx] = global_ptr
-    return ep_len

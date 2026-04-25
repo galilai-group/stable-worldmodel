@@ -129,10 +129,10 @@ def test_resolve_dataset_explicit_hdf5_file(tmp_path):
 def test_resolve_dataset_directory(tmp_path):
     sub = tmp_path / 'subdir'
     sub.mkdir()
-    h5 = sub / 'data.h5'
-    h5.touch()
+    (sub / 'data.h5').touch()
+    # _resolve_dataset returns the path as-is; format detection happens later.
     result = _resolve_dataset(str(sub), tmp_path)
-    assert result == h5
+    assert result == sub
 
 
 def test_resolve_dataset_hf_repo(tmp_path):
@@ -144,7 +144,7 @@ def test_resolve_dataset_hf_repo(tmp_path):
 
 
 def test_resolve_dataset_invalid_name_raises(tmp_path):
-    with pytest.raises(ValueError, match='Cannot resolve'):
+    with pytest.raises(FileNotFoundError, match='Cannot resolve'):
         _resolve_dataset('not_a_valid_name', tmp_path)
 
 
@@ -533,20 +533,23 @@ def _make_h5(path: Path):
 
 
 def test_load_dataset_from_local_h5(tmp_path):
-    # load_dataset resolves the h5, computes a relative name, and delegates to HDF5Dataset
+    """load_dataset autodetects HDF5 from a .h5 path and returns a working reader."""
+    from stable_worldmodel.data import HDF5Dataset
+
     datasets_dir = tmp_path / 'datasets'
     datasets_dir.mkdir()
     h5 = datasets_dir / 'mydata.h5'
     _make_h5(h5)
 
-    with patch('stable_worldmodel.data.dataset.HDF5Dataset') as mock_cls:
-        load_dataset(str(h5), cache_dir=str(tmp_path))
-        mock_cls.assert_called_once()
-        call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs['name'] == 'mydata'
+    ds = load_dataset(str(h5), cache_dir=str(tmp_path))
+    assert isinstance(ds, HDF5Dataset)
+    assert ds.h5_path == h5
 
 
 def test_load_dataset_from_directory(tmp_path):
+    """load_dataset autodetects HDF5 from a directory containing one .h5 file."""
+    from stable_worldmodel.data import HDF5Dataset
+
     datasets_dir = tmp_path / 'datasets'
     datasets_dir.mkdir()
     sub = datasets_dir / 'mydata'
@@ -554,11 +557,9 @@ def test_load_dataset_from_directory(tmp_path):
     h5 = sub / 'dataset.h5'
     _make_h5(h5)
 
-    with patch('stable_worldmodel.data.dataset.HDF5Dataset') as mock_cls:
-        load_dataset(str(sub), cache_dir=str(tmp_path))
-        mock_cls.assert_called_once()
-        call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs['name'] == 'mydata/dataset'
+    ds = load_dataset(str(sub), cache_dir=str(tmp_path))
+    assert isinstance(ds, HDF5Dataset)
+    assert ds.h5_path == h5
 
 
 def test_load_dataset_missing_file_raises(tmp_path):

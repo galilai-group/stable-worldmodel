@@ -1,4 +1,9 @@
-"""LeRobot Hub datasets exposed through the stable-worldmodel Dataset API."""
+"""LeRobot Hub format (read-only).
+
+Identified by the ``lerobot://`` scheme. Mapping ``World.collect``'s
+arbitrary info-dict to LeRobot's prescribed schema is non-trivial and
+therefore not supported as a writer here.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,9 @@ import numpy as np
 import torch
 
 from stable_worldmodel.data.dataset import Dataset
+from stable_worldmodel.data.format import Format, register_format
+
+_SCHEME = 'lerobot://'
 
 
 def _import_lerobot_hub_dataset() -> type:
@@ -36,7 +44,6 @@ def _import_lerobot_hub_dataset() -> type:
 
 
 def _scalarize(value: Any) -> Any:
-    """Convert tensors/arrays to plain Python scalars when possible."""
     if isinstance(value, torch.Tensor):
         if value.ndim == 0:
             return value.item()
@@ -49,7 +56,6 @@ def _scalarize(value: Any) -> Any:
 
 
 def _column_to_numpy(column: Any) -> np.ndarray:
-    """Convert a LeRobot/HF dataset column to a NumPy array."""
     if isinstance(column, torch.Tensor):
         return column.detach().cpu().numpy()
     if isinstance(column, np.ndarray):
@@ -354,3 +360,20 @@ class LeRobotAdapter(Dataset):
     def get_dim(self, col: str) -> int:
         data = self.get_col_data(col)
         return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
+
+
+@register_format
+class LeRobot(Format):
+    name = 'lerobot'
+
+    @classmethod
+    def detect(cls, path) -> bool:
+        return isinstance(path, str) and path.startswith(_SCHEME)
+
+    @classmethod
+    def open_reader(cls, path, **kwargs):
+        repo_id = path[len(_SCHEME) :] if path.startswith(_SCHEME) else path
+        return LeRobotAdapter(repo_id, **kwargs)
+
+
+__all__ = ['LeRobot', 'LeRobotAdapter']
