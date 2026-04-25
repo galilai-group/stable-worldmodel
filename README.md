@@ -29,9 +29,9 @@ from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
 # collect a dataset
-world = swm.World('swm/PushT-v1', num_envs=8)
+world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(64, 64))
 world.set_policy(your_expert_policy)
-world.record_dataset(dataset_name='pusht_demo', episodes=100)
+world.collect('pusht_demo.h5', episodes=100, seed=0)
 
 # load dataset and train your world model
 dataset = HDF5Dataset(name='pusht_demo', num_steps=16)
@@ -39,7 +39,10 @@ world_model = ...  # your world-model
 
 # evaluate with model predictive control
 solver = CEMSolver(model=world_model, num_samples=300)
-policy = WorldModelPolicy(solver=solver, config=PlanConfig(horizon=10))
+policy = WorldModelPolicy(
+    solver=solver,
+    config=PlanConfig(horizon=10, receding_horizon=5),
+)
 
 world.set_policy(policy)
 results = world.evaluate(episodes=50)

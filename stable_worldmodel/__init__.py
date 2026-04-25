@@ -1,4 +1,5 @@
 from stable_worldmodel import (
+    buffer,
     data,
     envs,
     policy,
@@ -16,6 +17,7 @@ __all__ = [
     'World',
     'PlanConfig',
     'pretraining',
+    'buffer',
     'data',
     'envs',
     'policy',

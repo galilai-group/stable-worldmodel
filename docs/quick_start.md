@@ -342,6 +342,7 @@ config = PlanConfig(
     horizon=10,
     receding_horizon=5,
     action_block=1,
+    history_len=1,          # >1 to feed past observations to the model
     warm_start=True
 )
 
@@ -353,6 +354,10 @@ world = swm.World('swm/PushT-v1', num_envs=1, image_shape=(224, 224))
 world.set_policy(policy)
 results = world.evaluate(episodes=50, seed=0)
 ```
+
+### Observation history
+
+Set `history_len > 1` to plan with past observations. `WorldModelPolicy` then maintains a per-env [`HistoryBuffer`](api/buffer.md) that stores the last few prepared `info` dicts and surfaces them, strided by `action_block`, every time the solver is called. Actions are aggregated as macro-blocks of length `action_block` so the planner sees one block per stride point. Make sure your world model was trained on the same history layout.
 
 ## And then?
 
