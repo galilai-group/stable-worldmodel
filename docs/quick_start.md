@@ -188,77 +188,64 @@ The `WorldModelPolicy` internally calls the solver to optimize action sequences 
 
 ## Dataset
 
-Stable World-Model provides utilities for recording and loading episode datasets in HDF5 format.
+Stable World-Model uses a small **format registry** for dataset I/O. The
+default format is `lance` (LanceDB tables); `hdf5`, `folder`, `video`,
+and `lerobot` are also available. See the [dataset API docs](api/dataset.md)
+for the full registry tour.
 
 ### Recording a Dataset
 
-Use `world.record_dataset()` to collect episodes and save them as a LanceDB table. The dataset is written to `$STABLEWM_HOME/datasets/<dataset_name>.lance` (defaults to `~/.stable_worldmodel/datasets/`). Images are JPEG-encoded on write; numeric columns are stored as fixed-size float32 lists. Re-running with the same `dataset_name` appends new episodes to the existing table.
+Use `world.collect()` to roll out episodes and dump their trajectories.
+Each info key becomes a column in the resulting file. The default writer
+is `lance`; pass `format=` to switch.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))
-policy = swm.policy.RandomPolicy(seed=42) # can be your JEPA or RL Policy
-world.set_policy(policy)
+world.set_policy(swm.policy.RandomPolicy(seed=42))
 
-# Record 100 episodes — written to ~/.stable_worldmodel/datasets/pusht_random.lance
-world.record_dataset(
-    dataset_name='pusht_random',
-    episodes=100,
-    seed=0,
-)
+# Default format = lance (LanceDB table directory)
+world.collect('data/pusht_random.lance', episodes=100, seed=0)
+
+# Or pick a different writer
+world.collect('data/pusht_random_video', episodes=100, seed=0, format='video')
 ```
 
 !!! info "Expert Policies"
-    Some environments come with a built-in weak expert policy for data collection. These policies are not optimal but provide better coverage than random actions. Check the environment documentation to see if an expert policy is available.
+    Some environments come with a built-in weak expert policy for data
+    collection. These policies are not optimal but provide better coverage
+    than random actions. Check the environment documentation to see if an
+    expert policy is available.
 
 ### Loading a Dataset
 
-Load recorded datasets using either `HDF5Dataset` (local files) or `LanceDataset` (local LanceDB tables, Hugging Face datasets, or object storage like s3 etc). The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample regardless of backend.
+`swm.data.load_dataset()` autodetects the format from the path and returns
+a reader. It accepts a local path, a HuggingFace repo (`<user>/<repo>`,
+auto-cached under `$STABLEWM_HOME/datasets/`), or a scheme-prefixed
+identifier such as `lerobot://lerobot/pusht`.
 
 ```python
-from stable_worldmodel.data import HDF5Dataset, LanceDataset
+import stable_worldmodel as swm
 
-# Local HDF5 file
-dataset = HDF5Dataset(
-    name='pusht_random',
-    frameskip=1,  # stride between frames
-    num_steps=4,  # sequence length
+ds = swm.data.load_dataset(
+    'data/pusht_random.lance',
+    frameskip=1,
+    num_steps=4,
     keys_to_load=['pixels', 'action', 'state'],
 )
-
-# LanceDB table — point at the full .lance table path (local folder,
-# hf:// dataset, or s3:// bucket). The table name is inferred from the suffix.
-# Image columns are auto-detected from the Arrow schema (any pa.binary column),
-# so no extra image_columns arg is needed in the common case.
-lance_dataset = LanceDataset(
-    uri='s3://my-bucket/lewm/lewm_pusht.lance',
-    frameskip=5,
-    num_steps=4,
-    keys_to_load=['pixels', 'action', 'proprio'],
-    connect_kwargs={'aws_access_key_id': '***', 'aws_secret_access_key': '***'},
-)
-
-# Access samples
-sample = dataset[0]
+sample = ds[0]
 print(sample['pixels'].shape)   # (4, 3, H, W)
 print(sample['action'].shape)   # (4, action_dim)
 ```
 
-`LanceDataset` streams only the requested columns via LanceDB's permutation API, never materializes the entire table in RAM, and decodes JPEG frames inside DataLoader workers. When reading from secure endpoints, provide the needed credentials or custom endpoints through `connect_kwargs`.
+### Converting Between Formats
+
+`swm.data.convert()` migrates a dataset from one format to another, episode
+by episode, using whatever writer is registered for `dest_format`.
+
 ```python
-from stable_worldmodel.data import LeRobotAdapter
-
-dataset = LeRobotAdapter(
-    repo_id='lerobot/pusht',
-    primary_camera_key='observation.images.top',  # gets mapped to `pixels`
-    num_steps=4,
-    frameskip=1,
-    keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
-    keys_to_cache=['action', 'proprio', 'ep_idx', 'step_idx'],
-)
+swm.data.convert('data/pusht_random.lance', 'data/pusht_random.h5',
+                 dest_format='hdf5')
 ```
-
-!!! info "LeRobot Support"
-    LeRobotAdapter support is read-only and requires Python 3.12+. You can install it passing in the optional dependency via `pip install 'stable-worldmodel[lerobot]'`.
 
 The dataset is compatible with PyTorch `DataLoader` for batched training.
 

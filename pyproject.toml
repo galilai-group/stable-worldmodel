@@ -21,10 +21,10 @@ dependencies = [
   "tabulate",
   "gymnasium",
   "einops",
-  "h5py",
-  "hdf5plugin",
   "lancedb>=0.30.0",
   "pylance>=4.0.0",
+  "pyarrow",
+  "pillow",
   "tqdm",
   "typer",
   "rich",
@@ -49,12 +49,17 @@ env = [
     "ogbench",
     "minigrid",
     "gymnasium[all]",
+    "gymnasium-robotics",
     "opencv-python",
     "stable_baselines3>=2.0.0",
 ]
 
-lerobot = [
+format = [
     "lerobot>=0.5.0; python_version >= '3.12'",
+    "h5py",
+    "hdf5plugin",
+    "decord",
+    "imageio[ffmpeg]",
 ]
 
 [dependency-groups]

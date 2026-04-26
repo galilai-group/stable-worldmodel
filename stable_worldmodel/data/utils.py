@@ -1,11 +1,10 @@
 import json
 import os
-import subprocess
 import urllib.request
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
+import numpy as np
+import torch
 from loguru import logger as logging
 from tqdm import tqdm
 
@@ -33,227 +32,189 @@ def ensure_dir_exists(path: Path):
         path.mkdir(parents=True, exist_ok=True)
 
 
-def _config_to_dict(config: Any) -> dict[str, Any]:
-    if config is None:
-        return {}
-    if isinstance(config, Mapping):
-        return dict(config)
-
-    try:  # Lazy import to avoid Hydra dependency during runtime.
-        from omegaconf import OmegaConf
-
-        if OmegaConf.is_config(config):
-            return OmegaConf.to_container(config, resolve=True)  # type: ignore[arg-type]
-    except Exception:  # pragma: no cover - OmegaConf optional
-        pass
-
-    raise TypeError(
-        'Dataset config must be a mapping or OmegaConf object; '
-        f'got {type(config)}'
-    )
-
-
-def create_dataset(config: Any):
-    """Instantiate the configured dataset backend.
-
-    Args:
-        config: Mapping/OmegaConf with at least a ``type`` key (``hdf5`` or
-            ``lance``). Remaining keys are forwarded to the dataset class.
-    """
-
-    cfg = _config_to_dict(config)
-    dataset_type = cfg.pop('type', None)
-    if dataset_type is None:
-        if 'uri' in cfg or 'table_name' in cfg:
-            dataset_type = 'lance'
-        else:
-            dataset_type = 'hdf5'
-    dataset_type = str(dataset_type).lower()
-
-    from stable_worldmodel.data.dataset import HDF5Dataset, LanceDataset
-
-    if dataset_type == 'hdf5':
-        return HDF5Dataset(**cfg)
-    if dataset_type in {'lance', 'lancedb', 'lance_dataset'}:
-        return LanceDataset(**cfg)
-    raise ValueError(
-        f"Unsupported dataset type '{dataset_type}'. Expected 'hdf5' or 'lance'."
-    )
-
-
-def build_script_dataset(
-    cfg: Any,
-    *,
-    keys_to_load: list[str],
-    keys_to_cache: list[str] | None = None,
-    cache_dir: str | Path | None = None,
-    extra: dict[str, Any] | None = None,
+def load_dataset(
+    name: str,
+    cache_dir: str = None,
+    format: str | None = None,
+    **kwargs,
 ):
-    """Dataset factory for the flat-config training scripts (gcbc, prejepa, …).
+    """Resolve a dataset name to a local path and dispatch to the matching
+    format reader from the registry.
 
-    These scripts use scalar config keys (``cfg.dataset_name``, ``cfg.n_steps``,
-    ``cfg.frameskip``) rather than a ``cfg.data.dataset`` block, so they can't
-    just forward a sub-config to :func:`create_dataset`.  This helper bridges
-    the two styles:
+    Supported names:
 
-    * By default it builds an :class:`HDF5Dataset` from ``cfg.dataset_name``.
-    * If ``cfg.dataset_uri`` is set (e.g. via ``+dataset_uri=…`` on the CLI)
-      it routes to :class:`LanceDataset` instead.  The URI can be a full
-      ``.../foo.lance`` path (table name inferred) or a database URI paired
-      with ``cfg.dataset_table_name``.
+    1. **Local path** — file or directory.
+    2. **HuggingFace repo** (``<user>/<repo>``) — downloaded and cached under
+       ``<cache_dir>/datasets/<user>--<repo>/``.
+    3. **Format scheme** (e.g. ``lerobot://lerobot/pusht``) — passed through
+       to the matching format unchanged.
 
-    ``extra`` is merged last and wins over inferred keys.
-    """
-    def _read(key, default=None):
-        if isinstance(cfg, Mapping):
-            return cfg.get(key, default)
-        return getattr(cfg, key, default)
-
-    dataset_uri = _read('dataset_uri')
-    table_name = _read('dataset_table_name')
-
-    params: dict[str, Any] = {
-        'num_steps': _read('n_steps'),
-        'frameskip': _read('frameskip'),
-        'keys_to_load': list(keys_to_load),
-    }
-    if keys_to_cache is not None:
-        params['keys_to_cache'] = list(keys_to_cache)
-
-    if dataset_uri:
-        params['uri'] = dataset_uri
-        if table_name:
-            params['table_name'] = table_name
-    else:
-        params['name'] = _read('dataset_name')
-        if cache_dir is not None:
-            params['cache_dir'] = cache_dir
-
-    if extra:
-        params.update(extra)
-    return create_dataset(params)
-
-
-def load_dataset(name: str, cache_dir: str = None, **kwargs):
-    """Resolve a dataset and return an instantiated :class:`HDF5Dataset`.
-
-    Supported formats for `name`:
-
-    1. **Local path** — absolute or relative path to a ``.h5`` / ``.hdf5`` file
-       or a directory containing exactly one such file.
-
-    2. **HuggingFace repo** (``<user>/<repo>``) — downloaded from HF and cached
-       under ``<cache_dir>/datasets/<user>--<repo>/``.  The repo must expose a
-       single ``dataset.tar.zst`` archive containing one HDF5 file.
+    The format is auto-detected via :func:`detect_format` unless ``format`` is
+    provided explicitly. To register a new format, decorate a
+    :class:`~stable_worldmodel.data.format.Format` subclass with
+    :func:`~stable_worldmodel.data.format.register_format`.
 
     Args:
-        name: Local path or HF repo id (``user/repo``).
-        cache_dir: Root cache directory.  Defaults to ``STABLEWM_HOME`` or
+        name: Local path, HF repo id, or scheme-prefixed identifier.
+        cache_dir: Root cache directory. Defaults to ``STABLEWM_HOME`` or
             ``~/.stable_worldmodel``.
-        **kwargs: Extra arguments passed to ``HDF5Dataset``.
+        format: Explicit format name (skips detection).
+        **kwargs: Forwarded to the format's reader.
 
     Returns:
-        An :class:`~stable_worldmodel.data.dataset.HDF5Dataset` instance.
-
-    Example::
-
-        ds = load_dataset('my-org/my-robot-data', num_steps=4, frameskip=2)
+        A reader instance (typically a
+        :class:`~stable_worldmodel.data.dataset.Dataset` subclass).
     """
-    from stable_worldmodel.data.dataset import HDF5Dataset
+    from stable_worldmodel.data.format import (
+        FORMATS,
+        detect_format,
+        get_format,
+    )
+
+    name = str(name)
+
+    # Scheme-prefixed identifiers (e.g. lerobot://...) bypass path resolution.
+    if '://' in name:
+        if format is None:
+            for fmt in FORMATS.values():
+                if fmt.detect(name):
+                    return fmt.open_reader(name, **kwargs)
+            raise ValueError(f'No format detected for {name!r}')
+        return get_format(format).open_reader(name, **kwargs)
 
     datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
     ensure_dir_exists(datasets_dir)
-    h5_path = _resolve_dataset(name, datasets_dir)
-    rel_name = str(h5_path.relative_to(datasets_dir).with_suffix(''))
-    return HDF5Dataset(name=rel_name, cache_dir=cache_dir, **kwargs)
+    path = _resolve_dataset(name, datasets_dir)
+
+    if format is not None:
+        return get_format(format).open_reader(path, **kwargs)
+
+    fmt = detect_format(path)
+    if fmt is None:
+        raise ValueError(
+            f'No format detected for {path!r}; pass format= explicitly.'
+        )
+    return fmt.open_reader(path, **kwargs)
 
 
 def _resolve_dataset(name: str, datasets_dir: Path) -> Path:
+    """Resolve *name* (local path or HF repo id) to a local path.
+
+    Returns whatever exists on disk — file or directory. Format detection
+    happens after this in :func:`load_dataset`. Local layout for cached
+    datasets is a directory under ``<datasets_dir>/<name>/``; the directory
+    may hold a ``foo.lance/`` table, a ``foo.h5`` file, or any other
+    layout a registered format can detect.
+    """
     local = Path(name)
     if not local.is_absolute():
         local = datasets_dir / local
 
-    # format 1a: explicit HDF5 file path
-    if local.suffix in ('.h5', '.hdf5'):
-        if local.exists():
-            return local
-        raise FileNotFoundError(f'Dataset file not found: {local}')
+    if local.exists():
+        return local
 
-    # format 1b: directory containing a single HDF5 file
-    if local.is_dir():
-        return _resolve_dataset_folder(local)
-
-    # format 2: HuggingFace repo (<user>/<repo>)
-    if '/' in name:
+    # HuggingFace repo: <user>/<repo>
+    if '/' in name and not name.startswith(('.', '/')):
         return _resolve_dataset_hf(name, datasets_dir)
 
-    raise ValueError(
-        f"Cannot resolve '{name}': not a .h5 file, a folder, or a HF repo id."
-    )
-
-
-def _resolve_dataset_folder(folder: Path) -> Path:
-    """Return the single HDF5 file inside *folder*."""
-    h5_files = list(folder.glob('*.h5')) + list(folder.glob('*.hdf5'))
-    if not h5_files:
-        raise FileNotFoundError(f'No .h5 / .hdf5 file found in {folder}')
-    if len(h5_files) > 1:
-        raise ValueError(
-            f'Ambiguous dataset: multiple HDF5 files in {folder}. '
-            'Specify the file directly.'
-        )
-    logging.info(f'Using dataset at {h5_files[0]}')
-    return h5_files[0]
-
-
-def _hf_dataset_find_archive(repo_id: str) -> str:
-    """Return the filename of the first .h5.zst or .tar.zst in a HF dataset repo."""
-    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main'
-    with urllib.request.urlopen(api_url) as resp:
-        entries = json.loads(resp.read())
-    for entry in entries:
-        name = entry.get('path', '')
-        if name.endswith('.h5.zst') or name.endswith('.tar.zst'):
-            return name
     raise FileNotFoundError(
-        f'No .h5.zst or .tar.zst file found in HF dataset repo {repo_id}'
+        f'Cannot resolve {name!r}: not a local path or HF repo id.'
     )
+
+
+# Suffixes we recognise on HF: a `.lance` directory (preferred) or a
+# `.h5` / `.hdf5` file. Each format is downloaded in its native shape — no
+# tar/zst wrapping.
+_HF_FILE_SUFFIXES: tuple[str, ...] = ('.h5', '.hdf5')
+_HF_DIR_SUFFIXES: tuple[str, ...] = ('.lance',)
+
+
+def _hf_list_tree(repo_id: str, sub_path: str = '') -> list[dict]:
+    """One HF API call: list entries at ``<repo>/tree/main/<sub_path>``."""
+    suffix = f'/{sub_path}' if sub_path else ''
+    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main{suffix}'
+    with urllib.request.urlopen(api_url) as resp:
+        return json.loads(resp.read())
+
+
+def _hf_find_dataset_entry(repo_id: str) -> dict:
+    """Return the first top-level entry that looks like a dataset.
+
+    Preference: a ``*.lance`` directory wins over an ``*.h5`` file when
+    both are present, since lance is the default format.
+    """
+    entries = _hf_list_tree(repo_id)
+
+    for entry in entries:
+        path = entry.get('path', '')
+        if entry.get('type') == 'directory' and path.endswith(
+            _HF_DIR_SUFFIXES
+        ):
+            return entry
+    for entry in entries:
+        path = entry.get('path', '')
+        if entry.get('type') == 'file' and path.endswith(_HF_FILE_SUFFIXES):
+            return entry
+
+    raise FileNotFoundError(
+        f'No dataset found in HF repo {repo_id}: expected a top-level '
+        f'`*.lance` directory or `*.h5`/`*.hdf5` file.'
+    )
+
+
+def _hf_walk_files(repo_id: str, sub_path: str) -> list[str]:
+    """Recursively list every *file* path under ``sub_path`` on HF."""
+    out: list[str] = []
+    stack = [sub_path]
+    while stack:
+        current = stack.pop()
+        for entry in _hf_list_tree(repo_id, current):
+            path = entry.get('path', '')
+            if entry.get('type') == 'directory':
+                stack.append(path)
+            else:
+                out.append(path)
+    return out
 
 
 def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
-    """Resolve a HF repo id, downloading and extracting when not cached.
+    """Resolve a HF repo id, downloading on first use.
 
-    Local layout: ``<datasets_dir>/<user>--<repo>/dataset.h5``
-    The archive fetched from HF must be a ``.h5.zst`` or ``.tar.zst`` file.
+    Local layout: ``<datasets_dir>/<user>--<repo>/`` — the directory is
+    returned as-is and format detection picks up whatever lives inside
+    (``*.lance``, ``*.h5``, …).
     """
     local_dir = datasets_dir / repo_id.replace('/', '--')
 
-    if local_dir.is_dir():
-        h5_files = list(local_dir.glob('*.h5')) + list(
-            local_dir.glob('*.hdf5')
-        )
-        if h5_files:
-            logging.info(f'Using cached dataset for {repo_id} at {local_dir}')
-            return _resolve_dataset_folder(local_dir)
+    if local_dir.is_dir() and any(local_dir.iterdir()):
+        logging.info(f'Using cached dataset for {repo_id} at {local_dir}')
+        return local_dir
 
     logging.info(f'Downloading dataset {repo_id} from HuggingFace...')
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    archive_name = _hf_dataset_find_archive(repo_id)
-    url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
-    archive_path = local_dir / archive_name
+    entry = _hf_find_dataset_entry(repo_id)
+    entry_path = entry['path']
 
-    logging.info(f'Fetching {url}')
-    _download(url, archive_path)
-
-    logging.info(f'Extracting {archive_path} into {local_dir}')
-    if archive_name.endswith('.tar.zst'):
-        _extract_zst_tar(archive_path, local_dir)
+    if entry.get('type') == 'directory':
+        files = _hf_walk_files(repo_id, entry_path)
+        if not files:
+            raise FileNotFoundError(
+                f"HF repo {repo_id}: directory '{entry_path}' is empty."
+            )
+        for remote in tqdm(files, desc=f'Fetching {entry_path}'):
+            url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{remote}'
+            dest = local_dir / remote
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _download(url, dest)
     else:
-        _extract_zst(archive_path)
-    archive_path.unlink()
+        url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{entry_path}'
+        dest = local_dir / entry_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        logging.info(f'Fetching {url}')
+        _download(url, dest)
 
-    return _resolve_dataset_folder(local_dir)
+    return local_dir
 
 
 def _download(url: str, dest: Path) -> None:
@@ -271,45 +232,77 @@ def _download(url: str, dest: Path) -> None:
             chunk = response.read(8192)
 
 
-def _extract_zst_tar(archive: Path, dest: Path) -> None:
-    """Extract a ``.tar.zst`` archive into *dest* using the system ``tar`` command."""
-    result = subprocess.run(
-        [
-            'tar',
-            '--use-compress-program=unzstd',
-            '-xf',
-            str(archive),
-            '-C',
-            str(dest),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to extract {archive}:\n{result.stderr.strip()}'
-        )
+def convert(
+    source,
+    dest,
+    *,
+    source_format: str | None = None,
+    dest_format: str = 'lance',
+    cache_dir: str | None = None,
+    progress: bool = True,
+    **dest_kwargs,
+) -> None:
+    """Convert a dataset from one registered format to another.
+
+    Reads each episode from *source* and writes it through the writer of
+    *dest_format*. Format detection follows the same rules as
+    :func:`load_dataset` — autodetect by default, or pass ``source_format``
+    explicitly.
+
+    Args:
+        source: Path or identifier accepted by :func:`load_dataset`.
+        dest: Output path for the destination writer.
+        source_format: Force a source format (skips detection).
+        dest_format: Registered writer name (default ``'lance'``).
+        cache_dir: Forwarded to the source loader for HF/local resolution.
+        progress: Show a progress bar over episodes.
+        **dest_kwargs: Forwarded to the destination writer.
+
+    Example::
+
+        from stable_worldmodel.data import convert
+        convert('data.h5', 'data.lance')
+    """
+    from stable_worldmodel.data.format import get_format
+
+    src = load_dataset(source, cache_dir=cache_dir, format=source_format)
+    writer_cls = get_format(dest_format)
+
+    iterator = range(len(src.lengths))
+    if progress:
+        iterator = tqdm(iterator, desc=f'Converting → {dest_format}')
+
+    with writer_cls.open_writer(dest, **dest_kwargs) as writer:
+        for ep_idx in iterator:
+            ep = src.load_episode(ep_idx)
+            writer.write_episode(
+                _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+            )
 
 
-def _extract_zst(archive: Path) -> None:
-    """Decompress a plain ``.zst`` file in-place using ``unzstd``."""
-    result = subprocess.run(
-        ['unzstd', str(archive), '-o', str(archive.with_suffix(''))],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to decompress {archive}:\n{result.stderr.strip()}'
-        )
+def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
+    """Adapt an episode dict from a reader to the ``{col: [step_arr, ...]}``
+    shape that writers consume.
+
+    Specifically:
+      - Tensors → NumPy arrays.
+      - Image arrays in ``(N, C, H, W)`` are transposed back to ``(N, H, W, C)``.
+      - Scalars (e.g. flattened string columns) are repeated ``ep_len`` times.
+    """
+    out: dict[str, list] = {}
+    for col, val in ep.items():
+        if isinstance(val, torch.Tensor):
+            arr = val.detach().cpu().numpy()
+        elif isinstance(val, np.ndarray):
+            arr = val
+        else:
+            out[col] = [val] * ep_len
+            continue
+
+        if arr.ndim == 4 and arr.shape[1] in (1, 3):
+            arr = arr.transpose(0, 2, 3, 1)
+        out[col] = list(arr)
+    return out
 
 
-__all__ = [
-    'load_dataset',
-    'get_cache_dir',
-    'ensure_dir_exists',
-    'create_dataset',
-    'build_script_dataset',
-]
+__all__ = ['load_dataset', 'convert', 'get_cache_dir', 'ensure_dir_exists']
