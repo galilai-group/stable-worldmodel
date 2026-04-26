@@ -25,6 +25,7 @@ nav:
       - envs/ogb.md
       - envs/tworoom.md
       - envs/gymnasium_robotics.md
+      - envs/craftax.md
   - Guides:
       - guides/checkpoints.md
   - cli.md

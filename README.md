@@ -117,6 +117,7 @@ See the full documentation [here](https://galilai-group.github.io/stable-worldmo
 <td align="center"><img src="docs/assets/fetch_push.gif"         width="120"/><br><img src="docs/assets/fetch_push_var.gif"         width="120"/></td>
 <td align="center"><img src="docs/assets/fetch_slide.gif"        width="120"/><br><img src="docs/assets/fetch_slide_var.gif"        width="120"/></td>
 <td align="center"><img src="docs/assets/fetch_pickandplace.gif" width="120"/><br><img src="docs/assets/fetch_pickandplace_var.gif" width="120"/></td>
+<td align="center"><img src="docs/assets/craftax_classic.gif"    width="120"/><br><img src="docs/assets/craftax.gif"                  width="120"/></td>
 </tr>
 </table>
 
@@ -124,7 +125,7 @@ See the full documentation [here](https://galilai-group.github.io/stable-worldmo
 
 <p align="center"><em>Top row: default appearance &nbsp;·&nbsp; Bottom row: visual factor of variation</em></p>
 
-stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [OGBench](https://github.com/seohongpark/ogbench), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
+stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
 
 Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
 
@@ -156,6 +157,10 @@ Each environment includes visual and physical factor variations to evaluate robu
 | swm/FetchPush-v3             | 11      |
 | swm/FetchSlide-v3            | 11      |
 | swm/FetchPickAndPlace-v3     | 11      |
+| swm/CraftaxClassicPixels-v1  | —       |
+| swm/CraftaxClassicSymbolic-v1| —       |
+| swm/CraftaxPixels-v1         | —       |
+| swm/CraftaxSymbolic-v1       | —       |
 
 </td>
 <td valign="top">
