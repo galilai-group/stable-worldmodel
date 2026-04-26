@@ -195,10 +195,10 @@ def envs():
     )
     table.add_column('Type', justify='left', style='magenta', no_wrap=True)
 
-    from stable_worldmodel.envs import WORLDS
+    from stable_worldmodel.envs import DISCRETE_WORLDS, WORLDS
 
-    continuous = sorted(e for e in WORLDS if 'Discrete' not in e)
-    discrete = sorted(e for e in WORLDS if 'Discrete' in e)
+    continuous = sorted(WORLDS - DISCRETE_WORLDS)
+    discrete = sorted(DISCRETE_WORLDS)
 
     for env_id in continuous:
         table.add_row(env_id, 'Continuous')

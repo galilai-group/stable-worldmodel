@@ -121,11 +121,21 @@ See the full documentation [here](https://galilai-group.github.io/stable-worldmo
 </tr>
 </table>
 
+<table>
+<tr>
+<td align="center"><img src="docs/assets/cartpole_control.gif"                 width="120"/><br><img src="docs/assets/cartpole_control_var.gif"                 width="120"/></td>
+<td align="center"><img src="docs/assets/mountain_car_control.gif"             width="120"/><br><img src="docs/assets/mountain_car_control_var.gif"             width="120"/></td>
+<td align="center"><img src="docs/assets/mountain_car_continuous_control.gif"  width="120"/><br><img src="docs/assets/mountain_car_continuous_control_var.gif"  width="120"/></td>
+<td align="center"><img src="docs/assets/acrobot_control.gif"                  width="120"/><br><img src="docs/assets/acrobot_control_var.gif"                  width="120"/></td>
+<td align="center"><img src="docs/assets/pendulum_control.gif"                 width="120"/><br><img src="docs/assets/pendulum_control_var.gif"                 width="120"/></td>
+</tr>
+</table>
+
 </div>
 
 <p align="center"><em>Top row: default appearance &nbsp;·&nbsp; Bottom row: visual factor of variation</em></p>
 
-stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
+stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
 
 Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
 
@@ -153,6 +163,11 @@ Each environment includes visual and physical factor variations to evaluate robu
 | swm/FingerDMControl-v0       | 10      |
 | swm/ManipulatorDMControl-v0  | 8       |
 | swm/QuadrupedDMControl-v0    | 7       |
+| swm/CartPoleControl-v1       | 10      |
+| swm/MountainCarControl-v0    | 5       |
+| swm/MountainCarContinuousControl-v0 | 4 |
+| swm/AcrobotControl-v1        | 11      |
+| swm/PendulumControl-v1       | 9       |
 | swm/FetchReach-v3            | 8       |
 | swm/FetchPush-v3             | 11      |
 | swm/FetchSlide-v3            | 11      |

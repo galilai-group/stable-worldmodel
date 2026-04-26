@@ -2,11 +2,14 @@ from gymnasium.envs import registration
 
 
 WORLDS = set()
+DISCRETE_WORLDS = set()
 
 
-def register(id, entry_point, **kwargs):
+def register(id, entry_point, discrete=False, **kwargs):
     registration.register(id=id, entry_point=entry_point, **kwargs)
     WORLDS.add(id)
+    if discrete:
+        DISCRETE_WORLDS.add(id)
 
 
 ##############
@@ -118,6 +121,31 @@ register(
     entry_point='stable_worldmodel.envs.piecewise.piecewise_env:PiecewiseEnv',
 )
 
+_GYM_CONTROL = 'stable_worldmodel.envs.gymnasium_control'
+register(
+    id='swm/CartPoleControl-v1',
+    entry_point=f'{_GYM_CONTROL}.cartpole:CartPoleWrapper',
+    discrete=True,
+)
+register(
+    id='swm/MountainCarControl-v0',
+    entry_point=f'{_GYM_CONTROL}.mountain_car:MountainCarWrapper',
+    discrete=True,
+)
+register(
+    id='swm/MountainCarContinuousControl-v0',
+    entry_point=f'{_GYM_CONTROL}.mountain_car:MountainCarContinuousWrapper',
+)
+register(
+    id='swm/AcrobotControl-v1',
+    entry_point=f'{_GYM_CONTROL}.acrobot:AcrobotWrapper',
+    discrete=True,
+)
+register(
+    id='swm/PendulumControl-v1',
+    entry_point=f'{_GYM_CONTROL}.pendulum:PendulumWrapper',
+)
+
 _FETCH_ENTRY = 'stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper'
 
 # Sparse reward + flattened Box obs (default; good for behavior cloning / simple SAC)
@@ -160,6 +188,7 @@ for _swm_id, _gym_id in [
 register(
     id='swm/PushT-Discrete-v1',
     entry_point='stable_worldmodel.envs.pusht:PushTDiscrete',
+    discrete=True,
 )
 
 for _swm_id, _entry in [
@@ -180,4 +209,4 @@ for _swm_id, _entry in [
         'stable_worldmodel.envs.craftax.craftax:CraftaxClassicSymbolicWrapper',
     ),
 ]:
-    register(id=_swm_id, entry_point=_entry)
+    register(id=_swm_id, entry_point=_entry, discrete=True)

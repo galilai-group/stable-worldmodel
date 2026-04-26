@@ -1,6 +1,6 @@
 ---
 title: Craftax
-summary: A JAX-accelerated open-ended 2D survival benchmark
+summary: An open-ended 2D survival benchmark
 external_links:
     arxiv: https://arxiv.org/abs/2402.16801
     github: https://github.com/MichaelTMatthews/Craftax
@@ -8,7 +8,7 @@ external_links:
 
 ## Description
 
-[Craftax](https://github.com/MichaelTMatthews/Craftax) is a JAX-accelerated reimplementation of [Crafter](https://github.com/danijar/crafter) — an open-ended 2D survival environment inspired by Minecraft. The agent navigates a procedurally generated world, gathers resources, crafts tools, fights enemies, and unlocks a hierarchy of achievements. The full **Craftax** version extends Crafter with floors, dungeons, magic, ranged combat, and additional creatures; **Craftax-Classic** is a faithful port of the original Crafter rules.
+[Craftax](https://github.com/MichaelTMatthews/Craftax) is a reimplementation of [Crafter](https://github.com/danijar/crafter) — an open-ended 2D survival environment inspired by Minecraft. The agent navigates a procedurally generated world, gathers resources, crafts tools, fights enemies, and unlocks a hierarchy of achievements. The full **Craftax** version extends Crafter with floors, dungeons, magic, ranged combat, and additional creatures; **Craftax-Classic** is a faithful port of the original Crafter rules.
 
 Both versions ship in a **Pixels** variant (rendered RGB tiles) and a **Symbolic** variant (flat feature vector). Episodes terminate on player death.
 
@@ -63,7 +63,6 @@ world = swm.World(
 | Episode Termination | Player death |
 | Auto-reset | Disabled (use `gym.wrappers.TimeLimit` to cap rollout length) |
 | Environment ID | `swm/CraftaxClassicPixels-v1`, `swm/CraftaxClassicSymbolic-v1` |
-| Backend | JAX (JIT-compiled `reset` / `step`) |
 
 ### Info Dictionary
 
@@ -100,7 +99,6 @@ world = swm.World(
 | Episode Termination | Player death |
 | Auto-reset | Disabled (use `gym.wrappers.TimeLimit` to cap rollout length) |
 | Environment ID | `swm/CraftaxPixels-v1`, `swm/CraftaxSymbolic-v1` |
-| Backend | JAX (JIT-compiled `reset` / `step`) |
 
 ### Info Dictionary
 
@@ -114,4 +112,3 @@ world = swm.World(
 
 - For the **Pixels** variants, pass `image_resample='nearest'` to `swm.World` so pixel-art tiles stay crisp when upscaled — the default bilinear resampling blurs them.
 - The wrapper does **not** distinguish `terminated` from `truncated`: every episode end is reported as `terminated=True`. Wrap with `gymnasium.wrappers.TimeLimit` if you need a step budget.
-- The first call to `reset` / `step` triggers JAX JIT compilation; subsequent calls reuse the cache and run on CPU/GPU with no Python overhead.
