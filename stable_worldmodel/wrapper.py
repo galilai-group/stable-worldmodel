@@ -331,6 +331,7 @@ class AddPixelsWrapper(gym.Wrapper):
         env: gym.Env,
         pixels_shape: tuple[int, int] = (84, 84),  # (height, width)
         torchvision_transform: Callable[[Any], Any] | None = None,
+        resample: int | None = None,
     ):
         """Initialize the wrapper.
 
@@ -338,6 +339,8 @@ class AddPixelsWrapper(gym.Wrapper):
             env: The environment to wrap.
             pixels_shape: Target (height, width) for rendered pixels.
             torchvision_transform: Optional transform to apply to the pixels.
+            resample: PIL resample filter (e.g. ``Image.BILINEAR``,
+                ``Image.NEAREST``). Defaults to BILINEAR.
         """
         super().__init__(env)
         self.pixels_shape = pixels_shape
@@ -346,6 +349,7 @@ class AddPixelsWrapper(gym.Wrapper):
         from PIL import Image
 
         self.Image = Image
+        self.resample = resample if resample is not None else Image.BILINEAR
 
     def _get_pixels(self) -> tuple[dict[str, np.ndarray], float]:
         """Render environment and process pixels.
@@ -365,7 +369,7 @@ class AddPixelsWrapper(gym.Wrapper):
             # Convert to PIL Image for resizing
             pil_img = self.Image.fromarray(img_array)
             height, width = self.pixels_shape
-            pil_img = pil_img.resize((width, height), self.Image.BILINEAR)
+            pil_img = pil_img.resize((width, height), self.resample)
             # Optionally apply torchvision transform
             if self.torchvision_transform is not None:
                 pixels = self.torchvision_transform(pil_img)
@@ -422,6 +426,7 @@ class ResizeGoalWrapper(gym.Wrapper):
         env: gym.Env,
         pixels_shape: tuple[int, int] = (84, 84),  # (height, width)
         torchvision_transform: Callable[[Any], Any] | None = None,
+        resample: int | None = None,
     ):
         """Initialize the wrapper.
 
@@ -429,6 +434,8 @@ class ResizeGoalWrapper(gym.Wrapper):
             env: The environment to wrap.
             pixels_shape: Target (height, width) for resizing goal images.
             torchvision_transform: Optional transform to apply to goal images.
+            resample: PIL resample filter (e.g. ``Image.BILINEAR``,
+                ``Image.NEAREST``). Defaults to BILINEAR.
         """
         super().__init__(env)
         self.pixels_shape = pixels_shape
@@ -437,6 +444,7 @@ class ResizeGoalWrapper(gym.Wrapper):
         from PIL import Image
 
         self.Image = Image
+        self.resample = resample if resample is not None else Image.BILINEAR
 
     def _format(self, img: np.ndarray) -> np.ndarray:
         """Resize and transform a goal image.
@@ -450,7 +458,7 @@ class ResizeGoalWrapper(gym.Wrapper):
         # Convert to PIL Image for resizing
         pil_img = self.Image.fromarray(img)
         height, width = self.pixels_shape
-        pil_img = pil_img.resize((width, height), self.Image.BILINEAR)
+        pil_img = pil_img.resize((width, height), self.resample)
         # Optionally apply torchvision transform
         if self.torchvision_transform is not None:
             pixels = self.torchvision_transform(pil_img)
@@ -488,6 +496,30 @@ class ResizeGoalWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
+_RESAMPLE_ALIASES = {
+    'nearest': 'NEAREST',
+    'bilinear': 'BILINEAR',
+    'bicubic': 'BICUBIC',
+    'lanczos': 'LANCZOS',
+    'box': 'BOX',
+    'hamming': 'HAMMING',
+}
+
+
+def _resolve_resample(resample: str | int | None) -> int | None:
+    if resample is None or isinstance(resample, int):
+        return resample
+    from PIL import Image
+
+    key = resample.lower()
+    if key not in _RESAMPLE_ALIASES:
+        raise ValueError(
+            f'Unknown resample mode {resample!r}; '
+            f'choose from {sorted(_RESAMPLE_ALIASES)}.'
+        )
+    return getattr(Image, _RESAMPLE_ALIASES[key])
+
+
 class MegaWrapper(gym.Wrapper):
     """Combines multiple wrappers for comprehensive environment preprocessing."""
 
@@ -499,6 +531,7 @@ class MegaWrapper(gym.Wrapper):
         goal_transform: Callable[[Any], Any] | None = None,
         required_keys: Iterable[str] | None = None,
         separate_goal: bool = True,
+        image_resample: str | int | None = None,
     ):
         """Initialize the mega wrapper pipeline.
 
@@ -509,18 +542,24 @@ class MegaWrapper(gym.Wrapper):
             goal_transform: Optional transform for goal images.
             required_keys: Keys that must be present in info dict.
             separate_goal: Whether to handle goal separately.
+            image_resample: PIL resample mode used when resizing pixels and
+                goal images. Accepts a PIL constant or a string in
+                ``{'nearest','bilinear','bicubic','lanczos','box','hamming'}``.
+                Defaults to bilinear. Use ``'nearest'`` for crisp pixel art.
         """
         super().__init__(env)
 
         req_keys = list(required_keys) if required_keys is not None else []
         req_keys.append(r'^pixels(?:\..*)?$')
 
+        resample = _resolve_resample(image_resample)
+
         # this adds `pixels` key to info with optional transform
-        env = AddPixelsWrapper(env, image_shape, pixels_transform)
+        env = AddPixelsWrapper(env, image_shape, pixels_transform, resample)
         # this removes the info output, everything is in observation!
         env = EverythingToInfoWrapper(env)
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, req_keys)
-        env = ResizeGoalWrapper(env, image_shape, goal_transform)
+        env = ResizeGoalWrapper(env, image_shape, goal_transform, resample)
 
         self.env = env

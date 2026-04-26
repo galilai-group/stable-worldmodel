@@ -161,3 +161,23 @@ register(
     id='swm/PushT-Discrete-v1',
     entry_point='stable_worldmodel.envs.pusht:PushTDiscrete',
 )
+
+for _swm_id, _entry in [
+    (
+        'swm/CraftaxPixels-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxPixelsWrapper',
+    ),
+    (
+        'swm/CraftaxSymbolic-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxSymbolicWrapper',
+    ),
+    (
+        'swm/CraftaxClassicPixels-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxClassicPixelsWrapper',
+    ),
+    (
+        'swm/CraftaxClassicSymbolic-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxClassicSymbolicWrapper',
+    ),
+]:
+    register(id=_swm_id, entry_point=_entry)

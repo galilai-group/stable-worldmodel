@@ -90,6 +90,9 @@ class World:
             ``MegaWrapper``.
         goal_transform: Optional callable applied to the goal inside
             ``MegaWrapper``.
+        image_resample: PIL resample mode for pixel/goal resizing
+            (``'nearest'``, ``'bilinear'``, ...). Defaults to bilinear;
+            use ``'nearest'`` for crisp pixel-art envs (e.g. Craftax).
         **kwargs: Forwarded to ``gym.make`` (e.g. ``render_mode``).
     """
 
@@ -103,6 +106,7 @@ class World:
         extra_wrappers: list | None = None,
         image_transform: Callable | None = None,
         goal_transform: Callable | None = None,
+        image_resample: str | int | None = None,
         **kwargs: Any,
     ):
         wrappers = [
@@ -112,6 +116,7 @@ class World:
                 pixels_transform=image_transform,
                 goal_transform=goal_transform,
                 separate_goal=goal_conditioned,
+                image_resample=image_resample,
             ),
             *(extra_wrappers or []),
         ]
@@ -365,7 +370,7 @@ class World:
         results = {
             'success_rate': 0.0,
             'episode_successes': np.zeros(episodes),
-            'seeds': np.zeros(episodes, dtype=np.int32),
+            'seeds': np.zeros(episodes, dtype=np.int64),
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
@@ -373,13 +378,12 @@ class World:
             if frames is not None:
                 for i in range(world.num_envs):
                     f = world.infos['pixels'][i]
-                    frames[i].append(f[-1] if f.ndim > 3 else f)
+                    frame = f[-1] if f.ndim > 3 else f
+                    frames[i].append(np.asarray(frame).copy())
 
         def on_done(env_idx, ep_idx, world):
             results['episode_successes'][ep_idx] = world.terminateds[env_idx]
-            results['seeds'][ep_idx] = world.envs.envs[
-                env_idx
-            ].unwrapped.np_random_seed
+            results['seeds'][ep_idx] = world.envs.seeds[env_idx]
             if frames is not None:
                 _save_video(
                     Path(video) / f'episode_{ep_idx}.mp4',
@@ -460,7 +464,8 @@ class World:
             if frames is not None:
                 for i in range(world.num_envs):
                     f = world.infos['pixels'][i]
-                    frames[i].append(f[-1] if f.ndim > 3 else f)
+                    frame = f[-1] if f.ndim > 3 else f
+                    frames[i].append(np.asarray(frame).copy())
 
         self._run(max_steps=eval_budget, mode=mode, on_step=on_step)
 
