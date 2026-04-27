@@ -289,3 +289,11 @@ The following research projects have been built on top of stable-worldmodel:
       url={https://arxiv.org/abs/2602.08968},
 }
 ```
+
+## 💰 Bounty Contribution
+
+- **Task:** [v0.0.6] Bug in `record_dataset` when using `OGBPointMaze-v0`
+- **Reward:** $22
+- **Source:** GitHub-Paid
+- **Date:** 2026-04-28
+
