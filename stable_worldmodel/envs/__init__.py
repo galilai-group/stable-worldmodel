@@ -210,3 +210,8 @@ for _swm_id, _entry in [
     ),
 ]:
     register(id=_swm_id, entry_point=_entry, discrete=True)
+
+try:
+    from stable_worldmodel.envs import ale  # noqa: F401
+except ImportError:
+    pass

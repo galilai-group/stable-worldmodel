@@ -139,7 +139,7 @@ See the full documentation [here](https://galilai-group.github.io/stable-worldmo
 
 <p align="center"><em>Top row: default appearance &nbsp;·&nbsp; Bottom row: visual factor of variation</em></p>
 
-stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
+stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), the [Arcade Learning Environment](https://ale.farama.org/) (100+ Atari games), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
 
 Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
 
@@ -180,6 +180,7 @@ Each environment includes visual and physical factor variations to evaluate robu
 | swm/CraftaxClassicSymbolic-v1| —       |
 | swm/CraftaxPixels-v1         | —       |
 | swm/CraftaxSymbolic-v1       | —       |
+| [ALE/* (100+ Atari games)](https://ale.farama.org/) | — |
 
 </td>
 <td valign="top">

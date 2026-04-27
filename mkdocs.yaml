@@ -27,6 +27,7 @@ nav:
       - envs/gymnasium_robotics.md
       - envs/gymnasium_control.md
       - envs/craftax.md
+      - envs/ale.md
   - Guides:
       - guides/checkpoints.md
   - cli.md
