@@ -26,13 +26,7 @@ def _mc_visuals_space():
 
 
 class MountainCarWrapper(GymControlWrapper):
-    DEFAULT_VARIATIONS = (
-        'physics.gravity',
-        'physics.force',
-        'physics.max_speed',
-        'visuals.bg',
-        'visuals.fg',
-    )
+    DEFAULT_VARIATIONS = ()
 
     def __init__(self, env_id='MountainCar-v0', render_mode=None, **kwargs):
         super().__init__(env_id, render_mode=render_mode, **kwargs)
@@ -89,12 +83,7 @@ class MountainCarContinuousWrapper(GymControlWrapper):
     as an attribute, so it cannot be varied without monkey-patching the step fn.
     """
 
-    DEFAULT_VARIATIONS = (
-        'physics.power',
-        'physics.max_speed',
-        'visuals.bg',
-        'visuals.fg',
-    )
+    DEFAULT_VARIATIONS = ()
 
     def __init__(
         self, env_id='MountainCarContinuous-v0', render_mode=None, **kwargs

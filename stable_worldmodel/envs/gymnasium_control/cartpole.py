@@ -5,18 +5,7 @@ from stable_worldmodel.envs.gymnasium_control.base import GymControlWrapper
 
 
 class CartPoleWrapper(GymControlWrapper):
-    DEFAULT_VARIATIONS = (
-        'physics.gravity',
-        'physics.masscart',
-        'physics.masspole',
-        'physics.length',
-        'physics.force_mag',
-        'physics.tau',
-        'visuals.bg',
-        'visuals.cart',
-        'visuals.pole',
-        'visuals.axle',
-    )
+    DEFAULT_VARIATIONS = ()
 
     def __init__(self, env_id='CartPole-v1', render_mode=None, **kwargs):
         super().__init__(env_id, render_mode=render_mode, **kwargs)

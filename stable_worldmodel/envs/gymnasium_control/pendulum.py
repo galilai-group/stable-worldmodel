@@ -5,17 +5,7 @@ from stable_worldmodel.envs.gymnasium_control.base import GymControlWrapper
 
 
 class PendulumWrapper(GymControlWrapper):
-    DEFAULT_VARIATIONS = (
-        'physics.g',
-        'physics.m',
-        'physics.l',
-        'physics.max_torque',
-        'physics.max_speed',
-        'physics.dt',
-        'visuals.bg',
-        'visuals.rod',
-        'visuals.hub',
-    )
+    DEFAULT_VARIATIONS = ()
 
     def __init__(self, env_id='Pendulum-v1', render_mode=None, **kwargs):
         super().__init__(env_id, render_mode=render_mode, **kwargs)

@@ -5,19 +5,7 @@ from stable_worldmodel.envs.gymnasium_control.base import GymControlWrapper
 
 
 class AcrobotWrapper(GymControlWrapper):
-    DEFAULT_VARIATIONS = (
-        'physics.link_length_1',
-        'physics.link_length_2',
-        'physics.link_mass_1',
-        'physics.link_mass_2',
-        'physics.link_com_pos_1',
-        'physics.link_com_pos_2',
-        'physics.link_moi',
-        'visuals.bg',
-        'visuals.line',
-        'visuals.link',
-        'visuals.joint',
-    )
+    DEFAULT_VARIATIONS = ()
 
     def __init__(self, env_id='Acrobot-v1', render_mode=None, **kwargs):
         super().__init__(env_id, render_mode=render_mode, **kwargs)
