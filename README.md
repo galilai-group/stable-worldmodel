@@ -27,13 +27,13 @@ import stable_worldmodel as swm
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
-# collect a dataset (default writer is hdf5; pass format='video' for MP4 episodes)
+# collect a dataset (default writer is lance; pass format='video' for MP4 episodes)
 world = swm.World('swm/PushT-v1', num_envs=8)
 world.set_policy(your_expert_policy)
-world.collect('data/pusht_demo.h5', episodes=100, seed=0)
+world.collect('data/pusht_demo.lance', episodes=100, seed=0)
 
 # load dataset and train your world model — format is autodetected
-dataset = swm.data.load_dataset('data/pusht_demo.h5', num_steps=16)
+dataset = swm.data.load_dataset('data/pusht_demo.lance', num_steps=16)
 world_model = ...  # your world-model
 
 # evaluate with model predictive control
@@ -56,7 +56,8 @@ or [register your own](https://galilai-group.github.io/stable-worldmodel/api/dat
 
 | Format     | On-disk layout                                  | Best for                                          |
 |------------|-------------------------------------------------|---------------------------------------------------|
-| `hdf5`     | single `.h5` file (one dataset per column)      | training — fast indexed reads, low CPU overhead   |
+| `lance`    | LanceDB table (episode-contiguous flat rows)    | default — append-friendly, fast indexed reads     |
+| `hdf5`     | single `.h5` file (one dataset per column)      | portable single-file artifact                     |
 | `folder`   | `.npz` columns + one JPEG per step              | inspection, partial-key streaming                 |
 | `video`    | `.npz` columns + one MP4 per episode (`decord`) | long episodes, compact image storage              |
 | `lerobot`  | `lerobot://<repo_id>` (read-only adapter)       | training/eval directly on LeRobot Hub datasets    |
@@ -64,17 +65,19 @@ or [register your own](https://galilai-group.github.io/stable-worldmodel/api/dat
 ```python
 import stable_worldmodel as swm
 
-world.collect('data/pusht.h5', episodes=100)                    # default: hdf5
+world.collect('data/pusht.lance', episodes=100)                 # default: lance
 world.collect('data/pusht_video', episodes=100, format='video') # mp4 episodes
 
-ds = swm.data.load_dataset('data/pusht.h5', num_steps=16)       # autodetect
-swm.data.convert('data/pusht.h5', 'data/pusht_video',
+ds = swm.data.load_dataset('data/pusht.lance', num_steps=16)    # autodetect
+swm.data.convert('data/pusht.lance', 'data/pusht_video',
                  dest_format='video', fps=30)                   # one-shot migration
 ```
 
-HDF5 ensures high-performance data loading, reduces CPU bottlenecks, and
-improves overall GPU utilization; MP4 is convenient for visualization and
-keeps long-horizon datasets small.
+Every writer accepts a `mode` kwarg (`'append'` default, `'overwrite'`,
+`'error'`); re-running `world.collect` extends the dataset rather than
+failing. Lance combines append-friendly row layout with fast indexed reads
+for training; MP4 is convenient for visualization and keeps long-horizon
+datasets small.
 
 <p align="center">
   <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">

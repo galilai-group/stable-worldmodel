@@ -189,8 +189,8 @@ The `WorldModelPolicy` internally calls the solver to optimize action sequences 
 
 Stable World-Model provides a small, pluggable data layer for recording and
 loading episode datasets. Recording, loading, and conversion all go through
-the same **format registry**, so the same code records to a single HDF5
-file or to a folder of MP4 episodes — only the `format=` flag changes. See
+the same **format registry**, so the same code records to a Lance table or
+to a folder of MP4 episodes — only the `format=` flag changes. See
 the [Dataset API](api/dataset.md) for the full reference; the rest of this
 section covers the everyday workflow.
 
@@ -198,15 +198,19 @@ section covers the everyday workflow.
 
 Use `world.collect()` to roll out episodes and dump their trajectories. Each
 info key becomes a column in the resulting file. The default writer is
-`hdf5`; pass `format='video'` or `'folder'` to switch backends.
+`lance`; pass `format='hdf5'`, `'video'`, or `'folder'` to switch backends.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))
 policy = swm.policy.RandomPolicy(seed=42)  # can be your JEPA or RL policy
 world.set_policy(policy)
 
-# Single HDF5 file (recommended for training).
-world.collect('data/pusht_random.h5', episodes=100, seed=0)
+# Lance table (default — recommended for training).
+world.collect('data/pusht_random.lance', episodes=100, seed=0)
+
+# Re-running the same call extends the table (mode='append' is the default
+# for every writer); pass mode='overwrite' to start fresh.
+world.collect('data/pusht_random.lance', episodes=50, seed=1)   # +50 episodes
 
 # Or a directory with one MP4 per episode (compact, easy to inspect).
 world.collect('data/pusht_random_video', episodes=100, seed=0,
@@ -229,7 +233,7 @@ returned per sample.
 import stable_worldmodel as swm
 
 dataset = swm.data.load_dataset(
-    'data/pusht_random.h5',                       # autodetected as hdf5
+    'data/pusht_random.lance',                    # autodetected as lance
     frameskip=1,
     num_steps=4,
     keys_to_load=['pixels', 'action', 'state'],
@@ -268,7 +272,7 @@ writer kwargs:
 
 ```python
 swm.data.convert(
-    'data/pusht_random.h5',           # source
+    'data/pusht_random.lance',        # source
     'data/pusht_random_video',        # destination
     dest_format='video',
     fps=30,

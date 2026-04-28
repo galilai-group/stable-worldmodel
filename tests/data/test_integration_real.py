@@ -41,6 +41,7 @@ class TestRealDataCollection:
             temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=4,
             seed=42,
+            format='hdf5',
         )
 
         # 4. Verify HDF5 file was created
@@ -100,6 +101,7 @@ class TestRealDataCollection:
             temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=2,
             seed=42,
+            format='hdf5',
         )
         world.envs.close()
 
@@ -133,6 +135,7 @@ class TestRealDataCollection:
             temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=2,
             seed=42,
+            format='hdf5',
         )
         world.envs.close()
 
@@ -171,6 +174,7 @@ class TestRealDataCollection:
             temp_cache_dir / 'datasets' / f'{dataset_name}.h5',
             episodes=2,
             seed=42,
+            format='hdf5',
         )
         world.envs.close()
 
@@ -255,6 +259,7 @@ class TestImageDatasetReal:
             temp_cache_dir / 'datasets' / f'{h5_name}.h5',
             episodes=3,
             seed=42,
+            format='hdf5',
         )
         world.envs.close()
 
@@ -310,6 +315,7 @@ class TestImageDatasetReal:
             temp_cache_dir / 'datasets' / f'{h5_name}.h5',
             episodes=3,
             seed=42,
+            format='hdf5',
         )
         world.envs.close()
 
@@ -360,6 +366,7 @@ class TestVideoDatasetReal:
             temp_cache_dir / 'datasets' / f'{h5_name}.h5',
             episodes=3,
             seed=42,
+            format='hdf5',
         )
         world.envs.close()
 

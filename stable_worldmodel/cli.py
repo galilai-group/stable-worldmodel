@@ -99,6 +99,49 @@ def _inspect_folder_dataset(path) -> None:
     print(table)
 
 
+def _lance_dir_size(path) -> int:
+    return sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+
+
+def _inspect_lance_dataset(path) -> None:
+    import lancedb
+
+    parent, stem = path.parent, path.stem
+    db = lancedb.connect(str(parent) or '.')
+    table = db.open_table(stem)
+    schema = table.schema
+    ep_arr = (
+        table.to_lance()
+        .to_table(columns=['episode_idx'])
+        .column('episode_idx')
+    ).to_numpy()
+    if len(ep_arr):
+        n_episodes = int(ep_arr[-1]) + 1
+        ep_lengths = [int((ep_arr == i).sum()) for i in range(n_episodes)]
+    else:
+        n_episodes = 0
+        ep_lengths = []
+
+    size = _format_size(_lance_dir_size(path))
+    print(f'[bold]Name:[/bold]     {path.name}')
+    print('[bold]Format:[/bold]   Lance')
+    print(f'[bold]Path:[/bold]     {path}')
+    print(f'[bold]Size:[/bold]     {size}')
+    print(f'[bold]Episodes:[/bold] {n_episodes}')
+    print(f'[bold]Steps:[/bold]    {len(ep_arr)}')
+    if ep_lengths:
+        print(f'[bold]Ep length:[/bold] {min(ep_lengths)} – {max(ep_lengths)}')
+
+    cols = Table(title='Columns')
+    cols.add_column('Column', style='cyan', no_wrap=True)
+    cols.add_column('Type', style='yellow')
+    for f in schema:
+        if f.name in ('episode_idx', 'step_idx'):
+            continue
+        cols.add_row(f.name, str(f.type))
+    print(cols)
+
+
 def _format_space(space) -> tuple[str, str, str]:
     """Return (type_label, range_str, init_str) for a leaf space."""
     from stable_worldmodel import spaces as swm_spaces
@@ -141,12 +184,25 @@ def datasets():
 
     rows = []
 
+    for lance_path in sorted(cache_dir.glob('*.lance')):
+        if not lance_path.is_dir():
+            continue
+        rows.append(
+            (
+                lance_path.stem,
+                'Lance',
+                _format_size(_lance_dir_size(lance_path)),
+            )
+        )
+
     for h5_path in sorted(cache_dir.glob('*.h5')):
         size = _format_size(h5_path.stat().st_size)
         rows.append((h5_path.stem, 'HDF5', size))
 
     for folder in sorted(cache_dir.iterdir()):
-        if not folder.is_dir() or not (folder / 'ep_len.npz').exists():
+        if not folder.is_dir() or folder.suffix == '.lance':
+            continue
+        if not (folder / 'ep_len.npz').exists():
             continue
         npz_size = sum(p.stat().st_size for p in folder.glob('*.npz'))
         rows.append(
@@ -173,10 +229,13 @@ def inspect(
     from stable_worldmodel.data.utils import get_cache_dir
 
     cache_dir = get_cache_dir(sub_folder='datasets')
+    lance_path = cache_dir / f'{name}.lance'
     h5_path = cache_dir / f'{name}.h5'
     folder_path = cache_dir / name
 
-    if h5_path.exists():
+    if lance_path.is_dir():
+        _inspect_lance_dataset(lance_path)
+    elif h5_path.exists():
         _inspect_hdf5_dataset(h5_path)
     elif folder_path.is_dir() and (folder_path / 'ep_len.npz').exists():
         _inspect_folder_dataset(folder_path)

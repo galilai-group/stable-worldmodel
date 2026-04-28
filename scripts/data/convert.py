@@ -50,26 +50,23 @@ def parse_args() -> argparse.Namespace:
         help='Override the dataset cache root.',
     )
     parser.add_argument(
-        '--overwrite',
-        action='store_true',
-        help='Pass overwrite=True to the destination writer (lance only).',
+        '--mode',
+        choices=('append', 'overwrite', 'error'),
+        default='append',
+        help='Destination writer mode (default: append).',
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    dest_kwargs = {}
-    if args.overwrite:
-        dest_kwargs['overwrite'] = True
-
     convert(
         args.source,
         args.dest,
         source_format=args.source_format,
         dest_format=args.dest_format,
         cache_dir=args.cache_dir,
-        **dest_kwargs,
+        mode=args.mode,
     )
 
 

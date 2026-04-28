@@ -19,6 +19,22 @@ from typing import Protocol, runtime_checkable
 
 FORMATS: dict[str, type[Format]] = {}
 
+WRITE_MODES = ('append', 'overwrite', 'error')
+"""Standard writer modes shared by all formats.
+
+- ``append``: extend the dataset if it exists; create otherwise. Default.
+- ``overwrite``: drop any existing dataset and start fresh.
+- ``error``: raise :class:`FileExistsError` if the dataset already exists.
+"""
+
+
+def validate_write_mode(mode: str) -> str:
+    if mode not in WRITE_MODES:
+        raise ValueError(
+            f'write mode must be one of {WRITE_MODES}, got {mode!r}'
+        )
+    return mode
+
 
 def register_format(cls: type[Format]) -> type[Format]:
     name = getattr(cls, 'name', None)
@@ -74,6 +90,13 @@ class Format:
 
     @classmethod
     def open_writer(cls, path, **kwargs) -> Writer:
+        """Return a streaming :class:`Writer` for this format.
+
+        All built-in writers accept a standard ``mode`` kwarg with values
+        from :data:`WRITE_MODES` (``'append'`` | ``'overwrite'`` |
+        ``'error'``); the default is ``'append'``. Schema mismatches in
+        append mode raise a clear exception before any data is written.
+        """
         raise NotImplementedError(
             f'format {cls.name or cls.__name__!r} does not support writing (read-only)'
         )

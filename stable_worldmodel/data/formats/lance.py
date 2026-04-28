@@ -28,7 +28,11 @@ import pyarrow as pa
 from lancedb.permutation import Permutation
 
 from stable_worldmodel.data.dataset import Dataset
-from stable_worldmodel.data.format import Format, register_format
+from stable_worldmodel.data.format import (
+    Format,
+    register_format,
+    validate_write_mode,
+)
 from stable_worldmodel.data.formats.utils import is_image_column
 
 
@@ -523,8 +527,9 @@ class LanceWriter:
         *,
         jpeg_quality: int = _DEFAULT_JPEG_QUALITY,
         connect_kwargs: dict[str, Any] | None = None,
-        overwrite: bool = False,
+        mode: str = 'append',
     ):
+        validate_write_mode(mode)
         loc = str(path).rstrip('/')
         if table_name is None:
             if loc.lower().endswith('.lance'):
@@ -543,11 +548,12 @@ class LanceWriter:
         Path(self.uri).mkdir(parents=True, exist_ok=True)
         self.jpeg_quality = jpeg_quality
         self.connect_kwargs = connect_kwargs or {}
-        self.overwrite = overwrite
+        self.mode = mode
 
         self._db = None
         self._table = None
         self._initialized = False
+        self._appending_existing = False
         self._rename_map: dict[str, str] = {}
         self._image_cols: set[str] = set()
         self._dims: dict[str, int] = {}
@@ -558,13 +564,16 @@ class LanceWriter:
     def __enter__(self):
         self._db = lancedb.connect(self.uri, **self.connect_kwargs)
         if self.table_name in self._db.list_tables().tables:
-            if self.overwrite:
-                self._db.drop_table(self.table_name)
-            else:
+            if self.mode == 'error':
                 raise FileExistsError(
                     f"Lance table '{self.table_name}' already exists at "
-                    f"'{self.uri}'. Pass overwrite=True to replace it."
+                    f"'{self.uri}'. Pass mode='overwrite' to replace it or "
+                    "mode='append' to extend it."
                 )
+            if self.mode == 'overwrite':
+                self._db.drop_table(self.table_name)
+            else:
+                self._open_existing_for_append()
         return self
 
     def __exit__(self, *exc):
@@ -578,6 +587,8 @@ class LanceWriter:
         if not self._initialized:
             self._init_schema(ep_data)
             self._initialized = True
+        elif self._appending_existing and not self._rename_map:
+            self._validate_episode_against_existing(ep_data)
 
         ep_len = len(next(iter(ep_data.values())))
         batch = self._build_batch(ep_data, ep_len)
@@ -592,6 +603,86 @@ class LanceWriter:
 
         self._ep_idx += 1
         self._global_ptr += ep_len
+
+    def _open_existing_for_append(self) -> None:
+        self._table = self._db.open_table(self.table_name)
+        schema = self._table.schema
+        image_cols: set[str] = set()
+        dims: dict[str, int] = {}
+        for f in schema:
+            if f.name in ('episode_idx', 'step_idx'):
+                continue
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type):
+                image_cols.add(f.name)
+            elif pa.types.is_fixed_size_list(f.type):
+                dims[f.name] = f.type.list_size
+            else:
+                raise ValueError(
+                    f"LanceWriter: cannot append to '{self.table_name}' — "
+                    f"existing column '{f.name}' has unsupported type "
+                    f'{f.type}.'
+                )
+
+        existing = self._table.to_lance().to_table(columns=['episode_idx'])
+        ep_col = existing.column('episode_idx').to_numpy()
+        self._image_cols = image_cols
+        self._dims = dims
+        self._schema = schema
+        self._global_ptr = int(len(ep_col))
+        self._ep_idx = int(ep_col.max()) + 1 if self._global_ptr else 0
+        self._initialized = True
+        self._appending_existing = True
+
+    def _validate_episode_against_existing(self, ep_data: dict) -> None:
+        incoming_to_lance: dict[str, str] = {}
+        for col in ep_data:
+            lance_name = _to_lance_name(col)
+            if lance_name in incoming_to_lance.values():
+                raise ValueError(
+                    f'LanceWriter: append failed — incoming columns map to '
+                    f"the same Lance name '{lance_name}'."
+                )
+            incoming_to_lance[col] = lance_name
+        lance_to_incoming = {v: k for k, v in incoming_to_lance.items()}
+
+        expected = set(self._image_cols) | set(self._dims)
+        incoming = set(lance_to_incoming)
+        missing = expected - incoming
+        extra = incoming - expected
+        if missing or extra:
+            raise ValueError(
+                f'LanceWriter: append failed — schema mismatch on table '
+                f"'{self.table_name}'. Missing columns: {sorted(missing)}; "
+                f'unexpected columns: {sorted(extra)}.'
+            )
+
+        for lance_name in self._image_cols:
+            vals = ep_data[lance_to_incoming[lance_name]]
+            if not (_is_image_name(lance_name) or is_image_column(vals)):
+                raise ValueError(
+                    f"LanceWriter: append failed — column '{lance_name}' is "
+                    'image-typed on disk but incoming values are not images.'
+                )
+
+        for lance_name, expected_dim in self._dims.items():
+            vals = ep_data[lance_to_incoming[lance_name]]
+            sample = np.asarray(vals[0])
+            actual_dim = int(sample.reshape(-1).shape[0])
+            if actual_dim != expected_dim:
+                raise ValueError(
+                    f"LanceWriter: append failed — column '{lance_name}' "
+                    f'dimension mismatch: existing={expected_dim}, '
+                    f'incoming={actual_dim}.'
+                )
+
+        ordered_lance_names = [
+            f.name
+            for f in self._schema
+            if f.name not in ('episode_idx', 'step_idx')
+        ]
+        self._rename_map = {
+            lance_to_incoming[ln]: ln for ln in ordered_lance_names
+        }
 
     def _init_schema(self, sample_ep: dict) -> None:
         rename_map: dict[str, str] = {}

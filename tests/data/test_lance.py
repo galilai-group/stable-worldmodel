@@ -160,11 +160,11 @@ def test_merge_col(tmp_path):
     assert ds.get_col_data('state').shape == (sum([5, 4, 6]), 6)
 
 
-def test_overwrite_required_for_existing_table(tmp_path):
+def test_error_mode_raises_for_existing_table(tmp_path):
     out = tmp_path / 'demo.lance'
     _write_demo(out)
     with pytest.raises(FileExistsError):
-        with LanceWriter(out) as w:
+        with LanceWriter(out, mode='error') as w:
             w.write_episode(
                 {
                     'pixels': [
@@ -180,9 +180,8 @@ def test_overwrite_required_for_existing_table(tmp_path):
 def test_overwrite_replaces_table(tmp_path):
     out = tmp_path / 'demo.lance'
     _write_demo(out, ep_lengths=(5, 4, 6))
-    _write_demo_into = (3, 3)
-    with LanceWriter(out, overwrite=True) as w:
-        for ep_len in _write_demo_into:
+    with LanceWriter(out, mode='overwrite') as w:
+        for ep_len in (3, 3):
             w.write_episode(
                 {
                     'pixels': [
@@ -196,6 +195,79 @@ def test_overwrite_replaces_table(tmp_path):
             )
     ds = LanceDataset(path=out)
     assert ds.lengths.tolist() == [3, 3]
+
+
+def test_append_extends_existing_table(tmp_path):
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(5, 4))
+
+    with LanceWriter(out) as w:  # mode='append' is the default
+        for ep_len in (3, 6):
+            w.write_episode(
+                {
+                    'pixels': [
+                        np.zeros((8, 8, 3), dtype=np.uint8)
+                        for _ in range(ep_len)
+                    ],
+                    'action': [
+                        np.zeros(2, dtype=np.float32) for _ in range(ep_len)
+                    ],
+                    'proprio': [
+                        np.zeros(3, dtype=np.float32) for _ in range(ep_len)
+                    ],
+                }
+            )
+
+    ds = LanceDataset(path=out)
+    assert ds.lengths.tolist() == [5, 4, 3, 6]
+    assert ds.offsets.tolist() == [0, 5, 9, 12]
+
+
+def test_append_schema_mismatch_raises(tmp_path):
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(3,))
+
+    with pytest.raises(ValueError, match='schema mismatch'):
+        with LanceWriter(out) as w:
+            w.write_episode(
+                {
+                    'pixels': [
+                        np.zeros((8, 8, 3), dtype=np.uint8) for _ in range(2)
+                    ],
+                    'action': [
+                        np.zeros(2, dtype=np.float32) for _ in range(2)
+                    ],
+                    # missing 'proprio'; new key 'extra'
+                    'extra': [np.zeros(2, dtype=np.float32) for _ in range(2)],
+                }
+            )
+
+
+def test_append_dim_mismatch_raises(tmp_path):
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(3,))
+
+    with pytest.raises(ValueError, match='dimension mismatch'):
+        with LanceWriter(out) as w:
+            w.write_episode(
+                {
+                    'pixels': [
+                        np.zeros((8, 8, 3), dtype=np.uint8) for _ in range(2)
+                    ],
+                    'action': [
+                        np.zeros(2, dtype=np.float32) for _ in range(2)
+                    ],
+                    'proprio': [
+                        np.zeros(99, dtype=np.float32) for _ in range(2)
+                    ],
+                }
+            )
+
+
+def test_invalid_mode_raises(tmp_path):
+    out = tmp_path / 'demo.lance'
+    with pytest.raises(ValueError, match='write mode'):
+        LanceWriter(out, mode='nope')
 
 
 def test_convert_lance_to_folder_and_back(tmp_path):

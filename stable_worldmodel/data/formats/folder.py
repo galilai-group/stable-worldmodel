@@ -12,7 +12,11 @@ import torch
 from PIL import Image
 
 from stable_worldmodel.data.dataset import Dataset
-from stable_worldmodel.data.format import Format, register_format
+from stable_worldmodel.data.format import (
+    Format,
+    register_format,
+    validate_write_mode,
+)
 from stable_worldmodel.data.formats.utils import is_image_column
 from stable_worldmodel.data.utils import get_cache_dir
 
@@ -148,18 +152,43 @@ class FolderWriter:
 
     Image columns are auto-detected: any value that is a ``uint8`` array
     shaped ``(H, W, 3)`` or ``(H, W, 1)`` is written as JPEG.
+
+    Args:
+        path: target directory.
+        mode: ``'append'`` (default — extend if a dataset is present),
+            ``'overwrite'`` (clear stale artifacts first), or ``'error'``
+            (raise if a dataset is already present). See
+            :data:`stable_worldmodel.data.format.WRITE_MODES`.
     """
 
-    def __init__(self, path):
+    def __init__(self, path, *, mode: str = 'append'):
+        validate_write_mode(mode)
         self.path = Path(path)
         self.path.mkdir(parents=True, exist_ok=True)
+        self.mode = mode
         self._tabular: dict[str, list[np.ndarray]] = {}
+        self._image_cols: set[str] = set()
+        self._tabular_dims: dict[str, tuple[int, ...]] = {}
         self._lengths: list[int] = []
         self._offsets: list[int] = []
         self._global_ptr = 0
         self._ep_idx = 0
+        self._appending_existing = False
+        self._validated = False
 
     def __enter__(self):
+        existing = (self.path / 'ep_len.npz').exists()
+        if existing:
+            if self.mode == 'error':
+                raise FileExistsError(
+                    f"FolderWriter: '{self.path}' already contains a dataset. "
+                    "Pass mode='overwrite' to replace it or mode='append' "
+                    'to extend it.'
+                )
+            if self.mode == 'overwrite':
+                self._clear_existing()
+            else:
+                self._load_existing_state()
         return self
 
     def __exit__(self, *exc):
@@ -174,6 +203,10 @@ class FolderWriter:
             np.savez(self.path / f'{col}.npz', np.concatenate(parts, axis=0))
 
     def write_episode(self, ep_data: dict) -> None:
+        if self._appending_existing and not self._validated:
+            self._validate_episode_against_existing(ep_data)
+            self._validated = True
+
         ep_len = len(next(iter(ep_data.values())))
         for col, vals in ep_data.items():
             if is_image_column(vals):
@@ -193,6 +226,75 @@ class FolderWriter:
         self._offsets.append(self._global_ptr)
         self._global_ptr += ep_len
         self._ep_idx += 1
+
+    def _clear_existing(self) -> None:
+        import shutil
+
+        for f in ('ep_len.npz', 'ep_offset.npz'):
+            (self.path / f).unlink(missing_ok=True)
+        for child in self.path.iterdir():
+            if child.is_file() and child.suffix == '.npz':
+                child.unlink()
+            elif child.is_dir():
+                shutil.rmtree(child)
+
+    def _load_existing_state(self) -> None:
+        lengths = np.load(self.path / 'ep_len.npz')['arr_0']
+        offsets = np.load(self.path / 'ep_offset.npz')['arr_0']
+        self._lengths = lengths.astype(np.int32).tolist()
+        self._offsets = offsets.astype(np.int64).tolist()
+        self._ep_idx = len(self._lengths)
+        self._global_ptr = int(lengths.sum()) if len(lengths) else 0
+
+        for npz in self.path.glob('*.npz'):
+            if npz.stem in ('ep_len', 'ep_offset'):
+                continue
+            arr = np.load(npz)['arr_0']
+            self._tabular[npz.stem] = [arr]
+            self._tabular_dims[npz.stem] = tuple(arr.shape[1:])
+
+        for sub in self.path.iterdir():
+            if sub.is_dir():
+                self._image_cols.add(sub.name)
+
+        self._appending_existing = True
+
+    def _validate_episode_against_existing(self, ep_data: dict) -> None:
+        incoming_image: set[str] = set()
+        incoming_tabular: dict[str, tuple[int, ...]] = {}
+        for col, vals in ep_data.items():
+            if is_image_column(vals):
+                incoming_image.add(col)
+            else:
+                incoming_tabular[col] = np.asarray(vals[0]).shape
+
+        expected = self._image_cols | set(self._tabular_dims)
+        incoming = incoming_image | set(incoming_tabular)
+        missing = expected - incoming
+        extra = incoming - expected
+        if missing or extra:
+            raise ValueError(
+                f"FolderWriter: append failed — schema mismatch on '{self.path}'. "
+                f'Missing columns: {sorted(missing)}; '
+                f'unexpected columns: {sorted(extra)}.'
+            )
+
+        bad_type = (incoming_image & set(self._tabular_dims)) | (
+            set(incoming_tabular) & self._image_cols
+        )
+        if bad_type:
+            raise ValueError(
+                'FolderWriter: append failed — image-vs-tabular type mismatch '
+                f'for columns: {sorted(bad_type)}.'
+            )
+
+        for col, shape in incoming_tabular.items():
+            if shape != self._tabular_dims[col]:
+                raise ValueError(
+                    f"FolderWriter: append failed — column '{col}' per-step "
+                    f'shape mismatch: existing={self._tabular_dims[col]}, '
+                    f'incoming={shape}.'
+                )
 
 
 @register_format

@@ -255,6 +255,64 @@ class TestHDF5Writer:
                 w.write_episode(ep_a)
                 w.write_episode(ep_b)
 
+    def test_append_extends_existing_file(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        with HDF5Writer(out) as w:  # default mode='append'
+            w.write_episode(two_episodes[1])
+        ds = HDF5Dataset(path=out)
+        assert list(ds.lengths) == [5, 7]
+        assert list(ds.offsets) == [0, 5]
+
+    def test_error_mode_raises_for_existing_file(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        with pytest.raises(FileExistsError):
+            HDF5Writer(out, mode='error').__enter__()
+
+    def test_overwrite_truncates_existing_file(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+            w.write_episode(two_episodes[1])
+        with HDF5Writer(out, mode='overwrite') as w:
+            w.write_episode(two_episodes[1])
+        ds = HDF5Dataset(path=out)
+        assert list(ds.lengths) == [7]
+
+    def test_append_schema_mismatch_raises(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_extra = dict(two_episodes[1])
+        ep_extra['unexpected'] = [
+            np.zeros(2, np.float32) for _ in range(len(ep_extra['action']))
+        ]
+        with pytest.raises(ValueError, match='schema mismatch'):
+            with HDF5Writer(out) as w:
+                w.write_episode(ep_extra)
+
+    def test_append_per_step_shape_mismatch_raises(
+        self, tmp_path, two_episodes
+    ):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_bad = {
+            'action': [np.zeros(99, np.float32) for _ in range(3)],
+            'proprio': [np.zeros(4, np.float32) for _ in range(3)],
+            'pixels': [np.zeros((8, 8, 3), np.uint8) for _ in range(3)],
+        }
+        with pytest.raises(ValueError, match='shape mismatch'):
+            with HDF5Writer(out) as w:
+                w.write_episode(ep_bad)
+
+    def test_invalid_mode_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='write mode'):
+            HDF5Writer(tmp_path / 'data.h5', mode='nope')
+
 
 class TestHDF5OpenReader:
     def test_directory_with_single_h5(self, tmp_path, two_episodes):
@@ -347,6 +405,69 @@ class TestFolderWriter:
         ep0 = ds.load_episode(0)
         assert 'pixels' not in ep0
 
+    def test_append_extends_existing_folder(self, tmp_path, two_episodes):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        with FolderWriter(out) as w:  # default mode='append'
+            w.write_episode(two_episodes[1])
+        ds = FolderDataset(path=out, folder_keys=['pixels'])
+        assert list(ds.lengths) == [5, 7]
+        assert (out / 'pixels' / 'ep_0_step_0.jpeg').exists()
+        assert (out / 'pixels' / 'ep_1_step_6.jpeg').exists()
+
+    def test_error_mode_raises_for_existing_folder(
+        self, tmp_path, two_episodes
+    ):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        with pytest.raises(FileExistsError):
+            FolderWriter(out, mode='error').__enter__()
+
+    def test_overwrite_clears_existing_folder(self, tmp_path, two_episodes):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+            w.write_episode(two_episodes[1])
+        with FolderWriter(out, mode='overwrite') as w:
+            w.write_episode(two_episodes[1])
+        ds = FolderDataset(path=out, folder_keys=['pixels'])
+        assert list(ds.lengths) == [7]
+        # First-write image files from the discarded session must be gone.
+        assert not (out / 'pixels' / 'ep_1_step_0.jpeg').exists()
+
+    def test_append_schema_mismatch_raises(self, tmp_path, two_episodes):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_extra = dict(two_episodes[1])
+        ep_extra['unexpected'] = [
+            np.zeros(2, np.float32) for _ in range(len(ep_extra['action']))
+        ]
+        with pytest.raises(ValueError, match='schema mismatch'):
+            with FolderWriter(out) as w:
+                w.write_episode(ep_extra)
+
+    def test_append_per_step_shape_mismatch_raises(
+        self, tmp_path, two_episodes
+    ):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_bad = {
+            'action': [np.zeros(99, np.float32) for _ in range(3)],
+            'proprio': [np.zeros(4, np.float32) for _ in range(3)],
+            'pixels': [np.zeros((8, 8, 3), np.uint8) for _ in range(3)],
+        }
+        with pytest.raises(ValueError, match='shape mismatch'):
+            with FolderWriter(out) as w:
+                w.write_episode(ep_bad)
+
+    def test_invalid_mode_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='write mode'):
+            FolderWriter(tmp_path / 'folder_ds', mode='nope')
+
 
 # ─── Video writer ─────────────────────────────────────────────────────────────
 
@@ -401,6 +522,63 @@ class TestVideoWriter:
         ep0 = ds.load_episode(0)
         assert ep0['pixels'].shape[0] == 8
         assert ep0['pixels'].shape[1] == 3  # CHW after reader permute
+
+    def test_append_extends_existing_video_dir(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(8))
+        with VideoWriter(out, fps=25) as w:  # default mode='append'
+            w.write_episode(self._video_episode(10))
+        np.testing.assert_array_equal(
+            np.load(out / 'ep_len.npz')['arr_0'], np.array([8, 10], np.int32)
+        )
+        assert (out / 'pixels' / 'ep_0.mp4').exists()
+        assert (out / 'pixels' / 'ep_1.mp4').exists()
+
+    def test_error_mode_raises_for_existing_video_dir(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(4))
+        with pytest.raises(FileExistsError):
+            VideoWriter(out, mode='error').__enter__()
+
+    def test_overwrite_clears_existing_video_dir(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(8))
+            w.write_episode(self._video_episode(10))
+        with VideoWriter(out, fps=25, mode='overwrite') as w:
+            w.write_episode(self._video_episode(5))
+        np.testing.assert_array_equal(
+            np.load(out / 'ep_len.npz')['arr_0'], np.array([5], np.int32)
+        )
+        assert not (out / 'pixels' / 'ep_1.mp4').exists()
+
+    def test_append_schema_mismatch_raises(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(4))
+        ep_extra = self._video_episode(4)
+        ep_extra['unexpected'] = [np.zeros(2, np.float32) for _ in range(4)]
+        with pytest.raises(ValueError, match='schema mismatch'):
+            with VideoWriter(out, fps=25) as w:
+                w.write_episode(ep_extra)
+
+    def test_append_per_step_shape_mismatch_raises(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(4))
+        ep_bad = {
+            'action': [np.zeros(99, np.float32) for _ in range(3)],
+            'pixels': [np.zeros((32, 32, 3), np.uint8) for _ in range(3)],
+        }
+        with pytest.raises(ValueError, match='shape mismatch'):
+            with VideoWriter(out, fps=25) as w:
+                w.write_episode(ep_bad)
+
+    def test_invalid_mode_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='write mode'):
+            VideoWriter(tmp_path / 'video_ds', mode='nope')
 
 
 # ─── Convert ──────────────────────────────────────────────────────────────────

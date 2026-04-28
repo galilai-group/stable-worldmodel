@@ -17,7 +17,7 @@ Quick start::
     world.set_policy(policy)
 
     # Record expert episodes to disk.
-    world.collect('data.h5', episodes=500, seed=0)
+    world.collect('data.lance', episodes=500, seed=0)
 
     # Evaluate a policy over a fixed number of episodes.
     results = world.evaluate(episodes=100, seed=42)
@@ -229,7 +229,7 @@ class World:
         episodes: int,
         seed: int | None = None,
         options: dict | None = None,
-        format: str = 'hdf5',
+        format: str = 'lance',
     ) -> None:
         """Roll out ``episodes`` and dump their trajectories using the writer
         registered for ``format``.
@@ -244,7 +244,7 @@ class World:
             episodes: Number of episodes to record.
             seed: Base seed for env resets.
             options: Reset options forwarded to ``envs.reset``.
-            format: Registered format name (default ``'hdf5'``). See
+            format: Registered format name (default ``'lance'``). See
                 :func:`stable_worldmodel.data.list_formats` for available
                 writers; new formats can be added via
                 :func:`stable_worldmodel.data.register_format`.

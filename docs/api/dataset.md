@@ -12,7 +12,7 @@ registry, so the rest of the library (e.g. `World.collect`, `swm.data.load_datas
 ```text
                   ┌──────────────────────────────────────────────┐
                   │              FORMAT REGISTRY                 │
-                  │  hdf5 │ folder │ video │ lerobot │  custom…  │
+                  │ lance │ hdf5 │ folder │ video │ lerobot │ …  │
                   └──────────────────────────────────────────────┘
                           ▲                       ▲
               detect ─────┘                       └───── @register_format
@@ -32,16 +32,16 @@ import stable_worldmodel as swm
 # 1) Record some episodes — World picks the writer registered under `format`.
 world = swm.World('swm/PushT-v1', num_envs=4, image_shape=(64, 64))
 world.set_policy(swm.policy.RandomPolicy(seed=0))
-world.collect('data/pusht.h5', episodes=20, seed=0)              # hdf5 (default)
+world.collect('data/pusht.lance', episodes=20, seed=0)           # lance (default)
 world.collect('data/pusht_video', episodes=20, format='video')   # mp4 + npz
 
 # 2) Load any dataset — format is autodetected from the path.
-ds = swm.data.load_dataset('data/pusht.h5', num_steps=4, frameskip=1)
+ds = swm.data.load_dataset('data/pusht.lance', num_steps=4, frameskip=1)
 sample = ds[0]
 print(sample['pixels'].shape, sample['action'].shape)   # (4, 3, H, W) (4, A)
 
 # 3) Switch backends without changing your collection code.
-swm.data.convert('data/pusht.h5', 'data/pusht_video', dest_format='video', fps=30)
+swm.data.convert('data/pusht.lance', 'data/pusht_video', dest_format='video', fps=30)
 ```
 
 `load_dataset` accepts:
@@ -64,10 +64,72 @@ All built-in formats expose the same `Dataset` API: each item is a dict of
 tensors stacked across `num_steps`, with image columns transposed to
 `(T, C, H, W)`.
 
-/// tab | HDF5 (recommended)
+/// tab | Lance (default)
+The **`lance`** format stores episodes as a single LanceDB table laid out
+in episode-contiguous flat rows. Image columns are kept as JPEG blobs in
+`pa.binary` columns; tabular columns become fixed-size lists of `float32`.
+Two index columns (`episode_idx`, `step_idx`) let the reader recover
+episode boundaries by scanning a single column. It's the default for
+`World.collect`.
+
+**Why this is the default for WM training.** World-model and VLA workloads
+mix large image trajectories with shuffled, random-access reads — a pattern
+that suffers under one-file-per-episode formats. This backend was chosen
+for two properties:
+
+- **Column-projected reads.** `keys_to_load=['pixels', 'action']` fetches
+  only those columns; unused fields (`state`, `reward`, additional cameras)
+  are never read or decoded.
+- **Streaming from object storage.** `path` accepts an `s3://`, `gs://`,
+  or `az://` URI (credentials via `connect_kwargs`); the reader pulls byte
+  ranges on demand, so a training run does not need a local copy of a
+  multi-TB dataset.
+
+Combined with row-level random access via `episode_idx` / `step_idx`,
+shuffled DataLoader workers stay fed without per-episode file-open
+overhead — which is the bottleneck at the dataset sizes typical of
+modern VLA training.
+
+**Layout:**
+
+```text
+dataset.lance/         # LanceDB table directory
+├── _versions/         # transaction log
+├── data/              # column fragments (Arrow IPC)
+└── _indices/          # secondary indexes (none by default)
+```
+
+**Read:**
+
+```python
+import stable_worldmodel as swm
+
+ds = swm.data.load_dataset('data/pusht.lance', num_steps=16, frameskip=1,
+                           keys_to_load=['pixels', 'action'])
+```
+
+**Write:**
+
+```python
+from stable_worldmodel.data import LanceWriter
+
+with LanceWriter('data/pusht.lance') as w:           # mode='append' default
+    for ep in episodes:
+        w.write_episode(ep)
+```
+
+`World.collect(path, episodes=...)` defaults to this format.
+
+!!! info ""
+    Field names with `.` are renamed to `_` on disk because Lance reserves
+    `.` as a struct-path separator (`pixels.top` → `pixels_top`). The
+    reader still references columns by their renamed name.
+///
+
+/// tab | HDF5
 The **`hdf5`** format stores everything in a single `.h5` file with one
-dataset per column plus the `ep_len`/`ep_offset` index. It's the fastest for
-training and the default for `World.collect`.
+dataset per column plus the `ep_len`/`ep_offset` index. Useful when you
+want a portable single-file artifact.
 
 **Layout:**
 
@@ -99,7 +161,7 @@ with HDF5Writer('data/pusht.h5') as w:
         w.write_episode(ep)
 ```
 
-`World.collect(path, episodes=...)` is the recommended way to produce one of these.
+To use this format with `World.collect`, pass `format='hdf5'` explicitly.
 ///
 
 /// tab | Folder
@@ -218,6 +280,44 @@ item = goal[0]                                  # adds 'goal_pixels', 'goal_prop
 ```
 ///
 
+## **[ Write Modes ]**
+
+Every built-in writer accepts a standard `mode` kwarg with three values
+(default: `'append'`):
+
+| mode          | when target exists                            | when target is missing |
+|---------------|-----------------------------------------------|------------------------|
+| `'append'`    | extend with new episodes (validates schema)   | create from scratch    |
+| `'overwrite'` | drop existing data, then write fresh          | create from scratch    |
+| `'error'`     | raise `FileExistsError`                       | create from scratch    |
+
+`'append'` is the default so that re-running a collection script naturally
+extends the dataset rather than failing or wiping prior work. Lengths,
+offsets, and episode indexes are resumed from the on-disk state. Image
+columns continue to use the next available `ep_idx` (or row offset) so
+appended frames don't clobber existing files.
+
+Schema is validated against the on-disk dataset before any new bytes are
+written. A column added, removed, retyped (image vs. tabular), or with a
+mismatched per-step shape raises a clear `ValueError`:
+
+```python
+from stable_worldmodel.data import HDF5Writer
+
+with HDF5Writer('data/pusht.h5') as w:               # extends existing
+    w.write_episode(ep)
+
+with HDF5Writer('data/pusht.h5', mode='overwrite') as w:  # starts fresh
+    w.write_episode(ep)
+
+with HDF5Writer('data/pusht.h5', mode='error') as w:      # raises if it exists
+    w.write_episode(ep)
+```
+
+The same `mode` kwarg works for `FolderWriter`, `VideoWriter`, and
+`LanceWriter`, and is forwarded by `World.collect(...)` and
+`swm.data.convert(...)` via their writer-kwarg passthrough.
+
 ## **[ Converting Between Formats ]**
 
 `convert()` walks each episode of a source dataset and writes it through the
@@ -280,7 +380,19 @@ swm.data.list_formats()         # ['hdf5', 'folder', 'video', 'lerobot', 'parque
 ```
 
 Read-only formats simply omit `open_writer`; write-only formats omit
-`open_reader`. Both calls raise a clear error by default.
+`open_reader`. Both calls raise a clear error by default. If your writer
+should participate in the standard mode contract, accept a `mode` kwarg and
+delegate validation to `validate_write_mode`:
+
+```python
+from stable_worldmodel.data.format import validate_write_mode, WRITE_MODES
+
+class ParquetWriter:
+    def __init__(self, path, *, mode: str = 'append'):
+        validate_write_mode(mode)             # rejects values outside WRITE_MODES
+        self.mode = mode
+        ...
+```
 
 ## **[ Base Class ]**
 

@@ -261,7 +261,7 @@ def convert(
     Example::
 
         from stable_worldmodel.data import convert
-        convert('data.h5', 'data.lance')
+        convert('data.lance', 'data_video', dest_format='video')
     """
     from stable_worldmodel.data.format import get_format
 

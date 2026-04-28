@@ -2,12 +2,14 @@ from .utils import *  # noqa: F403
 from .dataset import *  # noqa: F403
 from .format import (
     FORMATS,
+    WRITE_MODES,
     Format,
     Writer,
     detect_format,
     get_format,
     list_formats,
     register_format,
+    validate_write_mode,
 )
 
 # Importing the formats subpackage registers all built-in formats whose
@@ -42,9 +44,11 @@ __all__ = [
     'LanceDataset',
     'LanceWriter',
     'LeRobotAdapter',
+    'WRITE_MODES',
     'Writer',
     'detect_format',
     'get_format',
     'list_formats',
     'register_format',
+    'validate_write_mode',
 ]

@@ -13,7 +13,11 @@ import numpy as np
 import torch
 
 from stable_worldmodel.data.dataset import Dataset
-from stable_worldmodel.data.format import Format, register_format
+from stable_worldmodel.data.format import (
+    Format,
+    register_format,
+    validate_write_mode,
+)
 from stable_worldmodel.data.utils import get_cache_dir
 
 
@@ -129,18 +133,39 @@ class HDF5Dataset(Dataset):
 
 class HDF5Writer:
     """Append episodes to a single HDF5 file. Schema is inferred from the
-    first episode and locked thereafter."""
+    first episode and locked thereafter.
 
-    def __init__(self, path):
+    Args:
+        path: target ``.h5`` file.
+        mode: ``'append'`` (default — extend if the file exists),
+            ``'overwrite'`` (truncate first), or ``'error'`` (raise if the
+            file already exists). See :data:`stable_worldmodel.data.format.WRITE_MODES`.
+    """
+
+    def __init__(self, path, *, mode: str = 'append'):
+        validate_write_mode(mode)
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.mode = mode
         self._f: h5py.File | None = None
         self._initialized = False
+        self._appending_existing = False
         self._ep_written = 0
         self._global_ptr = 0
 
     def __enter__(self):
-        self._f = h5py.File(str(self.path), 'w', libver='latest')
+        exists = self.path.exists()
+        if exists and self.mode == 'error':
+            raise FileExistsError(
+                f"HDF5Writer: '{self.path}' already exists. "
+                "Pass mode='overwrite' to replace it or mode='append' to "
+                'extend it.'
+            )
+        if self.mode == 'overwrite' or not exists:
+            self._f = h5py.File(str(self.path), 'w', libver='latest')
+        else:
+            self._f = h5py.File(str(self.path), 'a', libver='latest')
+            self._load_existing_state()
         return self
 
     def __exit__(self, *exc):
@@ -154,6 +179,8 @@ class HDF5Writer:
         if not self._initialized:
             self._init_schema(ep_data)
             self._initialized = True
+        elif self._appending_existing and self._ep_written == 0:
+            self._validate_episode_against_existing(ep_data)
 
         ep_len = len(next(iter(ep_data.values())))
         for col, vals in ep_data.items():
@@ -161,13 +188,48 @@ class HDF5Writer:
             ds.resize(self._global_ptr + ep_len, axis=0)
             ds[self._global_ptr : self._global_ptr + ep_len] = np.array(vals)
 
-        self._f['ep_len'].resize(self._ep_written + 1, axis=0)
-        self._f['ep_len'][self._ep_written] = ep_len
-        self._f['ep_offset'].resize(self._ep_written + 1, axis=0)
-        self._f['ep_offset'][self._ep_written] = self._global_ptr
+        n = self._f['ep_len'].shape[0]
+        self._f['ep_len'].resize(n + 1, axis=0)
+        self._f['ep_len'][n] = ep_len
+        self._f['ep_offset'].resize(n + 1, axis=0)
+        self._f['ep_offset'][n] = self._global_ptr
 
         self._ep_written += 1
         self._global_ptr += ep_len
+
+    def _load_existing_state(self) -> None:
+        if 'ep_len' not in self._f or 'ep_offset' not in self._f:
+            raise ValueError(
+                f"HDF5Writer: cannot append to '{self.path}' — file is "
+                'missing ep_len/ep_offset metadata.'
+            )
+        ep_len = self._f['ep_len'][:]
+        self._global_ptr = int(ep_len.sum()) if len(ep_len) else 0
+        self._initialized = True
+        self._appending_existing = True
+
+    def _validate_episode_against_existing(self, ep_data: dict) -> None:
+        existing = {
+            k for k in self._f.keys() if k not in ('ep_len', 'ep_offset')
+        }
+        incoming = set(ep_data)
+        missing = existing - incoming
+        extra = incoming - existing
+        if missing or extra:
+            raise ValueError(
+                f"HDF5Writer: append failed — schema mismatch on '{self.path}'. "
+                f'Missing columns: {sorted(missing)}; '
+                f'unexpected columns: {sorted(extra)}.'
+            )
+        for col, vals in ep_data.items():
+            sample = np.asarray(vals[0])
+            ds_shape = self._f[col].shape[1:]
+            if sample.shape != ds_shape:
+                raise ValueError(
+                    f"HDF5Writer: append failed — column '{col}' shape "
+                    f'mismatch: existing per-step={ds_shape}, '
+                    f'incoming per-step={sample.shape}.'
+                )
 
     def _init_schema(self, sample_ep: dict) -> None:
         for col, vals in sample_ep.items():
