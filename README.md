@@ -203,6 +203,7 @@ Environments are pulled from the [DeepMind Control Suite](https://github.com/goo
 | Cross-Entropy Method (CEM)            | Sampling        |
 | Improved CEM (iCEM)                   | Sampling        |
 | Model Predictive Path Integral (MPPI) | Sampling        |
+| Predictive Sampling                   | Sampling        |
 | Gradient Descent (SGD, Adam)          | Gradient        |
 | Projected Gradient Descent (PGD)      | Gradient        |
 | Augmented Lagrangian                  | Constrained Opt |
