@@ -1,22 +1,3 @@
-"""HDF5 vs Lance vs LeRobot throughput benchmark — local + S3, cached + uncached.
-
-Self-contained: drop into Colab, EC2, or a local box. On a host with an IAM
-instance role attached, leave AWS_ACCESS_KEY_ID/SECRET blank and the SDK
-falls through to the role. On Colab/laptop, fill them in.
-
-Install (PR branches that include the relevant changes):
-
-    pip install 'stable-worldmodel @ git+https://github.com/AyushExel/stable-worldmodel.git@lance_bench' \
-        s3fs h5py hdf5plugin awscli
-
-then:
-
-    python compare_h5_lance.py --steps 100 --num-workers 4
-
-Knobs: --steps, --num-workers, --batch-size, --no-local, --no-s3,
---include-lerobot.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -32,7 +13,6 @@ from stable_worldmodel.data import HDF5Dataset, LanceDataset
 
 
 # Set these on Colab/laptop. Leave blank on EC2 with an IAM instance role
-# attached — the AWS SDK will fall through to the role automatically.
 AWS_ACCESS_KEY_ID = ''
 AWS_SECRET_ACCESS_KEY = ''
 AWS_REGION = 'us-east-2'
