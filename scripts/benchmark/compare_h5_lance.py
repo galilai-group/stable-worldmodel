@@ -50,10 +50,18 @@ def _ensure_local_h5() -> bool:
     if LOCAL_HDF5_PATH.exists():
         return True
     print(f'downloading {S3_HDF5_URI} → {LOCAL_HDF5_PATH} ...', flush=True)
-    r = subprocess.run([
-        'aws', 's3', 'cp', S3_HDF5_URI, str(LOCAL_HDF5_PATH),
-        '--region', AWS_REGION, '--no-progress',
-    ])
+    r = subprocess.run(
+        [
+            'aws',
+            's3',
+            'cp',
+            S3_HDF5_URI,
+            str(LOCAL_HDF5_PATH),
+            '--region',
+            AWS_REGION,
+            '--no-progress',
+        ]
+    )
     return r.returncode == 0
 
 
@@ -61,19 +69,31 @@ def _ensure_local_lance() -> bool:
     table_dir = LOCAL_LANCE_DIR / f'{S3_LANCE_TABLE}.lance'
     if table_dir.exists() and any(table_dir.iterdir()):
         return True
-    print(f'syncing {S3_LANCE_PREFIX}/{S3_LANCE_TABLE}.lance/ → {table_dir} ...', flush=True)
+    print(
+        f'syncing {S3_LANCE_PREFIX}/{S3_LANCE_TABLE}.lance/ → {table_dir} ...',
+        flush=True,
+    )
     table_dir.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run([
-        'aws', 's3', 'sync',
-        f'{S3_LANCE_PREFIX}/{S3_LANCE_TABLE}.lance/', str(table_dir),
-        '--region', AWS_REGION, '--no-progress',
-    ])
+    r = subprocess.run(
+        [
+            'aws',
+            's3',
+            'sync',
+            f'{S3_LANCE_PREFIX}/{S3_LANCE_TABLE}.lance/',
+            str(table_dir),
+            '--region',
+            AWS_REGION,
+            '--no-progress',
+        ]
+    )
     return r.returncode == 0
 
 
 def _bench(label, ds, args):
     loader = DataLoader(
-        ds, batch_size=args.batch_size, num_workers=args.num_workers,
+        ds,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
         pin_memory=False,
         prefetch_factor=2 if args.num_workers > 0 else None,
     )
@@ -91,7 +111,10 @@ def _bench(label, ds, args):
         n += b['pixels'].shape[0]
     dt = time.perf_counter() - t0
     sps = n / dt
-    print(f'{label:<32} {sps:8.1f} samples/s   ({dt/args.steps*1e3:5.1f} ms/step)', flush=True)
+    print(
+        f'{label:<32} {sps:8.1f} samples/s   ({dt / args.steps * 1e3:5.1f} ms/step)',
+        flush=True,
+    )
     return label, sps
 
 
@@ -103,63 +126,140 @@ def main():
     p.add_argument('--num-workers', type=int, default=4)
     p.add_argument('--warmup', type=int, default=5)
     p.add_argument('--steps', type=int, default=100)
-    p.add_argument('--no-local', action='store_true', help='skip local rows (no download)')
+    p.add_argument(
+        '--no-local', action='store_true', help='skip local rows (no download)'
+    )
     p.add_argument('--no-s3', action='store_true', help='skip S3 rows')
     p.add_argument('--include-lerobot', action='store_true')
     p.add_argument('--lerobot-repo', default=LEROBOT_REPO)
     args = p.parse_args()
 
-    common = dict(num_steps=args.num_steps, frameskip=args.frameskip,
-                  keys_to_load=DEFAULT_COLUMNS)
+    common = dict(
+        num_steps=args.num_steps,
+        frameskip=args.frameskip,
+        keys_to_load=DEFAULT_COLUMNS,
+    )
 
     datasets: list[tuple[str, torch.utils.data.Dataset]] = []
 
     if not args.no_local:
         if _ensure_local_h5():
-            datasets.append(('HDF5 local (no cache)',
-                             HDF5Dataset(path=str(LOCAL_HDF5_PATH), keys_to_cache=[], **common)))
-            datasets.append(('HDF5 local (cached)',
-                             HDF5Dataset(path=str(LOCAL_HDF5_PATH), keys_to_cache=CACHE_COLS, **common)))
+            datasets.append(
+                (
+                    'HDF5 local (no cache)',
+                    HDF5Dataset(
+                        path=str(LOCAL_HDF5_PATH), keys_to_cache=[], **common
+                    ),
+                )
+            )
+            datasets.append(
+                (
+                    'HDF5 local (cached)',
+                    HDF5Dataset(
+                        path=str(LOCAL_HDF5_PATH),
+                        keys_to_cache=CACHE_COLS,
+                        **common,
+                    ),
+                )
+            )
         else:
             print('(skipping local HDF5: download failed)')
         if _ensure_local_lance():
-            datasets.append(('Lance local (no cache)',
-                             LanceDataset(path=str(LOCAL_LANCE_DIR), table_name=S3_LANCE_TABLE,
-                                          keys_to_cache=[], **common)))
-            datasets.append(('Lance local (cached)',
-                             LanceDataset(path=str(LOCAL_LANCE_DIR), table_name=S3_LANCE_TABLE,
-                                          keys_to_cache=CACHE_COLS, **common)))
+            datasets.append(
+                (
+                    'Lance local (no cache)',
+                    LanceDataset(
+                        path=str(LOCAL_LANCE_DIR),
+                        table_name=S3_LANCE_TABLE,
+                        keys_to_cache=[],
+                        **common,
+                    ),
+                )
+            )
+            datasets.append(
+                (
+                    'Lance local (cached)',
+                    LanceDataset(
+                        path=str(LOCAL_LANCE_DIR),
+                        table_name=S3_LANCE_TABLE,
+                        keys_to_cache=CACHE_COLS,
+                        **common,
+                    ),
+                )
+            )
         else:
             print('(skipping local Lance: sync failed)')
 
     if not args.no_s3:
         lance_opts = {'storage_options': _lance_opts()}
         h5_opts = _hdf5_opts()
-        datasets.append(('Lance S3 (no cache)',
-                         LanceDataset(path=S3_LANCE_PREFIX, table_name=S3_LANCE_TABLE,
-                                      keys_to_cache=[], connect_kwargs=lance_opts, **common)))
-        datasets.append(('Lance S3 (cached)',
-                         LanceDataset(path=S3_LANCE_PREFIX, table_name=S3_LANCE_TABLE,
-                                      keys_to_cache=CACHE_COLS, connect_kwargs=lance_opts, **common)))
+        datasets.append(
+            (
+                'Lance S3 (no cache)',
+                LanceDataset(
+                    path=S3_LANCE_PREFIX,
+                    table_name=S3_LANCE_TABLE,
+                    keys_to_cache=[],
+                    connect_kwargs=lance_opts,
+                    **common,
+                ),
+            )
+        )
+        datasets.append(
+            (
+                'Lance S3 (cached)',
+                LanceDataset(
+                    path=S3_LANCE_PREFIX,
+                    table_name=S3_LANCE_TABLE,
+                    keys_to_cache=CACHE_COLS,
+                    connect_kwargs=lance_opts,
+                    **common,
+                ),
+            )
+        )
         try:
-            datasets.append(('HDF5 S3 (no cache)',
-                             HDF5Dataset(path=S3_HDF5_URI, storage_options=h5_opts,
-                                         keys_to_cache=[], **common)))
-            datasets.append(('HDF5 S3 (cached)',
-                             HDF5Dataset(path=S3_HDF5_URI, storage_options=h5_opts,
-                                         keys_to_cache=CACHE_COLS, **common)))
+            datasets.append(
+                (
+                    'HDF5 S3 (no cache)',
+                    HDF5Dataset(
+                        path=S3_HDF5_URI,
+                        storage_options=h5_opts,
+                        keys_to_cache=[],
+                        **common,
+                    ),
+                )
+            )
+            datasets.append(
+                (
+                    'HDF5 S3 (cached)',
+                    HDF5Dataset(
+                        path=S3_HDF5_URI,
+                        storage_options=h5_opts,
+                        keys_to_cache=CACHE_COLS,
+                        **common,
+                    ),
+                )
+            )
         except Exception as e:
             print(f'(skipping HDF5 S3: {e})')
 
     if args.include_lerobot:
         try:
             from stable_worldmodel.data import LeRobotAdapter
-            datasets.append((f'LeRobot ({args.lerobot_repo})',
-                             LeRobotAdapter(args.lerobot_repo, **common)))
+
+            datasets.append(
+                (
+                    f'LeRobot ({args.lerobot_repo})',
+                    LeRobotAdapter(args.lerobot_repo, **common),
+                )
+            )
         except Exception as e:
             print(f'(skipping LeRobot: {e})')
 
-    print(f'\nworkers={args.num_workers} batch={args.batch_size} steps={args.steps}\n', flush=True)
+    print(
+        f'\nworkers={args.num_workers} batch={args.batch_size} steps={args.steps}\n',
+        flush=True,
+    )
     results = [_bench(label, ds, args) for label, ds in datasets]
     print('\nSummary (samples/sec):')
     for label, sps in results:

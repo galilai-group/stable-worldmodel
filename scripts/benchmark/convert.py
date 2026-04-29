@@ -37,8 +37,10 @@ def _cached_get_safe_version(repo_id, version):
 _lru.get_safe_version = _cached_get_safe_version
 
 
-from stable_worldmodel.data import LeRobotAdapter, get_format
-from stable_worldmodel.data.utils import _episode_to_step_lists
+# Imports below run after the patch above is installed, so the SWM data
+# package (which transitively touches lerobot) sees the cached lookup.
+from stable_worldmodel.data import LeRobotAdapter, get_format  # noqa: E402
+from stable_worldmodel.data.utils import _episode_to_step_lists  # noqa: E402
 
 
 REPO_ID = 'lerobot/pusht_image'
@@ -66,11 +68,13 @@ def main() -> None:
         print(f'→ {fmt}: {dest}')
         writer_cls = get_format(fmt)
         with writer_cls.open_writer(dest, mode='overwrite') as w:
+
             def gen():
                 for i in range(n_eps):
                     yield _episode_to_step_lists(
                         src.load_episode(i), int(src.lengths[i])
                     )
+
             w.write_episodes(gen())
 
 

@@ -84,7 +84,9 @@ class HDF5Dataset(Dataset):
 
     @property
     def is_remote(self) -> bool:
-        return isinstance(self.h5_path, str) and self._looks_remote(self.h5_path)
+        return isinstance(self.h5_path, str) and self._looks_remote(
+            self.h5_path
+        )
 
     def _open_h5(self) -> h5py.File:
         if self.is_remote:
