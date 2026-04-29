@@ -301,7 +301,7 @@ def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
 
         if arr.ndim == 4 and arr.shape[1] in (1, 3):
             arr = arr.transpose(0, 2, 3, 1)
-        out[col] = list(arr)
+        out[col] = arr
     return out
 
 

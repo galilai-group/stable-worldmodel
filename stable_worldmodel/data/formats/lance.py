@@ -528,6 +528,7 @@ class LanceWriter:
         jpeg_quality: int = _DEFAULT_JPEG_QUALITY,
         connect_kwargs: dict[str, Any] | None = None,
         mode: str = 'append',
+        episodes_per_flush: int = 64,
     ):
         validate_write_mode(mode)
         loc = str(path).rstrip('/')
@@ -549,6 +550,7 @@ class LanceWriter:
         self.jpeg_quality = jpeg_quality
         self.connect_kwargs = connect_kwargs or {}
         self.mode = mode
+        self._episodes_per_flush = episodes_per_flush
 
         self._db = None
         self._table = None
@@ -560,6 +562,7 @@ class LanceWriter:
         self._schema: pa.Schema | None = None
         self._ep_idx = 0
         self._global_ptr = 0
+        self._batch_buffer: list[pa.RecordBatch] = []
 
     def __enter__(self):
         self._db = lancedb.connect(self.uri, **self.connect_kwargs)
@@ -577,6 +580,7 @@ class LanceWriter:
         return self
 
     def __exit__(self, *exc):
+        self._flush()
         self._db = None
         self._table = None
 
@@ -592,17 +596,26 @@ class LanceWriter:
 
         ep_len = len(next(iter(ep_data.values())))
         batch = self._build_batch(ep_data, ep_len)
-
-        table = pa.Table.from_batches([batch], schema=self._schema)
-        if self._table is None:
-            self._table = self._db.create_table(
-                self.table_name, data=table, schema=self._schema
-            )
-        else:
-            self._table.add(table)
-
+        self._batch_buffer.append(batch)
         self._ep_idx += 1
         self._global_ptr += ep_len
+
+        if len(self._batch_buffer) >= self._episodes_per_flush:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self._batch_buffer:
+            return
+        combined = pa.Table.from_batches(
+            self._batch_buffer, schema=self._schema
+        )
+        if self._table is None:
+            self._table = self._db.create_table(
+                self.table_name, data=combined, schema=self._schema
+            )
+        else:
+            self._table.add(combined)
+        self._batch_buffer.clear()
 
     def _open_existing_for_append(self) -> None:
         self._table = self._db.open_table(self.table_name)

@@ -7,7 +7,7 @@ import numpy as np
 
 def is_image_column(vals) -> bool:
     """Return True if `vals` looks like a sequence of HxW image frames."""
-    if not vals:
+    if len(vals) == 0:
         return False
     sample = np.asarray(vals[0])
     return (
