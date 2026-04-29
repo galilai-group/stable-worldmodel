@@ -20,8 +20,6 @@ from fastlite import database as fl_database
 from hydra import compose, initialize_config_dir
 from loguru import logger
 
-# Importing .paths also runs ``ensure_openapps_importable()`` as a side
-# effect, which must happen before we can import ``open_apps.*``.
 from .paths import OPENAPPS_CONFIG, app_group_dir  # noqa: I001
 from open_apps.apps.start_page.main import (  # noqa: E402
     AVAILABLE_APPS,
@@ -59,9 +57,6 @@ def _load_hydra_config(extra_overrides: list[str] | None = None):
     return cfg, tmp_logs
 
 
-# ── Variation discovery ─────────────────────────────────────────────
-
-
 def discover_variants(app_name: str, group: str) -> list[str]:
     """List Hydra variant yamls available for an app's group.
 
@@ -96,9 +91,7 @@ def _init_app(cfg):
     return _fasthtml_app, cfg
 
 
-# ── Reset helpers ────────────────────────────────────────────────────
 
-# Map app module names → config attribute keys for database paths
 _APP_CFG_KEYS = {
     'open_apps.apps.todo_app': 'todo',
     'open_apps.apps.calendar_app': 'calendar',
@@ -142,10 +135,6 @@ def reset_app(app_name: str, apps_cfg) -> None:
     module_path, getter_func = AVAILABLE_APPS[app_name]
     module = __import__(module_path, fromlist=[getter_func])
 
-    # Code editor is filesystem-backed, not SQLite-backed: wipe the
-    # directory and skip _drop_app_tables (treating the folder as a DB
-    # file would create a SQLite file at that path, which then confuses
-    # the re-seed in set_environment).
     if app_name == 'codeeditor':
         if hasattr(apps_cfg, 'code_editor') and hasattr(
             apps_cfg.code_editor, 'database_path'
@@ -170,10 +159,6 @@ def reset_all_apps(apps_cfg) -> None:
             reset_app(app_name, apps_cfg)
         except Exception as e:
             logger.warning(f'Failed to reset {app_name}: {e}')
-
-
-# ── Server lifecycle ─────────────────────────────────────────────────
-
 
 def pick_free_port(host: str = '127.0.0.1') -> int:
     """Ask the OS for an unused TCP port on ``host``."""

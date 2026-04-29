@@ -54,15 +54,11 @@ from .server import (
 )
 
 
-# Viewport choice tables — indexed by variation_space["browser"]["viewport"].
 VIEWPORT_CHOICES_W = [800, 1024, 1280, 1920]
 VIEWPORT_CHOICES_H = [600, 640, 720, 1080]
 
-# Initial scroll offset applied to every app after page.goto.
 SCROLL_Y_CHOICES = [0, 100, 300, 600]
 
-# ``map.city`` variation: indexes this list to pick the lat/lng that
-# gets written into ``cfg.apps.maps.init_location`` on reset.
 MAP_CITY_CHOICES: list[tuple[str, list[float]]] = [
     ('NYC', [40.7831, -73.9712]),
     ('Paris', [48.8566, 2.3522]),
@@ -96,7 +92,6 @@ def _read_variant_saved_places(content: str) -> list | None:
     return None
 
 
-# Task class to OpenApps app key.
 _TASK_CLASS_TO_APP = {
     'AddEventTask': 'calendar',
     'RemoveEventTask': 'calendar',
@@ -155,7 +150,7 @@ def list_tasks(app_name: str | None = None) -> list[str]:
     return keys
 
 
-# Lazy imports for Playwright (only needed at runtime).
+# Lazy imports for Playwright
 _playwright_ctx = None
 _browser = None
 
@@ -263,7 +258,7 @@ class OpenAppsEnv(gym.Env):
         )
         self.action_space = spaces.MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
 
-        # ── Variation space ──────────────────────────────────────────
+        # Variation space 
         self._appearance_variants = discover_variants(app_name, 'appearance')
         self._content_variants = discover_variants(app_name, 'content')
 
@@ -327,7 +322,7 @@ class OpenAppsEnv(gym.Env):
             default_vars.append('map.city')
         self._default_variations = tuple(default_vars)
 
-        # ── Start server in-process ──────────────────────────────────
+        # Start server in-process
         self._cfg, self._tmp_logs_dir = _load_hydra_config()
         self._asgi_app, self._cfg = _init_app(self._cfg)
         self._server_thread, self._server = start_server_thread(
@@ -335,7 +330,7 @@ class OpenAppsEnv(gym.Env):
         )
         wait_until_healthy(self.base_url)
 
-        # ── Start browser ────────────────────────────────────────────
+        # Start browser
         browser = _get_playwright()
         self._context = browser.new_context(
             viewport={
@@ -346,8 +341,6 @@ class OpenAppsEnv(gym.Env):
         self._page = self._context.new_page()
 
         OpenAppsEnv._active_instances += 1
-
-    # ── Reset ─────────────────────────────────────────────────────────
 
     def reset(self, *, seed=None, options=None):
         """Reset the environment to initial state.
@@ -388,11 +381,6 @@ class OpenAppsEnv(gym.Env):
                     f'!important; }}'
                 )
             )
-
-        # Scroll the page to the sampled initial offset. Playwright
-        # silently clamps to the actual scrollable area, so requesting
-        # 600px on a short page just pins us at the bottom — that's the
-        # behaviour we want for "scrolled down" variation.
         scroll_idx = int(np.asarray(v['browser']['scroll_y']).reshape(-1)[0])
         scroll_y = SCROLL_Y_CHOICES[scroll_idx]
         if scroll_y > 0:
@@ -448,8 +436,6 @@ class OpenAppsEnv(gym.Env):
         if (vw, vh) != (current['width'], current['height']):
             self._page.set_viewport_size({'width': vw, 'height': vh})
 
-    # ── Step ──────────────────────────────────────────────────────────
-
     def step(self, action: np.ndarray):
         """Execute one action and return the new observation.
 
@@ -480,8 +466,6 @@ class OpenAppsEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    # ── Render ────────────────────────────────────────────────────────
-
     def render(self) -> np.ndarray:
         """Return the current screenshot as numpy (H, W, 3) uint8."""
         if self._last_screenshot is not None:
@@ -501,8 +485,6 @@ class OpenAppsEnv(gym.Env):
         arr = np.array(img, dtype=np.uint8)
         self._last_screenshot = arr
         return arr
-
-    # ── Reward ────────────────────────────────────────────────────────
 
     def _compute_reward(self) -> float:
         """Compute reward by delegating to the OpenApps Task.
@@ -524,8 +506,6 @@ class OpenAppsEnv(gym.Env):
         except Exception as e:
             logger.warning(f'Reward computation failed: {e}')
             return 0.0
-
-    # ── Cleanup ───────────────────────────────────────────────────────
 
     def close(self):
         """Tear down browser, uvicorn server, and tmp config dir."""

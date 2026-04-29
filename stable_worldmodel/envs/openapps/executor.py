@@ -17,12 +17,12 @@ import numpy as np
 VIEWPORT_WIDTH = 1024
 VIEWPORT_HEIGHT = 640
 
-GRID_X = 32  # 1024 / 32 = 32 px per cell
-GRID_Y = 20  # 640  / 20 = 32 px per cell
+GRID_X = 32  
+GRID_Y = 20 
 NUM_ACTIONS = 3  # 0=click, 1=scroll_down, 2=scroll_up
 
-CELL_W = VIEWPORT_WIDTH // GRID_X  # 32 px
-CELL_H = VIEWPORT_HEIGHT // GRID_Y  # 32 px
+CELL_W = VIEWPORT_WIDTH // GRID_X 
+CELL_H = VIEWPORT_HEIGHT // GRID_Y 
 
 SCROLL_DELTA = 300  # px per scroll step (~3–4 list items)
 
@@ -58,9 +58,6 @@ def action_multidiscrete_to_playwright(action: np.ndarray, page) -> str:
         page.mouse.move(x, y)
         page.mouse.wheel(0, -SCROLL_DELTA)
         return f'scroll_up(x={x}, y={y}, delta={SCROLL_DELTA})'
-
-
-# ── Action string → MultiDiscrete ────────────────────────────────────
 
 
 def _px_to_cell(x_px: int, y_px: int) -> tuple[int, int]:

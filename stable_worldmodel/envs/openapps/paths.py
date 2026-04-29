@@ -22,13 +22,6 @@ TASKS_YAML = OPENAPPS_CONFIG / 'tasks' / 'all_tasks.yaml'
 
 def ensure_openapps_importable() -> None:
     """Make sure ``open_apps`` and its internal ``src.*`` imports work.
-
-    First try a plain ``import open_apps`` — if it succeeds (e.g. openapps
-    was pip-installed or is already on ``sys.path``), we're done. Only
-    fall back to patching the monorepo layout if the import fails.
-
-    Individual app modules inside openapps do ``from src.open_apps...``
-    internally, which requires ``openapps/`` itself on the path too.
     """
     try:
         import open_apps  # noqa: F401
@@ -45,18 +38,8 @@ def ensure_openapps_importable() -> None:
     if OPENAPPS_ROOT.is_dir() and str(OPENAPPS_ROOT) not in sys.path:
         sys.path.insert(0, str(OPENAPPS_ROOT))
 
-
-# Run at import time so any module that imports from .paths (including
-# env.py and server.py) can safely use top-level ``from open_apps...``.
 ensure_openapps_importable()
 
-
-# OpenApps app key (as used by OpenAppsEnv / the _APPS list) → the
-# corresponding directory name under ``openapps/config/apps/`` and the
-# URL path the FastHTML server mounts the app at. A few app keys don't
-# match either (``messages`` → ``messenger`` directory; ``map`` → ``maps``
-# URL + directory; ``codeeditor`` wants a trailing slash), so both sides
-# of the rename live here together.
 APP_TABLE: dict[str, dict[str, str]] = {
     'todo': {'config_dir': 'todo', 'url_path': '/todo'},
     'calendar': {'config_dir': 'calendar', 'url_path': '/calendar'},
