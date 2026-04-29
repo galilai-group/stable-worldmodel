@@ -262,44 +262,45 @@ class World:
         writer_cls = get_format(format)
         buffers = [defaultdict(list) for _ in range(self.num_envs)]
 
-        with writer_cls.open_writer(path) as writer:
+        def on_step(world):
+            for col, data in world.infos.items():
+                if col.startswith('_'):
+                    continue
+                if not isinstance(data, (np.ndarray, torch.Tensor)):
+                    continue
+                if data.ndim > 1 and data.shape[1] == 1:
+                    if isinstance(data, torch.Tensor):
+                        data = data.squeeze(1)
+                    else:
+                        data = np.squeeze(data, axis=1)
+                for i in range(world.num_envs):
+                    val = data[i]
+                    if isinstance(val, torch.Tensor):
+                        val = val.detach().cpu().numpy()
+                    elif isinstance(val, np.ndarray):
+                        val = val.copy()
+                    buffers[i][col].append(val)
 
-            def on_step(world):
-                for col, data in world.infos.items():
-                    if col.startswith('_'):
-                        continue
-                    if not isinstance(data, (np.ndarray, torch.Tensor)):
-                        continue
-                    if data.ndim > 1 and data.shape[1] == 1:
-                        if isinstance(data, torch.Tensor):
-                            data = data.squeeze(1)
-                        else:
-                            data = np.squeeze(data, axis=1)
-                    for i in range(world.num_envs):
-                        val = data[i]
-                        if isinstance(val, torch.Tensor):
-                            val = val.detach().cpu().numpy()
-                        elif isinstance(val, np.ndarray):
-                            val = val.copy()
-                        buffers[i][col].append(val)
+        with writer_cls.open_writer(path) as writer, tqdm(
+            total=episodes, desc='Recording'
+        ) as pbar:
 
-            def on_done(env_idx, ep_idx, world):
-                ep = {k: list(v) for k, v in buffers[env_idx].items()}
-                buffers[env_idx].clear()
-                if 'action' in ep:
-                    ep['action'].append(ep['action'].pop(0))
-                writer.write_episode(ep)
-                pbar.update(1)
-
-            with tqdm(total=episodes, desc='Recording') as pbar:
-                self._run(
+            def episode_iter():
+                for env_idx, _ in self._run_iter(
                     episodes=episodes,
                     seed=seed,
                     options=options,
                     mode='auto',
                     on_step=on_step,
-                    on_done=on_done,
-                )
+                ):
+                    ep = {k: list(v) for k, v in buffers[env_idx].items()}
+                    buffers[env_idx].clear()
+                    if 'action' in ep:
+                        ep['action'].append(ep['action'].pop(0))
+                    pbar.update(1)
+                    yield ep
+
+            writer.write_episodes(episode_iter())
 
     def _run(
         self,
@@ -311,6 +312,32 @@ class World:
         on_step=None,
         on_done=None,
     ) -> None:
+        """Drive the policy. Thin wrapper around :meth:`_run_iter` that
+        invokes ``on_done(env_idx, ep_idx, world)`` for each completion."""
+        for env_idx, ep_count in self._run_iter(
+            episodes=episodes,
+            max_steps=max_steps,
+            seed=seed,
+            options=options,
+            mode=mode,
+            on_step=on_step,
+        ):
+            if on_done:
+                on_done(env_idx, ep_count, self)
+
+    def _run_iter(
+        self,
+        episodes: int | None = None,
+        max_steps: int | None = None,
+        seed: int | None = None,
+        options: dict | None = None,
+        mode: str = 'auto',
+        on_step=None,
+    ):
+        """Drive the policy and yield ``(env_idx, ep_count)`` on each
+        episode completion. Letting callers consume completions as a
+        generator is what makes streaming writes possible without threading.
+        """
         assert mode in RESET_MODES, f'reset_mode must be one of {RESET_MODES}'
 
         if self.policy is None:
@@ -341,8 +368,7 @@ class World:
                 continue
 
             for i in np.where(done)[0]:
-                if on_done:
-                    on_done(i, ep_count, self)
+                yield int(i), ep_count
                 ep_count += 1
                 if episodes is not None and ep_count >= episodes:
                     return

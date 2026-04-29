@@ -508,7 +508,7 @@ class LanceDataset(Dataset):
 
 
 class LanceWriter:
-    """Append episodes to a Lance table, schema inferred from the first ep.
+    """Append episodes to a Lance table.
 
     Layout: ``<path>/<table>.lance/`` (LanceDB stores each table as a
     directory). When ``path`` ends in ``.lance``, the parent is the URI and
@@ -518,6 +518,15 @@ class LanceWriter:
     are JPEG-encoded into ``pa.binary``. Tabular columns become fixed-size
     lists of float32. Column names with ``.`` are renamed to ``_`` (Lance
     rejects dots in top-level field names).
+
+    Two write paths:
+      * :meth:`write_episode` — push one episode; one ``table.add`` per call,
+        one Lance version per call. Convenient for tests and one-off writes.
+      * :meth:`write_episodes` — pull from a caller-provided iterable and
+        stream it through a single ``pa.RecordBatchReader``. The whole
+        iterable lands as one Lance version (the iterator pattern from the
+        LanceDB docs). Memory stays bounded to one in-flight batch — the
+        right shape for large collection sessions like ``World.collect``.
     """
 
     def __init__(
@@ -583,26 +592,52 @@ class LanceWriter:
     def write_episode(self, ep_data: dict) -> None:
         if self._db is None:
             raise RuntimeError('LanceWriter used outside of a `with` block')
+        self._consume_episodes([ep_data])
+
+    def write_episodes(self, episodes) -> None:
+        if self._db is None:
+            raise RuntimeError('LanceWriter used outside of a `with` block')
+        self._consume_episodes(episodes)
+
+    def _consume_episodes(self, episodes) -> None:
+        """Drive a single ``create_table``/``table.add`` from an iterable.
+
+        The schema must be settled before we hand the reader to Lance, so we
+        peek the first episode here, run the standard schema-init / append-
+        validation hooks against it, then yield it as the first batch and
+        stream the remaining episodes through the same generator.
+        """
+        iterator = iter(episodes)
+        try:
+            first_ep = next(iterator)
+        except StopIteration:
+            return
 
         if not self._initialized:
-            self._init_schema(ep_data)
+            self._init_schema(first_ep)
             self._initialized = True
         elif self._appending_existing and not self._rename_map:
-            self._validate_episode_against_existing(ep_data)
+            self._validate_episode_against_existing(first_ep)
 
-        ep_len = len(next(iter(ep_data.values())))
-        batch = self._build_batch(ep_data, ep_len)
+        def batch_gen():
+            yield self._batch_from_episode(first_ep)
+            for ep in iterator:
+                yield self._batch_from_episode(ep)
 
-        table = pa.Table.from_batches([batch], schema=self._schema)
+        reader = pa.RecordBatchReader.from_batches(self._schema, batch_gen())
         if self._table is None:
             self._table = self._db.create_table(
-                self.table_name, data=table, schema=self._schema
+                self.table_name, data=reader, schema=self._schema
             )
         else:
-            self._table.add(table)
+            self._table.add(reader)
 
+    def _batch_from_episode(self, ep_data: dict) -> pa.RecordBatch:
+        ep_len = len(next(iter(ep_data.values())))
+        batch = self._build_batch(ep_data, ep_len)
         self._ep_idx += 1
         self._global_ptr += ep_len
+        return batch
 
     def _open_existing_for_append(self) -> None:
         self._table = self._db.open_table(self.table_name)

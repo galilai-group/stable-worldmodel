@@ -227,6 +227,10 @@ class FolderWriter:
         self._global_ptr += ep_len
         self._ep_idx += 1
 
+    def write_episodes(self, episodes) -> None:
+        for ep in episodes:
+            self.write_episode(ep)
+
     def _clear_existing(self) -> None:
         import shutil
 

@@ -14,6 +14,7 @@ Read-only formats simply omit `open_writer`; write-only formats omit
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
 
@@ -104,11 +105,22 @@ class Format:
 
 @runtime_checkable
 class Writer(Protocol):
-    """Streaming writer protocol — append episodes, close on exit."""
+    """Streaming writer protocol — append episodes, close on exit.
+
+    Two write paths are supported:
+
+    * :meth:`write_episode` — push one episode at a time.
+    * :meth:`write_episodes` — pull from a caller-provided iterable. Formats
+      that benefit from a single bulk write (e.g. Lance, where each
+      ``table.add`` produces a new dataset version) override this with a
+      streaming implementation; everyone else can fall back to looping over
+      :meth:`write_episode`.
+    """
 
     def __enter__(self) -> Writer: ...
     def __exit__(self, *exc) -> None: ...
     def write_episode(self, ep_data: dict) -> None: ...
+    def write_episodes(self, episodes: Iterable[dict]) -> None: ...
 
 
 __all__ = [

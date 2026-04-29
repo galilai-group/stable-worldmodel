@@ -197,6 +197,10 @@ class HDF5Writer:
         self._ep_written += 1
         self._global_ptr += ep_len
 
+    def write_episodes(self, episodes) -> None:
+        for ep in episodes:
+            self.write_episode(ep)
+
     def _load_existing_state(self) -> None:
         if 'ep_len' not in self._f or 'ep_offset' not in self._f:
             raise ValueError(
