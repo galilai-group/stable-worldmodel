@@ -281,9 +281,10 @@ class World:
                         val = val.copy()
                     buffers[i][col].append(val)
 
-        with writer_cls.open_writer(path) as writer, tqdm(
-            total=episodes, desc='Recording'
-        ) as pbar:
+        with (
+            writer_cls.open_writer(path) as writer,
+            tqdm(total=episodes, desc='Recording') as pbar,
+        ):
 
             def episode_iter():
                 for env_idx, _ in self._run_iter(
