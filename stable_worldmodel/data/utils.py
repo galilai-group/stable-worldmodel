@@ -272,12 +272,13 @@ def convert(
     if progress:
         iterator = tqdm(iterator, desc=f'Converting → {dest_format}')
 
-    with writer_cls.open_writer(dest, **dest_kwargs) as writer:
+    def episodes():
         for ep_idx in iterator:
             ep = src.load_episode(ep_idx)
-            writer.write_episode(
-                _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
-            )
+            yield _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+
+    with writer_cls.open_writer(dest, **dest_kwargs) as writer:
+        writer.write_episodes(episodes())
 
 
 def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
