@@ -1,5 +1,4 @@
 from collections import OrderedDict
-from functools import partial
 from pathlib import Path
 
 import hydra
@@ -8,6 +7,7 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
@@ -87,20 +87,6 @@ def get_img_preprocessor(source, target, img_size=224):
     )
 
 
-def get_column_normalizer(dataset, source, target):
-    data = torch.from_numpy(dataset.get_col_data(source)[:])
-    data = data[~torch.isnan(data).any(dim=1)]
-    mean, std = (
-        data.mean(0, keepdim=True).clone(),
-        data.std(0, keepdim=True).clone(),
-    )
-    return spt.data.transforms.WrapTorchTransform(
-        lambda x: ((x - mean) / std).float(),
-        source=source,
-        target=target,
-    )
-
-
 class VideoPipeline(spt.data.transforms.Transform):
     def __init__(self, processor, source='image', target='image'):
         super().__init__()
@@ -161,6 +147,29 @@ def _strip_action_dims(tensor, action_range):
         [tensor[..., : action_range[0]], tensor[..., action_range[1] :]],
         dim=-1,
     )
+
+
+class _ForwardWithCfg:
+    """Picklable replacement for ``functools.partial(forward_fn, cfg=cfg)``.
+
+    WORKAROUND: ``spt.Module`` binds the ``forward=...`` argument as a
+    method on its instance. ``multiprocessing.reduction._reduce_method``
+    reduces bound methods via ``(getattr, (m.__self__, m.__func__.__name__))``,
+    so the underlying callable needs a ``__name__`` attribute or spawn-
+    mode DataLoader workers crash. Lance forces the spawn start method
+    on Linux. ``__name__='forward'`` lets the reducer round-trip via
+    ``getattr(module, 'forward')`` on the worker side. The proper fix
+    belongs in ``stable_pretraining.Module``.
+    """
+
+    __name__ = 'forward'
+
+    def __init__(self, fn, cfg):
+        self.fn = fn
+        self.cfg = cfg
+
+    def __call__(self, module, batch, stage):
+        return self.fn(module, batch, stage, self.cfg)
 
 
 def dinowm_forward(self, batch, stage, cfg):
@@ -337,7 +346,7 @@ def run(cfg):
 
     world_model = spt.Module(
         model=world_model,
-        forward=partial(dinowm_forward, cfg=cfg),
+        forward=_ForwardWithCfg(dinowm_forward, cfg),
         optim={
             'model_opt': {'modules': 'model', 'optimizer': dict(cfg.optimizer)}
         },

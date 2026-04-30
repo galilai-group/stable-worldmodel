@@ -322,4 +322,43 @@ def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
     return out
 
 
-__all__ = ['load_dataset', 'convert', 'get_cache_dir', 'ensure_dir_exists']
+class ZScoreNormalizer:
+    """Picklable z-score normalizer: returns ``((x - mean) / std).float()``.
+
+    Lives at module scope (not a closure) so it survives pickle. Required
+    when the dataset is consumed by a DataLoader using the ``spawn`` start
+    method — which LanceDataset forces on Linux for fork-safety.
+    """
+
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, x):
+        return ((x - self.mean) / self.std).float()
+
+
+def column_normalizer(dataset, source: str, target: str):
+    """Build a per-column z-score :class:`WrapTorchTransform` from dataset
+    stats. Picklable end-to-end (uses :class:`ZScoreNormalizer` rather
+    than a local closure)."""
+    # Lazy import — stable_pretraining is a training-only dep.
+    from stable_pretraining.data.transforms import WrapTorchTransform
+
+    data = torch.from_numpy(np.array(dataset.get_col_data(source)))
+    data = data[~torch.isnan(data).any(dim=1)]
+    mean = data.mean(0, keepdim=True).clone()
+    std = data.std(0, keepdim=True).clone()
+    return WrapTorchTransform(
+        ZScoreNormalizer(mean, std), source=source, target=target
+    )
+
+
+__all__ = [
+    'load_dataset',
+    'convert',
+    'get_cache_dir',
+    'ensure_dir_exists',
+    'ZScoreNormalizer',
+    'column_normalizer',
+]

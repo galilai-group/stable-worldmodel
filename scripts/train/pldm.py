@@ -1,4 +1,3 @@
-from functools import partial
 from pathlib import Path
 
 import hydra
@@ -12,8 +11,8 @@ from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
 from torch import nn
 from torch.utils.data import DataLoader
-import numpy as np
 
+from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.pldm.module import (
     MLP,
     Embedder,
@@ -32,23 +31,6 @@ def get_img_preprocessor(source: str, target: str, img_size: int = 224):
     )
     resize = dt.transforms.Resize(img_size, source=source, target=target)
     return dt.transforms.Compose(to_image, resize)
-
-
-def get_column_normalizer(dataset, source: str, target: str):
-    """Get normalizer for a specific column in the dataset."""
-    col_data = dataset.get_col_data(source)
-    data = torch.from_numpy(np.array(col_data))
-    data = data[~torch.isnan(data).any(dim=1)]
-    mean = data.mean(0, keepdim=True).clone()
-    std = data.std(0, keepdim=True).clone()
-
-    def norm_fn(x):
-        return ((x - mean) / std).float()
-
-    normalizer = dt.transforms.WrapTorchTransform(
-        norm_fn, source=source, target=target
-    )
-    return normalizer
 
 
 class SaveCkptCallback(Callback):
@@ -78,6 +60,29 @@ class SaveCkptCallback(Callback):
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
         )
+
+
+class _ForwardWithCfg:
+    """Picklable replacement for ``functools.partial(forward_fn, cfg=cfg)``.
+
+    WORKAROUND: ``spt.Module`` binds the ``forward=...`` argument as a
+    method on its instance. ``multiprocessing.reduction._reduce_method``
+    reduces bound methods via ``(getattr, (m.__self__, m.__func__.__name__))``,
+    so the underlying callable needs a ``__name__`` attribute or spawn-
+    mode DataLoader workers crash. Lance forces the spawn start method
+    on Linux. ``__name__='forward'`` lets the reducer round-trip via
+    ``getattr(module, 'forward')`` on the worker side. The proper fix
+    belongs in ``stable_pretraining.Module``.
+    """
+
+    __name__ = 'forward'
+
+    def __init__(self, fn, cfg):
+        self.fn = fn
+        self.cfg = cfg
+
+    def __call__(self, module, batch, stage):
+        return self.fn(module, batch, stage, self.cfg)
 
 
 def pldm_forward(self, batch, stage, cfg):
@@ -241,7 +246,7 @@ def run(cfg):
     world_model = spt.Module(
         **models,
         **losses,
-        forward=partial(pldm_forward, cfg=cfg),
+        forward=_ForwardWithCfg(pldm_forward, cfg),
         optim=optimizers,
     )
 
