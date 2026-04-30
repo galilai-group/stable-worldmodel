@@ -204,25 +204,16 @@ def main():
                 "local .h5 with `convert(src.h5, dst.video, dest_format='video')`)"
             )
         else:
+            # FolderDataset/VideoDataset eagerly load tabular .npz columns
+            # into RAM at init, so action/proprio are already "cached" — no
+            # keys_to_cache knob; one row suffices.
             try:
                 datasets.append(
                     (
-                        'Video local (no cache)',
+                        'Video local',
                         VideoDataset(
                             path=str(LOCAL_VIDEO_DIR),
                             video_keys=['pixels'],
-                            keys_to_cache=[],
-                            **common,
-                        ),
-                    )
-                )
-                datasets.append(
-                    (
-                        'Video local (cached)',
-                        VideoDataset(
-                            path=str(LOCAL_VIDEO_DIR),
-                            video_keys=['pixels'],
-                            keys_to_cache=CACHE_COLS,
                             **common,
                         ),
                     )
