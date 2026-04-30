@@ -195,7 +195,15 @@ def main():
             )
         else:
             print('(skipping local Lance: sync failed)')
-        if VideoDataset is not None and LOCAL_VIDEO_DIR.exists():
+        if VideoDataset is None:
+            print('(skipping local Video: decord/imageio not installed)')
+        elif not LOCAL_VIDEO_DIR.exists():
+            print(
+                f'(skipping local Video: {LOCAL_VIDEO_DIR} not found — '
+                'run scripts/benchmark/convert.py first, or convert your '
+                "local .h5 with `convert(src.h5, dst.video, dest_format='video')`)"
+            )
+        else:
             try:
                 datasets.append(
                     (
@@ -221,8 +229,6 @@ def main():
                 )
             except Exception as e:
                 print(f'(skipping local Video: {e})')
-        elif VideoDataset is None:
-            print('(skipping local Video: decord/imageio not installed)')
 
     if not args.no_s3:
         lance_opts = {'storage_options': _lance_opts()}
