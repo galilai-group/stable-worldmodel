@@ -24,7 +24,7 @@ def _write_demo(
     ep_lengths: tuple[int, ...] = (5, 4, 6),
     extra_cols: dict[str, tuple[int, ...]] | None = None,
     pixels_key: str = 'pixels',
-    image_codec: str = 'raw',
+    image_codec: str = 'jpeg',
 ) -> None:
     rng = np.random.default_rng(0)
     extra_cols = extra_cols or {}
@@ -279,8 +279,9 @@ def test_invalid_image_codec_raises(tmp_path):
 
 
 def test_codec_raw_roundtrip(tmp_path):
-    """Default codec=raw — pixels stored as fixed_size_list<uint8> with shape
-    metadata; reader reshapes without JPEG decode."""
+    """codec=raw — pixels stored as pa.large_binary with shape + compression
+    metadata so Lance applies general compression. Reader decodes via
+    np.frombuffer + reshape (no JPEG decode)."""
     out = tmp_path / 'demo.lance'
     _write_demo(out, image_codec='raw')
 
@@ -289,19 +290,61 @@ def test_codec_raw_roundtrip(tmp_path):
 
     schema = lancedb.connect(str(tmp_path)).open_table('demo').schema
     pixel_field = schema.field('pixels')
-    assert pa.types.is_fixed_size_list(pixel_field.type)
-    assert pa.types.is_uint8(pixel_field.type.value_type)
-    assert pixel_field.type.list_size == 8 * 8 * 3
-    assert pixel_field.metadata == {b'image_shape': b'8,8,3'}
+    assert pa.types.is_large_binary(pixel_field.type)
+    md = pixel_field.metadata or {}
+    assert md.get(b'image_shape') == b'8,8,3'
+    # Compression hint must be present for Lance to engage zstd.
+    assert md.get(b'lance-encoding:compression') == b'zstd'
 
     ds = LanceDataset(path=out)
     assert ds.image_columns == {'pixels'}
-    assert 'pixels' in ds._raw_image_shapes
+    assert ds._raw_image_shapes['pixels'] == (8, 8, 3)
     sample = ds[0]
     assert sample['pixels'].shape == (1, 3, 8, 8)
-    assert (
-        sample['pixels'].dtype.is_floating_point is False
-    )  # uint8 → torch.uint8
+    assert sample['pixels'].dtype == torch.uint8
+
+
+def test_codec_raw_legacy_fixed_size_list_still_readable(tmp_path):
+    """The reader auto-detects the old fixed_size_list<uint8> raw layout —
+    not produced by the writer any more, but datasets out in the wild
+    still work."""
+    import pyarrow as pa
+    import lancedb
+
+    rng = np.random.default_rng(0)
+    H = W = 8
+    C = 3
+    flat = rng.integers(0, 255, (3, H * W * C), dtype=np.uint8).reshape(-1)
+    schema = pa.schema(
+        [
+            pa.field('episode_idx', pa.int32()),
+            pa.field('step_idx', pa.int32()),
+            pa.field(
+                'pixels',
+                pa.list_(pa.uint8(), H * W * C),
+                metadata={b'image_shape': f'{H},{W},{C}'.encode()},
+            ),
+        ]
+    )
+    arr = pa.FixedSizeListArray.from_arrays(
+        pa.array(flat, type=pa.uint8()), H * W * C
+    )
+    table = pa.table(
+        [
+            pa.array([0, 0, 0], type=pa.int32()),
+            pa.array([0, 1, 2], type=pa.int32()),
+            arr,
+        ],
+        schema=schema,
+    )
+    lancedb.connect(str(tmp_path)).create_table(
+        'legacy_raw', data=table, schema=schema, mode='overwrite'
+    )
+
+    ds = LanceDataset(path=tmp_path / 'legacy_raw.lance')
+    assert ds._raw_image_shapes['pixels'] == (8, 8, 3)
+    assert ds[0]['pixels'].shape == (1, 3, 8, 8)
+    assert ds[0]['pixels'].dtype == torch.uint8
 
 
 def test_codec_jpeg_roundtrip(tmp_path):
@@ -332,7 +375,7 @@ def test_codec_both_roundtrip(tmp_path):
     import lancedb
 
     schema = lancedb.connect(str(tmp_path)).open_table('demo').schema
-    assert pa.types.is_fixed_size_list(schema.field('pixels').type)
+    assert pa.types.is_large_binary(schema.field('pixels').type)
     assert pa.types.is_binary(schema.field('pixels_jpeg').type)
 
     # Default reader projects both; both auto-detected as images.

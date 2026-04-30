@@ -54,6 +54,14 @@ except (ImportError, AttributeError):
 _DEFAULT_JPEG_QUALITY = 95
 _IMAGE_CODECS = ('raw', 'jpeg', 'both')
 _IMAGE_SHAPE_META_KEY = b'image_shape'
+_LANCE_COMPRESSION_KEY = b'lance-encoding:compression'
+# Storage format 2.2 is required for general-compression metadata to take
+# effect on binary columns (auto-LZ4 above 32KB, opt-in zstd via metadata).
+_DATA_STORAGE_VERSION = '2.2'
+# Default codec for raw image columns. Zstd → ~30-40× on synthetic env
+# frames (tworoom), ~1.5-2× on natural images. LZ4 is the fallback
+# auto-applied by Lance 2.2 when no codec hint is given.
+_DEFAULT_RAW_COMPRESSION = b'zstd'
 
 
 def _normalize_image_frame(frame: np.ndarray) -> np.ndarray:
@@ -160,23 +168,31 @@ class LanceDataset(Dataset):
                 f"Columns {missing} missing from Lance table '{resolved_name}'"
             )
 
-        # Auto-detect image columns from schema. Two storage flavours:
-        #   * pa.binary       — JPEG-encoded blob (decoded via _decode_images)
-        #   * pa.fixed_size_list(uint8, H*W*C) with `image_shape` field metadata
-        #     — raw uint8 frames, just reshape (no decode).
-        binary_cols: set[str] = set()
+        # Auto-detect image columns from schema. Three storage flavours:
+        #   * pa.binary / pa.large_binary WITHOUT image_shape metadata —
+        #     JPEG blob; decoded via _decode_images on read.
+        #   * pa.binary / pa.large_binary WITH image_shape metadata —
+        #     raw uint8 bytes, current default; Lance applies general
+        #     compression (zstd via field metadata). Decoded via
+        #     np.frombuffer + reshape on read.
+        #   * pa.fixed_size_list(uint8, H*W*C) WITH image_shape metadata —
+        #     legacy raw layout (pre-compression-fix); still readable.
+        jpeg_cols: set[str] = set()
         raw_image_shapes: dict[str, tuple[int, int, int]] = {}
         for f in table.schema:
-            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type):
-                binary_cols.add(f.name)
-            elif pa.types.is_fixed_size_list(f.type) and pa.types.is_uint8(
-                f.type.value_type
-            ):
-                shape_meta = (f.metadata or {}).get(_IMAGE_SHAPE_META_KEY)
-                if shape_meta:
-                    h, w, c = (int(x) for x in shape_meta.decode().split(','))
-                    raw_image_shapes[f.name] = (h, w, c)
-        autodetected = binary_cols | set(raw_image_shapes)
+            shape_meta = (f.metadata or {}).get(_IMAGE_SHAPE_META_KEY)
+            is_bin = pa.types.is_binary(f.type) or pa.types.is_large_binary(
+                f.type
+            )
+            is_fsl_u8 = pa.types.is_fixed_size_list(f.type) and (
+                pa.types.is_uint8(f.type.value_type)
+            )
+            if shape_meta and (is_bin or is_fsl_u8):
+                h, w, c = (int(x) for x in shape_meta.decode().split(','))
+                raw_image_shapes[f.name] = (h, w, c)
+            elif is_bin:
+                jpeg_cols.add(f.name)
+        autodetected = jpeg_cols | set(raw_image_shapes)
         self.image_columns = (
             autodetected & set(self._keys)
             if image_columns is None
@@ -454,15 +470,25 @@ class LanceDataset(Dataset):
             if col in self.image_columns:
                 if col in self._raw_image_shapes:
                     h, w, c = self._raw_image_shapes[col]
-                    # `values` is (span, h*w*c) uint8 numpy; reshape to
-                    # (T, h, w, c), downsample temporally, permute to CHW.
-                    if not isinstance(values, np.ndarray):
-                        values = self._pylist_to_numpy(values, col)
-                    values = values.reshape(-1, h, w, c)[:: self.frameskip]
+                    # Two source layouts for raw uint8 image data:
+                    #   * list of byte-blobs (pa.large_binary, current
+                    #     default — frombuffer per blob, then stack)
+                    #   * numpy (T, h*w*c) (legacy fixed_size_list path
+                    #     or cached column — straight reshape)
+                    if isinstance(values, np.ndarray):
+                        arr = values.reshape(-1, h, w, c)
+                    else:
+                        arr = np.stack(
+                            [
+                                np.frombuffer(b, dtype=np.uint8).reshape(
+                                    h, w, c
+                                )
+                                for b in values
+                            ]
+                        )
+                    arr = arr[:: self.frameskip]
                     steps[col] = (
-                        torch.from_numpy(values)
-                        .permute(0, 3, 1, 2)
-                        .contiguous()
+                        torch.from_numpy(arr).permute(0, 3, 1, 2).contiguous()
                     )
                     continue
                 blobs = values[:: self.frameskip]
@@ -625,7 +651,7 @@ class LanceWriter:
         jpeg_quality: int = _DEFAULT_JPEG_QUALITY,
         connect_kwargs: dict[str, Any] | None = None,
         mode: str = 'append',
-        image_codec: str = 'raw',
+        image_codec: str = 'jpeg',
     ):
         validate_write_mode(mode)
         if image_codec not in _IMAGE_CODECS:
@@ -724,7 +750,10 @@ class LanceWriter:
         reader = pa.RecordBatchReader.from_batches(self._schema, batch_gen())
         if self._table is None:
             self._table = self._db.create_table(
-                self.table_name, data=reader, schema=self._schema
+                self.table_name,
+                data=reader,
+                schema=self._schema,
+                data_storage_version=_DATA_STORAGE_VERSION,
             )
         else:
             self._table.add(reader)
@@ -745,16 +774,20 @@ class LanceWriter:
         for f in schema:
             if f.name in ('episode_idx', 'step_idx'):
                 continue
-            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type):
+            shape_meta = (f.metadata or {}).get(_IMAGE_SHAPE_META_KEY)
+            is_bin = pa.types.is_binary(f.type) or pa.types.is_large_binary(
+                f.type
+            )
+            is_fsl_u8 = pa.types.is_fixed_size_list(f.type) and (
+                pa.types.is_uint8(f.type.value_type)
+            )
+            if shape_meta and (is_bin or is_fsl_u8):
+                h, w, c = (int(x) for x in shape_meta.decode().split(','))
+                col_meta[f.name] = ('image_raw', (h, w, c))
+            elif is_bin:
                 col_meta[f.name] = ('image_jpeg', None)
             elif pa.types.is_fixed_size_list(f.type):
-                child_type = f.type.value_type
-                shape_meta = (f.metadata or {}).get(_IMAGE_SHAPE_META_KEY)
-                if pa.types.is_uint8(child_type) and shape_meta:
-                    h, w, c = (int(x) for x in shape_meta.decode().split(','))
-                    col_meta[f.name] = ('image_raw', (h, w, c))
-                else:
-                    col_meta[f.name] = ('tabular', f.type.list_size)
+                col_meta[f.name] = ('tabular', f.type.list_size)
             else:
                 raise ValueError(
                     f"LanceWriter: cannot append to '{self.table_name}' — "
@@ -914,12 +947,17 @@ class LanceWriter:
             kind, info = col_meta[ln]
             if kind == 'image_raw':
                 h, w, c = info
+                # pa.large_binary (not fixed_size_list) so the
+                # `lance-encoding:compression` metadata key actually
+                # engages — fixed_size_list<uint8> bypasses general
+                # compression entirely in Lance v2.
                 fields.append(
                     pa.field(
                         ln,
-                        pa.list_(pa.uint8(), h * w * c),
+                        pa.large_binary(),
                         metadata={
-                            _IMAGE_SHAPE_META_KEY: f'{h},{w},{c}'.encode()
+                            _IMAGE_SHAPE_META_KEY: f'{h},{w},{c}'.encode(),
+                            _LANCE_COMPRESSION_KEY: _DEFAULT_RAW_COMPRESSION,
                         },
                     )
                 )
@@ -953,16 +991,11 @@ class LanceWriter:
             )
             vals = ep_data[src_col]
             if kind == 'image_raw':
-                h, w, c = info
-                frames = np.stack(
-                    [_normalize_image_frame(v).reshape(-1) for v in vals]
-                )
-                arrays.append(
-                    pa.FixedSizeListArray.from_arrays(
-                        pa.array(frames.reshape(-1), type=pa.uint8()),
-                        h * w * c,
-                    )
-                )
+                # Each frame becomes a contiguous H*W*C uint8 byte blob.
+                # Stored as pa.large_binary so Lance applies the
+                # general-compression encoding (LZ4/Zstd via metadata).
+                blobs = [_normalize_image_frame(v).tobytes() for v in vals]
+                arrays.append(pa.array(blobs, type=pa.large_binary()))
             elif kind == 'image_jpeg':
                 blobs = [
                     _encode_frame(np.asarray(v), self.jpeg_quality)

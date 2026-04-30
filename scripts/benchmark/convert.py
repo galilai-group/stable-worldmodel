@@ -74,9 +74,16 @@ PUSHT_KEY_ALIASES = {
 # it once with `aws s3 cp` and then derive the lance + video versions.
 TWOROOM_S3_URI = f'{S3_BASE}/tworoom/tworoom.h5'
 
-# Default Lance image codec: write BOTH cols (raw uint8 `pixels` + jpeg
-# `pixels_jpeg`) so the bench can read either path against the same data.
-LANCE_CODEC = 'both'
+# Per-dataset Lance image codec. Both datasets use 'both' so the bench
+# can compare raw-uint8 reads vs JPEG-decode reads against the same
+# table. The raw column is now stored as pa.large_binary with zstd
+# compression hint (engaged via Lance storage version 2.2), so the
+# tworoom raw column compresses ~30-40× — no longer the storage problem
+# the uncompressed fixed_size_list layout posed.
+LANCE_CODEC_PER_DATASET = {
+    'pusht': 'both',
+    'tworoom': 'both',
+}
 
 # Each entry: (local_path, s3_subpath_relative_to_S3_BASE).
 # All formats live under one prefix per dataset for cleanliness.
@@ -165,7 +172,7 @@ def convert_pusht(force: bool) -> None:
         print(f'  → {fmt}: {dest} ({n_eps} episodes)', flush=True)
         kw = {'mode': 'overwrite'}
         if fmt == 'lance':
-            kw['image_codec'] = LANCE_CODEC
+            kw['image_codec'] = LANCE_CODEC_PER_DATASET['pusht']
         writer_cls = get_format(fmt)
         with writer_cls.open_writer(dest, **kw) as w:
 
@@ -220,7 +227,7 @@ def convert_tworoom(force: bool) -> None:
         print(f'  → {fmt}: {dest} ({n_eps} episodes)', flush=True)
         kw = {'mode': 'overwrite'}
         if fmt == 'lance':
-            kw['image_codec'] = LANCE_CODEC
+            kw['image_codec'] = LANCE_CODEC_PER_DATASET['tworoom']
         writer_cls = get_format(fmt)
         with writer_cls.open_writer(dest, **kw) as w:
 
