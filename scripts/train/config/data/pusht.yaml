@@ -1,7 +1,7 @@
 dataset:
   num_steps: ${eval:'${wm.num_preds} + ${wm.history_size}'}
   frameskip: 5
-  name: pusht_expert_train
+  name: pusht_expert_train.h5
   keys_to_load:
     - pixels
     - action

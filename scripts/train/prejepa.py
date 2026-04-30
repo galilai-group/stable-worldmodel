@@ -234,7 +234,7 @@ def run(cfg):
     encoding_keys = list(cfg.wm.get('encoding', {}).keys())
     keys_to_load = ['pixels'] + encoding_keys
 
-    dataset = swm.data.HDF5Dataset(
+    dataset = swm.data.load_dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,
@@ -355,15 +355,8 @@ def run(cfg):
         OmegaConf.save(cfg, f)
 
     logger = None
-    if cfg.wandb.enable:
-        logger = WandbLogger(
-            name='dino_wm',
-            project=cfg.wandb.project,
-            entity=cfg.wandb.entity,
-            resume='allow' if run_id else None,
-            id=run_id or None,
-            log_model=False,
-        )
+    if cfg.wandb.enabled:
+        logger = WandbLogger(**cfg.wandb.config)
         logger.log_hyperparams(OmegaConf.to_container(cfg))
 
     trainer = pl.Trainer(

@@ -31,7 +31,7 @@ eval:
   goal_offset_steps: 25
   eval_budget: 50
   img_size: 224
-  dataset_name: pusht_expert_train
+  dataset_name: pusht_expert_train.h5
   callables:
     # -- set state
     - method: _set_state

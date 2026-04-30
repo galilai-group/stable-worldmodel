@@ -60,7 +60,7 @@ def get_data(cfg, goal_probabilities):
     keys_to_load = ['pixels', 'action'] + (['proprio'] if use_proprio else [])
     keys_to_cache = ['action'] + (['proprio'] if use_proprio else [])
 
-    dataset = swm.data.HDF5Dataset(
+    dataset = swm.data.load_dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,

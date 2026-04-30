@@ -62,10 +62,4 @@ trainer:
   precision: 16-mixed
   gradient_clip_val: 1.0
 
-# --- Logging ---
-wandb:
-  enable: false
-  project: swm
-  entity: stable-worldmodel
-
 dump_object: true

@@ -116,7 +116,11 @@ def run(cfg):
     ##       dataset       ##
     #########################
 
-    dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+    dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
+    dataset_name = dataset_cfg.pop('name')
+    dataset = swm.data.load_dataset(
+        dataset_name, transform=None, **dataset_cfg
+    )
     transforms = [
         get_img_preprocessor(
             source='pixels', target='pixels', img_size=cfg.img_size

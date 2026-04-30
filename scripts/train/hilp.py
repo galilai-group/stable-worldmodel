@@ -56,7 +56,7 @@ def get_data(cfg):
     if not hasattr(cfg, 'local_cache_dir'):
         cache_dir = os.environ.get('SLURM_TMPDIR', None)
 
-    dataset = swm.data.HDF5Dataset(
+    dataset = swm.data.load_dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,

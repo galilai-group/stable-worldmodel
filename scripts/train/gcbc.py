@@ -60,7 +60,7 @@ def get_data(cfg):
         keys_to_load.append('proprio')
         keys_to_cache.append('proprio')
 
-    dataset = swm.data.HDF5Dataset(
+    dataset = swm.data.load_dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,

@@ -6,6 +6,7 @@ defaults:
 
 
 output_model_name: dinogcbc
+dataset_name: pusht_expert_train.h5
 
 trainer:
   max_epochs: 100
