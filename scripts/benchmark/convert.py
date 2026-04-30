@@ -1,16 +1,17 @@
-"""Convert a LeRobot dataset into HDF5 + Lance for the throughput benchmark.
+"""Convert a LeRobot dataset into HDF5 + Lance + Video for the bench.
 
 Pre-step for `compare_h5_lance.py`. Reads ``lerobot/pusht_image`` (or any
 LeRobot HF dataset) via :class:`LeRobotAdapter`, exposing every native
-column through ``key_aliases``, and writes the same data to two formats
+column through ``key_aliases``, and writes the same data to three formats
 locally:
 
-  - ``pusht.h5``      (HDF5, single file)
-  - ``pusht.lance``   (Lance, directory)
+  - ``pusht.h5``      (HDF5, single file with per-frame uint8 arrays)
+  - ``pusht.lance``   (Lance, columnar with JPEG-encoded blobs)
+  - ``pusht.video``   (per-episode MP4 + tabular .npz; needs decord/imageio)
 
-Both end up with identical schemas and identical data, so the bench can
-read the same rows out of all three formats (LeRobot / HDF5 / Lance) for
-an apples-to-apples comparison.
+All three end up with identical row counts and matching tabular columns,
+so the bench can read the same data out of all three formats (plus
+LeRobot HF) for an apples-to-apples comparison.
 
 The leading monkey-patch caches LeRobot's ``get_safe_version`` lookup so
 the conversion doesn't fire one HuggingFace API call per episode (which
@@ -57,6 +58,7 @@ KEY_ALIASES = {
 TARGETS = [
     ('hdf5', 'pusht.h5'),
     ('lance', 'pusht.lance'),
+    ('video', 'pusht.video'),
 ]
 
 

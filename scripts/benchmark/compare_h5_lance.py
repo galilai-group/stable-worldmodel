@@ -11,6 +11,11 @@ from torch.utils.data import DataLoader
 
 from stable_worldmodel.data import HDF5Dataset, LanceDataset
 
+try:
+    from stable_worldmodel.data import VideoDataset
+except ImportError:  # decord/imageio missing — Video row will be skipped
+    VideoDataset = None
+
 
 # Set these on Colab/laptop. Leave blank on EC2 with an IAM instance role
 AWS_ACCESS_KEY_ID = ''
@@ -24,6 +29,7 @@ S3_HDF5_URI = f's3://{S3_BUCKET}/training/stableworldmodel/tworoom/tworoom.h5'
 
 LOCAL_LANCE_DIR = Path('./tworoom_lance_local').resolve()
 LOCAL_HDF5_PATH = Path('./tworoom.h5').resolve()
+LOCAL_VIDEO_DIR = Path('./tworoom.video').resolve()
 
 DEFAULT_COLUMNS = ['pixels', 'action', 'proprio']
 CACHE_COLS = ['action', 'proprio']
@@ -189,6 +195,34 @@ def main():
             )
         else:
             print('(skipping local Lance: sync failed)')
+        if VideoDataset is not None and LOCAL_VIDEO_DIR.exists():
+            try:
+                datasets.append(
+                    (
+                        'Video local (no cache)',
+                        VideoDataset(
+                            path=str(LOCAL_VIDEO_DIR),
+                            video_keys=['pixels'],
+                            keys_to_cache=[],
+                            **common,
+                        ),
+                    )
+                )
+                datasets.append(
+                    (
+                        'Video local (cached)',
+                        VideoDataset(
+                            path=str(LOCAL_VIDEO_DIR),
+                            video_keys=['pixels'],
+                            keys_to_cache=CACHE_COLS,
+                            **common,
+                        ),
+                    )
+                )
+            except Exception as e:
+                print(f'(skipping local Video: {e})')
+        elif VideoDataset is None:
+            print('(skipping local Video: decord/imageio not installed)')
 
     if not args.no_s3:
         lance_opts = {'storage_options': _lance_opts()}
