@@ -20,7 +20,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from stable_worldmodel.data import convert, get_format
+from stable_worldmodel.data import HDF5Dataset, get_format
 from stable_worldmodel.data.utils import _episode_to_step_lists
 
 
@@ -179,26 +179,29 @@ def convert_pusht(force: bool) -> None:
 
 
 def convert_tworoom(force: bool) -> None:
-    """Tworoom S3 .h5 → {h5 (local copy), lance, video}.
+    """Tworoom S3 .h5 → {h5 (canonical local copy), lance, video}.
 
-    The original tworoom .h5 lives on S3 (not HF), so we ``aws s3 cp`` it
-    once into ./tworoom.h5 then derive the lance + video versions from
-    that local file via the load_dataset/convert pipeline.
+    The original tworoom .h5 lives on S3 (not HF). We ``aws s3 cp`` it
+    once into ./tworoom.h5 — ``--force`` does NOT re-download the source
+    since it's the canonical input — then read it directly via
+    HDF5Dataset and stream into the lance/video writers.
     """
     print('\n=== tworoom ===')
     h5_local, _ = PLAN['tworoom']['hdf5']
     lance_local, _ = PLAN['tworoom']['lance']
     video_local, _ = PLAN['tworoom']['video']
 
+    # Source: download only if missing. --force never wipes the source.
     h5_p = Path(h5_local)
-    if force and h5_p.exists():
-        _wipe(h5_p)
     if not _is_done(h5_p):
         print(f'  downloading {TWOROOM_S3_URI} → {h5_p}', flush=True)
         rc = _aws('s3', 'cp', TWOROOM_S3_URI, str(h5_p), '--no-progress')
         if rc != 0:
             raise SystemExit('tworoom h5 download failed')
+    else:
+        print(f'  source: {h5_p} (already present)')
 
+    # Derived outputs: --force wipes & re-derives.
     targets: list[tuple[str, str]] = []
     for fmt, dest in [('lance', lance_local), ('video', video_local)]:
         dest_p = Path(dest)
@@ -211,12 +214,23 @@ def convert_tworoom(force: bool) -> None:
     if not targets:
         return
 
+    src = HDF5Dataset(path=str(h5_p))
+    n_eps = len(src.lengths)
     for fmt, dest in targets:
-        print(f'  → {fmt}: {dest}', flush=True)
+        print(f'  → {fmt}: {dest} ({n_eps} episodes)', flush=True)
         kw = {'mode': 'overwrite'}
         if fmt == 'lance':
             kw['image_codec'] = LANCE_CODEC
-        convert(str(h5_p), dest, dest_format=fmt, **kw)
+        writer_cls = get_format(fmt)
+        with writer_cls.open_writer(dest, **kw) as w:
+
+            def gen():
+                for i in range(n_eps):
+                    yield _episode_to_step_lists(
+                        src.load_episode(i), int(src.lengths[i])
+                    )
+
+            w.write_episodes(gen())
 
 
 # ---- Main ------------------------------------------------------------------
