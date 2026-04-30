@@ -16,7 +16,6 @@ import io
 import logging
 import re
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -50,8 +49,6 @@ try:
 except (ImportError, AttributeError):
     _tv_decode_jpeg = None
     _TV_RGB = None
-
-_DECODE_THREADS = 8  # Plenty of headroom; libjpeg releases the GIL.
 
 
 _DEFAULT_JPEG_QUALITY = 95
@@ -405,17 +402,12 @@ class LanceDataset(Dataset):
     def _decode_images(self, blobs) -> torch.Tensor:
         """Decode a list of JPEG blobs into a stacked ``(N, C, H, W)`` uint8 tensor.
 
-        Two-tier fast-path:
-
-        * **torchvision.io.decode_jpeg** when available — libjpeg-turbo
-          backed, batch SIMD, GIL-released. Order-of-magnitude faster than
-          PIL on CPU and supports CUDA decode if a GPU is present.
-        * **PIL on a thread pool** as fallback — JPEG decode releases the
-          GIL inside libjpeg, so threading still wins despite the GIL.
-
-        A torchvision decode failure (rare; happens with non-conformant
-        JPEGs) silently falls through to PIL rather than crashing the whole
-        batch.
+        Fast path: ``torchvision.io.decode_jpeg`` when available —
+        libjpeg-turbo with internal SIMD, GIL-released, supports CUDA
+        decode if a GPU is present. Single Python call so DataLoader
+        workers (which are already process-parallel) don't compete with
+        an extra thread pool of our own. Falls back to a sequential PIL
+        loop when torchvision is missing or a blob is non-conformant.
         """
         if not blobs:
             return torch.empty(0, dtype=torch.uint8)
@@ -434,14 +426,7 @@ class LanceDataset(Dataset):
             except (RuntimeError, TypeError):
                 pass  # malformed blob — fall through to PIL
 
-        if len(blobs) > 1:
-            with ThreadPoolExecutor(
-                max_workers=min(_DECODE_THREADS, len(blobs))
-            ) as pool:
-                frames = list(pool.map(self._decode_image, blobs))
-        else:
-            frames = [self._decode_image(blobs[0])]
-        return torch.stack(frames)
+        return torch.stack([self._decode_image(b) for b in blobs])
 
     def _prepare_numeric_tensor(
         self, data: np.ndarray, downsample: bool
