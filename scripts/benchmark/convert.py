@@ -82,12 +82,12 @@ LANCE_CODEC = 'both'
 # All formats live under one prefix per dataset for cleanliness.
 PLAN = {
     'pusht': {
-        'h5': ('pusht.h5', 'pusht/pusht.h5'),
+        'hdf5': ('pusht.h5', 'pusht/pusht.h5'),
         'lance': ('pusht.lance', 'pusht/pusht.lance/'),
         'video': ('pusht.video', 'pusht/pusht.video/'),
     },
     'tworoom': {
-        'h5': ('tworoom.h5', 'tworoom/tworoom.h5'),
+        'hdf5': ('tworoom.h5', 'tworoom/tworoom.h5'),
         'lance': ('tworoom.lance', 'tworoom/tworoom.lance/'),
         'video': ('tworoom.video', 'tworoom/tworoom.video/'),
     },
@@ -186,7 +186,7 @@ def convert_tworoom(force: bool) -> None:
     that local file via the load_dataset/convert pipeline.
     """
     print('\n=== tworoom ===')
-    h5_local, _ = PLAN['tworoom']['h5']
+    h5_local, _ = PLAN['tworoom']['hdf5']
     lance_local, _ = PLAN['tworoom']['lance']
     video_local, _ = PLAN['tworoom']['video']
 
