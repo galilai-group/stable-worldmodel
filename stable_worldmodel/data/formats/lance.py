@@ -52,32 +52,6 @@ except (ImportError, AttributeError):
 
 
 _DEFAULT_JPEG_QUALITY = 95
-_IMAGE_CODECS = ('raw', 'jpeg', 'both')
-_IMAGE_SHAPE_META_KEY = b'image_shape'
-_LANCE_COMPRESSION_KEY = b'lance-encoding:compression'
-# Storage format 2.2 is required for general-compression metadata to take
-# effect on binary columns (auto-LZ4 above 32KB, opt-in zstd via metadata).
-_DATA_STORAGE_VERSION = '2.2'
-# Default codec for raw image columns. Zstd → ~30-40× on synthetic env
-# frames (tworoom), ~1.5-2× on natural images. LZ4 is the fallback
-# auto-applied by Lance 2.2 when no codec hint is given.
-_DEFAULT_RAW_COMPRESSION = b'zstd'
-
-
-def _normalize_image_frame(frame: np.ndarray) -> np.ndarray:
-    """Normalise a single frame to uint8 (H, W, C) with C in {1, 3, 4}."""
-    arr = np.asarray(frame)
-    if (
-        arr.ndim == 3
-        and arr.shape[0] in (1, 3, 4)
-        and arr.shape[-1] not in (1, 3, 4)
-    ):
-        arr = np.transpose(arr, (1, 2, 0))
-    if arr.ndim == 2:
-        arr = arr[..., None]
-    if arr.dtype != np.uint8:
-        arr = arr.astype(np.uint8)
-    return arr
 
 
 def _to_lance_name(name: str) -> str:
@@ -168,42 +142,16 @@ class LanceDataset(Dataset):
                 f"Columns {missing} missing from Lance table '{resolved_name}'"
             )
 
-        # Auto-detect image columns from schema. Three storage flavours:
-        #   * pa.binary / pa.large_binary WITHOUT image_shape metadata —
-        #     JPEG blob; decoded via _decode_images on read.
-        #   * pa.binary / pa.large_binary WITH image_shape metadata —
-        #     raw uint8 bytes, current default; Lance applies general
-        #     compression (zstd via field metadata). Decoded via
-        #     np.frombuffer + reshape on read.
-        #   * pa.fixed_size_list(uint8, H*W*C) WITH image_shape metadata —
-        #     legacy raw layout (pre-compression-fix); still readable.
-        jpeg_cols: set[str] = set()
-        raw_image_shapes: dict[str, tuple[int, int, int]] = {}
-        for f in table.schema:
-            shape_meta = (f.metadata or {}).get(_IMAGE_SHAPE_META_KEY)
-            is_bin = pa.types.is_binary(f.type) or pa.types.is_large_binary(
-                f.type
-            )
-            is_fsl_u8 = pa.types.is_fixed_size_list(f.type) and (
-                pa.types.is_uint8(f.type.value_type)
-            )
-            if shape_meta and (is_bin or is_fsl_u8):
-                h, w, c = (int(x) for x in shape_meta.decode().split(','))
-                raw_image_shapes[f.name] = (h, w, c)
-            elif is_bin:
-                jpeg_cols.add(f.name)
-        autodetected = jpeg_cols | set(raw_image_shapes)
+        binary_cols = {
+            f.name
+            for f in table.schema
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
+        }
         self.image_columns = (
-            autodetected & set(self._keys)
+            binary_cols & set(self._keys)
             if image_columns is None
             else {c for c in image_columns if c in self._keys}
         )
-        # Subset of image_columns that are stored as raw uint8 frames.
-        self._raw_image_shapes = {
-            c: raw_image_shapes[c]
-            for c in self.image_columns
-            if c in raw_image_shapes
-        }
 
         lengths, offsets = self._compute_episode_structure(table)
 
@@ -468,29 +416,6 @@ class LanceDataset(Dataset):
                 values = self._extract_column(batch, col)
 
             if col in self.image_columns:
-                if col in self._raw_image_shapes:
-                    h, w, c = self._raw_image_shapes[col]
-                    # Two source layouts for raw uint8 image data:
-                    #   * list of byte-blobs (pa.large_binary, current
-                    #     default — frombuffer per blob, then stack)
-                    #   * numpy (T, h*w*c) (legacy fixed_size_list path
-                    #     or cached column — straight reshape)
-                    if isinstance(values, np.ndarray):
-                        arr = values.reshape(-1, h, w, c)
-                    else:
-                        arr = np.stack(
-                            [
-                                np.frombuffer(b, dtype=np.uint8).reshape(
-                                    h, w, c
-                                )
-                                for b in values
-                            ]
-                        )
-                    arr = arr[:: self.frameskip]
-                    steps[col] = (
-                        torch.from_numpy(arr).permute(0, 3, 1, 2).contiguous()
-                    )
-                    continue
                 blobs = values[:: self.frameskip]
                 if isinstance(blobs, np.ndarray):
                     blobs = blobs.tolist()
@@ -651,13 +576,8 @@ class LanceWriter:
         jpeg_quality: int = _DEFAULT_JPEG_QUALITY,
         connect_kwargs: dict[str, Any] | None = None,
         mode: str = 'append',
-        image_codec: str = 'jpeg',
     ):
         validate_write_mode(mode)
-        if image_codec not in _IMAGE_CODECS:
-            raise ValueError(
-                f'image_codec must be one of {_IMAGE_CODECS}, got {image_codec!r}'
-            )
         loc = str(path).rstrip('/')
         if table_name is None:
             if loc.lower().endswith('.lance'):
@@ -677,18 +597,14 @@ class LanceWriter:
         self.jpeg_quality = jpeg_quality
         self.connect_kwargs = connect_kwargs or {}
         self.mode = mode
-        self.image_codec = image_codec
 
         self._db = None
         self._table = None
         self._initialized = False
         self._appending_existing = False
-        # Source col → list of (lance_name, kind) pairs.
-        # kind ∈ {'image_raw', 'image_jpeg', 'tabular'}.
-        # Most cols map 1→1; image cols in 'both' mode map 1→2.
-        self._col_plan: dict[str, list[tuple[str, str]]] = {}
-        # Per Lance column: (h, w, c) for image_raw, dim for tabular, None for image_jpeg.
-        self._col_meta: dict[str, Any] = {}
+        self._rename_map: dict[str, str] = {}
+        self._image_cols: set[str] = set()
+        self._dims: dict[str, int] = {}
         self._schema: pa.Schema | None = None
         self._ep_idx = 0
         self._global_ptr = 0
@@ -739,7 +655,7 @@ class LanceWriter:
         if not self._initialized:
             self._init_schema(first_ep)
             self._initialized = True
-        elif self._appending_existing and not self._col_plan:
+        elif self._appending_existing and not self._rename_map:
             self._validate_episode_against_existing(first_ep)
 
         def batch_gen():
@@ -750,10 +666,7 @@ class LanceWriter:
         reader = pa.RecordBatchReader.from_batches(self._schema, batch_gen())
         if self._table is None:
             self._table = self._db.create_table(
-                self.table_name,
-                data=reader,
-                schema=self._schema,
-                data_storage_version=_DATA_STORAGE_VERSION,
+                self.table_name, data=reader, schema=self._schema
             )
         else:
             self._table.add(reader)
@@ -768,26 +681,15 @@ class LanceWriter:
     def _open_existing_for_append(self) -> None:
         self._table = self._db.open_table(self.table_name)
         schema = self._table.schema
-        # Reverse-engineer per-column metadata from the existing schema so
-        # we can append in whatever codec the table was originally written.
-        col_meta: dict[str, Any] = {}
+        image_cols: set[str] = set()
+        dims: dict[str, int] = {}
         for f in schema:
             if f.name in ('episode_idx', 'step_idx'):
                 continue
-            shape_meta = (f.metadata or {}).get(_IMAGE_SHAPE_META_KEY)
-            is_bin = pa.types.is_binary(f.type) or pa.types.is_large_binary(
-                f.type
-            )
-            is_fsl_u8 = pa.types.is_fixed_size_list(f.type) and (
-                pa.types.is_uint8(f.type.value_type)
-            )
-            if shape_meta and (is_bin or is_fsl_u8):
-                h, w, c = (int(x) for x in shape_meta.decode().split(','))
-                col_meta[f.name] = ('image_raw', (h, w, c))
-            elif is_bin:
-                col_meta[f.name] = ('image_jpeg', None)
+            if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type):
+                image_cols.add(f.name)
             elif pa.types.is_fixed_size_list(f.type):
-                col_meta[f.name] = ('tabular', f.type.list_size)
+                dims[f.name] = f.type.list_size
             else:
                 raise ValueError(
                     f"LanceWriter: cannot append to '{self.table_name}' — "
@@ -797,7 +699,8 @@ class LanceWriter:
 
         existing = self._table.to_lance().to_table(columns=['episode_idx'])
         ep_col = existing.column('episode_idx').to_numpy()
-        self._col_meta = col_meta
+        self._image_cols = image_cols
+        self._dims = dims
         self._schema = schema
         self._global_ptr = int(len(ep_col))
         self._ep_idx = int(ep_col.max()) + 1 if self._global_ptr else 0
@@ -813,28 +716,16 @@ class LanceWriter:
                 continue
             if lance_name in incoming_to_lance.values():
                 raise ValueError(
-                    'LanceWriter: append failed — incoming columns map to '
+                    f'LanceWriter: append failed — incoming columns map to '
                     f"the same Lance name '{lance_name}'."
                 )
             incoming_to_lance[col] = lance_name
         lance_to_incoming = {v: k for k, v in incoming_to_lance.items()}
 
-        # Build the expected primary set: in 'both' mode `<X>_jpeg` is a
-        # companion of `<X>` (same source col, written twice), so it
-        # doesn't need its own incoming entry. Group lance cols by primary.
-        kinds = {ln: kind for ln, (kind, _) in self._col_meta.items()}
-        primary_lance: dict[str, list[str]] = {}
-        for ln in self._col_meta:
-            base = ln
-            if kinds[ln] == 'image_jpeg' and ln.endswith('_jpeg'):
-                stripped = ln[: -len('_jpeg')]
-                if kinds.get(stripped) == 'image_raw':
-                    base = stripped
-            primary_lance.setdefault(base, []).append(ln)
-
-        incoming_lance = set(incoming_to_lance.values())
-        missing = set(primary_lance) - incoming_lance
-        extra = incoming_lance - set(primary_lance)
+        expected = set(self._image_cols) | set(self._dims)
+        incoming = set(lance_to_incoming)
+        missing = expected - incoming
+        extra = incoming - expected
         if missing or extra:
             raise ValueError(
                 f'LanceWriter: append failed — schema mismatch on table '
@@ -842,53 +733,39 @@ class LanceWriter:
                 f'unexpected columns: {sorted(extra)}.'
             )
 
-        # Per-col type/shape checks.
-        for primary, lance_names in primary_lance.items():
-            vals = ep_data[lance_to_incoming[primary]]
-            for ln in lance_names:
-                kind, info = self._col_meta[ln]
-                if kind == 'image_raw':
-                    sample = _normalize_image_frame(vals[0])
-                    if sample.shape != info:
-                        raise ValueError(
-                            f"LanceWriter: append failed — column '{ln}' "
-                            f'image-shape mismatch: existing={info}, '
-                            f'incoming={sample.shape}.'
-                        )
-                elif kind == 'image_jpeg':
-                    if not (_is_image_name(ln) or is_image_column(vals)):
-                        raise ValueError(
-                            f"LanceWriter: append failed — column '{ln}' is "
-                            'image-typed on disk but incoming values are '
-                            'not images.'
-                        )
-                else:  # tabular
-                    sample = np.asarray(vals[0])
-                    if int(sample.reshape(-1).shape[0]) != info:
-                        raise ValueError(
-                            f"LanceWriter: append failed — column '{ln}' "
-                            f'dimension mismatch: existing={info}, '
-                            f'incoming={sample.reshape(-1).shape[0]}.'
-                        )
+        for lance_name in self._image_cols:
+            vals = ep_data[lance_to_incoming[lance_name]]
+            if not (_is_image_name(lance_name) or is_image_column(vals)):
+                raise ValueError(
+                    f"LanceWriter: append failed — column '{lance_name}' is "
+                    'image-typed on disk but incoming values are not images.'
+                )
 
-        # Build the col plan from the schema's lance-col order.
-        plan: dict[str, list[tuple[str, str]]] = {}
-        for ln in (
+        for lance_name, expected_dim in self._dims.items():
+            vals = ep_data[lance_to_incoming[lance_name]]
+            sample = np.asarray(vals[0])
+            actual_dim = int(sample.reshape(-1).shape[0])
+            if actual_dim != expected_dim:
+                raise ValueError(
+                    f"LanceWriter: append failed — column '{lance_name}' "
+                    f'dimension mismatch: existing={expected_dim}, '
+                    f'incoming={actual_dim}.'
+                )
+
+        ordered_lance_names = [
             f.name
             for f in self._schema
             if f.name not in ('episode_idx', 'step_idx')
-        ):
-            for primary, lance_names in primary_lance.items():
-                if ln in lance_names:
-                    src = lance_to_incoming[primary]
-                    plan.setdefault(src, []).append((ln, kinds[ln]))
-                    break
-        self._col_plan = plan
+        ]
+        self._rename_map = {
+            lance_to_incoming[ln]: ln for ln in ordered_lance_names
+        }
 
     def _init_schema(self, sample_ep: dict) -> None:
-        col_plan: dict[str, list[tuple[str, str]]] = {}
-        col_meta: dict[str, Any] = {}
         rename_map: dict[str, str] = {}
+        image_cols: set[str] = set()
+        dims: dict[str, int] = {}
+        ordered_cols: list[str] = []
 
         reserved = {'episode_idx', 'step_idx'}
         dropped = [c for c in sample_ep if _to_lance_name(c) in reserved]
@@ -899,38 +776,19 @@ class LanceWriter:
                 dropped,
             )
 
-        ordered_lance: list[str] = []
         for col, vals in sample_ep.items():
             lance_name = _to_lance_name(col)
             if lance_name in reserved:
                 continue
             rename_map[col] = lance_name
-            entries: list[tuple[str, str]] = []
+            ordered_cols.append(lance_name)
 
             if _is_image_name(lance_name) or is_image_column(vals):
-                sample = _normalize_image_frame(vals[0])
-                shape = sample.shape  # (H, W, C)
-                if self.image_codec in ('raw', 'both'):
-                    entries.append((lance_name, 'image_raw'))
-                    col_meta[lance_name] = ('image_raw', shape)
-                    ordered_lance.append(lance_name)
-                if self.image_codec in ('jpeg', 'both'):
-                    jpeg_name = (
-                        f'{lance_name}_jpeg'
-                        if self.image_codec == 'both'
-                        else lance_name
-                    )
-                    entries.append((jpeg_name, 'image_jpeg'))
-                    col_meta[jpeg_name] = ('image_jpeg', None)
-                    ordered_lance.append(jpeg_name)
-            else:
-                sample = np.asarray(vals[0])
-                dim = int(sample.reshape(-1).shape[0])
-                entries.append((lance_name, 'tabular'))
-                col_meta[lance_name] = ('tabular', dim)
-                ordered_lance.append(lance_name)
+                image_cols.add(lance_name)
+                continue
 
-            col_plan[col] = entries
+            sample = np.asarray(vals[0])
+            dims[lance_name] = int(sample.reshape(-1).shape[0])
 
         renamed = {k: v for k, v in rename_map.items() if k != v}
         if renamed:
@@ -943,31 +801,15 @@ class LanceWriter:
             pa.field('episode_idx', pa.int32()),
             pa.field('step_idx', pa.int32()),
         ]
-        for ln in ordered_lance:
-            kind, info = col_meta[ln]
-            if kind == 'image_raw':
-                h, w, c = info
-                # pa.large_binary (not fixed_size_list) so the
-                # `lance-encoding:compression` metadata key actually
-                # engages — fixed_size_list<uint8> bypasses general
-                # compression entirely in Lance v2.
-                fields.append(
-                    pa.field(
-                        ln,
-                        pa.large_binary(),
-                        metadata={
-                            _IMAGE_SHAPE_META_KEY: f'{h},{w},{c}'.encode(),
-                            _LANCE_COMPRESSION_KEY: _DEFAULT_RAW_COMPRESSION,
-                        },
-                    )
-                )
-            elif kind == 'image_jpeg':
-                fields.append(pa.field(ln, pa.binary()))
-            else:  # tabular
-                fields.append(pa.field(ln, pa.list_(pa.float32(), info)))
+        for col in ordered_cols:
+            if col in image_cols:
+                fields.append(pa.field(col, pa.binary()))
+            else:
+                fields.append(pa.field(col, pa.list_(pa.float32(), dims[col])))
 
-        self._col_plan = col_plan
-        self._col_meta = col_meta
+        self._rename_map = rename_map
+        self._image_cols = image_cols
+        self._dims = dims
         self._schema = pa.schema(fields)
 
     def _build_batch(self, ep_data: dict, ep_len: int) -> pa.RecordBatch:
@@ -978,35 +820,20 @@ class LanceWriter:
             pa.array(episode_idx, type=pa.int32()),
             pa.array(step_idx, type=pa.int32()),
         ]
-        # Iterate the schema's lance-col order to ensure arrays line up.
-        for f in self._schema:
-            if f.name in ('episode_idx', 'step_idx'):
-                continue
-            kind, info = self._col_meta[f.name]
-            # Find the source col that feeds this lance col.
-            src_col = next(
-                src
-                for src, entries in self._col_plan.items()
-                if any(ln == f.name for ln, _ in entries)
-            )
-            vals = ep_data[src_col]
-            if kind == 'image_raw':
-                # Each frame becomes a contiguous H*W*C uint8 byte blob.
-                # Stored as pa.large_binary so Lance applies the
-                # general-compression encoding (LZ4/Zstd via metadata).
-                blobs = [_normalize_image_frame(v).tobytes() for v in vals]
-                arrays.append(pa.array(blobs, type=pa.large_binary()))
-            elif kind == 'image_jpeg':
+        for col, lance_name in self._rename_map.items():
+            vals = ep_data[col]
+            if lance_name in self._image_cols:
                 blobs = [
                     _encode_frame(np.asarray(v), self.jpeg_quality)
                     for v in vals
                 ]
                 arrays.append(pa.array(blobs, type=pa.binary()))
-            else:  # tabular
-                flat = np.asarray(vals, dtype=np.float32).reshape(ep_len, info)
+            else:
+                dim = self._dims[lance_name]
+                flat = np.asarray(vals, dtype=np.float32).reshape(ep_len, dim)
                 arrays.append(
                     pa.FixedSizeListArray.from_arrays(
-                        pa.array(flat.reshape(-1), type=pa.float32()), info
+                        pa.array(flat.reshape(-1), type=pa.float32()), dim
                     )
                 )
 

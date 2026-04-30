@@ -179,7 +179,7 @@ def _fmt_bytes(n: int) -> str:
 # ---- Bench loop ------------------------------------------------------------
 
 
-def _bench_one(label, ds, args, pixels_key='pixels'):
+def _bench_one(label, ds, args):
     loader = DataLoader(
         ds,
         batch_size=args.batch_size,
@@ -193,7 +193,7 @@ def _bench_one(label, ds, args, pixels_key='pixels'):
         if b is None:
             it = iter(loader)
             b = next(it)
-        _ = b[pixels_key].shape
+        _ = b['pixels'].shape
 
     n, t0 = 0, time.perf_counter()
     for _ in range(args.steps):
@@ -201,12 +201,12 @@ def _bench_one(label, ds, args, pixels_key='pixels'):
         if b is None:
             it = iter(loader)
             b = next(it)
-        n += b[pixels_key].shape[0]
+        n += b['pixels'].shape[0]
     dt = time.perf_counter() - t0
     sps = n / dt
     ms_per_step = dt / args.steps * 1e3
     print(
-        f'{label:<48} {sps:9.1f} samples/s   ({ms_per_step:7.1f} ms/step)',
+        f'{label:<42} {sps:9.1f} samples/s   ({ms_per_step:7.1f} ms/step)',
         flush=True,
     )
     return sps, ms_per_step
@@ -216,53 +216,15 @@ def _bench_one(label, ds, args, pixels_key='pixels'):
 
 
 def _build_rows(ds_name, cfg, args, common):
-    """Return list of (fmt, source, cache, dataset, storage_uri, pixels_key).
+    """Return list of (fmt, source, cache, dataset, storage_uri).
 
     `fmt`/`source`/`cache` are the three label columns the markdown table
-    splits on. `storage_uri` feeds the size lookup. `pixels_key` tells
-    the bench loop which key to look at for the pixel-batch shape (Lance
-    in 'both' codec exposes both 'pixels' and 'pixels_jpeg').
+    splits on. `storage_uri` feeds the size lookup.
     """
-    rows: list[tuple[str, str, str, object, str, str]] = []
+    rows: list[tuple[str, str, str, object, str]] = []
     h5_local = Path(cfg['h5_local']).resolve()
     lance_local = Path(cfg['lance_local']).resolve()
     video_local = Path(cfg['video_local']).resolve()
-
-    # Drop keys_to_load from common; we override per row (Lance jpeg path
-    # projects 'pixels_jpeg' instead of 'pixels').
-    base = {k: v for k, v in common.items() if k != 'keys_to_load'}
-    keys_raw = ['pixels', 'action', 'proprio']
-    keys_jpeg = ['pixels_jpeg', 'action', 'proprio']
-
-    def _lance_pair(source_label, path, connect_kwargs, storage_uri):
-        """Up to two rows per cache mode — one for the raw-uint8 read path,
-        one for the jpeg-decode path. Reader-side detection: a column is
-        'raw' iff the schema is fixed_size_list<uint8> with image_shape
-        metadata; otherwise it's a binary blob and the reader decodes.
-        Skip silently if a projection isn't available (e.g. `pixels_jpeg`
-        missing on a raw-only or legacy jpeg-only table)."""
-        out = []
-        for cache_label, k2c in [('no-cache', []), ('cached', CACHE_COLS)]:
-            for ks, pkey in [(keys_raw, 'pixels'), (keys_jpeg, 'pixels_jpeg')]:
-                try:
-                    ds = LanceDataset(
-                        path=path,
-                        keys_to_load=ks,
-                        keys_to_cache=k2c,
-                        connect_kwargs=connect_kwargs,
-                        **base,
-                    )
-                except KeyError:
-                    continue  # projection not in this table
-                fmt = (
-                    'Lance raw'
-                    if pkey in ds._raw_image_shapes
-                    else 'Lance jpeg'
-                )
-                out.append(
-                    (fmt, source_label, cache_label, ds, storage_uri, pkey)
-                )
-        return out
 
     if not args.no_local:
         if _ensure_local_h5(h5_local, cfg['h5_s3']):
@@ -272,13 +234,9 @@ def _build_rows(ds_name, cfg, args, common):
                     'local',
                     'no-cache',
                     HDF5Dataset(
-                        path=str(h5_local),
-                        keys_to_cache=[],
-                        keys_to_load=keys_raw,
-                        **base,
+                        path=str(h5_local), keys_to_cache=[], **common
                     ),
                     str(h5_local),
-                    'pixels',
                 )
             )
             rows.append(
@@ -287,18 +245,35 @@ def _build_rows(ds_name, cfg, args, common):
                     'local',
                     'cached',
                     HDF5Dataset(
-                        path=str(h5_local),
-                        keys_to_cache=CACHE_COLS,
-                        keys_to_load=keys_raw,
-                        **base,
+                        path=str(h5_local), keys_to_cache=CACHE_COLS, **common
                     ),
                     str(h5_local),
-                    'pixels',
                 )
             )
         if _ensure_local_lance(lance_local, cfg['lance_s3']):
-            rows.extend(
-                _lance_pair('local', str(lance_local), None, str(lance_local))
+            rows.append(
+                (
+                    'Lance',
+                    'local',
+                    'no-cache',
+                    LanceDataset(
+                        path=str(lance_local), keys_to_cache=[], **common
+                    ),
+                    str(lance_local),
+                )
+            )
+            rows.append(
+                (
+                    'Lance',
+                    'local',
+                    'cached',
+                    LanceDataset(
+                        path=str(lance_local),
+                        keys_to_cache=CACHE_COLS,
+                        **common,
+                    ),
+                    str(lance_local),
+                )
             )
         if VideoDataset is not None and video_local.exists():
             try:
@@ -310,11 +285,9 @@ def _build_rows(ds_name, cfg, args, common):
                         VideoDataset(
                             path=str(video_local),
                             video_keys=['pixels'],
-                            keys_to_load=keys_raw,
-                            **base,
+                            **common,
                         ),
                         str(video_local),
-                        'pixels',
                     )
                 )
             except Exception as e:
@@ -323,8 +296,33 @@ def _build_rows(ds_name, cfg, args, common):
     if not args.no_s3:
         lance_opts = {'storage_options': _lance_storage_opts()}
         h5_opts = _hdf5_storage_opts()
-        rows.extend(
-            _lance_pair('s3', cfg['lance_s3'], lance_opts, cfg['lance_s3'])
+        rows.append(
+            (
+                'Lance',
+                's3',
+                'no-cache',
+                LanceDataset(
+                    path=cfg['lance_s3'],
+                    keys_to_cache=[],
+                    connect_kwargs=lance_opts,
+                    **common,
+                ),
+                cfg['lance_s3'],
+            )
+        )
+        rows.append(
+            (
+                'Lance',
+                's3',
+                'cached',
+                LanceDataset(
+                    path=cfg['lance_s3'],
+                    keys_to_cache=CACHE_COLS,
+                    connect_kwargs=lance_opts,
+                    **common,
+                ),
+                cfg['lance_s3'],
+            )
         )
         rows.append(
             (
@@ -335,11 +333,9 @@ def _build_rows(ds_name, cfg, args, common):
                     path=cfg['h5_s3'],
                     storage_options=h5_opts,
                     keys_to_cache=[],
-                    keys_to_load=keys_raw,
-                    **base,
+                    **common,
                 ),
                 cfg['h5_s3'],
-                'pixels',
             )
         )
         rows.append(
@@ -351,11 +347,9 @@ def _build_rows(ds_name, cfg, args, common):
                     path=cfg['h5_s3'],
                     storage_options=h5_opts,
                     keys_to_cache=CACHE_COLS,
-                    keys_to_load=keys_raw,
-                    **base,
+                    **common,
                 ),
                 cfg['h5_s3'],
-                'pixels',
             )
         )
 
@@ -368,11 +362,8 @@ def _build_rows(ds_name, cfg, args, common):
                     'LeRobot',
                     'hf-cache',
                     '—',
-                    LeRobotAdapter(
-                        cfg['lerobot_repo'], keys_to_load=keys_raw, **base
-                    ),
+                    LeRobotAdapter(cfg['lerobot_repo'], **common),
                     f'lerobot://{cfg["lerobot_repo"]}',
-                    'pixels',
                 )
             )
         except Exception as e:
@@ -427,7 +418,7 @@ def main() -> None:
 
         # Storage costs first; cache by URI so we don't re-list S3 prefixes.
         storage_cache: dict[str, int] = {}
-        for fmt, source, cache, ds, storage_uri, _pkey in rows:
+        for fmt, source, cache, ds, storage_uri in rows:
             if storage_uri not in storage_cache:
                 storage_cache[storage_uri] = (
                     _s3_size(storage_uri)
@@ -435,9 +426,9 @@ def main() -> None:
                     else _local_size(Path(storage_uri))
                 )
 
-        for fmt, source, cache, ds, storage_uri, pkey in rows:
-            label = f'{ds_name:<7}  {fmt:<11} {source:<8} {cache:<8}'
-            sps, ms_step = _bench_one(label, ds, args, pixels_key=pkey)
+        for fmt, source, cache, ds, storage_uri in rows:
+            label = f'{ds_name:<7}  {fmt:<7} {source:<8} {cache:<8}'
+            sps, ms_step = _bench_one(label, ds, args)
             results.append(
                 (
                     ds_name,
@@ -454,34 +445,30 @@ def main() -> None:
     # ---- Markdown summary --------------------------------------------------
     print('\n## Throughput\n')
     print(
-        '| Dataset | Format      | Source   | Cache    | samples/s | ms/step  | Storage    |'
+        '| Dataset | Format  | Source   | Cache    | samples/s | ms/step  | Storage    |'
     )
     print(
-        '|---------|-------------|----------|----------|-----------|----------|------------|'
+        '|---------|---------|----------|----------|-----------|----------|------------|'
     )
     for ds_name, fmt, source, cache, _uri, sps, ms_step, size in results:
         print(
-            f'| {ds_name:<7} | {fmt:<11} | {source:<8} | {cache:<8} | '
+            f'| {ds_name:<7} | {fmt:<7} | {source:<8} | {cache:<8} | '
             f'{sps:9.1f} | {ms_step:8.1f} | {_fmt_bytes(size):>10} |'
         )
 
-    # Storage table: dedupe by (dataset, fmt-without-codec). 'Lance raw' and
-    # 'Lance jpeg' point at the same .lance dir so they share storage.
     print('\n## Storage size per dataset/format (local)\n')
-    print('| Dataset | Format    | Local size |')
-    print('|---------|-----------|------------|')
+    print('| Dataset | Format  | Local size |')
+    print('|---------|---------|------------|')
     seen: set[tuple[str, str]] = set()
     for ds_name, fmt, source, cache, uri, *_ in results:
         if source != 'local':
             continue
-        # Collapse 'Lance raw' / 'Lance jpeg' → 'Lance' for the storage view.
-        canonical = fmt.split()[0]
-        key = (ds_name, canonical)
+        key = (ds_name, fmt)
         if key in seen:
             continue
         seen.add(key)
         size = _local_size(Path(uri))
-        print(f'| {ds_name:<7} | {canonical:<9} | {_fmt_bytes(size):>10} |')
+        print(f'| {ds_name:<7} | {fmt:<7} | {_fmt_bytes(size):>10} |')
 
 
 if __name__ == '__main__':
