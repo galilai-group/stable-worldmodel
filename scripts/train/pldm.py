@@ -233,12 +233,17 @@ def run(cfg):
         'path_straight': TemporalStraighteningLoss(),
     }
 
+    total_steps = cfg.trainer.max_epochs * len(train)
     optimizers = {}
     for model_name in models.keys():
         optimizers[f'{model_name}_opt'] = {
             'modules': str(model_name),
             'optimizer': dict(cfg.optimizer),
-            'scheduler': {'type': 'LinearWarmupCosineAnnealingLR'},
+            'scheduler': {
+                'type': 'LinearWarmupCosineAnnealingLR',
+                'warmup_steps': max(1, int(0.01 * total_steps)),
+                'max_steps': total_steps,
+            },
             'interval': 'epoch',
         }
 
