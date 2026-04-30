@@ -288,6 +288,10 @@ def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
     Specifically:
       - Tensors → NumPy arrays.
       - Image arrays in ``(N, C, H, W)`` are transposed back to ``(N, H, W, C)``.
+      - Image arrays in float dtypes (e.g. LeRobot's ``ToTensor``-normalised
+        ``[0, 1]`` floats) are rescaled to ``uint8 [0, 255]`` so downstream
+        writers (Lance JPEG encode, Video MP4 encode, HDF5 fixed-dtype
+        datasets) receive a consistent display-range integer image.
       - Scalars (e.g. flattened string columns) are repeated ``ep_len`` times.
     """
     out: dict[str, list] = {}
@@ -302,6 +306,18 @@ def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
 
         if arr.ndim == 4 and arr.shape[1] in (1, 3):
             arr = arr.transpose(0, 2, 3, 1)
+
+        # Float image → uint8. LeRobot's ToTensor pipeline produces float32
+        # in [0, 1]; HDF5 / Lance / Video tworoom-style readers all assume
+        # uint8 HxWxC. Detect by shape (3D HWC or 4D NHWC with 1/3 channels)
+        # and float dtype, then clip-and-scale.
+        if (
+            arr.dtype.kind == 'f'
+            and arr.ndim in (3, 4)
+            and arr.shape[-1] in (1, 3)
+        ):
+            arr = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+
         out[col] = list(arr)
     return out
 
