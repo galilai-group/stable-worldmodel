@@ -20,7 +20,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from stable_worldmodel.data import HDF5Dataset, convert, get_format
+from stable_worldmodel.data import convert, get_format
 from stable_worldmodel.data.utils import _episode_to_step_lists
 
 
@@ -70,9 +70,13 @@ PUSHT_KEY_ALIASES = {
     'index': 'global_index',
 }
 
-# Tworoom: HF HDF5 dataset. HDF5Dataset(name=...) auto-downloads to its
-# cache_dir on first construction; we then read from that cached file.
-TWOROOM_HF_NAME = 'quentinll--lewm-tworooms/tworoom'
+# Tworoom: original .h5 lives on S3 (no public HF mirror). We download
+# it once with `aws s3 cp` and then derive the lance + video versions.
+TWOROOM_S3_URI = f'{S3_BASE}/tworoom/tworoom.h5'
+
+# Default Lance image codec: write BOTH cols (raw uint8 `pixels` + jpeg
+# `pixels_jpeg`) so the bench can read either path against the same data.
+LANCE_CODEC = 'both'
 
 # Each entry: (local_path, s3_subpath_relative_to_S3_BASE).
 # All formats live under one prefix per dataset for cleanliness.
@@ -159,8 +163,11 @@ def convert_pusht(force: bool) -> None:
 
     for fmt, dest in targets:
         print(f'  → {fmt}: {dest} ({n_eps} episodes)', flush=True)
+        kw = {'mode': 'overwrite'}
+        if fmt == 'lance':
+            kw['image_codec'] = LANCE_CODEC
         writer_cls = get_format(fmt)
-        with writer_cls.open_writer(dest, mode='overwrite') as w:
+        with writer_cls.open_writer(dest, **kw) as w:
 
             def gen():
                 for i in range(n_eps):
@@ -172,38 +179,27 @@ def convert_pusht(force: bool) -> None:
 
 
 def convert_tworoom(force: bool) -> None:
-    """Tworoom HF .h5 → {h5 (canonical local copy), lance, video}.
+    """Tworoom S3 .h5 → {h5 (local copy), lance, video}.
 
-    HDF5Dataset(name=...) handles the HF download/cache. We then symlink
-    the cached h5 file under ./tworoom.h5 so the bench can find it via a
-    stable local path, and run convert() to derive the lance + video
-    versions from it.
+    The original tworoom .h5 lives on S3 (not HF), so we ``aws s3 cp`` it
+    once into ./tworoom.h5 then derive the lance + video versions from
+    that local file via the load_dataset/convert pipeline.
     """
     print('\n=== tworoom ===')
     h5_local, _ = PLAN['tworoom']['h5']
     lance_local, _ = PLAN['tworoom']['lance']
     video_local, _ = PLAN['tworoom']['video']
 
-    # Ensure the source .h5 is downloaded; HDF5Dataset.__init__ does it.
-    print(f'  ensuring source: HF {TWOROOM_HF_NAME}')
-    cache_ds = HDF5Dataset(name=TWOROOM_HF_NAME)
-    src_h5 = Path(cache_ds.h5_path)
-    if not src_h5.exists():
-        raise SystemExit(f'HF cache miss: {src_h5}')
-
     h5_p = Path(h5_local)
     if force and h5_p.exists():
         _wipe(h5_p)
     if not _is_done(h5_p):
-        # Symlink (cheap) instead of copying 12 GB. Falls back to copy on
-        # filesystems without symlink support (rare on Linux).
-        try:
-            h5_p.symlink_to(src_h5)
-            print(f'  → h5: {h5_p} → {src_h5} (symlink)')
-        except OSError:
-            shutil.copy2(src_h5, h5_p)
-            print(f'  → h5: {h5_p} (copy)')
+        print(f'  downloading {TWOROOM_S3_URI} → {h5_p}', flush=True)
+        rc = _aws('s3', 'cp', TWOROOM_S3_URI, str(h5_p), '--no-progress')
+        if rc != 0:
+            raise SystemExit('tworoom h5 download failed')
 
+    targets: list[tuple[str, str]] = []
     for fmt, dest in [('lance', lance_local), ('video', video_local)]:
         dest_p = Path(dest)
         if force and dest_p.exists():
@@ -211,8 +207,16 @@ def convert_tworoom(force: bool) -> None:
         if _is_done(dest_p):
             print(f'  {fmt}: {dest} already exists; skipping')
             continue
+        targets.append((fmt, dest))
+    if not targets:
+        return
+
+    for fmt, dest in targets:
         print(f'  → {fmt}: {dest}', flush=True)
-        convert(str(h5_p), dest, dest_format=fmt, mode='overwrite')
+        kw = {'mode': 'overwrite'}
+        if fmt == 'lance':
+            kw['image_codec'] = LANCE_CODEC
+        convert(str(h5_p), dest, dest_format=fmt, **kw)
 
 
 # ---- Main ------------------------------------------------------------------
