@@ -1,3 +1,24 @@
+"""Comprehensive benchmark — tworoom + pusht across HDF5/Lance/Video/LeRobot.
+
+Throughput in samples/s, on-disk storage in MB. Auto-downloads any missing
+local copies from S3 first, then runs every applicable combination, then
+prints a markdown table.
+
+What's measured per (dataset × format × source × cache-mode):
+  - Tworoom — h5 local/s3 (cached/no-cache), lance local/s3 (cached/
+    no-cache), video local. 10 rows.
+  - Pusht  — same plus a `LeRobot HF` row (single, format-native).
+    11 rows.
+  - Storage cost — local file/dir size and S3 prefix size.
+
+Run on EC2 with an IAM instance role attached, or set AWS creds in env.
+Pass ``--no-s3`` to skip the network rows, ``--no-local`` to skip the
+local rows, ``--datasets pusht`` for one dataset only.
+
+Run scripts/benchmark/convert.py first to produce + upload the source
+data this script reads from.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -6,96 +27,159 @@ import subprocess
 import time
 from pathlib import Path
 
-import torch
 from torch.utils.data import DataLoader
 
 from stable_worldmodel.data import HDF5Dataset, LanceDataset
 
 try:
     from stable_worldmodel.data import VideoDataset
-except ImportError:  # decord/imageio missing — Video row will be skipped
+except ImportError:  # decord/imageio missing — Video rows skipped
     VideoDataset = None
 
 
-# Set these on Colab/laptop. Leave blank on EC2 with an IAM instance role
-AWS_ACCESS_KEY_ID = ''
-AWS_SECRET_ACCESS_KEY = ''
-AWS_REGION = 'us-east-2'
+# ---- Configuration (must match scripts/benchmark/convert.py PLAN) ----------
 
 S3_BUCKET = 'lancedb-datasets-dev-us-east-2-devrel'
-S3_LANCE_PREFIX = f's3://{S3_BUCKET}/training/stableworldmodel/tworoom_lance'
-S3_LANCE_TABLE = 'lewm_tworoom'
-S3_HDF5_URI = f's3://{S3_BUCKET}/training/stableworldmodel/tworoom/tworoom.h5'
+S3_BASE = f's3://{S3_BUCKET}/training/stableworldmodel'
+S3_REGION = 'us-east-2'
 
-LOCAL_LANCE_DIR = Path('./tworoom_lance_local').resolve()
-LOCAL_HDF5_PATH = Path('./tworoom.h5').resolve()
-LOCAL_VIDEO_DIR = Path('./tworoom.video').resolve()
+# Set on Colab/laptop. Leave blank on EC2 with an IAM instance role.
+AWS_ACCESS_KEY_ID = ''
+AWS_SECRET_ACCESS_KEY = ''
 
 DEFAULT_COLUMNS = ['pixels', 'action', 'proprio']
 CACHE_COLS = ['action', 'proprio']
-LEROBOT_REPO = 'lerobot/pusht_image'
+
+# Per-dataset paths. Mirror PLAN in convert.py.
+# `lance_*` paths point directly at the .lance dir; LanceDataset
+# auto-detects parent + table-name from the path when table_name is None.
+DATASETS = {
+    'pusht': {
+        'image_size': 96,
+        'h5_local': './pusht.h5',
+        'h5_s3': f'{S3_BASE}/pusht/pusht.h5',
+        'lance_local': './pusht.lance',
+        'lance_s3': f'{S3_BASE}/pusht/pusht.lance',
+        'video_local': './pusht.video',
+        'lerobot_repo': 'lerobot/pusht_image',
+    },
+    'tworoom': {
+        'image_size': 224,
+        'h5_local': './tworoom.h5',
+        'h5_s3': f'{S3_BASE}/tworoom/tworoom.h5',
+        'lance_local': './tworoom.lance',
+        'lance_s3': f'{S3_BASE}/tworoom/tworoom.lance',
+        'video_local': './tworoom.video',
+        'lerobot_repo': None,
+    },
+}
 
 
-def _lance_opts() -> dict:
-    opts = {'region': AWS_REGION, 'virtual_hosted_style_request': 'true'}
+# ---- Storage-options helpers (creds-aware) ---------------------------------
+
+
+def _lance_storage_opts() -> dict:
+    opts = {'region': S3_REGION, 'virtual_hosted_style_request': 'true'}
     if AWS_ACCESS_KEY_ID:
         opts['aws_access_key_id'] = AWS_ACCESS_KEY_ID
         opts['aws_secret_access_key'] = AWS_SECRET_ACCESS_KEY
     return opts
 
 
-def _hdf5_opts() -> dict:
-    opts = {'client_kwargs': {'region_name': AWS_REGION}}
+def _hdf5_storage_opts() -> dict:
+    opts = {'client_kwargs': {'region_name': S3_REGION}}
     if AWS_ACCESS_KEY_ID:
         opts['key'] = AWS_ACCESS_KEY_ID
         opts['secret'] = AWS_SECRET_ACCESS_KEY
     return opts
 
 
-def _ensure_local_h5() -> bool:
-    if LOCAL_HDF5_PATH.exists():
-        return True
-    print(f'downloading {S3_HDF5_URI} → {LOCAL_HDF5_PATH} ...', flush=True)
-    r = subprocess.run(
-        [
-            'aws',
-            's3',
-            'cp',
-            S3_HDF5_URI,
-            str(LOCAL_HDF5_PATH),
-            '--region',
-            AWS_REGION,
-            '--no-progress',
-        ]
-    )
-    return r.returncode == 0
+# ---- Auto-download from S3 -------------------------------------------------
 
 
-def _ensure_local_lance() -> bool:
-    table_dir = LOCAL_LANCE_DIR / f'{S3_LANCE_TABLE}.lance'
-    if table_dir.exists() and any(table_dir.iterdir()):
+def _aws(*args) -> int:
+    return subprocess.run(['aws', *args, '--region', S3_REGION]).returncode
+
+
+def _ensure_local_h5(local: Path, s3_uri: str) -> bool:
+    if local.exists():
         return True
-    print(
-        f'syncing {S3_LANCE_PREFIX}/{S3_LANCE_TABLE}.lance/ → {table_dir} ...',
-        flush=True,
-    )
-    table_dir.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(
-        [
-            'aws',
+    print(f'  downloading {s3_uri} → {local}', flush=True)
+    return _aws('s3', 'cp', s3_uri, str(local), '--no-progress') == 0
+
+
+def _ensure_local_lance(local_dir: Path, s3_uri: str) -> bool:
+    """Sync a Lance .lance directory from S3 if missing locally."""
+    if local_dir.exists() and any(local_dir.iterdir()):
+        return True
+    print(f'  syncing {s3_uri}/ → {local_dir}', flush=True)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    return (
+        _aws(
             's3',
             'sync',
-            f'{S3_LANCE_PREFIX}/{S3_LANCE_TABLE}.lance/',
-            str(table_dir),
-            '--region',
-            AWS_REGION,
+            s3_uri.rstrip('/') + '/',
+            str(local_dir),
             '--no-progress',
-        ]
+        )
+        == 0
     )
-    return r.returncode == 0
 
 
-def _bench(label, ds, args):
+# ---- Storage measurement ---------------------------------------------------
+
+
+def _local_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    return sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
+
+
+def _s3_size(uri: str) -> int:
+    """Total bytes under an S3 URI via `aws s3 ls --recursive --summarize`."""
+    try:
+        out = subprocess.check_output(
+            [
+                'aws',
+                's3',
+                'ls',
+                '--recursive',
+                '--summarize',
+                uri,
+                '--region',
+                S3_REGION,
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        return 0
+    for line in out.splitlines():
+        if 'Total Size' in line:
+            return int(line.split(':', 1)[1].strip())
+    return 0
+
+
+def _fmt_bytes(n: int) -> str:
+    if n <= 0:
+        return '—'
+    for unit, thresh in [
+        ('TB', 1 << 40),
+        ('GB', 1 << 30),
+        ('MB', 1 << 20),
+        ('KB', 1 << 10),
+    ]:
+        if n >= thresh:
+            return f'{n / thresh:.2f} {unit}'
+    return f'{n} B'
+
+
+# ---- Bench loop ------------------------------------------------------------
+
+
+def _bench_one(label, ds, args):
     loader = DataLoader(
         ds,
         batch_size=args.batch_size,
@@ -105,7 +189,10 @@ def _bench(label, ds, args):
     )
     it = iter(loader)
     for _ in range(args.warmup):
-        b = next(it, None) or next(iter(loader))
+        b = next(it, None)
+        if b is None:
+            it = iter(loader)
+            b = next(it)
         _ = b['pixels'].shape
 
     n, t0 = 0, time.perf_counter()
@@ -117,27 +204,199 @@ def _bench(label, ds, args):
         n += b['pixels'].shape[0]
     dt = time.perf_counter() - t0
     sps = n / dt
+    ms_per_step = dt / args.steps * 1e3
     print(
-        f'{label:<32} {sps:8.1f} samples/s   ({dt / args.steps * 1e3:5.1f} ms/step)',
+        f'{label:<42} {sps:9.1f} samples/s   ({ms_per_step:7.1f} ms/step)',
         flush=True,
     )
-    return label, sps
+    return sps, ms_per_step
 
 
-def main():
+# ---- Main ------------------------------------------------------------------
+
+
+def _build_rows(ds_name, cfg, args, common):
+    """Return list of (fmt, source, cache, dataset, storage_uri).
+
+    `fmt`/`source`/`cache` are the three label columns the markdown table
+    splits on. `storage_uri` feeds the size lookup.
+    """
+    rows: list[tuple[str, str, str, object, str]] = []
+    h5_local = Path(cfg['h5_local']).resolve()
+    lance_local = Path(cfg['lance_local']).resolve()
+    video_local = Path(cfg['video_local']).resolve()
+
+    if not args.no_local:
+        if _ensure_local_h5(h5_local, cfg['h5_s3']):
+            rows.append(
+                (
+                    'HDF5',
+                    'local',
+                    'no-cache',
+                    HDF5Dataset(
+                        path=str(h5_local), keys_to_cache=[], **common
+                    ),
+                    str(h5_local),
+                )
+            )
+            rows.append(
+                (
+                    'HDF5',
+                    'local',
+                    'cached',
+                    HDF5Dataset(
+                        path=str(h5_local), keys_to_cache=CACHE_COLS, **common
+                    ),
+                    str(h5_local),
+                )
+            )
+        if _ensure_local_lance(lance_local, cfg['lance_s3']):
+            rows.append(
+                (
+                    'Lance',
+                    'local',
+                    'no-cache',
+                    LanceDataset(
+                        path=str(lance_local), keys_to_cache=[], **common
+                    ),
+                    str(lance_local),
+                )
+            )
+            rows.append(
+                (
+                    'Lance',
+                    'local',
+                    'cached',
+                    LanceDataset(
+                        path=str(lance_local),
+                        keys_to_cache=CACHE_COLS,
+                        **common,
+                    ),
+                    str(lance_local),
+                )
+            )
+        if VideoDataset is not None and video_local.exists():
+            try:
+                rows.append(
+                    (
+                        'Video',
+                        'local',
+                        '—',
+                        VideoDataset(
+                            path=str(video_local),
+                            video_keys=['pixels'],
+                            **common,
+                        ),
+                        str(video_local),
+                    )
+                )
+            except Exception as e:
+                print(f'  (skipping {ds_name} Video: {e})')
+
+    if not args.no_s3:
+        lance_opts = {'storage_options': _lance_storage_opts()}
+        h5_opts = _hdf5_storage_opts()
+        rows.append(
+            (
+                'Lance',
+                's3',
+                'no-cache',
+                LanceDataset(
+                    path=cfg['lance_s3'],
+                    keys_to_cache=[],
+                    connect_kwargs=lance_opts,
+                    **common,
+                ),
+                cfg['lance_s3'],
+            )
+        )
+        rows.append(
+            (
+                'Lance',
+                's3',
+                'cached',
+                LanceDataset(
+                    path=cfg['lance_s3'],
+                    keys_to_cache=CACHE_COLS,
+                    connect_kwargs=lance_opts,
+                    **common,
+                ),
+                cfg['lance_s3'],
+            )
+        )
+        rows.append(
+            (
+                'HDF5',
+                's3',
+                'no-cache',
+                HDF5Dataset(
+                    path=cfg['h5_s3'],
+                    storage_options=h5_opts,
+                    keys_to_cache=[],
+                    **common,
+                ),
+                cfg['h5_s3'],
+            )
+        )
+        rows.append(
+            (
+                'HDF5',
+                's3',
+                'cached',
+                HDF5Dataset(
+                    path=cfg['h5_s3'],
+                    storage_options=h5_opts,
+                    keys_to_cache=CACHE_COLS,
+                    **common,
+                ),
+                cfg['h5_s3'],
+            )
+        )
+
+    if cfg['lerobot_repo'] and args.include_lerobot:
+        try:
+            from stable_worldmodel.data import LeRobotAdapter
+
+            rows.append(
+                (
+                    'LeRobot',
+                    'hf-cache',
+                    '—',
+                    LeRobotAdapter(cfg['lerobot_repo'], **common),
+                    f'lerobot://{cfg["lerobot_repo"]}',
+                )
+            )
+        except Exception as e:
+            print(f'  (skipping LeRobot for {ds_name}: {e})')
+
+    return rows
+
+
+def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument(
+        '--datasets',
+        nargs='+',
+        choices=['pusht', 'tworoom'],
+        default=['pusht', 'tworoom'],
+    )
     p.add_argument('--num-steps', type=int, default=4)
     p.add_argument('--frameskip', type=int, default=5)
     p.add_argument('--batch-size', type=int, default=64)
     p.add_argument('--num-workers', type=int, default=4)
     p.add_argument('--warmup', type=int, default=5)
     p.add_argument('--steps', type=int, default=100)
+    p.add_argument('--no-local', action='store_true')
+    p.add_argument('--no-s3', action='store_true')
     p.add_argument(
-        '--no-local', action='store_true', help='skip local rows (no download)'
+        '--include-lerobot',
+        action='store_true',
+        default=True,
+        help='include the LeRobot HF row for pusht (default on)',
     )
-    p.add_argument('--no-s3', action='store_true', help='skip S3 rows')
-    p.add_argument('--include-lerobot', action='store_true')
-    p.add_argument('--lerobot-repo', default=LEROBOT_REPO)
+    p.add_argument(
+        '--no-lerobot', dest='include_lerobot', action='store_false'
+    )
     args = p.parse_args()
 
     common = dict(
@@ -146,155 +405,70 @@ def main():
         keys_to_load=DEFAULT_COLUMNS,
     )
 
-    datasets: list[tuple[str, torch.utils.data.Dataset]] = []
-
-    if not args.no_local:
-        if _ensure_local_h5():
-            datasets.append(
-                (
-                    'HDF5 local (no cache)',
-                    HDF5Dataset(
-                        path=str(LOCAL_HDF5_PATH), keys_to_cache=[], **common
-                    ),
-                )
-            )
-            datasets.append(
-                (
-                    'HDF5 local (cached)',
-                    HDF5Dataset(
-                        path=str(LOCAL_HDF5_PATH),
-                        keys_to_cache=CACHE_COLS,
-                        **common,
-                    ),
-                )
-            )
-        else:
-            print('(skipping local HDF5: download failed)')
-        if _ensure_local_lance():
-            datasets.append(
-                (
-                    'Lance local (no cache)',
-                    LanceDataset(
-                        path=str(LOCAL_LANCE_DIR),
-                        table_name=S3_LANCE_TABLE,
-                        keys_to_cache=[],
-                        **common,
-                    ),
-                )
-            )
-            datasets.append(
-                (
-                    'Lance local (cached)',
-                    LanceDataset(
-                        path=str(LOCAL_LANCE_DIR),
-                        table_name=S3_LANCE_TABLE,
-                        keys_to_cache=CACHE_COLS,
-                        **common,
-                    ),
-                )
-            )
-        else:
-            print('(skipping local Lance: sync failed)')
-        if VideoDataset is None:
-            print('(skipping local Video: decord/imageio not installed)')
-        elif not LOCAL_VIDEO_DIR.exists():
-            print(
-                f'(skipping local Video: {LOCAL_VIDEO_DIR} not found — '
-                'run scripts/benchmark/convert.py first, or convert your '
-                "local .h5 with `convert(src.h5, dst.video, dest_format='video')`)"
-            )
-        else:
-            # FolderDataset/VideoDataset eagerly load tabular .npz columns
-            # into RAM at init, so action/proprio are already "cached" — no
-            # keys_to_cache knob; one row suffices.
-            try:
-                datasets.append(
-                    (
-                        'Video local',
-                        VideoDataset(
-                            path=str(LOCAL_VIDEO_DIR),
-                            video_keys=['pixels'],
-                            **common,
-                        ),
-                    )
-                )
-            except Exception as e:
-                print(f'(skipping local Video: {e})')
-
-    if not args.no_s3:
-        lance_opts = {'storage_options': _lance_opts()}
-        h5_opts = _hdf5_opts()
-        datasets.append(
-            (
-                'Lance S3 (no cache)',
-                LanceDataset(
-                    path=S3_LANCE_PREFIX,
-                    table_name=S3_LANCE_TABLE,
-                    keys_to_cache=[],
-                    connect_kwargs=lance_opts,
-                    **common,
-                ),
-            )
-        )
-        datasets.append(
-            (
-                'Lance S3 (cached)',
-                LanceDataset(
-                    path=S3_LANCE_PREFIX,
-                    table_name=S3_LANCE_TABLE,
-                    keys_to_cache=CACHE_COLS,
-                    connect_kwargs=lance_opts,
-                    **common,
-                ),
-            )
-        )
-        try:
-            datasets.append(
-                (
-                    'HDF5 S3 (no cache)',
-                    HDF5Dataset(
-                        path=S3_HDF5_URI,
-                        storage_options=h5_opts,
-                        keys_to_cache=[],
-                        **common,
-                    ),
-                )
-            )
-            datasets.append(
-                (
-                    'HDF5 S3 (cached)',
-                    HDF5Dataset(
-                        path=S3_HDF5_URI,
-                        storage_options=h5_opts,
-                        keys_to_cache=CACHE_COLS,
-                        **common,
-                    ),
-                )
-            )
-        except Exception as e:
-            print(f'(skipping HDF5 S3: {e})')
-
-    if args.include_lerobot:
-        try:
-            from stable_worldmodel.data import LeRobotAdapter
-
-            datasets.append(
-                (
-                    f'LeRobot ({args.lerobot_repo})',
-                    LeRobotAdapter(args.lerobot_repo, **common),
-                )
-            )
-        except Exception as e:
-            print(f'(skipping LeRobot: {e})')
-
     print(
-        f'\nworkers={args.num_workers} batch={args.batch_size} steps={args.steps}\n',
-        flush=True,
+        f'workers={args.num_workers} batch={args.batch_size} steps={args.steps}\n'
     )
-    results = [_bench(label, ds, args) for label, ds in datasets]
-    print('\nSummary (samples/sec):')
-    for label, sps in results:
-        print(f'  {label:<32} {sps:8.1f}')
+
+    # Each result: (ds_name, fmt, source, cache, storage_uri, sps, ms_step, size_bytes)
+    results: list[tuple[str, str, str, str, str, float, float, int]] = []
+
+    for ds_name in args.datasets:
+        cfg = DATASETS[ds_name]
+        rows = _build_rows(ds_name, cfg, args, common)
+
+        # Storage costs first; cache by URI so we don't re-list S3 prefixes.
+        storage_cache: dict[str, int] = {}
+        for fmt, source, cache, ds, storage_uri in rows:
+            if storage_uri not in storage_cache:
+                storage_cache[storage_uri] = (
+                    _s3_size(storage_uri)
+                    if storage_uri.startswith('s3://')
+                    else _local_size(Path(storage_uri))
+                )
+
+        for fmt, source, cache, ds, storage_uri in rows:
+            label = f'{ds_name:<7}  {fmt:<7} {source:<8} {cache:<8}'
+            sps, ms_step = _bench_one(label, ds, args)
+            results.append(
+                (
+                    ds_name,
+                    fmt,
+                    source,
+                    cache,
+                    storage_uri,
+                    sps,
+                    ms_step,
+                    storage_cache[storage_uri],
+                )
+            )
+
+    # ---- Markdown summary --------------------------------------------------
+    print('\n## Throughput\n')
+    print(
+        '| Dataset | Format  | Source   | Cache    | samples/s | ms/step  | Storage    |'
+    )
+    print(
+        '|---------|---------|----------|----------|-----------|----------|------------|'
+    )
+    for ds_name, fmt, source, cache, _uri, sps, ms_step, size in results:
+        print(
+            f'| {ds_name:<7} | {fmt:<7} | {source:<8} | {cache:<8} | '
+            f'{sps:9.1f} | {ms_step:8.1f} | {_fmt_bytes(size):>10} |'
+        )
+
+    print('\n## Storage size per dataset/format (local)\n')
+    print('| Dataset | Format  | Local size |')
+    print('|---------|---------|------------|')
+    seen: set[tuple[str, str]] = set()
+    for ds_name, fmt, source, cache, uri, *_ in results:
+        if source != 'local':
+            continue
+        key = (ds_name, fmt)
+        if key in seen:
+            continue
+        seen.add(key)
+        size = _local_size(Path(uri))
+        print(f'| {ds_name:<7} | {fmt:<7} | {_fmt_bytes(size):>10} |')
 
 
 if __name__ == '__main__':
@@ -304,5 +478,5 @@ if __name__ == '__main__':
         mp.set_start_method('spawn', force=True)
     except RuntimeError:
         pass
-    os.environ.setdefault('AWS_DEFAULT_REGION', AWS_REGION)
+    os.environ.setdefault('AWS_DEFAULT_REGION', S3_REGION)
     main()
