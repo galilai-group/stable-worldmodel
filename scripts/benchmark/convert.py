@@ -1,15 +1,19 @@
-"""Convert + upload tworoom across HDF5/Lance/Video formats.
+"""Convert + upload tworoom + pusht across HDF5/Lance/Video formats.
 
-Tworoom (224x224) is the bench's source of truth — pusht's 96x96 frames
-were too small to make per-format throughput differences land cleanly.
-
-Idempotent: skips conversion if the local output already exists; skips
-upload by checking the S3 prefix. Pass ``--force`` to redo from scratch.
+Both datasets are 224x224 LeWorldModel sources. Idempotent: skips
+conversion if the local output already exists; skips upload by checking
+the S3 prefix. Pass ``--force`` to redo from scratch.
 
 Defaults:
     python convert.py            # convert + upload all formats
     python convert.py --no-upload         # convert only
     python convert.py --force             # ignore existing local outputs
+
+Source resolution:
+    tworoom: ``{S3_BASE}/tworoom/tworoom.h5`` (no public HF mirror).
+    pusht:   tries ``{S3_BASE}/pusht/pusht.h5`` first; on miss, falls
+             back to ``quentinll/lewm-pusht`` on HF and decompresses
+             the ``.zst`` blob via the system ``zstd`` CLI.
 
 Run on EC2 with an IAM instance role attached, or set AWS creds in env.
 """
@@ -31,9 +35,13 @@ S3_BUCKET = 'lancedb-datasets-dev-us-east-2-devrel'
 S3_BASE = f's3://{S3_BUCKET}/training/stableworldmodel'
 S3_REGION = 'us-east-2'
 
-# Tworoom: original .h5 lives on S3 (no public HF mirror). We download
-# it once with `aws s3 cp` and then derive the lance/video versions.
+# tworoom: only available on S3.
 TWOROOM_S3_URI = f'{S3_BASE}/tworoom/tworoom.h5'
+
+# pusht: try S3 first, fall back to HF + zstd decompress on miss.
+PUSHT_S3_URI = f'{S3_BASE}/pusht/pusht.h5'
+PUSHT_HF_REPO = 'quentinll/lewm-pusht'
+PUSHT_HF_FILE = 'pusht_expert_train.h5.zst'
 
 # Each entry: (local_path, s3_subpath_relative_to_S3_BASE).
 PLAN = {
@@ -41,6 +49,11 @@ PLAN = {
         'hdf5': ('tworoom.h5', 'tworoom/tworoom.h5'),
         'lance': ('tworoom.lance', 'tworoom/tworoom.lance/'),
         'video': ('tworoom.video', 'tworoom/tworoom.video/'),
+    },
+    'pusht': {
+        'hdf5': ('pusht.h5', 'pusht/pusht.h5'),
+        'lance': ('pusht.lance', 'pusht/pusht.lance/'),
+        'video': ('pusht.video', 'pusht/pusht.video/'),
     },
 }
 
@@ -87,35 +100,51 @@ def _wipe(local: Path) -> None:
         shutil.rmtree(local)
 
 
+# ---- Source fetchers -------------------------------------------------------
+
+
+def _fetch_tworoom_h5(dest: Path) -> None:
+    print(f'  downloading {TWOROOM_S3_URI} -> {dest}', flush=True)
+    rc = _aws('s3', 'cp', TWOROOM_S3_URI, str(dest), '--no-progress')
+    if rc != 0:
+        raise SystemExit('tworoom h5 download failed')
+
+
+def _fetch_pusht_h5(dest: Path) -> None:
+    """S3 first; fall back to HF + zstd decompress."""
+    print(f'  trying {PUSHT_S3_URI} -> {dest}', flush=True)
+    rc = _aws('s3', 'cp', PUSHT_S3_URI, str(dest), '--no-progress')
+    if rc == 0:
+        return
+
+    print(
+        f'  S3 miss; downloading {PUSHT_HF_REPO}/{PUSHT_HF_FILE} from HF',
+        flush=True,
+    )
+    from huggingface_hub import hf_hub_download
+
+    zst = hf_hub_download(
+        repo_id=PUSHT_HF_REPO,
+        filename=PUSHT_HF_FILE,
+        repo_type='dataset',
+    )
+    print(f'  decompressing {zst} -> {dest}', flush=True)
+    rc = subprocess.run(['zstd', '-d', '-f', '-o', str(dest), zst]).returncode
+    if rc != 0:
+        raise SystemExit(
+            'pusht: zstd decompression failed (install zstd if missing)'
+        )
+
+
 # ---- Conversions -----------------------------------------------------------
 
 
-def convert_tworoom(force: bool) -> None:
-    """Tworoom S3 .h5 -> {h5 (canonical local copy), lance, video}.
-
-    The original tworoom .h5 lives on S3 (not HF). We ``aws s3 cp`` it
-    once into ./tworoom.h5 — ``--force`` does NOT re-download the source
-    since it's the canonical input — then read it directly via
-    HDF5Dataset and stream into the lance/video writers.
-    """
-    print('\n=== tworoom ===')
-    h5_local, _ = PLAN['tworoom']['hdf5']
-    lance_local, _ = PLAN['tworoom']['lance']
-    video_local, _ = PLAN['tworoom']['video']
-
-    # Source: download only if missing. --force never wipes the source.
-    h5_p = Path(h5_local)
-    if not _is_done(h5_p):
-        print(f'  downloading {TWOROOM_S3_URI} -> {h5_p}', flush=True)
-        rc = _aws('s3', 'cp', TWOROOM_S3_URI, str(h5_p), '--no-progress')
-        if rc != 0:
-            raise SystemExit('tworoom h5 download failed')
-    else:
-        print(f'  source: {h5_p} (already present)')
-
-    # Derived outputs: --force wipes & re-derives.
+def _derive_lance_video(name: str, h5_p: Path, force: bool) -> None:
+    """From a local source .h5, derive lance + video outputs in PLAN[name]."""
+    plan = PLAN[name]
     targets: list[tuple[str, str]] = []
-    for fmt, dest in [('lance', lance_local), ('video', video_local)]:
+    for fmt in ('lance', 'video'):
+        dest = plan[fmt][0]
         dest_p = Path(dest)
         if force and dest_p.exists():
             _wipe(dest_p)
@@ -142,6 +171,26 @@ def convert_tworoom(force: bool) -> None:
             w.write_episodes(gen())
 
 
+def convert_tworoom(force: bool) -> None:
+    print('\n=== tworoom ===')
+    h5_p = Path(PLAN['tworoom']['hdf5'][0])
+    if not _is_done(h5_p):
+        _fetch_tworoom_h5(h5_p)
+    else:
+        print(f'  source: {h5_p} (already present)')
+    _derive_lance_video('tworoom', h5_p, force)
+
+
+def convert_pusht(force: bool) -> None:
+    print('\n=== pusht ===')
+    h5_p = Path(PLAN['pusht']['hdf5'][0])
+    if not _is_done(h5_p):
+        _fetch_pusht_h5(h5_p)
+    else:
+        print(f'  source: {h5_p} (already present)')
+    _derive_lance_video('pusht', h5_p, force)
+
+
 # ---- Main ------------------------------------------------------------------
 
 
@@ -158,18 +207,20 @@ def main() -> None:
     args = p.parse_args()
 
     convert_tworoom(args.force)
+    convert_pusht(args.force)
 
     if args.no_upload:
         print('\n--no-upload: leaving S3 untouched.')
         return
 
     print('\n=== upload ===')
-    for fmt, (local, s3_sub) in PLAN['tworoom'].items():
-        local_p = Path(local)
-        if not local_p.exists():
-            print(f'  skip tworoom/{fmt}: {local_p} not found')
-            continue
-        _upload(local_p, s3_sub)
+    for ds_name, plan in PLAN.items():
+        for fmt, (local, s3_sub) in plan.items():
+            local_p = Path(local)
+            if not local_p.exists():
+                print(f'  skip {ds_name}/{fmt}: {local_p} not found')
+                continue
+            _upload(local_p, s3_sub)
 
 
 if __name__ == '__main__':

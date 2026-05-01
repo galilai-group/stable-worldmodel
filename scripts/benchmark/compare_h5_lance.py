@@ -1,12 +1,12 @@
-"""Comprehensive benchmark — tworoom across HDF5/Lance/Video.
+"""Comprehensive benchmark — tworoom + pusht across HDF5/Lance/Video.
 
 Throughput in samples/s, on-disk storage in MB. Auto-downloads any missing
 local copies from S3 first, then runs every applicable combination, then
 prints a markdown table.
 
-What's measured per (format x source x cache-mode):
+What's measured per (dataset x format x source x cache-mode):
   - HDF5 local/s3 (cached/no-cache), Lance local/s3 (cached/no-cache),
-    Video local. 8 rows.
+    Video local. 8 rows per dataset.
   - Storage cost — local file/dir size and S3 prefix size.
 
 Run on EC2 with an IAM instance role attached, or set AWS creds in env.
@@ -58,6 +58,14 @@ DATASETS = {
         'lance_local': './tworoom.lance',
         'lance_s3': f'{S3_BASE}/tworoom/tworoom.lance',
         'video_local': './tworoom.video',
+    },
+    'pusht': {
+        'image_size': 224,
+        'h5_local': './pusht.h5',
+        'h5_s3': f'{S3_BASE}/pusht/pusht.h5',
+        'lance_local': './pusht.lance',
+        'lance_s3': f'{S3_BASE}/pusht/pusht.lance',
+        'video_local': './pusht.video',
     },
 }
 
