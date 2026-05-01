@@ -63,18 +63,9 @@ class SaveCkptCallback(Callback):
 
 
 class _ForwardWithCfg:
-    """Picklable replacement for ``functools.partial(forward_fn, cfg=cfg)``.
-
-    WORKAROUND: ``spt.Module`` binds the ``forward=...`` argument as a
-    method on its instance. ``multiprocessing.reduction._reduce_method``
-    reduces bound methods via ``(getattr, (m.__self__, m.__func__.__name__))``,
-    so the underlying callable needs a ``__name__`` attribute or spawn-
-    mode DataLoader workers crash. Lance forces the spawn start method
-    on Linux. ``__name__='forward'`` lets the reducer round-trip via
-    ``getattr(module, 'forward')`` on the worker side. The proper fix
-    belongs in ``stable_pretraining.Module``.
-    """
-
+    # WORKAROUND: spt.Module binds `forward=` as a method; multiprocessing's
+    # bound-method reducer needs `__name__`. Fix belongs upstream in
+    # stable_pretraining.Module.
     __name__ = 'forward'
 
     def __init__(self, fn, cfg):

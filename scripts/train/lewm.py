@@ -1,5 +1,3 @@
-import os
-import pickle
 from pathlib import Path
 
 import hydra
@@ -21,83 +19,6 @@ from stable_worldmodel.wm.lewm import LeWM
 from stable_worldmodel.wm.loss import SIGReg
 from lightning.pytorch.callbacks import Callback
 from stable_worldmodel.wm.utils import save_pretrained
-
-
-class _PickleDiagnostic(Callback):
-    """Walks the train + val DataLoaders' reachable object graph and prints
-    every attribute path that fails to pickle with `_thread.lock`. Runs in
-    `on_fit_start`, i.e. AFTER spt's env_info / other setup callbacks
-    have fired but BEFORE workers are spawned — exactly the lifecycle
-    window when DataLoader workers crash with "cannot pickle".
-
-    Gated by `SWM_PICKLE_DIAGNOSTIC=1`. SystemExits after printing so
-    you don't have to wait for the actual training to fail.
-    """
-
-    @staticmethod
-    def _try_pickle(obj):
-        try:
-            pickle.dumps(obj)
-            return True, None
-        except Exception as e:
-            return False, str(e)
-
-    def _walk(self, obj, path, depth=0, max_depth=10, seen=None):
-        if seen is None:
-            seen = set()
-        if id(obj) in seen or depth > max_depth:
-            return
-        seen.add(id(obj))
-        children = []
-        if hasattr(obj, '__dict__'):
-            children = list(vars(obj).items())
-        elif isinstance(obj, dict):
-            children = list(obj.items())
-        elif isinstance(obj, (list, tuple)):
-            children = list(enumerate(obj))
-        for k, v in children:
-            ok_child, err = self._try_pickle(v)
-            if ok_child:
-                continue
-            # Only chase the lock — other failures (dynamic classes, file
-            # handles) are noise for this hunt.
-            if '_thread' not in (err or '') and 'lock' not in (
-                err or ''
-            ).lower():
-                continue
-            next_path = (
-                f'{path}.{k}' if isinstance(k, str) else f'{path}[{k!r}]'
-            )
-            print(
-                f'  ❌ {next_path}  type={type(v).__module__}.{type(v).__name__}',
-                flush=True,
-            )
-            self._walk(v, next_path, depth + 1, max_depth, seen)
-
-    def on_fit_start(self, trainer, pl_module):
-        targets = []
-        for attr in ('train_dataloader', 'val_dataloaders'):
-            dl = getattr(trainer, attr, None)
-            if dl is None:
-                continue
-            if isinstance(dl, (list, tuple)):
-                for i, x in enumerate(dl):
-                    targets.append((f'{attr}[{i}]', x))
-            else:
-                targets.append((attr, dl))
-
-        print('\n========== PICKLE DIAGNOSTIC ==========', flush=True)
-        for label, obj in targets:
-            ok, err = self._try_pickle(obj)
-            if ok:
-                print(f'{label}: ✅ pickles OK', flush=True)
-                continue
-            print(f'{label}: ❌ FAILS — {err[:120]}', flush=True)
-            self._walk(obj, label)
-        print('========================================\n', flush=True)
-        raise SystemExit(
-            'pickle diagnostic complete; unset SWM_PICKLE_DIAGNOSTIC to run normally'
-        )
 
 
 def get_img_preprocessor(source: str, target: str, img_size: int = 224):
@@ -139,23 +60,9 @@ class SaveCkptCallback(Callback):
 
 
 class _ForwardWithCfg:
-    """Picklable replacement for ``functools.partial(forward_fn, cfg=cfg)``.
-
-    WORKAROUND: ``spt.Module`` binds the ``forward=...`` argument as a
-    method on its instance. ``multiprocessing.reduction._reduce_method``
-    reduces bound methods via ``(getattr, (m.__self__, m.__func__.__name__))``,
-    so the underlying callable needs a ``__name__`` attribute or spawn-
-    mode DataLoader workers crash (``functools.partial`` lacks one;
-    Lance forces the spawn start method on Linux).
-
-    Setting ``__name__ = 'forward'`` lets the reducer succeed —
-    ``getattr(module, 'forward')`` on the worker side returns the
-    re-bound method which dispatches back through ``__call__``. The
-    proper fix belongs in ``stable_pretraining.Module`` so it doesn't
-    subject ``forward`` to method-reduction semantics; this is just
-    enough to unblock Lance + training end-to-end.
-    """
-
+    # WORKAROUND: spt.Module binds `forward=` as a method; multiprocessing's
+    # bound-method reducer needs `__name__`. Fix belongs upstream in
+    # stable_pretraining.Module.
     __name__ = 'forward'
 
     def __init__(self, fn, cfg):
@@ -340,13 +247,9 @@ def run(cfg):
         epoch_interval=1,
     )
 
-    callbacks = [object_dump_callback]
-    if os.environ.get('SWM_PICKLE_DIAGNOSTIC'):
-        callbacks.append(_PickleDiagnostic())
-
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=callbacks,
+        callbacks=[object_dump_callback],
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,

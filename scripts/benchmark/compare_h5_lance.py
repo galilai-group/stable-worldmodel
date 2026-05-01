@@ -1,12 +1,12 @@
-"""Comprehensive benchmark — tworoom across HDF5/Lance/Video/LeRobot.
+"""Comprehensive benchmark — tworoom across HDF5/Lance/Video.
 
 Throughput in samples/s, on-disk storage in MB. Auto-downloads any missing
 local copies from S3 first, then runs every applicable combination, then
 prints a markdown table.
 
-What's measured per (format × source × cache-mode):
+What's measured per (format x source x cache-mode):
   - HDF5 local/s3 (cached/no-cache), Lance local/s3 (cached/no-cache),
-    Video local, LeRobot local. 9 rows.
+    Video local. 8 rows.
   - Storage cost — local file/dir size and S3 prefix size.
 
 Run on EC2 with an IAM instance role attached, or set AWS creds in env.
@@ -58,11 +58,6 @@ DATASETS = {
         'lance_local': './tworoom.lance',
         'lance_s3': f'{S3_BASE}/tworoom/tworoom.lance',
         'video_local': './tworoom.video',
-        'lerobot_local': './tworoom.lerobot',
-        'lerobot_s3': f'{S3_BASE}/tworoom/tworoom.lerobot',
-        # Logical repo_id used at LeRobotDataset.create() time. Read
-        # path uses (repo_id, root=...) — the dir is the source of truth.
-        'lerobot_repo_id': 'local/tworoom',
     },
 }
 
@@ -101,10 +96,10 @@ def _ensure_local_h5(local: Path, s3_uri: str) -> bool:
 
 
 def _ensure_local_dir(local_dir: Path, s3_uri: str) -> bool:
-    """Sync an S3 directory prefix (Lance / LeRobot / Video) to a local dir."""
+    """Sync an S3 directory prefix (Lance / Video) to a local dir."""
     if local_dir.exists() and any(local_dir.iterdir()):
         return True
-    print(f'  syncing {s3_uri}/ → {local_dir}', flush=True)
+    print(f'  syncing {s3_uri}/ -> {local_dir}', flush=True)
     local_dir.mkdir(parents=True, exist_ok=True)
     return (
         _aws(
@@ -213,7 +208,6 @@ def _build_rows(ds_name, cfg, args, common):
     h5_local = Path(cfg['h5_local']).resolve()
     lance_local = Path(cfg['lance_local']).resolve()
     video_local = Path(cfg['video_local']).resolve()
-    lerobot_local = Path(cfg['lerobot_local']).resolve()
 
     if not args.no_local:
         if _ensure_local_h5(h5_local, cfg['h5_s3']):
@@ -270,7 +264,7 @@ def _build_rows(ds_name, cfg, args, common):
                     (
                         'Video',
                         'local',
-                        '—',
+                        '-',
                         VideoDataset(
                             path=str(video_local),
                             video_keys=['pixels'],
@@ -281,27 +275,6 @@ def _build_rows(ds_name, cfg, args, common):
                 )
             except Exception as e:
                 print(f'  (skipping {ds_name} Video: {e})')
-        if args.include_lerobot and _ensure_local_dir(
-            lerobot_local, cfg['lerobot_s3']
-        ):
-            try:
-                from stable_worldmodel.data import LeRobotAdapter
-
-                rows.append(
-                    (
-                        'LeRobot',
-                        'local',
-                        '—',
-                        LeRobotAdapter(
-                            repo_id=cfg['lerobot_repo_id'],
-                            root=str(lerobot_local),
-                            **common,
-                        ),
-                        str(lerobot_local),
-                    )
-                )
-            except Exception as e:
-                print(f'  (skipping {ds_name} LeRobot: {e})')
 
     if not args.no_s3:
         lance_opts = {'storage_options': _lance_storage_opts()}
@@ -376,15 +349,6 @@ def main() -> None:
     p.add_argument('--steps', type=int, default=100)
     p.add_argument('--no-local', action='store_true')
     p.add_argument('--no-s3', action='store_true')
-    p.add_argument(
-        '--include-lerobot',
-        action='store_true',
-        default=True,
-        help='include the LeRobot local row (default on)',
-    )
-    p.add_argument(
-        '--no-lerobot', dest='include_lerobot', action='store_false'
-    )
     args = p.parse_args()
 
     common = dict(
