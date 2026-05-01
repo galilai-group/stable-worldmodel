@@ -6,6 +6,7 @@ import lightning as pl
 import stable_pretraining as spt
 import torch
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
@@ -32,10 +33,6 @@ def get_data(cfg):
             ),
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
-
-    from stable_worldmodel.data import (
-        column_normalizer as get_column_normalizer,
-    )
 
     cache_dir = None
     if not hasattr(cfg, 'local_cache_dir'):
