@@ -1,43 +1,66 @@
-<h1 align="center">
-    <p> <b>stable-worldmodel</b></p>
-</h1>
+<h1 align="center">stable-worldmodel</h1>
 
-<h2 align="center">
-    <p><i>World model research made simple. From data collection to training and evaluation.</i></p>
-</h2>
-
-<div align="center" style="line-height: 1;">
-  <a href="https://galilai-group.github.io/stable-worldmodel/" target="_blank" style="margin: 2px;"><img alt="Documentation" src="https://img.shields.io/badge/Docs-blue.svg" style="display: inline-block; vertical-align: middle;"/></a>
-  <a href="https://github.com/galilai-group/stable-worldmodel" target="_blank" style="margin: 2px;"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/galilai-group/stable-worldmodel/tests.yaml?label=Tests" style="display: inline-block; vertical-align: middle;"/></a>
-  <a href="https://pypi.python.org/pypi/stable-worldmodel/#history" target="_blank" style="margin: 2px;"><img alt="PyPI" src="https://img.shields.io/pypi/v/stable-worldmodel.svg" style="display: inline-block; vertical-align: middle;"/></a>
-  <a href="https://pytorch.org/get-started/locally/" target="_blank" style="margin: 2px;"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white" style="display: inline-block; vertical-align: middle;"/></a>
-  <a href="https://github.com/astral-sh/ruff" target="_blank" style="margin: 2px;"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" style="display: inline-block; vertical-align: middle;"/></a>
-</div>
+<p align="center"><i>A platform for reproducible world model research and evaluation.</i></p>
 
 <p align="center">
-  <a href="#quick-example"><b>Quick Example</b></a> | <a href="#supported-environments"><b>Environments</b></a> | <a href="#installing-stable-worldmodel"><b>Installation</b></a> | <a href="https://galilai-group.github.io/stable-worldmodel/"><b>Documentation</b></a> | <a href="#contributing"><b>Contributing</b></a> | <a href="#citation"><b>Citation</b></a>
+  <a href="https://galilai-group.github.io/stable-worldmodel/"><img alt="Documentation" src="https://img.shields.io/badge/Docs-blue.svg"/></a>
+  <a href="https://github.com/galilai-group/stable-worldmodel"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/galilai-group/stable-worldmodel/tests.yaml?label=Tests"/></a>
+  <a href="https://pypi.python.org/pypi/stable-worldmodel/#history"><img alt="PyPI" src="https://img.shields.io/pypi/v/stable-worldmodel.svg"/></a>
+  <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"/></a>
+  <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"/></a>
 </p>
 
+<p align="center">
+  <a href="#installation"><b>Installation</b></a> ·
+  <a href="#quick-start"><b>Quick Start</b></a> ·
+  <a href="#environments"><b>Environments</b></a> ·
+  <a href="#solvers-and-baselines"><b>Solvers & Baselines</b></a> ·
+  <a href="https://galilai-group.github.io/stable-worldmodel/"><b>Documentation</b></a> ·
+  <a href="#citation"><b>Citation</b></a>
+</p>
 
+---
 
-## Quick Example
+`stable-worldmodel` provides a single, unified interface for the three stages of world model research — **collecting data**, **training**, and **evaluating with model-predictive control** — across a large suite of standardized environments. It ships with reference implementations of common baselines and planning solvers so research code can stay focused on the contribution that matters: the model and the objective.
+
+## Installation
+
+From PyPI:
+
+```bash
+pip install stable-worldmodel
+```
+
+From source (development):
+
+```bash
+git clone https://github.com/galilai-group/stable-worldmodel
+cd stable-worldmodel
+uv venv --python=3.10 && source .venv/bin/activate
+uv sync --all-extras --group dev
+```
+
+Datasets and checkpoints are stored under `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). Override the variable to point at your preferred storage location.
+
+> The library is in active development. APIs may change between minor versions.
+
+## Quick Start
 
 ```python
 import stable_worldmodel as swm
-from stable_worldmodel.data import HDF5Dataset
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
-# collect a dataset
-world = swm.World('swm/PushT-v1', num_envs=8)
+# 1. Collect a dataset
+world = swm.World("swm/PushT-v1", num_envs=8)
 world.set_policy(your_expert_policy)
-world.record_dataset(dataset_name='pusht_demo', episodes=100)
+world.collect("data/pusht_demo.lance", episodes=100, seed=0)
 
-# load dataset and train your world model
-dataset = HDF5Dataset(name='pusht_demo', num_steps=16)
-world_model = ...  # your world-model
+# 2. Load it and train your world model (format is autodetected)
+dataset = swm.data.load_dataset("data/pusht_demo.lance", num_steps=16)
+world_model = ...  # your model
 
-# evaluate with model predictive control
+# 3. Evaluate with model-predictive control
 solver = CEMSolver(model=world_model, num_samples=300)
 policy = WorldModelPolicy(solver=solver, config=PlanConfig(horizon=10))
 
@@ -46,12 +69,7 @@ results = world.evaluate(episodes=50)
 print(f"Success Rate: {results['success_rate']:.1f}%")
 ```
 
-stable-worldmodel eases reproducibility by already implementing several baselines: [`scripts/train/prejepa.py`](scripts/train/prejepa.py) reproduces results from the [DINO-WM paper](https://arxiv.org/abs/2411.04983) and [`scripts/train/gcivl.py`](scripts/train/gcivl.py) implements several [goal-conditioned RL algorithms](https://arxiv.org/abs/2410.20092).
-To foster research in MPC for world models, several planning solvers are already implemented, including zeroth-order ([CEM](stable_worldmodel/solver/cem.py), [MPPI](stable_worldmodel/solver/mppi.py)), gradient-based ([GradientSolver](stable_worldmodel/solver/gd.py), [PGD](stable_worldmodel/solver/discrete_solvers.py)), and constrained gradient approaches ([LagrangianSolver](stable_worldmodel/solver/lagrangian.py)).
-
-### Efficiency
-
-We support multiple dataset formats to optimize efficiency: MP4 enables fast and convenient visualization, while HDF5 ensures high-performance data loading, reduces CPU bottlenecks, and improves overall GPU utilization.
+Reference implementations are provided in [`scripts/train/`](scripts/train): [`prejepa.py`](scripts/train/prejepa.py) reproduces [DINO-WM](https://arxiv.org/abs/2411.04983), and [`gcivl.py`](scripts/train/gcivl.py) implements several [goal-conditioned RL baselines](https://arxiv.org/abs/2410.20092).
 
 <p align="center">
   <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">
@@ -59,25 +77,87 @@ We support multiple dataset formats to optimize efficiency: MP4 enables fast and
   <em>GPU utilization for DINO-WM trained on Push-T with a DINOv2-Small backbone.</em>
 </p>
 
-See the full documentation [here](https://galilai-group.github.io/stable-worldmodel/).
+## Data Formats
 
-## Supported Environments
+Recording, loading, and conversion all go through a small **format registry**. Pick the backend that matches your trade-off, or [register your own](https://galilai-group.github.io/stable-worldmodel/api/dataset/#registering-a-custom-format).
 
-<p align="center">
-  <img src="docs/assets/envs_grid_1.gif" alt="Environments Grid 1">
-  <br>
-  <img src="docs/assets/envs_grid_2.gif" alt="Environments Grid 2">
-</p>
+| Format    | On-disk layout                                  | Best for                                       |
+|-----------|-------------------------------------------------|------------------------------------------------|
+| `lance`   | LanceDB table (episode-contiguous flat rows)    | default — append-friendly, fast indexed reads  |
+| `hdf5`    | single `.h5` file (one dataset per column)      | portable single-file artifact                  |
+| `folder`  | `.npz` columns + one JPEG per step              | inspection, partial-key streaming              |
+| `video`   | `.npz` columns + one MP4 per episode (`decord`) | long episodes, compact image storage           |
+| `lerobot` | `lerobot://<repo_id>` (read-only adapter)       | training/eval directly on LeRobot Hub datasets |
 
-stable-worldmodel supports a large collection of environments from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [OGBench](https://github.com/seohongpark/ogbench), and classical world model benchmarks such as [Two-Room](https://arxiv.org/abs/2411.04983) and [PushT](https://arxiv.org/abs/2303.04137).
+```python
+world.collect("data/pusht.lance", episodes=100)                  # default: lance
+world.collect("data/pusht_video", episodes=100, format="video")  # mp4 episodes
 
-Each environment includes visual and physical factor variations to evaluate robustness and generalization. New environments can easily be added to stable-worldmodel as they only need to follow the [Gymnasium](https://gymnasium.farama.org/) interface.
+ds = swm.data.load_dataset("data/pusht.lance", num_steps=16)     # autodetect
+swm.data.convert("data/pusht.lance", "data/pusht_video",
+                 dest_format="video", fps=30)                    # one-shot migration
+```
+
+Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'error'`); re-running `world.collect` extends the existing dataset rather than failing.
+
+## Environments
 
 <div align="center">
 
 <table>
 <tr>
-<td valign="top">
+<td align="center"><img src="docs/assets/ballincup.gif" width="120"/><br><img src="docs/assets/ballincup_var.gif" width="120"/></td>
+<td align="center"><img src="docs/assets/cartpole.gif"  width="120"/><br><img src="docs/assets/cartpole_var.gif"  width="120"/></td>
+<td align="center"><img src="docs/assets/cheetah.gif"   width="120"/><br><img src="docs/assets/cheetah_var.gif"   width="120"/></td>
+<td align="center"><img src="docs/assets/finger.gif"    width="120"/><br><img src="docs/assets/finger_var.gif"    width="120"/></td>
+<td align="center"><img src="docs/assets/hopper.gif"    width="120"/><br><img src="docs/assets/hopper_var.gif"    width="120"/></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td align="center"><img src="docs/assets/pendulum.gif"  width="120"/><br><img src="docs/assets/pendulum_var.gif"  width="120"/></td>
+<td align="center"><img src="docs/assets/quadruped.gif" width="120"/><br><img src="docs/assets/quadruped_var.gif" width="120"/></td>
+<td align="center"><img src="docs/assets/reacher.gif"   width="120"/><br><img src="docs/assets/reacher_var.gif"   width="120"/></td>
+<td align="center"><img src="docs/assets/walker.gif"    width="120"/><br><img src="docs/assets/walker_var.gif"    width="120"/></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td align="center"><img src="docs/assets/cartpole_control.gif"     width="120"/><br><img src="docs/assets/cartpole_control_var.gif"     width="120"/></td>
+<td align="center"><img src="docs/assets/mountain_car_control.gif" width="120"/><br><img src="docs/assets/mountain_car_control_var.gif" width="120"/></td>
+<td align="center"><img src="docs/assets/acrobot_control.gif"      width="120"/><br><img src="docs/assets/acrobot_control_var.gif"      width="120"/></td>
+<td align="center"><img src="docs/assets/pendulum_control.gif"     width="120"/><br><img src="docs/assets/pendulum_control_var.gif"     width="120"/></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td align="center"><img src="docs/assets/cube.gif"    width="120"/><br><img src="docs/assets/cube_fov.gif"    width="120"/></td>
+<td align="center"><img src="docs/assets/scene.gif"   width="120"/><br><img src="docs/assets/scene_fov.gif"   width="120"/></td>
+<td align="center"><img src="docs/assets/pusht.gif"   width="120"/><br><img src="docs/assets/pusht_fov.gif"   width="120"/></td>
+<td align="center"><img src="docs/assets/tworoom.gif" width="120"/><br><img src="docs/assets/tworoom_fov.gif" width="120"/></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td align="center"><img src="docs/assets/fetch_reach.gif"        width="120"/><br><img src="docs/assets/fetch_reach_var.gif"        width="120"/></td>
+<td align="center"><img src="docs/assets/fetch_push.gif"         width="120"/><br><img src="docs/assets/fetch_push_var.gif"         width="120"/></td>
+<td align="center"><img src="docs/assets/fetch_slide.gif"        width="120"/><br><img src="docs/assets/fetch_slide_var.gif"        width="120"/></td>
+<td align="center"><img src="docs/assets/fetch_pickandplace.gif" width="120"/><br><img src="docs/assets/fetch_pickandplace_var.gif" width="120"/></td>
+<td align="center"><img src="docs/assets/craftax_classic.gif"    width="120"/><br><img src="docs/assets/craftax.gif"                width="120"/></td>
+</tr>
+</table>
+
+<em>Top row: default appearance &nbsp;·&nbsp; Bottom row: visual factor of variation</em>
+
+</div>
+
+Environments are pulled from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), the [Arcade Learning Environment](https://ale.farama.org/) (100+ Atari games), and classical world model benchmarks ([Two-Room](https://arxiv.org/abs/2411.04983), [PushT](https://arxiv.org/abs/2303.04137)). Each ships with both visual and physical factors of variation for robustness studies. Adding a new environment only requires conforming to the [Gymnasium](https://gymnasium.farama.org/) interface.
+
+<div align="center">
 
 | [Environment ID](https://github.com/galilai-group/stable-worldmodel/tree/main/stable_worldmodel/envs) |  # FoV  |
 |------------------------------|---------|
@@ -97,95 +177,65 @@ Each environment includes visual and physical factor variations to evaluate robu
 | swm/FingerDMControl-v0       | 10      |
 | swm/ManipulatorDMControl-v0  | 8       |
 | swm/QuadrupedDMControl-v0    | 7       |
-
-</td>
-<td valign="top">
-
-| [Solver](https://github.com/galilai-group/stable-worldmodel/tree/main/stable_worldmodel/solver) | Type |
-|----------|---|
-| Cross-Entropy Method (CEM)| Sampling |
-| Improved CEM (iCEM) | Sampling |
-| Model Predictive Path Integral (MPPI) | Sampling |
-| Gradient Descent (SGD, Adam) | Gradient |
-| Projected Gradient Descent (PGD) | Gradient |
-| Augmented Lagrangian | Constrained Opt |
-
-<br>
-
-| [Baselines](https://github.com/galilai-group/stable-worldmodel/tree/main/scripts/train) | Type |
-|-------------------|----|
-| DINO-WM           |JEPA|
-| PLDM              |JEPA|
-| LeWM              |JEPA|
-| GCBC              |Behaviour Cloning|
-| GCIVL             |RL|
-| GCIQL             |RL|
-
-</td>
-
-</td>
-</tr>
-</table>
+| swm/CartPoleControl-v1       | 10      |
+| swm/MountainCarControl-v0    | 5       |
+| swm/MountainCarContinuousControl-v0 | 4 |
+| swm/AcrobotControl-v1        | 11      |
+| swm/PendulumControl-v1       | 9       |
+| swm/FetchReach-v3            | 8       |
+| swm/FetchPush-v3             | 11      |
+| swm/FetchSlide-v3            | 11      |
+| swm/FetchPickAndPlace-v3     | 11      |
+| swm/CraftaxClassicPixels-v1  | —       |
+| swm/CraftaxClassicSymbolic-v1| —       |
+| swm/CraftaxPixels-v1         | —       |
+| swm/CraftaxSymbolic-v1       | —       |
+| [ALE/* (100+ Atari games)](https://ale.farama.org/) | — |
 
 </div>
 
+## Solvers and Baselines
 
+<div align="center">
 
+| [Solver](https://github.com/galilai-group/stable-worldmodel/tree/main/stable_worldmodel/solver) | Type            |
+|---------------------------------------|-----------------|
+| Cross-Entropy Method (CEM)            | Sampling        |
+| Improved CEM (iCEM)                   | Sampling        |
+| Model Predictive Path Integral (MPPI) | Sampling        |
+| Predictive Sampling                   | Sampling        |
+| Gradient Descent (SGD, Adam)          | Gradient        |
+| Projected Gradient Descent (PGD)      | Gradient        |
+| Augmented Lagrangian                  | Constrained Opt |
 
-## CLI
+| [Baseline](https://github.com/galilai-group/stable-worldmodel/tree/main/scripts/train) | Type              |
+|----------|-------------------|
+| DINO-WM  | JEPA              |
+| PLDM     | JEPA              |
+| LeWM     | JEPA              |
+| GCBC     | Behaviour Cloning |
+| GCIVL    | RL                |
+| GCIQL    | RL                |
 
-After installation, the `swm` command-line tool is available to inspect your datasets, environments, and checkpoints without writing any code:
+</div>
 
-```bash
-# list cached datasets
-swm datasets
+## Command-Line Interface
 
-# inspect a specific dataset
-swm inspect pusht_expert_train
-
-# list all registered environments
-swm envs
-
-# show factors of variation for an environment
-swm fovs PushT-v1
-
-# list available model checkpoints
-swm checkpoints
-```
-
-## Installing stable-worldmodel
-
-stable-worldmodel is available on PyPI and can be installed with:
-
-```bash
-pip install stable-worldmodel
-```
-
-> **Note:** The library is still in active development.
-
-### Install from Source
-
-To set up a development environment from source:
+After installation, the `swm` command is available for inspecting datasets, environments, and checkpoints without writing code:
 
 ```bash
-git clone https://github.com/galilai-group/stable-worldmodel
-cd stable-worldmodel/
-uv venv --python=3.10
-source .venv/bin/activate
-uv sync --all-extras --group dev
+swm datasets                    # list cached datasets
+swm inspect pusht_expert_train  # inspect a specific dataset
+swm envs                        # list all registered environments
+swm fovs PushT-v1               # show factors of variation for an environment
+swm checkpoints                 # list available model checkpoints
 ```
 
-> **Note:** All datasets and models will be saved in the `$STABLEWM_HOME` environment variable. By default this is `~/.stable_worldmodel/`. Adapt this directory according to your storage needs.
+## Documentation
 
+The full documentation lives at [galilai-group.github.io/stable-worldmodel](https://galilai-group.github.io/stable-worldmodel/), with API references, tutorials, and guides.
 
-### Questions
-
-If you have a question, please [file an issue](https://github.com/galilai-group/stable-worldmodel/issues).
-
-
-## Works Based on stable-worldmodel
-
-The following research projects have been built on top of stable-worldmodel:
+## Built on `stable-worldmodel`
 
 - **[C-JEPA](https://hazel-heejeong-nam.github.io/cjepa/)**
 - **[LeWM](https://le-wm.github.io/)**
@@ -194,14 +244,18 @@ The following research projects have been built on top of stable-worldmodel:
 
 ```bibtex
 @misc{maes_lelidec2026swm-1,
-      title={stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation},
-      author = {Lucas Maes and Quentin Le Lidec and Dan Haramati and
-                Nassim Massaudi and Damien Scieur and Yann LeCun and
-                Randall Balestriero},
-      year={2026},
-      eprint={2602.08968},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2602.08968},
+  title  = {stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation},
+  author = {Lucas Maes and Quentin Le Lidec and Dan Haramati and
+            Nassim Massaudi and Damien Scieur and Yann LeCun and
+            Randall Balestriero},
+  year   = {2026},
+  eprint = {2602.08968},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.AI},
+  url    = {https://arxiv.org/abs/2602.08968},
 }
 ```
+
+## Questions
+
+Open an [issue](https://github.com/galilai-group/stable-worldmodel/issues) — happy to help.

@@ -19,8 +19,8 @@ swm datasets
 ┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┓
 ┃ Name                   ┃ Format ┃    Size ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━┩
-│ pusht_expert_train     │ HDF5   │ 812.3MB │
-│ pusht_expert_val       │ HDF5   │  81.3MB │
+│ pusht_expert_train     │ Lance  │ 812.3MB │
+│ pusht_expert_val       │ Lance  │  81.3MB │
 └────────────────────────┴────────┴─────────┘
 ```
 
@@ -34,21 +34,21 @@ swm inspect pusht_expert_train
 
 ```
 Name:      pusht_expert_train
-Format:    HDF5
-Path:      ~/.stable_worldmodel/pusht_expert_train.h5
+Format:    Lance
+Path:      ~/.stable_worldmodel/pusht_expert_train.lance
 Size:      812.3 MB
 Episodes:  2000
 Steps:     297806
 Ep length: 100 – 200
 
-              Columns
-┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
-┃ Column   ┃ Shape              ┃ Dtype   ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
-│ action   │ (297806, 2)        │ float32 │
-│ pixels   │ (297806, 3, 64, 64)│ uint8   │
-│ state    │ (297806, 5)        │ float32 │
-└──────────┴────────────────────┴─────────┘
+           Columns
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Column   ┃ Type                         ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ action   │ fixed_size_list<float>[2]    │
+│ pixels   │ binary                       │
+│ state    │ fixed_size_list<float>[5]    │
+└──────────┴──────────────────────────────┘
 ```
 
 ## `swm envs`

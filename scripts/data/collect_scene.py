@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 os.environ['MUJOCO_GL'] = 'egl'
 
@@ -32,11 +33,12 @@ def run(cfg: DictConfig):
     rng = np.random.default_rng(cfg.seed)
     world.set_policy(ExpertPolicy())
 
-    world.record_dataset(
-        'ogbench/scene_single_expert',
+    world.collect(
+        Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+        / 'datasets'
+        / 'ogbench/scene_single_expert.lance',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
-        cache_dir=cfg.cache_dir,
         options=options,
     )
 

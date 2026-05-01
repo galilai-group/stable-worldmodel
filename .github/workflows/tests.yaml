@@ -13,6 +13,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - uses: pre-commit/action@v3.0.1
+
   build:
     runs-on: ubuntu-latest
     strategy:

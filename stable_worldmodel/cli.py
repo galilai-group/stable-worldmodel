@@ -99,6 +99,49 @@ def _inspect_folder_dataset(path) -> None:
     print(table)
 
 
+def _lance_dir_size(path) -> int:
+    return sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+
+
+def _inspect_lance_dataset(path) -> None:
+    import lancedb
+
+    parent, stem = path.parent, path.stem
+    db = lancedb.connect(str(parent) or '.')
+    table = db.open_table(stem)
+    schema = table.schema
+    ep_arr = (
+        table.to_lance()
+        .to_table(columns=['episode_idx'])
+        .column('episode_idx')
+    ).to_numpy()
+    if len(ep_arr):
+        n_episodes = int(ep_arr[-1]) + 1
+        ep_lengths = [int((ep_arr == i).sum()) for i in range(n_episodes)]
+    else:
+        n_episodes = 0
+        ep_lengths = []
+
+    size = _format_size(_lance_dir_size(path))
+    print(f'[bold]Name:[/bold]     {path.name}')
+    print('[bold]Format:[/bold]   Lance')
+    print(f'[bold]Path:[/bold]     {path}')
+    print(f'[bold]Size:[/bold]     {size}')
+    print(f'[bold]Episodes:[/bold] {n_episodes}')
+    print(f'[bold]Steps:[/bold]    {len(ep_arr)}')
+    if ep_lengths:
+        print(f'[bold]Ep length:[/bold] {min(ep_lengths)} – {max(ep_lengths)}')
+
+    cols = Table(title='Columns')
+    cols.add_column('Column', style='cyan', no_wrap=True)
+    cols.add_column('Type', style='yellow')
+    for f in schema:
+        if f.name in ('episode_idx', 'step_idx'):
+            continue
+        cols.add_row(f.name, str(f.type))
+    print(cols)
+
+
 def _format_space(space) -> tuple[str, str, str]:
     """Return (type_label, range_str, init_str) for a leaf space."""
     from stable_worldmodel import spaces as swm_spaces
@@ -141,12 +184,25 @@ def datasets():
 
     rows = []
 
+    for lance_path in sorted(cache_dir.glob('*.lance')):
+        if not lance_path.is_dir():
+            continue
+        rows.append(
+            (
+                lance_path.stem,
+                'Lance',
+                _format_size(_lance_dir_size(lance_path)),
+            )
+        )
+
     for h5_path in sorted(cache_dir.glob('*.h5')):
         size = _format_size(h5_path.stat().st_size)
         rows.append((h5_path.stem, 'HDF5', size))
 
     for folder in sorted(cache_dir.iterdir()):
-        if not folder.is_dir() or not (folder / 'ep_len.npz').exists():
+        if not folder.is_dir() or folder.suffix == '.lance':
+            continue
+        if not (folder / 'ep_len.npz').exists():
             continue
         npz_size = sum(p.stat().st_size for p in folder.glob('*.npz'))
         rows.append(
@@ -173,10 +229,13 @@ def inspect(
     from stable_worldmodel.data.utils import get_cache_dir
 
     cache_dir = get_cache_dir(sub_folder='datasets')
+    lance_path = cache_dir / f'{name}.lance'
     h5_path = cache_dir / f'{name}.h5'
     folder_path = cache_dir / name
 
-    if h5_path.exists():
+    if lance_path.is_dir():
+        _inspect_lance_dataset(lance_path)
+    elif h5_path.exists():
         _inspect_hdf5_dataset(h5_path)
     elif folder_path.is_dir() and (folder_path / 'ep_len.npz').exists():
         _inspect_folder_dataset(folder_path)
@@ -195,10 +254,10 @@ def envs():
     )
     table.add_column('Type', justify='left', style='magenta', no_wrap=True)
 
-    from stable_worldmodel.envs import WORLDS
+    from stable_worldmodel.envs import DISCRETE_WORLDS, WORLDS
 
-    continuous = sorted(e for e in WORLDS if 'Discrete' not in e)
-    discrete = sorted(e for e in WORLDS if 'Discrete' in e)
+    continuous = sorted(WORLDS - DISCRETE_WORLDS)
+    discrete = sorted(DISCRETE_WORLDS)
 
     for env_id in continuous:
         table.add_row(env_id, 'Continuous')
@@ -256,6 +315,64 @@ def fovs(
 
     print(table)
     environment.close()
+
+
+@app.command()
+def convert(
+    name: Annotated[str, typer.Argument(help='Source dataset name.')],
+    output: Annotated[
+        str | None,
+        typer.Argument(
+            help='Output dataset name. Defaults to <name>-<dest-format>.',
+            show_default=False,
+        ),
+    ] = None,
+    dest_format: Annotated[
+        str,
+        typer.Option('--dest-format', '-f', help='Destination format.'),
+    ] = 'video',
+    source_format: Annotated[
+        str | None,
+        typer.Option(
+            '--source-format', help='Force source format (skip detection).'
+        ),
+    ] = None,
+):
+    """Convert a dataset to another format (e.g. HDF5 → video)."""
+    from stable_worldmodel.data import convert as data_convert
+    from stable_worldmodel.data.utils import get_cache_dir
+
+    cache_dir = get_cache_dir(sub_folder='datasets')
+
+    h5_path = cache_dir / f'{name}.h5'
+    folder_path = cache_dir / name
+    lance_path = cache_dir / f'{name}.lance'
+    if h5_path.exists():
+        source_path = h5_path
+    elif folder_path.is_dir() and (folder_path / 'ep_len.npz').exists():
+        source_path = folder_path
+    elif folder_path.is_dir() and (folder_path / '_versions').is_dir():
+        source_path = folder_path
+    elif lance_path.is_dir() and (lance_path / '_versions').is_dir():
+        source_path = lance_path
+    else:
+        print(f'[red]Dataset not found: {name}[/red]')
+        print('Run [cyan]swm datasets[/cyan] to see available datasets.')
+        raise typer.Exit(1)
+
+    dest_name = output if output is not None else f'{name}-{dest_format}'
+    dest_path = cache_dir / dest_name
+
+    print(
+        f'Converting [cyan]{name}[/cyan] → [magenta]{dest_format}[/magenta] as [cyan]{dest_name}[/cyan]'
+    )
+    data_convert(
+        source_path,
+        dest_path,
+        dest_format=dest_format,
+        source_format=source_format,
+    )
+    print(f'[green]Done.[/green] Output: {dest_path}')
 
 
 @app.command()

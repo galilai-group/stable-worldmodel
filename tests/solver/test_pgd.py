@@ -135,8 +135,8 @@ def test_pgd_solver_solve_full_horizon():
     solver.configure(action_space=action_space, n_envs=4, config=config)
     result = solver.solve(info_dict={})
 
-    assert "actions" in result
-    actions = result["actions"]
+    assert 'actions' in result
+    actions = result['actions']
     assert isinstance(actions, torch.Tensor)
     assert actions.shape == (4, 10, 1)  # (n_envs, horizon, action_dim)
 
@@ -151,7 +151,7 @@ def test_pgd_solver_solve_with_action_block():
     solver.configure(action_space=action_space, n_envs=2, config=config)
     result = solver.solve(info_dict={})
 
-    actions = result["actions"]
+    actions = result['actions']
     assert actions.shape == (2, 5, 3)  # (n_envs, horizon, action_dim=3*1)
 
 
@@ -164,7 +164,7 @@ def test_pgd_solver_solve_single_env():
     solver.configure(action_space=action_space, n_envs=1, config=config)
     result = solver.solve(info_dict={})
 
-    actions = result["actions"]
+    actions = result['actions']
     assert actions.shape == (1, 7, 1)
 
 
@@ -178,10 +178,19 @@ def test_pgd_solver_solve_ignores_info_dict():
 
     # Should produce same shape regardless of info_dict content
     result1 = solver.solve(info_dict={})
-    result2 = solver.solve(info_dict={"state": torch.randn(2, 10), "obs": None})
-    results3 = solver.solve(info_dict={"state": np.random.randn(2, 10), "obs": None})
+    result2 = solver.solve(
+        info_dict={'state': torch.randn(2, 10), 'obs': None}
+    )
+    results3 = solver.solve(
+        info_dict={'state': np.random.randn(2, 10), 'obs': None}
+    )
 
-    assert result1["actions"].shape == result2["actions"].shape == results3["actions"].shape == (2, 5, 3)
+    assert (
+        result1['actions'].shape
+        == result2['actions'].shape
+        == results3['actions'].shape
+        == (2, 5, 3)
+    )
 
 
 ###########################
@@ -237,7 +246,9 @@ def test_pgd_solver_warm_start_with_action_block():
 
 def test_pgd_solver_warm_start_with_var_scale():
     """Test warm-starting with var_scale."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=0, var_scale=0.1, num_samples=2)
+    solver = PGDSolver(
+        model=DummyCostModel(), n_steps=0, var_scale=0.1, num_samples=2
+    )
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
@@ -286,7 +297,7 @@ def test_pgd_solver_callable():
     result1 = solver(info_dict={})
     result2 = solver.solve(info_dict={})
 
-    assert result1["actions"].shape == result2["actions"].shape == (2, 5, 1)
+    assert result1['actions'].shape == result2['actions'].shape == (2, 5, 1)
 
 
 def test_pgd_solver_callable_with_kwargs():
@@ -300,7 +311,7 @@ def test_pgd_solver_callable_with_kwargs():
     init_action = torch.randn(2, 2, 5)
     result = solver(info_dict={}, init_action=init_action)
 
-    assert result["actions"].shape == (2, 5, 1)
+    assert result['actions'].shape == (2, 5, 1)
 
 
 ###########################
@@ -320,7 +331,7 @@ def test_pgd_solver_solve_empty_init_action():
     init_action = torch.zeros((2, 0, 5))
     result = solver.solve(info_dict={}, init_action=init_action)
 
-    assert result["actions"].shape == (2, 5, 1)
+    assert result['actions'].shape == (2, 5, 1)
 
 
 def test_pgd_solver_horizon_1():
@@ -332,7 +343,7 @@ def test_pgd_solver_horizon_1():
     solver.configure(action_space=action_space, n_envs=2, config=config)
     result = solver.solve(info_dict={})
 
-    assert result["actions"].shape == (2, 1, 1)
+    assert result['actions'].shape == (2, 1, 1)
 
 
 def test_pgd_solver_large_horizon():
@@ -344,7 +355,7 @@ def test_pgd_solver_large_horizon():
     solver.configure(action_space=action_space, n_envs=2, config=config)
     result = solver.solve(info_dict={})
 
-    assert result["actions"].shape == (2, 100, 1)
+    assert result['actions'].shape == (2, 100, 1)
 
 
 def test_pgd_solver_many_envs():
@@ -356,7 +367,7 @@ def test_pgd_solver_many_envs():
     solver.configure(action_space=action_space, n_envs=64, config=config)
     result = solver.solve(info_dict={})
 
-    assert result["actions"].shape == (64, 10, 1)
+    assert result['actions'].shape == (64, 10, 1)
 
 
 ###########################
@@ -386,7 +397,7 @@ def test_pgd_solver_deterministic_with_seed():
     action_space.seed(42)
     result2 = solver2.solve(info_dict={})
 
-    assert torch.allclose(result1["actions"], result2["actions"])
+    assert torch.allclose(result1['actions'], result2['actions'])
 
 
 def test_pgd_solver_multiple_solves():
@@ -401,7 +412,7 @@ def test_pgd_solver_multiple_solves():
     result2 = solver.solve(info_dict={})
 
     # Results should be different (with very high probability)
-    assert not torch.allclose(result1["actions"], result2["actions"])
+    assert not torch.allclose(result1['actions'], result2['actions'])
 
 
 def test_pgd_solver_receding_horizon_pattern():
@@ -414,7 +425,7 @@ def test_pgd_solver_receding_horizon_pattern():
 
     # First planning step
     result1 = solver.solve(info_dict={})
-    actions1 = result1["actions"]
+    actions1 = result1['actions']
     assert actions1.shape == (4, 10, 1)
 
     # Execute first 5 steps, keep remaining 5
@@ -422,8 +433,10 @@ def test_pgd_solver_receding_horizon_pattern():
     assert remaining.shape == (4, 5, 1)
 
     # Second planning step with warm-start
-    result2 = solver.solve(info_dict={}, init_action=remaining, from_scalar=True)
-    actions2 = result2["actions"]
+    result2 = solver.solve(
+        info_dict={}, init_action=remaining, from_scalar=True
+    )
+    actions2 = result2['actions']
     assert actions2.shape == (4, 10, 1)
 
 
@@ -436,7 +449,7 @@ def test_pgd_solver_respects_action_space_bounds():
     solver.configure(action_space=action_space, n_envs=4, config=config)
     result = solver.solve(info_dict={})
 
-    actions = result["actions"]
+    actions = result['actions']
     # Check that all actions are in {0, 1, 2, 3, 4}
     allowed = set(range(action_space.n))
     actions_np = actions.cpu().numpy()

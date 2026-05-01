@@ -22,7 +22,9 @@ _TASKS = ('stand', 'hop', 'hop-backward', 'flip', 'flip-backward')
 
 
 class HopperDMControlWrapper(DMControlWrapper):
-    def __init__(self, task='hop', seed=None, environment_kwargs=None):
+    def __init__(
+        self, task='hop', seed=None, environment_kwargs=None, render_mode=None
+    ):
         if task not in _TASKS:
             raise ValueError(
                 f"Unknown task '{task}'. Must be one of {list(_TASKS)}"

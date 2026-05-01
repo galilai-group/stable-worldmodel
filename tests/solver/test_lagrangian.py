@@ -1,11 +1,8 @@
 """Tests for LagrangianSolver class."""
 
-import dataclasses
-
 import numpy as np
 import pytest
 import torch
-import torch.nn.functional as F
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
@@ -448,8 +445,7 @@ def test_persist_multipliers_warm_starts():
     )
     configure(solver, action_dim=4, n_envs=2, horizon=4, action_block=1)
 
-    out1 = solver.solve({})
-    lambdas_after_first = out1['lambdas'].clone()
+    solver.solve({})
 
     out2 = solver.solve({})
     lambdas_after_second = out2['lambdas']

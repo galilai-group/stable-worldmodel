@@ -29,7 +29,9 @@ _TASK_TARGET_SIZES = {
 
 
 class ReacherDMControlWrapper(DMControlWrapper):
-    def __init__(self, task='hard', seed=None, environment_kwargs=None):
+    def __init__(
+        self, task='hard', seed=None, environment_kwargs=None, render_mode=None
+    ):
         if task not in _TASKS:
             raise ValueError(
                 f"Unknown task '{task}'. Must be one of {list(_TASKS)}"

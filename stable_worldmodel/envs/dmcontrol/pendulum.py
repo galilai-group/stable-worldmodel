@@ -15,7 +15,7 @@ _DEFAULT_TIME_LIMIT = 20
 
 
 class PendulumDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, seed=None, environment_kwargs=None, render_mode=None):
         xml, assets = pendulum.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(pendulum.__file__)  # .../dm_control/suite

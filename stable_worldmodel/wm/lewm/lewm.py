@@ -3,8 +3,6 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 
-from .module import detach_clone
-
 
 class LeWM(nn.Module):
     def __init__(
@@ -27,7 +25,7 @@ class LeWM(nn.Module):
         """Encode observations and actions into embeddings.
         info: dict with pixels and action keys
         """
-        pixels = info['pixels'].float()
+        pixels = info['pixels'].to(next(self.encoder.parameters()).dtype)
         b = pixels.size(0)
         pixels = rearrange(
             pixels, 'b t ... -> (b t) ...'
@@ -71,35 +69,31 @@ class LeWM(nn.Module):
         info['action'] = act_0
         n_steps = T - H
 
-        # copy and encode initial info dict
-        _init = {k: v[:, 0] for k, v in info.items() if torch.is_tensor(v)}
-        _init = self.encode(_init)
-        emb = info['emb'] = _init['emb'].unsqueeze(1).expand(B, S, -1, -1)
-        _init = {k: detach_clone(v) for k, v in _init.items()}
+        # encode initial state, or reuse cached embedding from a prior rollout
+        if 'emb' not in info:
+            _init = {k: v[:, 0] for k, v in info.items() if torch.is_tensor(v)}
+            _init = self.encode(_init)
+            info['emb'] = _init['emb'].unsqueeze(1).expand(B, S, -1, -1)
 
         # flatten batch and sample dimensions for rollout
-        emb = rearrange(emb, 'b s ... -> (b s) ...').clone()
-        act = rearrange(act_0, 'b s ... -> (b s) ...')
-        act_future = rearrange(act_future, 'b s ... -> (b s) ...')
+        emb_init = rearrange(info['emb'], 'b s ... -> (b s) ...')
+        act_flat = rearrange(act_0, 'b s ... -> (b s) ...')
+        act_future_flat = rearrange(act_future, 'b s ... -> (b s) ...')
+        all_act_emb = self.action_encoder(
+            torch.cat([act_flat, act_future_flat], dim=1)
+        )  # (BS, T, A_emb)
 
-        # rollout predictor autoregressively for n_steps
+        # rollout predictor autoregressively for n_steps + 1 (final) steps
+        # emb_list holds individual (BS, D) frames, each with its own grad_fn
         HS = history_size
-        for t in range(n_steps):
-            act_emb = self.action_encoder(act)
-            emb_trunc = emb[:, -HS:]  # (BS, HS, D)
-            act_trunc = act_emb[:, -HS:]  # (BS, HS, A_emb)
-            pred_emb = self.predict(emb_trunc, act_trunc)[:, -1:]  # (BS, 1, D)
-            emb = torch.cat([emb, pred_emb], dim=1)  # (BS, T+1, D)
+        emb_list = list(emb_init.unbind(dim=1))  # H tensors of shape (BS, D)
+        for t in range(n_steps + 1):
+            lo = max(0, H + t - HS)
+            emb_trunc = torch.stack(emb_list[lo:], dim=1)  # (BS, HS, D)
+            act_trunc = all_act_emb[:, lo : H + t]  # (BS, HS, A_emb)
+            emb_list.append(self.predict(emb_trunc, act_trunc)[:, -1])
 
-            next_act = act_future[:, t : t + 1, :]  # (BS, 1, action_dim)
-            act = torch.cat([act, next_act], dim=1)  # (BS, T+1, action_dim)
-
-        # predict the last state
-        act_emb = self.action_encoder(act)  # (BS, T, A_emb)
-        emb_trunc = emb[:, -HS:]  # (BS, HS, D)
-        act_trunc = act_emb[:, -HS:]  # (BS, HS, A_emb)
-        pred_emb = self.predict(emb_trunc, act_trunc)[:, -1:]  # (BS, 1, D)
-        emb = torch.cat([emb, pred_emb], dim=1)
+        emb = torch.stack(emb_list, dim=1)  # (BS, H + n_steps + 1, D)
 
         # unflatten batch and sample dimensions
         pred_rollout = rearrange(emb, '(b s) ... -> b s ...', b=B, s=S)
@@ -128,22 +122,22 @@ class LeWM(nn.Module):
 
         assert 'goal' in info_dict, 'goal not in info_dict'
 
-        device = next(self.parameters()).device
-        for k in list(info_dict.keys()):
-            if torch.is_tensor(info_dict[k]):
-                info_dict[k] = info_dict[k].to(device)
+        # encode goal state, or reuse cached embedding from a prior call
+        if 'goal_emb' not in info_dict:
+            goal = {
+                k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)
+            }
+            goal['pixels'] = goal['goal']
 
-        goal = {k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)}
-        goal['pixels'] = goal['goal']
+            for k in info_dict:
+                if k.startswith('goal_'):
+                    goal[k[len('goal_') :]] = goal.pop(k)
 
-        for k in info_dict:
-            if k.startswith('goal_'):
-                goal[k[len('goal_') :]] = goal.pop(k)
+            goal.pop('action')
+            goal = self.encode(goal)
 
-        goal.pop('action')
-        goal = self.encode(goal)
+            info_dict['goal_emb'] = goal['emb']
 
-        info_dict['goal_emb'] = goal['emb']
         info_dict = self.rollout(info_dict, action_candidates)
 
         cost = self.criterion(info_dict)

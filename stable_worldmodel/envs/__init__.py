@@ -2,11 +2,14 @@ from gymnasium.envs import registration
 
 
 WORLDS = set()
+DISCRETE_WORLDS = set()
 
 
-def register(id, entry_point):
-    registration.register(id=id, entry_point=entry_point)
+def register(id, entry_point, discrete=False, **kwargs):
+    registration.register(id=id, entry_point=entry_point, **kwargs)
     WORLDS.add(id)
+    if discrete:
+        DISCRETE_WORLDS.add(id)
 
 
 ##############
@@ -44,8 +47,8 @@ register(
 )
 
 register(
-    id='swm/OGBPointMaze-v0',
-    entry_point='stable_worldmodel.envs.ogbench.pointmaze_env:PointMazeEnv',
+    id='swm/OGBMaze-v0',
+    entry_point='stable_worldmodel.envs.ogbench.maze_env:MazeEnv',
 )
 
 register(
@@ -113,6 +116,69 @@ register(
     entry_point='stable_worldmodel.envs.dmcontrol.quadruped:QuadrupedDMControlWrapper',
 )
 
+register(
+    id='swm/Piecewise-v0',
+    entry_point='stable_worldmodel.envs.piecewise.piecewise_env:PiecewiseEnv',
+)
+
+_GYM_CONTROL = 'stable_worldmodel.envs.gymnasium_control'
+register(
+    id='swm/CartPoleControl-v1',
+    entry_point=f'{_GYM_CONTROL}.cartpole:CartPoleWrapper',
+    discrete=True,
+)
+register(
+    id='swm/MountainCarControl-v0',
+    entry_point=f'{_GYM_CONTROL}.mountain_car:MountainCarWrapper',
+    discrete=True,
+)
+register(
+    id='swm/MountainCarContinuousControl-v0',
+    entry_point=f'{_GYM_CONTROL}.mountain_car:MountainCarContinuousWrapper',
+)
+register(
+    id='swm/AcrobotControl-v1',
+    entry_point=f'{_GYM_CONTROL}.acrobot:AcrobotWrapper',
+    discrete=True,
+)
+register(
+    id='swm/PendulumControl-v1',
+    entry_point=f'{_GYM_CONTROL}.pendulum:PendulumWrapper',
+)
+
+_FETCH_ENTRY = 'stable_worldmodel.envs.gymnasium_robotics.fetch:FetchWrapper'
+
+# Sparse reward + flattened Box obs (default; good for behavior cloning / simple SAC)
+for _swm_id, _gym_id in [
+    ('swm/FetchReach-v3', 'FetchReach-v4'),
+    ('swm/FetchPush-v3', 'FetchPush-v4'),
+    ('swm/FetchSlide-v3', 'FetchSlide-v4'),
+    ('swm/FetchPickAndPlace-v3', 'FetchPickAndPlace-v4'),
+]:
+    register(id=_swm_id, entry_point=_FETCH_ENTRY, kwargs={'env_id': _gym_id})
+
+# Dense reward + flattened Box obs (standard SAC with shaped reward)
+for _swm_id, _gym_id in [
+    ('swm/FetchReachDense-v3', 'FetchReachDense-v4'),
+    ('swm/FetchPushDense-v3', 'FetchPushDense-v4'),
+    ('swm/FetchSlideDense-v3', 'FetchSlideDense-v4'),
+    ('swm/FetchPickAndPlaceDense-v3', 'FetchPickAndPlaceDense-v4'),
+]:
+    register(id=_swm_id, entry_point=_FETCH_ENTRY, kwargs={'env_id': _gym_id})
+
+# Sparse reward + Dict obs (observation/achieved_goal/desired_goal preserved)
+# Required by goal-conditioned algorithms such as SB3's HerReplayBuffer.
+for _swm_id, _gym_id in [
+    ('swm/FetchReachDict-v3', 'FetchReach-v4'),
+    ('swm/FetchPushDict-v3', 'FetchPush-v4'),
+    ('swm/FetchSlideDict-v3', 'FetchSlide-v4'),
+    ('swm/FetchPickAndPlaceDict-v3', 'FetchPickAndPlace-v4'),
+]:
+    register(
+        id=_swm_id,
+        entry_point=_FETCH_ENTRY,
+        kwargs={'env_id': _gym_id, 'flatten': False},
+    )
 
 ############
 # OPENAPPS #
@@ -132,12 +198,34 @@ register(
 # DISCRETE #
 ############
 
-register(
-    id='swm/SimpleNavigation-v0',
-    entry_point='stable_worldmodel.envs.simple_nav.env:SimpleNavigationEnv',
-)
 
 register(
     id='swm/PushT-Discrete-v1',
     entry_point='stable_worldmodel.envs.pusht:PushTDiscrete',
+    discrete=True,
 )
+
+for _swm_id, _entry in [
+    (
+        'swm/CraftaxPixels-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxPixelsWrapper',
+    ),
+    (
+        'swm/CraftaxSymbolic-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxSymbolicWrapper',
+    ),
+    (
+        'swm/CraftaxClassicPixels-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxClassicPixelsWrapper',
+    ),
+    (
+        'swm/CraftaxClassicSymbolic-v1',
+        'stable_worldmodel.envs.craftax.craftax:CraftaxClassicSymbolicWrapper',
+    ),
+]:
+    register(id=_swm_id, entry_point=_entry, discrete=True)
+
+try:
+    from stable_worldmodel.envs import ale  # noqa: F401
+except ImportError:
+    pass

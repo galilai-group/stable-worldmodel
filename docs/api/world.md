@@ -1,134 +1,102 @@
 title: World
-summary: A unified interface for orchestrating vectorized environments, managing policy interactions, and handling data collection (HDF5/Video) and evaluation pipelines.
+summary: Runs a policy against a pool of vectorized environments, with HDF5 data collection and dataset-driven evaluation.
 ---
 
-The `World` class is the central entry point for managing vectorized environments in `stable_worldmodel`. It handles synchronization, preprocessing (resizing, stacking), and interaction with policies.
+`World` is the main entry point for rolling out policies in `stable_worldmodel`. It bundles:
+
+1. A batched simulator (`EnvPool`) that steps `num_envs` envs in parallel and can skip terminated envs via a mask.
+2. A preprocessing pipeline (`MegaWrapper`) that resizes pixels, lifts everything into the info dict, and applies optional transforms.
+3. A rollout loop that drives `policy.get_action(infos)` and handles resets, per-env termination, and episode accounting.
 
 /// tab | Basic Usage
 ```python
-from stable_worldmodel import World
+import stable_worldmodel as swm
 from stable_worldmodel.policy import RandomPolicy
 
-# 1. Initialize the World with 4 parallel environments
-world = World(
+world = swm.World(
     env_name="swm/PushT-v1",
     num_envs=4,
     image_shape=(64, 64),
-    history_size=1
 )
-
-# 2. Set a policy (e.g., Random)
 world.set_policy(RandomPolicy())
 
-# 3. Reset and step
-world.reset()
-for _ in range(100):
-    world.step()
-    # Access current states/infos
-    # world.infos["pixels"] -> (4, 3, 64, 64)
+# All stacked tensors in world.infos have shape (num_envs, 1, ...).
+world.reset(seed=0)
+# world.infos["pixels"]  -> (4, 1, 64, 64, 3)
 ```
 ///
 
-/// tab | Recording Video
+/// tab | Collect a dataset
 ```python
-from stable_worldmodel import World
-from stable_worldmodel.policy import RandomPolicy
+import stable_worldmodel as swm
 
-world = World(
-    env_name="swm/PushT-v1",
-    num_envs=1,
-    image_shape=(64, 64)
-)
-world.set_policy(RandomPolicy())
+world = swm.World("swm/PushT-v1", num_envs=8, image_shape=(64, 64))
+world.set_policy(expert_policy)
 
-# Record a 500-step video
-world.record_video(
-    video_path="./videos",
-    max_steps=500,
-    viewname="pixels"
-)
+# Roll out 500 episodes in parallel and dump them to an HDF5 file.
+world.collect("data/pusht_expert.h5", episodes=500, seed=0)
 ```
 ///
 
-/// tab | Recording Dataset
+/// tab | Episodic evaluation
 ```python
-from stable_worldmodel import World
-from stable_worldmodel.policy import RandomPolicy
-
-world = World(
-    env_name="swm/PushT-v1",
-    num_envs=4,  # Collect 4 episodes in parallel
-    image_shape=(64, 64)
+results = world.evaluate(
+    episodes=100,
+    seed=42,
+    video="videos/",          # optional: mp4 per episode
 )
-world.set_policy(RandomPolicy())
 
-# Record 50 episodes to a .h5 dataset
-world.record_dataset(
-    dataset_name="pusht_random",
-    episodes=50,
-    cache_dir="./data"
-)
-# Result: ./data/pusht_random.h5
+print(f"Success rate: {results['success_rate']:.1f}%")
 ```
 ///
 
-/// tab | Evaluation
+/// tab | Dataset-driven evaluation
 ```python
-from stable_worldmodel import World
-from stable_worldmodel.data import HDF5Dataset
-from stable_worldmodel.policy import RandomPolicy # or your trained policy
-
-# 1. Load a dataset for initial states
-dataset = HDF5Dataset("pusht_random", cache_dir="./data")
-
-# 2. Setup World
-world = World(env_name="swm/PushT-v1", num_envs=4, image_shape=(64, 64))
-world.set_policy(RandomPolicy())
-
-# 3. Evaluate starting from dataset states
-results = world.evaluate_from_dataset(
+# One env per target episode. Each env starts at the chosen step and aims
+# for the state `goal_offset` timesteps later. Run capped at `eval_budget`.
+results = world.evaluate(
     dataset=dataset,
-    episodes_idx=[0, 1, 2, 3],  # Episodes to test on
-    start_steps=[0, 0, 0, 0],   # Start from beginning
-    goal_offset_steps=50,       # Goal is state at t=50
-    eval_budget=100             # Max steps to reach goal
+    episodes_idx=[0, 1, 2, 3],
+    start_steps=[0, 10, 20, 30],
+    goal_offset=30,
+    eval_budget=50,
+    video="videos/",
 )
-
-print(f"Success Rate: {results['success_rate']}%")
 ```
 ///
 
-!!! tip "Performance"
-    The `World` class uses a custom `SyncWorld` vectorized environment for synchronized execution, ensuring deterministic and batched stepping across multiple environments.
-
-/// tab | Per-Environment Options
-The `World` class supports passing different options to each environment during reset, enabling per-environment variations and configurations:
+/// tab | Per-environment reset options
+`reset(options=...)` accepts a list of per-env dicts to seed domain randomization or variations:
 
 ```python
-from stable_worldmodel import World
-
-world = World(
-    env_name="swm/PushT-v1",
-    num_envs=3,
-    image_shape=(64, 64)
-)
-
-# Different variations for each environment
-per_env_options = [
+per_env = [
     {"variation": ["agent.color"], "variation_values": {"agent.color": [255, 0, 0]}},
     {"variation": ["agent.color"], "variation_values": {"agent.color": [0, 255, 0]}},
     {"variation": ["agent.color"], "variation_values": {"agent.color": [0, 0, 255]}},
 ]
+world.reset(options=per_env)
+```
+///
 
-world.reset(options=per_env_options)
+## Info convention
+
+Every tensor / array value in `world.infos` carries a leading time dim of 1 after the env dim:
+
+```
+world.infos["pixels"].shape  # (num_envs, 1, H, W, C)
+world.infos["state"].shape   # (num_envs, 1, state_dim)
 ```
 
-This is useful for:
+Non-array values (strings, nested objects) stay as a Python list of length `num_envs`. `rewards`, `terminateds`, and `truncateds` are returned from the last `step()` separately and are shape `(num_envs,)` — they do not carry the time dim.
 
-- **Domain randomization**: Different visual variations per environment
-- **Curriculum learning**: Different difficulty levels per environment
-- **Parallel evaluation**: Testing multiple configurations simultaneously
-///
+## Reset modes
+
+`evaluate` (and internally `_run`) support two termination policies:
+
+- `reset_mode='auto'` — terminated envs are reset immediately. The run continues until `episodes` episodes have finished (or `max_steps` is reached). This is the default for episodic eval.
+- `reset_mode='wait'` — terminated envs are frozen (step is skipped for them via the env-pool mask). The run stops when all envs are done. This is the default for dataset eval, so every env gets to complete its specific start→goal task.
+
+---
 
 ::: stable_worldmodel.world.World
     options:
@@ -136,30 +104,37 @@ This is useful for:
         members: false
         show_source: false
 
-## **[ Recording ]**
+## **[ Rollouts ]**
 
-::: stable_worldmodel.world.World.record_dataset
-::: stable_worldmodel.world.World.record_video
-
-## **[ Evaluation ]**
-
-::: stable_worldmodel.world.World.evaluate_from_dataset
+::: stable_worldmodel.world.World.collect
 ::: stable_worldmodel.world.World.evaluate
 
 ## **[ Environment ]**
 
 ::: stable_worldmodel.world.World.reset
-::: stable_worldmodel.world.World.step
-::: stable_worldmodel.world.World.close
 ::: stable_worldmodel.world.World.set_policy
+::: stable_worldmodel.world.World.close
 
 ## **[ Properties ]**
 
 ::: stable_worldmodel.world.World.num_envs
-::: stable_worldmodel.world.World.observation_space
-::: stable_worldmodel.world.World.action_space
-::: stable_worldmodel.world.World.variation_space
-::: stable_worldmodel.world.World.single_variation_space
-::: stable_worldmodel.world.World.single_action_space
-::: stable_worldmodel.world.World.single_observation_space
 
+## EnvPool
+
+The underlying batched simulator. You rarely touch it directly — `World` builds one for you — but its action and observation spaces are what the policy sees.
+
+::: stable_worldmodel.world.EnvPool
+    options:
+        heading_level: 3
+        members:
+          - num_envs
+          - action_space
+          - single_action_space
+          - observation_space
+          - single_observation_space
+          - variation_space
+          - single_variation_space
+          - reset
+          - step
+          - close
+        show_source: false

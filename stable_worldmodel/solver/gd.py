@@ -56,6 +56,11 @@ class GradientSolver(torch.nn.Module):
             optimizer_kwargs if optimizer_kwargs is not None else {'lr': 1.0}
         )
 
+        try:
+            self._dtype = next(model.parameters()).dtype
+        except (AttributeError, StopIteration):
+            self._dtype = torch.float32
+
         self._configured = False
         self._n_envs = None
         self._action_dim = None
@@ -91,20 +96,30 @@ class GradientSolver(torch.nn.Module):
         """Planning horizon in timesteps."""
         return self._config.horizon
 
+    @property
+    def dtype(self) -> torch.dtype:
+        return self._dtype
+
     def __call__(self, *args: Any, **kwargs: Any) -> dict:
         """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action(self, actions: torch.Tensor | None = None) -> None:
+    def init_action(
+        self, n_envs: int, actions: torch.Tensor | None = None
+    ) -> None:
         """Initialize the action tensor for optimization."""
         if actions is None:
-            actions = torch.zeros((self._n_envs, 0, self.action_dim))
+            actions = torch.zeros(
+                (n_envs, 0, self.action_dim), dtype=self.dtype
+            )
 
         # fill remaining action
         remaining = self.horizon - actions.shape[1]
 
         if remaining > 0:
-            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
+            new_actions = torch.zeros(
+                n_envs, remaining, self.action_dim, dtype=self.dtype
+            )
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
         actions = actions.unsqueeze(1).repeat_interleave(
@@ -115,14 +130,17 @@ class GradientSolver(torch.nn.Module):
                 actions[:, 1:].shape,
                 generator=self.torch_gen,
                 device=self.device,
+                dtype=self.dtype,
             )
             * self.var_scale
         )  # add small noise to all samples except the first one
 
-        # reset actions
-        if hasattr(self, 'init'):
+        # reset actions — re-register when shape differs (batch size may vary across calls)
+        if hasattr(self, 'init') and self.init.shape == actions.shape:
             self.init.copy_(actions)
         else:
+            if 'init' in self._parameters:
+                del self._parameters['init']
             self.register_parameter('init', torch.nn.Parameter(actions))
 
     def solve(
@@ -135,14 +153,16 @@ class GradientSolver(torch.nn.Module):
             'actions': None,
         }
 
+        # Batch size is taken from info_dict so callers can solve for a subset of envs
+        total_envs = len(next(iter(info_dict.values())))
+
         with torch.no_grad():
-            self.init_action(init_action)
+            self.init_action(total_envs, init_action)
 
         # Determine batch size (default to all envs if not specified which can cause memory issues)
         batch_size = (
-            self.batch_size if self.batch_size is not None else self.n_envs
+            self.batch_size if self.batch_size is not None else total_envs
         )
-        total_envs = self.n_envs
 
         # Lists to hold results from each batch to be concatenated later
         batch_top_actions_list = []
@@ -158,22 +178,23 @@ class GradientSolver(torch.nn.Module):
             # We initialize the optimizer class passed in __init__ with the kwargs
             optim = self.optimizer_cls([batch_init], **self.optimizer_kwargs)
 
-            # Prepare Batch Infos
-            # Slice the input info_dict and then expand dimensions
             expanded_infos = {}
             for k, v in info_dict.items():
-                # Slice the data for the current batch indices
-                # Assumes input data dim 0 corresponds to n_envs
                 if torch.is_tensor(v):
-                    batch_v = v[start_idx:end_idx]
-                    batch_v = batch_v.unsqueeze(1)
-                    batch_v = batch_v.expand(
-                        current_bs, self.num_samples, *batch_v.shape[2:]
+                    v_batch = v[start_idx:end_idx]
+                    target_dtype = (
+                        self.dtype if v_batch.is_floating_point() else None
+                    )
+                    batch_v = (
+                        v_batch.to(device=self.device, dtype=target_dtype)
+                        .unsqueeze(1)
+                        .expand(current_bs, self.num_samples, *v.shape[1:])
                     )
                 elif isinstance(v, np.ndarray):
-                    batch_v = v[start_idx:end_idx]
                     batch_v = np.repeat(
-                        batch_v[:, None, ...], self.num_samples, axis=1
+                        v[start_idx:end_idx, None, ...],
+                        self.num_samples,
+                        axis=1,
                     )
                 expanded_infos[k] = batch_v
 
@@ -181,10 +202,7 @@ class GradientSolver(torch.nn.Module):
             batch_cost_history = []
 
             for step in range(self.n_steps):
-                current_info = expanded_infos.copy()
-
-                # Calculate cost using the batch parameter
-                costs = self.model.get_cost(current_info, batch_init)
+                costs = self.model.get_cost(expanded_infos, batch_init)
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Got {type(costs)} cost, expect torch.Tensor'

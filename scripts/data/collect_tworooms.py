@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import hydra
 import numpy as np
 from loguru import logger as logging
@@ -16,11 +18,12 @@ def run(cfg):
     options = cfg.get('options')
     rng = np.random.default_rng(cfg.seed)
 
-    world.record_dataset(
-        'tworoom',
+    world.collect(
+        Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+        / 'datasets'
+        / 'tworoom_expert.lance',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
-        cache_dir=cfg.cache_dir,
         options=options,
     )
 

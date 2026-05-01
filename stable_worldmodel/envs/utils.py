@@ -71,8 +71,16 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
     ) -> None:
         p = to_pygame(pos, self.surface)
 
-        pygame.draw.circle(self.surface, fill_color.as_int(), p, round(radius), 0)
-        pygame.draw.circle(self.surface, light_color(fill_color).as_int(), p, round(radius - 4), 0)
+        pygame.draw.circle(
+            self.surface, fill_color.as_int(), p, round(radius), 0
+        )
+        pygame.draw.circle(
+            self.surface,
+            light_color(fill_color).as_int(),
+            p,
+            round(radius - 4),
+            0,
+        )
 
     def draw_segment(self, a: Vec2d, b: Vec2d, color: SpaceDebugColor) -> None:
         p1 = to_pygame(a, self.surface)
@@ -92,12 +100,16 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
         p2 = to_pygame(b, self.surface)
 
         r = round(max(1, radius * 2))
-        pygame.draw.lines(self.surface, fill_color.as_int(), False, [p1, p2], r)
+        pygame.draw.lines(
+            self.surface, fill_color.as_int(), False, [p1, p2], r
+        )
         if r > 2:
             orthog = [abs(p2[1] - p1[1]), abs(p2[0] - p1[0])]
             if orthog[0] == 0 and orthog[1] == 0:
                 return
-            scale = radius / (orthog[0] * orthog[0] + orthog[1] * orthog[1]) ** 0.5
+            scale = (
+                radius / (orthog[0] * orthog[0] + orthog[1] * orthog[1]) ** 0.5
+            )
             orthog[0] = round(orthog[0] * scale)
             orthog[1] = round(orthog[1] * scale)
             points = [
@@ -139,7 +151,9 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
                 b = verts[(i + 1) % len(verts)]
                 self.draw_fat_segment(a, b, radius, fill_color, fill_color)
 
-    def draw_dot(self, size: float, pos: tuple[float, float], color: SpaceDebugColor) -> None:
+    def draw_dot(
+        self, size: float, pos: tuple[float, float], color: SpaceDebugColor
+    ) -> None:
         p = to_pygame(pos, self.surface)
         pygame.draw.circle(self.surface, color.as_int(), p, round(size), 0)
 
@@ -150,7 +164,9 @@ def get_mouse_pos(surface: pygame.Surface) -> tuple[int, int]:
     return from_pygame(p, surface)
 
 
-def to_pygame(p: tuple[float, float], surface: pygame.Surface) -> tuple[int, int]:
+def to_pygame(
+    p: tuple[float, float], surface: pygame.Surface
+) -> tuple[int, int]:
     """Convenience method to convert pymunk coordinates to pygame surface
     local coordinates.
 
@@ -163,7 +179,9 @@ def to_pygame(p: tuple[float, float], surface: pygame.Surface) -> tuple[int, int
         return round(p[0]), round(p[1])
 
 
-def from_pygame(p: tuple[float, float], surface: pygame.Surface) -> tuple[int, int]:
+def from_pygame(
+    p: tuple[float, float], surface: pygame.Surface
+) -> tuple[int, int]:
     """Convenience method to convert pygame surface local coordinates to
     pymunk coordinates
     """
@@ -171,7 +189,10 @@ def from_pygame(p: tuple[float, float], surface: pygame.Surface) -> tuple[int, i
 
 
 def light_color(color: SpaceDebugColor):
-    color = np.minimum(1.2 * np.float32([color.r, color.g, color.b, color.a]), np.float32([255]))
+    color = np.minimum(
+        1.2 * np.float32([color.r, color.g, color.b, color.a]),
+        np.float32([255]),
+    )
     color = SpaceDebugColor(r=color[0], g=color[1], b=color[2], a=color[3])
     return color
 
@@ -189,7 +210,7 @@ def pymunk_to_shapely(body, shapes):
             poly = sg.Point(tuple(center)).buffer(shape.radius, resolution=16)
             geoms.append(poly)
         else:
-            raise RuntimeError(f"Unsupported shape type {type(shape)}")
+            raise RuntimeError(f'Unsupported shape type {type(shape)}')
     geom = sg.MultiPolygon(geoms)
     return geom
 
@@ -208,9 +229,21 @@ def perturb_camera_angle(xyaxis, deg_dif=[3, 3]):
     pitch = np.deg2rad(deg_dif[1])
 
     # Build rotation matrices
-    R_yaw = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    R_yaw = np.array(
+        [
+            [np.cos(yaw), -np.sin(yaw), 0],
+            [np.sin(yaw), np.cos(yaw), 0],
+            [0, 0, 1],
+        ]
+    )
 
-    R_pitch = np.array([[1, 0, 0], [0, np.cos(pitch), -np.sin(pitch)], [0, np.sin(pitch), np.cos(pitch)]])
+    R_pitch = np.array(
+        [
+            [1, 0, 0],
+            [0, np.cos(pitch), -np.sin(pitch)],
+            [0, np.sin(pitch), np.cos(pitch)],
+        ]
+    )
 
     # Combine and rotate the basis
     R = R_pitch @ R_yaw

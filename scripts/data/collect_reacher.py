@@ -1,8 +1,9 @@
 import os
+from pathlib import Path
 
 from omegaconf import OmegaConf
 
-os.environ['MUJOCO_GL'] = 'egl'
+os.environ['MUJOCO_GL'] = 'glfw'
 
 import hydra
 import numpy as np
@@ -25,11 +26,12 @@ def run(cfg):
 
     world.set_policy(RandomPolicy(seed=rng.integers(0, 1_000_000).item()))
 
-    world.record_dataset(
-        'dmc/reacher_random',
+    world.collect(
+        Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+        / 'datasets'
+        / 'dmc/reacher_random.lance',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
-        cache_dir=cfg.cache_dir,
         options=options,
     )
 

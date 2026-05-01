@@ -1,7 +1,8 @@
 import os
+from pathlib import Path
 
 
-os.environ['MUJOCO_GL'] = 'egl'
+os.environ['MUJOCO_GL'] = 'glfw'
 
 from collections import OrderedDict
 
@@ -22,9 +23,15 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoModelForImageClassification
 
 import stable_worldmodel as swm
-from stable_worldmodel.wrapper import MegaWrapper, VariationWrapper
+from stable_worldmodel.wm.prejepa.module import CausalPredictor, Embedder
+from stable_worldmodel.wrapper import MegaWrapper
 
-from utils import get_state_grid
+from utils import (
+    LeWMAdapter,
+    PreJEPAAdapter,
+    get_rotation_states,
+    get_state_grid,
+)
 
 
 DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
@@ -60,8 +67,6 @@ def get_env(cfg):
                 image_shape=(cfg.image_size, cfg.image_size),
                 pixels_transform=None,
                 goal_transform=None,
-                history_size=cfg.env.history_size,
-                frame_skip=cfg.env.frame_skip,
             )
         ]
         + ([]),
@@ -69,7 +74,6 @@ def get_env(cfg):
         render_mode='rgb_array',
     )
 
-    env = VariationWrapper(env)
     env.unwrapped.autoreset_mode = gym.vector.AutoresetMode.DISABLED
 
     # create the transform
@@ -148,6 +152,12 @@ def get_env(cfg):
     if goal_proprio_process is not None:
         process['goal_proprio'] = goal_proprio_process
 
+    # Do a dummy reset to get actual data dimensions for info-dict keys.
+    # Pass variation=[] to suppress DEFAULT_VARIATIONS resampling (e.g. block.angle),
+    # otherwise the variation_space angle drifts from its init_value=0.0 and
+    # get_state_from_grid picks up a random T orientation.
+    _, sample_info = env.reset(options={'variation': []})
+
     with open_dict(cfg) as cfg:
         cfg.extra_dims = {}
         for key in cfg.world_model.get('encoding', {}):
@@ -159,8 +169,10 @@ def get_env(cfg):
                 raise ValueError(
                     f"Encoding key '{key}' not found in dataset columns."
                 )
+            elif key in sample_info:
+                inpt_dim = np.asarray(sample_info[key]).shape[-1]
             else:
-                inpt_dim = obs_space.shape[0]
+                inpt_dim = obs_space.shape[-1]
             cfg.extra_dims[key] = inpt_dim
 
     return env, process, transform
@@ -285,56 +297,55 @@ def get_world_model(cfg):
     """Load and setup world model.
     For visualization, we only need the model to implement the `encode` method."""
 
-    if cfg.world_model.model_name is not None:
-        model = swm.policy.AutoCostModel(cfg.world_model.model_name).to(
-            cfg.get('device', 'cpu')
+    device = cfg.get('device', 'cpu')
+
+    if cfg.world_model.get('checkpoint_path') is not None:
+        checkpoint_path = str(
+            Path(cfg.world_model.checkpoint_path).expanduser().resolve()
         )
-        model = model.to(cfg.get('device', 'cpu'))
-        model = model.eval()
-    else:  # no checkpoint found, build model from scratch
-        encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(cfg)
-        embedding_dim += sum(
-            emb_dim for emb_dim in cfg.world_model.get('encoding', {}).values()
-        )  # add all extra dims
+        model = swm.wm.utils.load_pretrained(checkpoint_path).to(device).eval()
+        if isinstance(model, swm.wm.lewm.LeWM):
+            return LeWMAdapter(model)
+        return PreJEPAAdapter(model)
 
-        logging.info(f'Patches: {num_patches}, Embedding dim: {embedding_dim}')
+    # No checkpoint: build PreJEPA model from scratch using backbone config
+    encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(cfg)
+    embedding_dim += sum(
+        emb_dim for emb_dim in cfg.world_model.get('encoding', {}).values()
+    )  # add all extra dims
 
-        # Build causal predictor (transformer that predicts next latent states)
+    logging.info(f'Patches: {num_patches}, Embedding dim: {embedding_dim}')
 
-        print('>>>> DIM PREDICTOR:', embedding_dim)
+    print('>>>> DIM PREDICTOR:', embedding_dim)
 
-        predictor = swm.wm.prejepa.CausalPredictor(
-            num_patches=num_patches,
-            num_frames=cfg.world_model.history_size,
-            dim=embedding_dim,
-            **cfg.world_model.predictor,
+    predictor = CausalPredictor(
+        num_patches=num_patches,
+        num_frames=cfg.world_model.history_size,
+        dim=embedding_dim,
+        **cfg.world_model.predictor,
+    )
+
+    extra_encoders = OrderedDict()
+    for key, emb_dim in cfg.world_model.get('encoding', {}).items():
+        inpt_dim = cfg.extra_dims[key]
+        extra_encoders[key] = Embedder(in_chans=inpt_dim, emb_dim=emb_dim)
+        print(
+            f'Build encoder for {key} with input dim {inpt_dim} and emb dim {emb_dim}'
         )
 
-        # Build action and proprioception encoders
-        extra_encoders = OrderedDict()
-        for key, emb_dim in cfg.world_model.get('encoding', {}).items():
-            inpt_dim = cfg.extra_dims[key]
-            extra_encoders[key] = swm.wm.prejepa.Embedder(
-                in_chans=inpt_dim, emb_dim=emb_dim
-            )
-            print(
-                f'Build encoder for {key} with input dim {inpt_dim} and emb dim {emb_dim}'
-            )
+    extra_encoders = torch.nn.ModuleDict(extra_encoders)
 
-        extra_encoders = torch.nn.ModuleDict(extra_encoders)
-
-        # Assemble world model
-        model = swm.wm.prejepa.PreJEPA(
-            encoder=spt.backbone.EvalOnly(encoder),
-            predictor=predictor,
-            extra_encoders=extra_encoders,
-            history_size=cfg.world_model.history_size,
-            num_pred=cfg.world_model.num_preds,
-            interpolate_pos_encoding=interp_pos_enc,
-        )
-        model.to(cfg.get('device', 'cpu'))
-        model = model.eval()
-    return model
+    model = swm.wm.prejepa.PreJEPA(
+        encoder=spt.backbone.EvalOnly(encoder),
+        predictor=predictor,
+        extra_encoders=extra_encoders,
+        history_size=cfg.world_model.history_size,
+        num_pred=cfg.world_model.num_preds,
+        interpolate_pos_encoding=interp_pos_enc,
+    )
+    model.to(device)
+    model = model.eval()
+    return PreJEPAAdapter(model)
 
 
 # ============================================================================
@@ -378,20 +389,35 @@ def collect_embeddings(world_model, env, process, transform, cfg):
             for key in infos:
                 if isinstance(infos[key], torch.Tensor):
                     infos[key] = infos[key].to(cfg.get('device', 'cpu'))
-            infos = world_model.encode(infos, target='embed')
-            if cfg.world_model.get(
-                'backbone_only', False
-            ):  # use only vision backbone embeddings
-                variation_embeddings.append(
-                    infos['pixels_embed'].cpu().detach()
-                )
-            else:  # use full model embeddings (proropio + action + vision)
-                variation_embeddings.append(infos['embed'].cpu().detach())
+            infos = world_model.encode(infos)
+            variation_embeddings.append(infos['embed'].cpu().detach())
             variation_pixels.append(infos['pixels'][0].cpu().detach())
         embeddings.append(variation_embeddings)
         pixels.append(variation_pixels)
 
     return grid, embeddings, pixels
+
+
+def collect_rotation_embeddings(world_model, env, process, transform, cfg):
+    """Collect embeddings by sweeping T-block rotation with fixed agent/block positions."""
+    n_steps = cfg.env.get('rotation_steps', 100)
+    angles, state_list = get_rotation_states(
+        env.unwrapped.envs[0].unwrapped, n_steps
+    )
+
+    embeddings = []
+    pixels = []
+    for state in tqdm(state_list, desc='Collecting rotation embeddings'):
+        _, infos = env.reset(options={'state': state, 'variation': []})
+        infos = prepare_info(infos, process, transform)
+        for key in infos:
+            if isinstance(infos[key], torch.Tensor):
+                infos[key] = infos[key].to(cfg.get('device', 'cpu'))
+        infos = world_model.encode(infos)
+        embeddings.append(infos['embed'].cpu().detach())
+        pixels.append(infos['pixels'][0].cpu().detach())
+
+    return angles, embeddings, pixels
 
 
 # ============================================================================
@@ -597,6 +623,56 @@ def plot_representations(
     plt.close(fig)
 
 
+def plot_rotation_representations(
+    angles,
+    representations_2d,
+    title_suffix='Latent Space (T Rotation)',
+    save_path='latent_rotation.pdf',
+):
+    """Plot t-SNE of embeddings from a T-block rotation sweep, colored by angle.
+
+    Colors use the same RGBA formula as the grid plot (R=norm_x, G=norm_y, B=0.5):
+    the unit-circle (cos θ, sin θ) plays the role of (x, y), giving
+    R = (cos θ + 1)/2, G = (sin θ + 1)/2, B = 0.5.
+
+    Left panel: polar plot showing the angle sweep with these colors.
+    Right panel: 2D projection with the same colors.
+    """
+    colors = np.zeros((len(angles), 4))
+    colors[:, 0] = (np.cos(angles) + 1) / 2
+    colors[:, 1] = (np.sin(angles) + 1) / 2
+    colors[:, 2] = 0.5
+    colors[:, 3] = 1.0
+
+    fig = plt.figure(figsize=(16, 7))
+    ax_polar = fig.add_subplot(1, 2, 1, projection='polar')
+    ax_tsne = fig.add_subplot(1, 2, 2)
+
+    # Polar panel: dots on a unit circle at each sampled angle
+    ax_polar.scatter(angles, np.ones_like(angles), c=colors, s=50)
+    ax_polar.set_rticks([])
+    ax_polar.set_title('Physical State: T-Block Angle', pad=15)
+
+    # t-SNE panel
+    ax_tsne.scatter(
+        representations_2d[:, 0],
+        representations_2d[:, 1],
+        c=colors,
+        s=50,
+        edgecolor='k',
+        alpha=0.8,
+    )
+    ax_tsne.set_title(f'2D Projection ({title_suffix})')
+    ax_tsne.set_xlabel('Projected Dim 1')
+    ax_tsne.set_ylabel('Projected Dim 2')
+    ax_tsne.grid(True, linestyle='--', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, format='pdf')
+    logging.info(f'Rotation visualization saved to {save_path}')
+    plt.close(fig)
+
+
 def make_runtime_cfg(global_cfg, dataset_cfg):
     return OmegaConf.merge(
         {
@@ -637,76 +713,109 @@ def run(cfg):
         env, process, transform = get_env(local_cfg)
         world_model = get_world_model(local_cfg)
 
-        model_name = (
-            wm_cfg.model_name
-            if wm_cfg.model_name is not None
-            else wm_cfg.backbone.type
-        )
+        if wm_cfg.get('checkpoint_path') is not None:
+            model_name = Path(wm_cfg.checkpoint_path).expanduser().name
+        else:
+            model_name = wm_cfg.backbone.type
 
-        # --- Collect embeddings ---
-        logging.info('Computing embeddings from environment...')
-        grid, embeddings_variations, pixels_variations = collect_embeddings(
-            world_model, env, process, transform, local_cfg
-        )
+        visualization_mode = env_cfg.get('visualization_mode', 'grid')
 
-        # --- Prepare embeddings for dimensionality reduction ---
-        all_embeddings_list = []
-        for var_list in embeddings_variations:
-            var_emb = torch.cat(var_list, dim=0).cpu().numpy()
-            var_emb = rearrange(var_emb, 'b ... -> b (...)')
-            all_embeddings_list.append(var_emb)
-
-        all_embeddings_global = np.concatenate(all_embeddings_list, axis=0)
-
-        num_variations = len(all_embeddings_list)
-        samples_per_variation = all_embeddings_list[0].shape[0]
-
-        # --- Dimensionality reduction ---
-        logging.info(
-            f'Computing global {local_cfg.dimensionality_reduction} '
-            f'for {num_variations} variations '
-            f'({all_embeddings_global.shape[0]} samples)...'
-        )
-        representations_2d = compute_dimensionality_reduction(
-            all_embeddings_global, local_cfg
-        )
-
-        # --- Plot latent space ---
-        dr_save_path = f'{dataset_name}_{model_name}_{local_cfg.dimensionality_reduction}.pdf'
-
-        plot_representations(
-            grid,
-            representations_2d,
-            variations_cfg=env_cfg.variations,
-            samples_per_variation=samples_per_variation,
-            title_suffix=f'{dataset_name} Latent Space',
-            save_path=dr_save_path,
-        )
-
-        # --- Distance maps per variation ---
-        grid_size = env_cfg.grid_size
-
-        for var_idx, var_pixels_list in enumerate(pixels_variations):
-            embeddings = all_embeddings_list[var_idx]
-            pixels = torch.cat(var_pixels_list, dim=0).cpu().numpy()
-
-            var_suffix = (
-                f'var_{env_cfg.variations[var_idx]["variation"]["fields"][0]}'
-                if env_cfg.variations[var_idx]['variation']['fields']
-                is not None
-                else 'var_original'
+        if visualization_mode == 'rotation':
+            # --- Rotation sweep: fixed agent/block positions, varying T angle ---
+            logging.info('Computing rotation embeddings from environment...')
+            angles, emb_list, pix_list = collect_rotation_embeddings(
+                world_model, env, process, transform, local_cfg
             )
 
-            distmap_save_path = (
-                f'{dataset_name}_{model_name}_{var_suffix}_distmap.pdf'
+            all_embeddings = torch.cat(emb_list, dim=0).cpu().numpy()
+            all_embeddings = rearrange(all_embeddings, 'b ... -> b (...)')
+
+            logging.info(
+                f'Computing {local_cfg.dimensionality_reduction} '
+                f'for {all_embeddings.shape[0]} rotation samples...'
+            )
+            representations_2d = compute_dimensionality_reduction(
+                all_embeddings, local_cfg
             )
 
-            plot_distance_maps(
-                grid.reshape(grid_size, grid_size, -1),
-                embeddings.reshape(grid_size, grid_size, -1),
-                pixels.reshape(grid_size, grid_size, *pixels.shape[1:]),
-                save_path=distmap_save_path,
+            rot_save_path = (
+                f'{dataset_name}_{model_name}_rotation_'
+                f'{local_cfg.dimensionality_reduction}.pdf'
             )
+            plot_rotation_representations(
+                angles,
+                representations_2d,
+                title_suffix=f'{dataset_name} Latent Space',
+                save_path=rot_save_path,
+            )
+
+        else:
+            # --- Default: grid sweep over agent/block XY translations ---
+            logging.info('Computing embeddings from environment...')
+            grid, embeddings_variations, pixels_variations = (
+                collect_embeddings(
+                    world_model, env, process, transform, local_cfg
+                )
+            )
+
+            # --- Prepare embeddings for dimensionality reduction ---
+            all_embeddings_list = []
+            for var_list in embeddings_variations:
+                var_emb = torch.cat(var_list, dim=0).cpu().numpy()
+                var_emb = rearrange(var_emb, 'b ... -> b (...)')
+                all_embeddings_list.append(var_emb)
+
+            all_embeddings_global = np.concatenate(all_embeddings_list, axis=0)
+
+            num_variations = len(all_embeddings_list)
+            samples_per_variation = all_embeddings_list[0].shape[0]
+
+            # --- Dimensionality reduction ---
+            logging.info(
+                f'Computing global {local_cfg.dimensionality_reduction} '
+                f'for {num_variations} variations '
+                f'({all_embeddings_global.shape[0]} samples)...'
+            )
+            representations_2d = compute_dimensionality_reduction(
+                all_embeddings_global, local_cfg
+            )
+
+            # --- Plot latent space ---
+            dr_save_path = f'{dataset_name}_{model_name}_{local_cfg.dimensionality_reduction}.pdf'
+
+            plot_representations(
+                grid,
+                representations_2d,
+                variations_cfg=env_cfg.variations,
+                samples_per_variation=samples_per_variation,
+                title_suffix=f'{dataset_name} Latent Space',
+                save_path=dr_save_path,
+            )
+
+            # --- Distance maps per variation ---
+            grid_size = env_cfg.grid_size
+
+            for var_idx, var_pixels_list in enumerate(pixels_variations):
+                embeddings = all_embeddings_list[var_idx]
+                pixels = torch.cat(var_pixels_list, dim=0).cpu().numpy()
+
+                var_suffix = (
+                    f'var_{env_cfg.variations[var_idx]["variation"]["fields"][0]}'
+                    if env_cfg.variations[var_idx]['variation']['fields']
+                    is not None
+                    else 'var_original'
+                )
+
+                distmap_save_path = (
+                    f'{dataset_name}_{model_name}_{var_suffix}_distmap.pdf'
+                )
+
+                plot_distance_maps(
+                    grid.reshape(grid_size, grid_size, -1),
+                    embeddings.reshape(grid_size, grid_size, -1),
+                    pixels.reshape(grid_size, grid_size, *pixels.shape[1:]),
+                    save_path=distmap_save_path,
+                )
 
         logging.info(f'Finished dataset: {dataset_name}')
 

@@ -4,14 +4,18 @@ from ..quantizer import PolarQuantizer
 from .env import PushT
 
 
-DEFAULT_VARIATIONS = ("agent.start_position", "block.start_position", "block.angle")
+DEFAULT_VARIATIONS = (
+    'agent.start_position',
+    'block.start_position',
+    'block.angle',
+)
 
 
 class PushTDiscrete(PushT):
     metadata = {
-        "render_modes": ["human", "rgb_array"],
-        "video.frames_per_second": 10,
-        "render_fps": 10,
+        'render_modes': ['human', 'rgb_array'],
+        'video.frames_per_second': 10,
+        'render_fps': 10,
     }
     reward_range = (0.0, 1.0)
 
@@ -23,7 +27,7 @@ class PushTDiscrete(PushT):
         render_action=False,
         resolution=224,
         with_target=True,
-        render_mode="rgb_array",
+        render_mode='rgb_array',
         relative=True,
         init_value=None,
     ):
@@ -40,7 +44,9 @@ class PushTDiscrete(PushT):
 
         # override action space to be discrete
         # rem: new actions are discrete bin
-        self.quantizer = quantizer or PolarQuantizer(16, 16, max_action_distance=1.0)
+        self.quantizer = quantizer or PolarQuantizer(
+            16, 16, max_action_distance=1.0
+        )
         self.action_space = spaces.MultiDiscrete(self.quantizer.action_shape)
 
     def step(self, quantized_action):

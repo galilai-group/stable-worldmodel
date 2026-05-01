@@ -1,8 +1,7 @@
-"""OGBench Point Maze environment with variation_space support.
+"""OGBench Maze environment with variation_space support.
 
-This module wraps the OGBench point maze environment (and variants such as
-BallMaze or AntMaze) with a ``variation_space`` for visual domain
-randomization.
+This module wraps the OGBench maze environment (point, ant, humanoid variants
+and BallMaze) with a ``variation_space`` for visual domain randomization.
 
 The variation mechanism follows the same ``modify_mjcf_model`` /
 ``compile_model`` / ``mark_dirty`` pattern used by the dm_control wrappers
@@ -34,9 +33,9 @@ Supported visual variations:
 
 Example::
 
-    from stable_worldmodel.envs.ogbench.point_maze import PointMazeEnv
+    from stable_worldmodel.envs.ogbench.maze_env import MazeEnv
 
-    env = PointMazeEnv(maze_type='large', ob_type='pixels')
+    env = MazeEnv(maze_type='large', ob_type='pixels')
 
     # Reset and sample all visual variations.
     obs, info = env.reset(options={'variation': ['all']})
@@ -74,13 +73,14 @@ nothing is varied by default.
 """
 
 
-class PointMazeEnv(gym.Wrapper):
-    """Point maze environment with variation_space support.
+class MazeEnv(gym.Wrapper):
+    """Maze environment with variation_space support.
 
     Wraps the OGBench maze environment (created via
     :func:`ogbench.locomaze.maze.make_maze_env`) with a ``variation_space``
-    that enables visual domain randomization.  Variation application follows
-    the ``modify_mjcf_model`` / ``compile_model`` pattern of the dm_control
+    that enables visual domain randomization.  Supports point, ant, and
+    humanoid locomotion agents.  Variation application follows the
+    ``modify_mjcf_model`` / ``compile_model`` pattern of the dm_control
     wrappers in this project.
 
     All attributes and methods not explicitly overridden are forwarded to
@@ -114,7 +114,7 @@ class PointMazeEnv(gym.Wrapper):
         height=224,
         **kwargs,
     ):
-        """Initialize PointMazeEnv.
+        """Initialize MazeEnv.
 
         Creates the underlying OGBench maze environment (including maze-wall
         XML generation) and loads the resulting XML into a dm_control MJCF
@@ -152,7 +152,7 @@ class PointMazeEnv(gym.Wrapper):
             **kwargs,
         )
         super().__init__(env)
-        self.env_name = 'PointMaze'
+        self.env_name = f'{loco_env_type.capitalize()}Maze'
 
         # OGBench hardcodes observation_space to (64, 64, 3) for pixels regardless
         # of the width/height passed. Override to match the actual render dimensions.

@@ -25,6 +25,7 @@ from stable_worldmodel.data.dataset import Dataset
 ## TestDatasetBase — Tests for the base Dataset class abstract methods      ##
 ##############################################################################
 
+
 def test_column_names_not_implemented():
     """Test that column_names raises NotImplementedError."""
     lengths = np.array([10])
@@ -284,6 +285,7 @@ def mock_dataset_c():
 ## TestImageDataset — Tests for ImageDataset                                ##
 ##############################################################################
 
+
 def test_image_dataset_init(sample_image_dataset):
     """Test ImageDataset initialization."""
     cache_dir, name = sample_image_dataset
@@ -438,7 +440,9 @@ def test_image_dataset_transform(sample_image_dataset):
     assert isinstance(item, dict)
 
 
-def test_image_dataset_short_episode_filtered(sample_image_dataset_short_episode):
+def test_image_dataset_short_episode_filtered(
+    sample_image_dataset_short_episode,
+):
     """Test that episodes shorter than span are filtered out."""
     cache_dir, name = sample_image_dataset_short_episode
     dataset = ImageDataset(
@@ -489,6 +493,7 @@ def test_image_dataset_load_episode(sample_image_dataset):
 ##############################################################################
 ## TestVideoDataset — Tests for VideoDataset                                ##
 ##############################################################################
+
 
 def test_video_dataset_init(sample_video_dataset):
     """Test VideoDataset initialization."""
@@ -660,15 +665,14 @@ def test_video_dataset_decord_import_error(sample_video_dataset):
 
     # Mock the import to raise ImportError
     with patch.dict(sys.modules, {'decord': None}):
-        with pytest.raises(
-            ImportError, match='VideoDataset requires decord'
-        ):
+        with pytest.raises(ImportError, match='VideoDataset requires decord'):
             VideoDataset(name, cache_dir=str(cache_dir))
 
 
 ##############################################################################
 ## TestMergeDataset — Tests for MergeDataset                                ##
 ##############################################################################
+
 
 def test_merge_dataset_init(mock_dataset_a, mock_dataset_b):
     """Test MergeDataset initialization."""
@@ -684,7 +688,9 @@ def test_merge_dataset_init_empty_raises():
         MergeDataset([])
 
 
-def test_merge_dataset_column_names_auto_dedupe(mock_dataset_a, mock_dataset_b):
+def test_merge_dataset_column_names_auto_dedupe(
+    mock_dataset_a, mock_dataset_b
+):
     """Test column_names with automatic deduplication."""
     merged = MergeDataset([mock_dataset_a, mock_dataset_b])
 
@@ -697,7 +703,9 @@ def test_merge_dataset_column_names_auto_dedupe(mock_dataset_a, mock_dataset_b):
     assert 'audio' in cols
 
 
-def test_merge_dataset_column_names_explicit_keys(mock_dataset_a, mock_dataset_b):
+def test_merge_dataset_column_names_explicit_keys(
+    mock_dataset_a, mock_dataset_b
+):
     """Test column_names with explicit keys_from_dataset."""
     merged = MergeDataset(
         [mock_dataset_a, mock_dataset_b],
@@ -791,7 +799,9 @@ def test_merge_dataset_load_chunk(mock_dataset_a, mock_dataset_b):
     assert 'audio' in chunk[0]
 
 
-def test_merge_dataset_load_chunk_merges_all_datasets(mock_dataset_a, mock_dataset_b):
+def test_merge_dataset_load_chunk_merges_all_datasets(
+    mock_dataset_a, mock_dataset_b
+):
     """Test load_chunk merges data from all datasets."""
     merged = MergeDataset([mock_dataset_a, mock_dataset_b])
 
@@ -824,7 +834,9 @@ def test_merge_dataset_get_col_data(mock_dataset_a, mock_dataset_b):
     assert audio_data.shape[0] == 20
 
 
-def test_merge_dataset_get_col_data_not_assigned_raises(mock_dataset_a, mock_dataset_b):
+def test_merge_dataset_get_col_data_not_assigned_raises(
+    mock_dataset_a, mock_dataset_b
+):
     """Test get_col_data raises for unassigned column."""
     merged = MergeDataset(
         [mock_dataset_a, mock_dataset_b],
@@ -874,6 +886,7 @@ def test_merge_dataset_get_row_data_empty_keys(mock_dataset_a, mock_dataset_b):
 ##############################################################################
 ## TestConcatDataset — Tests for ConcatDataset                              ##
 ##############################################################################
+
 
 def test_concat_dataset_init(mock_dataset_a, mock_dataset_c):
     """Test ConcatDataset initialization."""
@@ -979,7 +992,9 @@ def test_concat_dataset_get_col_data(mock_dataset_a, mock_dataset_c):
     assert action_data.shape[0] == 35
 
 
-def test_concat_dataset_get_col_data_not_found_raises(mock_dataset_a, mock_dataset_c):
+def test_concat_dataset_get_col_data_not_found_raises(
+    mock_dataset_a, mock_dataset_c
+):
     """Test get_col_data raises for missing column."""
     concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
 
@@ -987,7 +1002,9 @@ def test_concat_dataset_get_col_data_not_found_raises(mock_dataset_a, mock_datas
         concat.get_col_data('nonexistent')
 
 
-def test_concat_dataset_get_row_data_single_int(mock_dataset_a, mock_dataset_c):
+def test_concat_dataset_get_row_data_single_int(
+    mock_dataset_a, mock_dataset_c
+):
     """Test get_row_data with single int index."""
     concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
 
@@ -1018,6 +1035,7 @@ def test_concat_dataset_get_row_data_list(mock_dataset_a, mock_dataset_c):
 ##############################################################################
 ## TestIntegration — Integration tests combining MergeDataset/ConcatDataset ##
 ##############################################################################
+
 
 def test_merge_then_concat(mock_dataset_a, mock_dataset_b, mock_dataset_c):
     """Test combining MergeDataset and ConcatDataset."""
@@ -1072,6 +1090,7 @@ def test_concat_multiple_datasets(mock_dataset_a):
 ##############################################################################
 ## TestMergeDatasetLengths — Test MergeDataset.lengths property             ##
 ##############################################################################
+
 
 def test_merge_dataset_lengths_property(mock_dataset_a, mock_dataset_b):
     """Test lengths property returns first dataset's lengths."""
@@ -1175,6 +1194,7 @@ def sample_hdf5_grayscale(tmp_path):
 ##############################################################################
 ## TestGoalDataset — Tests for GoalDataset wrapper                          ##
 ##############################################################################
+
 
 def test_goal_dataset_init(sample_hdf5_for_goal):
     """Test GoalDataset initialization."""
@@ -1443,8 +1463,8 @@ def test_goal_dataset_sample_uniform_future_step(sample_hdf5_for_goal):
     # Sample from episode 0, starting at step 5
     ep_idx = 0
     local_start = 5
-    future_ep_idx, future_local_idx = (
-        goal_dataset._sample_uniform_future_step(ep_idx, local_start)
+    future_ep_idx, future_local_idx = goal_dataset._sample_uniform_future_step(
+        ep_idx, local_start
     )
 
     # Calculate current_end
@@ -1579,9 +1599,7 @@ def test_goal_dataset_current_goal_equals_current_state(tmp_path):
             'action', data=np.zeros((total_steps, 2), dtype=np.float32)
         )
 
-    base_dataset = HDF5Dataset(
-        'current_goal_test', cache_dir=str(tmp_path)
-    )
+    base_dataset = HDF5Dataset('current_goal_test', cache_dir=str(tmp_path))
     goal_dataset = GoalDataset(
         base_dataset,
         goal_probabilities=(0.0, 0.0, 0.0, 1.0),  # Always current
@@ -1595,9 +1613,7 @@ def test_goal_dataset_current_goal_equals_current_state(tmp_path):
 
         # Goal should be the last frame of the clip
         # The goal is loaded as a single step, so it has shape (1, C, H, W) for pixels
-        last_frame_pixels = item['pixels'][
-            -1:
-        ]  # Last frame of current clip
+        last_frame_pixels = item['pixels'][-1:]  # Last frame of current clip
         goal_pixels = item['goal_pixels']
 
         last_frame_proprio = item['proprio'][-1:]  # Last step proprio
@@ -1721,6 +1737,7 @@ def sample_hdf5_with_string_column(tmp_path):
 ## TestHDF5DatasetEdgeCases — Additional edge case tests for HDF5Dataset    ##
 ##############################################################################
 
+
 def test_hdf5_getitem_with_string_column(sample_hdf5_with_string_column):
     """Test that loading a dataset with a bytes string column does not raise."""
     cache_dir, name = sample_hdf5_with_string_column
@@ -1763,6 +1780,7 @@ def test_hdf5_get_row_data_list_indices(sample_hdf5_grayscale):
 ## load_chunk (exclusive end) returns goal_offset_steps + 1 frames and the  ##
 ## goal frame lands exactly goal_offset_steps steps after the init frame.   ##
 ##############################################################################
+
 
 @pytest.fixture
 def sequential_hdf5(tmp_path):
@@ -1809,13 +1827,17 @@ def test_goal_offset_1_distinct_from_init(sequential_hdf5):
 
 
 @pytest.mark.parametrize('goal_offset_steps', [1, 5, 10])
-def test_goal_is_exactly_offset_steps_ahead(sequential_hdf5, goal_offset_steps):
+def test_goal_is_exactly_offset_steps_ahead(
+    sequential_hdf5, goal_offset_steps
+):
     """goal frame index equals start + goal_offset_steps for various offsets."""
     cache_dir, name = sequential_hdf5
     dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
     start = 3
-    end = start + goal_offset_steps + 1  # fixed formula from evaluate_from_dataset
+    end = (
+        start + goal_offset_steps + 1
+    )  # fixed formula from evaluate_from_dataset
 
     chunk = dataset.load_chunk(
         np.array([0]), np.array([start]), np.array([end])
@@ -1825,7 +1847,9 @@ def test_goal_is_exactly_offset_steps_ahead(sequential_hdf5, goal_offset_steps):
     init_val = obs[0].item()
     goal_val = obs[-1].item()
 
-    assert init_val == start, f'init frame should be step {start}, got {init_val}'
+    assert init_val == start, (
+        f'init frame should be step {start}, got {init_val}'
+    )
     assert goal_val == start + goal_offset_steps, (
         f'goal frame should be step {start + goal_offset_steps}, got {goal_val}'
     )
@@ -1837,7 +1861,7 @@ def test_old_formula_would_fail(sequential_hdf5):
     dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
 
     start, goal_offset_steps = 5, 3
-    old_end = start + goal_offset_steps        # bug: off by one
+    old_end = start + goal_offset_steps  # bug: off by one
     fixed_end = start + goal_offset_steps + 1  # fix
 
     old_chunk = dataset.load_chunk(
@@ -1859,6 +1883,7 @@ def test_old_formula_would_fail(sequential_hdf5):
 ##############################################################################
 ## TestImageDatasetEdgeCases — Additional edge case tests for ImageDataset  ##
 ##############################################################################
+
 
 def test_image_dataset_get_row_data_list(sample_image_dataset):
     """Test get_row_data with list of indices."""

@@ -1,11 +1,72 @@
 """Shared grid utilities for environment visualization."""
 
+import torch
+import torch.nn as nn
 import numpy as np
 from loguru import logger as logging
 
 from stable_worldmodel.envs.ogbench.cube_env import CubeEnv
 from stable_worldmodel.envs.pusht.env import PushT
 from stable_worldmodel.envs.two_room.env import TwoRoomEnv
+
+
+class LeWMAdapter(nn.Module):
+    """Wraps LeWM for visualization.
+
+    Skips NaN-valued action at reset boundaries.
+    """
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        # LeWM has no extra_encoders dict; provide an empty one for compatibility
+        self.extra_encoders = {}
+
+    def encode(self, info, pixels_key='pixels', target='emb'):
+        encode_info = dict(info)
+        if (
+            'action' in encode_info
+            and isinstance(encode_info['action'], torch.Tensor)
+            and encode_info['action'].isnan().any()
+        ):
+            encode_info.pop('action')
+        result = self.model.encode(encode_info)
+        info.update(result)
+        return info
+
+
+class PreJEPAAdapter(nn.Module):
+    """Wraps PreJEPA for visualization.
+
+    Filters out NaN-valued keys (e.g. action at reset) from the extra encoders
+    before calling encode, so only valid state observations are embedded.
+    Exposes a flat (B, T, P*d) interface for predict.
+    """
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self._n_patches = None
+        self._d = None
+
+    def encode(self, info, pixels_key='pixels', target='emb'):
+        emb_keys = [
+            k
+            for k in self.model.extra_encoders
+            if k in info
+            and isinstance(info[k], torch.Tensor)
+            and not info[k].isnan().any()
+        ]
+        return self.model.encode(
+            info, pixels_key=pixels_key, target=target, emb_keys=emb_keys
+        )
+
+    def predict(self, emb, act_emb=None):
+        """(B, T, P*d) -> (B, T, P*d). act_emb is unused (already baked into emb)."""
+        B, T = emb.shape[:2]
+        emb_4d = emb.reshape(B, T, self._n_patches, self._d)
+        preds = self.model.predict(emb_4d)
+        return preds.flatten(start_dim=2)
 
 
 def get_state_from_grid(env, grid_element, dim: int | list = 0):
@@ -63,6 +124,47 @@ def get_state_from_grid(env, grid_element, dim: int | list = 0):
         # TODO should check position is feasible
         pass
     return grid_state
+
+
+def get_rotation_states(env, n_steps: int = 100):
+    """Generate PushT states with fixed agent/block positions and varying block angle.
+
+    Agent is fixed at the bottom-right corner of its spawn range, the T-block
+    is fixed at the centre of its spawn range, and the block angle sweeps
+    uniformly from 0 to 2π.
+
+    Args:
+        env: A PushT environment instance.
+        n_steps: Number of angle samples in [0, 2π).
+
+    Returns:
+        angles: (N,) array of block angles in radians.
+        state_list: List of N full state vectors.
+    """
+    if not isinstance(env, PushT):
+        raise NotImplementedError(
+            f'Rotation state sweep not implemented for env type: {type(env)}'
+        )
+
+    agent_space = env.variation_space['agent']['start_position']
+    block_space = env.variation_space['block']['start_position']
+
+    # Agent fixed at bottom-right corner (high end of its spawn range)
+    agent_pos = agent_space.high.copy()
+
+    # Block fixed at centre of its spawn range
+    block_pos = (block_space.low + block_space.high) / 2.0
+
+    # Zero velocity
+    vel = np.zeros(2, dtype=np.float32)
+
+    angles = np.linspace(0, 2 * np.pi, n_steps, endpoint=False)
+    state_list = [
+        np.concatenate([agent_pos, block_pos, [angle], vel])
+        for angle in angles
+    ]
+
+    return angles, state_list
 
 
 def get_state_grid(env, grid_size: int = 10):

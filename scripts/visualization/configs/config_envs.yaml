@@ -36,6 +36,10 @@ datasets:
       env_name: swm/PushT-v1
       history_size: 1
       frame_skip: 1
+      # visualization_mode: grid   → 2D XY grid of agent/T translations (default)
+      # visualization_mode: rotation → sweep T-block angle 0→2π, fixed positions
+      visualization_mode: grid
+      rotation_steps: 100          # number of angle samples (rotation mode only)
       grid_size: 20
       default_variation: ["agent.start_position"]
       variations:

@@ -5,24 +5,23 @@ sidebar_title: Quickstart
 
 ## World
 
-The `World` class is the main interface for interacting with environments. It wraps vectorized Gymnasium environments and provides a unified API for data collection, evaluation, and planning.
+The `World` class is the main interface for interacting with environments. It wraps a pool of vectorized Gymnasium environments (`EnvPool`) and a preprocessing pipeline (`MegaWrapper`), and provides a unified API for data collection, evaluation, and planning.
 
 ```python
 import stable_worldmodel as swm
 
-world = swm.World(env='swm/PushT-v1', num_envs=4)
+world = swm.World('swm/PushT-v1', num_envs=4, image_shape=(64, 64))
 ```
 
-Unlike the traditional Gymnasium interface that returns `(obs, reward, terminated, truncated, info)` from `step()`, `World` adopts a simpler philosophy: all data produced by the environments is stored in a single dictionary accessible via `world.infos`. The `step()` and `reset()` methods operate on all environments simultaneously and update this dictionary in place.
+Unlike the traditional Gymnasium interface that returns `(obs, reward, terminated, truncated, info)` from `step()`, `World` adopts a simpler philosophy: all data produced by the environments is stored in a single dictionary accessible via `world.infos`. You drive the simulation by attaching a policy and calling `collect()` or `evaluate()` — the internal rollout loop steps the envs, refreshes `world.infos`, and invokes the policy for you.
 
 ```python
+world.set_policy(policy)
 world.reset(seed=0)
-world.step()
 
-# Access all environment data through world.infos
-print(world.infos['pixels'].shape)    # (num_envs, C, H, W)
-print(world.infos['reward'])          # (num_envs,)
-print(world.infos['terminated'])      # (num_envs,)
+# Array/tensor values carry a leading time dim of 1 after the env dim.
+print(world.infos['pixels'].shape)    # (num_envs, 1, H, W, C)
+print(world.infos['state'].shape)     # (num_envs, 1, state_dim)
 ```
 
 See the [World API](api/world.md) for all available parameters and methods.
@@ -49,8 +48,8 @@ A key feature of stable-worldmodel is the **variation space**, which defines all
 Each environment exposes a `variation_space` that describes what can be varied:
 
 ```python
-# View the variation space structure
-print(world.single_variation_space.to_str())
+# View the variation space structure (exposed on the env pool)
+print(world.envs.single_variation_space.to_str())
 ```
 
 For example, in PushT this might show:
@@ -116,7 +115,7 @@ This is particularly useful for:
 
 ### Policy for World Interactions
 
-A `World` requires a policy to determine actions. When you call `world.step()`, it internally calls `policy.get_action(info)` to obtain the actions for all environments.
+A `World` requires a policy to determine actions. During `collect()` / `evaluate()`, the internal rollout loop calls `policy.get_action(world.infos)` on every step.
 
 Any custom policy must implement the `get_action` method:
 
@@ -188,23 +187,34 @@ The `WorldModelPolicy` internally calls the solver to optimize action sequences 
 
 ## Dataset
 
-Stable World-Model provides utilities for recording and loading episode datasets in HDF5 format.
+Stable World-Model provides a small, pluggable data layer for recording and
+loading episode datasets. Recording, loading, and conversion all go through
+the same **format registry**, so the same code records to a Lance table or
+to a folder of MP4 episodes — only the `format=` flag changes. See
+the [Dataset API](api/dataset.md) for the full reference; the rest of this
+section covers the everyday workflow.
 
 ### Recording a Dataset
 
-Use `world.record_dataset()` to collect episodes and save them in HDF5 format. The dataset is saved to `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). This is useful for collecting expert demonstrations, random exploration data, or rollouts from a trained policy.
+Use `world.collect()` to roll out episodes and dump their trajectories. Each
+info key becomes a column in the resulting file. The default writer is
+`lance`; pass `format='hdf5'`, `'video'`, or `'folder'` to switch backends.
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(224, 224))
-policy = swm.policy.RandomPolicy(seed=42) # can be your JEPA or RL Policy
+policy = swm.policy.RandomPolicy(seed=42)  # can be your JEPA or RL policy
 world.set_policy(policy)
 
-# Record 100 episodes to HDF5
-world.record_dataset(
-    dataset_name='pusht_random',
-    episodes=100,
-    seed=0
-)
+# Lance table (default — recommended for training).
+world.collect('data/pusht_random.lance', episodes=100, seed=0)
+
+# Re-running the same call extends the table (mode='append' is the default
+# for every writer); pass mode='overwrite' to start fresh.
+world.collect('data/pusht_random.lance', episodes=50, seed=1)   # +50 episodes
+
+# Or a directory with one MP4 per episode (compact, easy to inspect).
+world.collect('data/pusht_random_video', episodes=100, seed=0,
+              format='video')
 ```
 
 !!! info "Expert Policies"
@@ -212,41 +222,62 @@ world.record_dataset(
 
 ### Loading a Dataset
 
-Load recorded datasets using `HDF5Dataset`. The `frameskip` parameter controls the stride between frames, and `num_steps` sets the sequence length returned per sample. This makes it easy to train models on temporal sequences of observations and actions.
+`swm.data.load_dataset()` resolves a name to a local path and dispatches to
+the matching reader. It accepts a local path, a HuggingFace repo
+(`<user>/<repo>`, downloaded to `$STABLEWM_HOME/datasets/`), or a
+scheme-prefixed identifier such as `lerobot://lerobot/pusht`. `frameskip`
+controls the stride between frames; `num_steps` is the sequence length
+returned per sample.
 
 ```python
-from stable_worldmodel.data import HDF5Dataset
+import stable_worldmodel as swm
 
-dataset = HDF5Dataset(
-    name='pusht_random',
-    frameskip=1,  # stride between frames
-    num_steps=4,  # sequence length
-    keys_to_load=['pixels', 'action', 'state']
+dataset = swm.data.load_dataset(
+    'data/pusht_random.lance',                    # autodetected as lance
+    frameskip=1,
+    num_steps=4,
+    keys_to_load=['pixels', 'action', 'state'],
 )
 
-# Access samples
 sample = dataset[0]
 print(sample['pixels'].shape)   # (4, 3, H, W)
 print(sample['action'].shape)   # (4, action_dim)
 ```
 
-```python
-from stable_worldmodel.data import LeRobotAdapter
+The same call works for the other formats:
 
-dataset = LeRobotAdapter(
-    repo_id='lerobot/pusht',
-    primary_camera_key='observation.images.top',  # gets mapped to `pixels`
+```python
+# Folder / Video (autodetected from directory layout)
+swm.data.load_dataset('data/pusht_random_video', num_steps=4)
+
+# LeRobot Hub dataset
+swm.data.load_dataset(
+    'lerobot://lerobot/pusht',
+    primary_camera_key='observation.images.top',  # → `pixels`
     num_steps=4,
-    frameskip=1,
     keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
-    keys_to_cache=['action', 'proprio', 'ep_idx', 'step_idx'],
 )
 ```
 
 !!! info "LeRobot Support"
-    LeRobotAdapter support is read-only and requires Python 3.12+. You can install it passing in the optional dependency via `pip install 'stable-worldmodel[lerobot]'`.
+    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[format]'`.
 
-The dataset is compatible with PyTorch `DataLoader` for batched training.
+The returned dataset is compatible with PyTorch `DataLoader` for batched training.
+
+### Converting Between Formats
+
+`swm.data.convert()` migrates a dataset from one format to another, episode
+by episode. Source format is autodetected; pass `dest_format` and any
+writer kwargs:
+
+```python
+swm.data.convert(
+    'data/pusht_random.lance',        # source
+    'data/pusht_random_video',        # destination
+    dest_format='video',
+    fps=30,
+)
+```
 
 Use the CLI to list all available datasets, or inspect a specific one:
 
@@ -257,15 +288,10 @@ swm inspect pusht_expert_train
 
 ### Recording Videos
 
-Use `world.record_video()` to visualize the behavior of the current world policy. This is helpful for debugging, qualitative evaluation, or generating figures for papers.
+To visualize a policy's behavior, pass `video=<dir>` to `evaluate()`. One mp4 per episode is written into the target directory — useful for debugging, qualitative evaluation, or generating figures for papers.
 
 ```python
-world.record_video(
-    video_path='./videos/',
-    max_steps=500,
-    fps=30,
-    seed=0
-)
+world.evaluate(episodes=10, seed=0, video='./videos/')
 ```
 
 ### Recording Videos from Dataset
@@ -287,35 +313,30 @@ record_video_from_dataset(
 
 ## Evaluation
 
-Stable World-Model provides two ways to evaluate world models: `evaluate()` and `evaluate_from_dataset()`. Both methods measure how well a policy can reach a goal state, but they differ in how the goal is sampled. **We recommend using `evaluate_from_dataset()`** as it guarantees solvable tasks and enables fair comparisons across methods.
+`world.evaluate()` has two modes of operation, selected by whether you pass a `dataset`. Both measure how well a policy reaches a goal state, but they differ in how start and goal are sampled. **We recommend the dataset-driven mode** as it guarantees solvable tasks and enables fair comparisons across methods.
 
-### Offline Evaluation with `evaluate_from_dataset()` (Recommended)
+### Dataset-driven Evaluation (Recommended)
 
-Use `world.evaluate_from_dataset()` to evaluate from starting states taken from an existing dataset. This method:
-
-1. Takes a **starting state** from a trajectory in the dataset (`start_steps`)
-2. Sets the **goal** as the state `goal_offset_steps` ahead in that same trajectory
-
-Because the goal is taken from a completed trajectory, this guarantees the problem is **solvable within the given budget**—the original trajectory already reached that state. This makes evaluation fairer and more interpretable.
+When you pass `dataset=...`, each env is assigned one dataset episode. The env starts at `start_steps[i]` of that episode and targets the state `goal_offset` steps later. Because the goal is taken from a completed trajectory, the task is **solvable within the eval budget** — the original trajectory already reached that state. The run ends when every env has either succeeded or exhausted its budget (`reset_mode='wait'` by default here).
 
 ```python
-results = world.evaluate_from_dataset(
+results = world.evaluate(
     dataset=dataset,
     episodes_idx=[0, 1, 2, 3],      # Which episodes to sample from
     start_steps=[0, 10, 20, 30],    # Starting timestep within each episode
-    goal_offset_steps=50,           # Goal = state at start_step + 50
-    eval_budget=100,                # Max budget (2x the current temp dist)
+    goal_offset=50,                 # Goal = state at start_step + 50
+    eval_budget=100,                # Max env steps per episode
 )
 ```
 
-For example, if `start_steps=10` and `goal_offset_steps=50`, the agent starts at timestep 10 of the trajectory and must reach the state that was at timestep 60. Since the original trajectory completed this transition, we know the task is achievable.
+For example, if `start_steps[i]=10` and `goal_offset=50`, env `i` starts at timestep 10 of the trajectory and must reach the state that was at timestep 60. Since the original trajectory completed this transition, we know the task is achievable.
 
 !!! note ""
     The length of `episodes_idx` and `start_steps` must match `num_envs`, as each environment evaluates one configuration in parallel.
 
-### Online Evaluation with `evaluate()`
+### Episodic Evaluation
 
-Use `world.evaluate()` to evaluate your policy with randomly sampled goals. At each episode, the environment samples a random goal state that the agent must reach.
+Without a dataset, `evaluate()` runs `episodes` episodes with randomly sampled goals and auto-resets terminated envs (`reset_mode='auto'` by default).
 
 ```python
 world = swm.World('swm/PushT-v1', num_envs=4, image_shape=(224, 224))
@@ -330,12 +351,11 @@ print(f"Success Rate: {results['success_rate']:.1f}%")
 print(f"Episode Successes: {results['episode_successes']}")  # Per-episode results
 ```
 
-The `evaluate()` method runs episodes in parallel across `num_envs` environments, automatically handling episode resets and aggregating results. The returned dictionary contains:
+The returned dictionary contains:
 
 - `success_rate`: Overall success percentage
-- `episode_successes`: Array of per-episode success (0 or 1)
-- `episode_count`: Total episodes completed
-- Any custom metrics specified in `eval_keys`
+- `episode_successes`: Per-episode success flags (bool/uint array)
+- `seeds`: Per-episode reset seeds
 
 ## Model-Based Planning
 

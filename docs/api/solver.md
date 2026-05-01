@@ -51,6 +51,16 @@ summary: Model-based planning solvers for action optimization
 
 ::: stable_worldmodel.solver.MPPISolver.solve
 
+::: stable_worldmodel.solver.PredictiveSamplingSolver
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+::: stable_worldmodel.solver.PredictiveSamplingSolver.configure
+
+::: stable_worldmodel.solver.PredictiveSamplingSolver.solve
+
 ::: stable_worldmodel.solver.GradientSolver
     options:
         heading_level: 3

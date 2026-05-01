@@ -1,20 +1,10 @@
 defaults:
   - _self_
-  - override hydra/launcher: submitit_slurm
+  - launcher/local
 
 hydra:
   output_subdir: null
   mode: MULTIRUN
-  launcher:
-    max_num_timeout: 999
-    gpus_per_node: 1
-    tasks_per_node: 1
-    cpus_per_task: 8
-    mem_gb: 48
-    timeout_min: 1440
-    partition: long 
-    signal_delay_s: 120
-    constraint: lovelace
   run:
     dir: .
 

@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock
 
 import gymnasium as gym
-import numpy as np
 import pytest
 
 from stable_worldmodel.envs.pusht.expert_policy import WeakPolicy
@@ -21,7 +20,7 @@ def mock_single_env():
     mock_env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
     mock_env.action_space = gym.spaces.Box(low=-1, high=1, shape=(2,))
     mock_env.spec = MagicMock()
-    mock_env.spec.id = "swm/PushT-v0"
+    mock_env.spec.id = 'swm/PushT-v0'
     return mock_env
 
 
@@ -38,7 +37,7 @@ def mock_vectorized_env():
     for _ in range(3):
         sub_env = MagicMock()
         sub_env.spec = MagicMock()
-        sub_env.spec.id = "swm/PushT-v0"
+        sub_env.spec.id = 'swm/PushT-v0'
         mock_sub_envs.append(sub_env)
 
     mock_env.envs = mock_sub_envs
@@ -82,7 +81,7 @@ def test_weak_policy_set_env_discrete_env():
     mock_env.observation_space = gym.spaces.Box(low=0, high=1, shape=(4,))
     mock_env.action_space = gym.spaces.Discrete(9)
     mock_env.spec = MagicMock()
-    mock_env.spec.id = "swm/PushTDiscrete-v0"
+    mock_env.spec.id = 'swm/PushTDiscrete-v0'
 
     policy = WeakPolicy()
     policy.set_env(mock_env)
@@ -108,7 +107,7 @@ def test_weak_policy_set_env_vectorized_env_discrete():
 
     mock_sub_env = MagicMock()
     mock_sub_env.spec = MagicMock()
-    mock_sub_env.spec.id = "swm/PushTDiscrete-v0"
+    mock_sub_env.spec.id = 'swm/PushTDiscrete-v0'
     mock_env.envs = [mock_sub_env, mock_sub_env, mock_sub_env]
 
     policy = WeakPolicy()
@@ -143,7 +142,7 @@ def test_weak_policy_set_env_wrong_environment():
     """Test WeakPolicy.set_env raises assertion for non-PushT environment."""
     mock_env = MagicMock(spec=gym.Env)
     mock_env.spec = MagicMock()
-    mock_env.spec.id = "CartPole-v1"
+    mock_env.spec.id = 'CartPole-v1'
 
     policy = WeakPolicy()
     with pytest.raises(AssertionError):
@@ -157,7 +156,7 @@ def test_weak_policy_set_env_vectorized_wrong_environment():
 
     mock_sub_env = MagicMock()
     mock_sub_env.spec = MagicMock()
-    mock_sub_env.spec.id = "CartPole-v1"
+    mock_sub_env.spec.id = 'CartPole-v1'
     mock_env.envs = [mock_sub_env]
 
     policy = WeakPolicy()
