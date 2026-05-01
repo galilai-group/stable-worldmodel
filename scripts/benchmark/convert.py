@@ -173,13 +173,19 @@ def _hdf5_to_lerobot(src: HDF5Dataset, dest: Path, n_eps: int) -> None:
             lr_ds.save_episode()
 
 
-def convert_tworoom(force: bool) -> None:
-    """Tworoom S3 .h5 → {h5 (canonical local copy), lance, video, lerobot}.
+def convert_tworoom(force: bool, include_lerobot: bool) -> None:
+    """Tworoom S3 .h5 → {h5 (canonical local copy), lance, video[, lerobot]}.
 
     The original tworoom .h5 lives on S3 (not HF). We ``aws s3 cp`` it
     once into ./tworoom.h5 — ``--force`` does NOT re-download the source
     since it's the canonical input — then read it directly via
-    HDF5Dataset and stream into the lance/video/lerobot writers.
+    HDF5Dataset and stream into the lance/video[/lerobot] writers.
+
+    LeRobot conversion is opt-in via ``--lerobot`` because each episode
+    triggers an mp4 finalization pass even with streaming_encoding on,
+    making it dramatically slower than the other writers on a 1500+
+    episode dataset. Skip it for fast iteration; enable when you
+    actually want the LeRobot bench row.
     """
     print('\n=== tworoom ===')
     h5_local, _ = PLAN['tworoom']['hdf5']
@@ -198,12 +204,14 @@ def convert_tworoom(force: bool) -> None:
         print(f'  source: {h5_p} (already present)')
 
     # Derived outputs: --force wipes & re-derives.
+    candidates = [('lance', lance_local), ('video', video_local)]
+    if include_lerobot:
+        candidates.append(('lerobot', lerobot_local))
+    else:
+        print('  lerobot: skipped (pass --lerobot to enable; slow on big datasets)')
+
     targets: list[tuple[str, str]] = []
-    for fmt, dest in [
-        ('lance', lance_local),
-        ('video', video_local),
-        ('lerobot', lerobot_local),
-    ]:
+    for fmt, dest in candidates:
         dest_p = Path(dest)
         if force and dest_p.exists():
             _wipe(dest_p)
@@ -244,9 +252,16 @@ def main() -> None:
     p.add_argument(
         '--force', action='store_true', help='re-convert even if outputs exist'
     )
+    p.add_argument(
+        '--lerobot',
+        action='store_true',
+        help='also build the LeRobot dataset (slow: per-episode mp4 '
+        'finalization fires for every save_episode regardless of '
+        'streaming_encoding)',
+    )
     args = p.parse_args()
 
-    convert_tworoom(args.force)
+    convert_tworoom(args.force, include_lerobot=args.lerobot)
 
     if args.no_upload:
         print('\n--no-upload: leaving S3 untouched.')
@@ -254,6 +269,8 @@ def main() -> None:
 
     print('\n=== upload ===')
     for fmt, (local, s3_sub) in PLAN['tworoom'].items():
+        if fmt == 'lerobot' and not args.lerobot:
+            continue
         local_p = Path(local)
         if not local_p.exists():
             print(f'  skip tworoom/{fmt}: {local_p} not found')
