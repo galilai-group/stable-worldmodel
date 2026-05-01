@@ -91,7 +91,6 @@ def _init_app(cfg):
     return _fasthtml_app, cfg
 
 
-
 _APP_CFG_KEYS = {
     'open_apps.apps.todo_app': 'todo',
     'open_apps.apps.calendar_app': 'calendar',
@@ -159,6 +158,7 @@ def reset_all_apps(apps_cfg) -> None:
             reset_app(app_name, apps_cfg)
         except Exception as e:
             logger.warning(f'Failed to reset {app_name}: {e}')
+
 
 def pick_free_port(host: str = '127.0.0.1') -> int:
     """Ask the OS for an unused TCP port on ``host``."""

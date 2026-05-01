@@ -275,7 +275,7 @@ class OpenAppsEnv(gym.Env):
         )
         self.action_space = spaces.MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
 
-        # Variation space 
+        # Variation space
         self._appearance_variants = discover_variants(app_name, 'appearance')
         self._content_variants = discover_variants(app_name, 'content')
 

@@ -21,8 +21,7 @@ TASKS_YAML = OPENAPPS_CONFIG / 'tasks' / 'all_tasks.yaml'
 
 
 def ensure_openapps_importable() -> None:
-    """Make sure ``open_apps`` and its internal ``src.*`` imports work.
-    """
+    """Make sure ``open_apps`` and its internal ``src.*`` imports work."""
     try:
         import open_apps  # noqa: F401
     except ImportError:
@@ -37,6 +36,7 @@ def ensure_openapps_importable() -> None:
     # still requires the openapps/ repo root on sys.path if it exists.
     if OPENAPPS_ROOT.is_dir() and str(OPENAPPS_ROOT) not in sys.path:
         sys.path.insert(0, str(OPENAPPS_ROOT))
+
 
 ensure_openapps_importable()
 

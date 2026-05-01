@@ -17,12 +17,12 @@ import numpy as np
 VIEWPORT_WIDTH = 1024
 VIEWPORT_HEIGHT = 640
 
-GRID_X = 32  
-GRID_Y = 20 
+GRID_X = 32
+GRID_Y = 20
 NUM_ACTIONS = 3  # 0=click, 1=scroll_down, 2=scroll_up
 
-CELL_W = VIEWPORT_WIDTH // GRID_X 
-CELL_H = VIEWPORT_HEIGHT // GRID_Y 
+CELL_W = VIEWPORT_WIDTH // GRID_X
+CELL_H = VIEWPORT_HEIGHT // GRID_Y
 
 SCROLL_DELTA = 300  # px per scroll step (~3–4 list items)
 
