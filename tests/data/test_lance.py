@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 
 from stable_worldmodel.data import (
     LanceDataset,
