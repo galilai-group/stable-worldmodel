@@ -1,19 +1,17 @@
-"""Comprehensive benchmark — tworoom + pusht across HDF5/Lance/Video/LeRobot.
+"""Comprehensive benchmark — tworoom across HDF5/Lance/Video/LeRobot.
 
 Throughput in samples/s, on-disk storage in MB. Auto-downloads any missing
 local copies from S3 first, then runs every applicable combination, then
 prints a markdown table.
 
-What's measured per (dataset × format × source × cache-mode):
-  - Tworoom — h5 local/s3 (cached/no-cache), lance local/s3 (cached/
-    no-cache), video local. 10 rows.
-  - Pusht  — same plus a `LeRobot HF` row (single, format-native).
-    11 rows.
+What's measured per (format × source × cache-mode):
+  - HDF5 local/s3 (cached/no-cache), Lance local/s3 (cached/no-cache),
+    Video local, LeRobot local. 9 rows.
   - Storage cost — local file/dir size and S3 prefix size.
 
 Run on EC2 with an IAM instance role attached, or set AWS creds in env.
 Pass ``--no-s3`` to skip the network rows, ``--no-local`` to skip the
-local rows, ``--datasets pusht`` for one dataset only.
+local rows.
 
 Run scripts/benchmark/convert.py first to produce + upload the source
 data this script reads from.
@@ -50,19 +48,9 @@ AWS_SECRET_ACCESS_KEY = ''
 DEFAULT_COLUMNS = ['pixels', 'action', 'proprio']
 CACHE_COLS = ['action', 'proprio']
 
-# Per-dataset paths. Mirror PLAN in convert.py.
-# `lance_*` paths point directly at the .lance dir; LanceDataset
-# auto-detects parent + table-name from the path when table_name is None.
+# Tworoom-only. Pusht (96×96) made per-format throughput differences
+# noisy; tworoom (224×224) is now the bench's source of truth.
 DATASETS = {
-    'pusht': {
-        'image_size': 96,
-        'h5_local': './pusht.h5',
-        'h5_s3': f'{S3_BASE}/pusht/pusht.h5',
-        'lance_local': './pusht.lance',
-        'lance_s3': f'{S3_BASE}/pusht/pusht.lance',
-        'video_local': './pusht.video',
-        'lerobot_repo': 'lerobot/pusht_image',
-    },
     'tworoom': {
         'image_size': 224,
         'h5_local': './tworoom.h5',
@@ -70,7 +58,11 @@ DATASETS = {
         'lance_local': './tworoom.lance',
         'lance_s3': f'{S3_BASE}/tworoom/tworoom.lance',
         'video_local': './tworoom.video',
-        'lerobot_repo': None,
+        'lerobot_local': './tworoom.lerobot',
+        'lerobot_s3': f'{S3_BASE}/tworoom/tworoom.lerobot',
+        # Logical repo_id used at LeRobotDataset.create() time. Read
+        # path uses (repo_id, root=...) — the dir is the source of truth.
+        'lerobot_repo_id': 'local/tworoom',
     },
 }
 
@@ -108,8 +100,8 @@ def _ensure_local_h5(local: Path, s3_uri: str) -> bool:
     return _aws('s3', 'cp', s3_uri, str(local), '--no-progress') == 0
 
 
-def _ensure_local_lance(local_dir: Path, s3_uri: str) -> bool:
-    """Sync a Lance .lance directory from S3 if missing locally."""
+def _ensure_local_dir(local_dir: Path, s3_uri: str) -> bool:
+    """Sync an S3 directory prefix (Lance / LeRobot / Video) to a local dir."""
     if local_dir.exists() and any(local_dir.iterdir()):
         return True
     print(f'  syncing {s3_uri}/ → {local_dir}', flush=True)
@@ -216,15 +208,12 @@ def _bench_one(label, ds, args):
 
 
 def _build_rows(ds_name, cfg, args, common):
-    """Return list of (fmt, source, cache, dataset, storage_uri).
-
-    `fmt`/`source`/`cache` are the three label columns the markdown table
-    splits on. `storage_uri` feeds the size lookup.
-    """
+    """Return list of (fmt, source, cache, dataset, storage_uri)."""
     rows: list[tuple[str, str, str, object, str]] = []
     h5_local = Path(cfg['h5_local']).resolve()
     lance_local = Path(cfg['lance_local']).resolve()
     video_local = Path(cfg['video_local']).resolve()
+    lerobot_local = Path(cfg['lerobot_local']).resolve()
 
     if not args.no_local:
         if _ensure_local_h5(h5_local, cfg['h5_s3']):
@@ -250,7 +239,7 @@ def _build_rows(ds_name, cfg, args, common):
                     str(h5_local),
                 )
             )
-        if _ensure_local_lance(lance_local, cfg['lance_s3']):
+        if _ensure_local_dir(lance_local, cfg['lance_s3']):
             rows.append(
                 (
                     'Lance',
@@ -292,6 +281,27 @@ def _build_rows(ds_name, cfg, args, common):
                 )
             except Exception as e:
                 print(f'  (skipping {ds_name} Video: {e})')
+        if args.include_lerobot and _ensure_local_dir(
+            lerobot_local, cfg['lerobot_s3']
+        ):
+            try:
+                from stable_worldmodel.data import LeRobotAdapter
+
+                rows.append(
+                    (
+                        'LeRobot',
+                        'local',
+                        '—',
+                        LeRobotAdapter(
+                            repo_id=cfg['lerobot_repo_id'],
+                            root=str(lerobot_local),
+                            **common,
+                        ),
+                        str(lerobot_local),
+                    )
+                )
+            except Exception as e:
+                print(f'  (skipping {ds_name} LeRobot: {e})')
 
     if not args.no_s3:
         lance_opts = {'storage_options': _lance_storage_opts()}
@@ -353,33 +363,11 @@ def _build_rows(ds_name, cfg, args, common):
             )
         )
 
-    if cfg['lerobot_repo'] and args.include_lerobot:
-        try:
-            from stable_worldmodel.data import LeRobotAdapter
-
-            rows.append(
-                (
-                    'LeRobot',
-                    'hf-cache',
-                    '—',
-                    LeRobotAdapter(cfg['lerobot_repo'], **common),
-                    f'lerobot://{cfg["lerobot_repo"]}',
-                )
-            )
-        except Exception as e:
-            print(f'  (skipping LeRobot for {ds_name}: {e})')
-
     return rows
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        '--datasets',
-        nargs='+',
-        choices=['pusht', 'tworoom'],
-        default=['pusht', 'tworoom'],
-    )
     p.add_argument('--num-steps', type=int, default=4)
     p.add_argument('--frameskip', type=int, default=5)
     p.add_argument('--batch-size', type=int, default=64)
@@ -392,7 +380,7 @@ def main() -> None:
         '--include-lerobot',
         action='store_true',
         default=True,
-        help='include the LeRobot HF row for pusht (default on)',
+        help='include the LeRobot local row (default on)',
     )
     p.add_argument(
         '--no-lerobot', dest='include_lerobot', action='store_false'
@@ -412,8 +400,7 @@ def main() -> None:
     # Each result: (ds_name, fmt, source, cache, storage_uri, sps, ms_step, size_bytes)
     results: list[tuple[str, str, str, str, str, float, float, int]] = []
 
-    for ds_name in args.datasets:
-        cfg = DATASETS[ds_name]
+    for ds_name, cfg in DATASETS.items():
         rows = _build_rows(ds_name, cfg, args, common)
 
         # Storage costs first; cache by URI so we don't re-list S3 prefixes.
