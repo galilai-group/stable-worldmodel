@@ -108,8 +108,16 @@ def _hdf5_to_lerobot(src: HDF5Dataset, dest: Path, n_eps: int) -> None:
     Schema: pixels → ``observation.images.main`` (video), proprio →
     ``observation.state``, action → ``action``. Per-frame ``task`` is a
     static string — bench doesn't read it.
+
+    `streaming_encoding=True` keeps a single SVT-AV1 encoder warm across
+    every episode instead of spinning one up per save. Without it,
+    LeRobot writes per-frame PNGs then re-reads + encodes them at
+    save_episode() — the dominant cost on a 1500+ episode dataset.
+    `VideoEncodingManager` flushes the pending stream on exit; `.finalize()`
+    is also called explicitly afterwards to be safe.
     """
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.datasets.video_utils import VideoEncodingManager
 
     probe = _episode_to_step_lists(src.load_episode(0), int(src.lengths[0]))
     pixels0 = np.asarray(probe['pixels'][0])
@@ -139,28 +147,30 @@ def _hdf5_to_lerobot(src: HDF5Dataset, dest: Path, n_eps: int) -> None:
         features=features,
         root=dest,
         use_videos=True,
-        image_writer_threads=4,
+        streaming_encoding=True,
+        encoder_threads=4,
     )
 
-    for i in range(n_eps):
-        ep_len = int(src.lengths[i])
-        ep = _episode_to_step_lists(src.load_episode(i), ep_len)
-        for t in range(ep_len):
-            lr_ds.add_frame(
-                {
-                    'observation.images.main': np.asarray(
-                        ep['pixels'][t], dtype=np.uint8
-                    ),
-                    'observation.state': np.asarray(
-                        ep['proprio'][t], dtype=np.float32
-                    ).reshape(-1),
-                    'action': np.asarray(
-                        ep['action'][t], dtype=np.float32
-                    ).reshape(-1),
-                    'task': LEROBOT_TASK,
-                }
-            )
-        lr_ds.save_episode()
+    with VideoEncodingManager(lr_ds):
+        for i in range(n_eps):
+            ep_len = int(src.lengths[i])
+            ep = _episode_to_step_lists(src.load_episode(i), ep_len)
+            for t in range(ep_len):
+                lr_ds.add_frame(
+                    {
+                        'observation.images.main': np.asarray(
+                            ep['pixels'][t], dtype=np.uint8
+                        ),
+                        'observation.state': np.asarray(
+                            ep['proprio'][t], dtype=np.float32
+                        ).reshape(-1),
+                        'action': np.asarray(
+                            ep['action'][t], dtype=np.float32
+                        ).reshape(-1),
+                        'task': LEROBOT_TASK,
+                    }
+                )
+            lr_ds.save_episode()
 
 
 def convert_tworoom(force: bool) -> None:
