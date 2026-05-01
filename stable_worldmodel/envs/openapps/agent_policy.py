@@ -86,7 +86,15 @@ class VLMPolicy(BasePolicy):
             )
             return np.array([[0, GRID_X // 2, GRID_Y // 2]], dtype=np.int64)
 
-        return action_str_to_multidiscrete(parsed)[None, :]
+        try:
+            return action_str_to_multidiscrete(parsed)[None, :]
+        except ValueError as e:
+            self._dropped_action_count += 1
+            logger.debug(
+                f'Malformed action dropped ({self._dropped_action_count}/'
+                f'{self._total_steps}): {parsed} ({e})'
+            )
+            return np.array([[0, GRID_X // 2, GRID_Y // 2]], dtype=np.int64)
 
     @staticmethod
     def _is_supported(parsed: str) -> bool:

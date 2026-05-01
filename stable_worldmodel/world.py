@@ -275,9 +275,6 @@ class World:
         for _ in range(max_steps):
             self.step()
 
-            if np.any(self.terminateds) or np.any(self.truncateds):
-                break
-
             for i, o in enumerate(out):
                 frames_to_stack = []
                 for v_name in viewname:
@@ -294,6 +291,11 @@ class World:
                         goal_data = goal_data[-1]
                     frame = np.vstack([frame, goal_data])
                 o.append_data(frame)
+
+            # Stop after appending so the terminating frame (the one
+            # showing the success state) is included in the video.
+            if np.any(self.terminateds) or np.any(self.truncateds):
+                break
         for o in out:
             o.close()
         print(f'Video saved to {video_path}')

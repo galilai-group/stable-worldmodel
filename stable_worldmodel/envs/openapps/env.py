@@ -97,8 +97,10 @@ _TASK_CLASS_TO_APP = {
     'RemoveEventTask': 'calendar',
     'AddToDoTask': 'todo',
     'MarkToDoDoneTask': 'todo',
+    'DeleteToDoTask': 'todo',
     'SendMessageTask': 'messages',
     'SavePlaceTask': 'map',
+    'RemoveLandmarkTask': 'map',
 }
 
 
@@ -120,13 +122,24 @@ def _load_task_from_yaml(task_key: str, app_name: str) -> Task:
     task_cfg = cfg[task_key]
     target = task_cfg.get('_target_', '')
     task_class = target.rsplit('.', 1)[-1]
-    expected_app = _TASK_CLASS_TO_APP.get(task_class)
-    if expected_app is not None and expected_app != app_name:
-        raise ValueError(
-            f'Task {task_key!r} ({task_class}) targets app '
-            f'{expected_app!r}, but env was constructed with '
-            f'app_name={app_name!r}'
-        )
+    if task_class == 'NavigateToAppTask':
+        # Per-instance source_app drives env validation, not a class-level
+        # mapping. The env must launch on the task's source app.
+        source_app = task_cfg.get('source_app')
+        if source_app is not None and source_app != app_name:
+            raise ValueError(
+                f'Task {task_key!r} (NavigateToAppTask) starts in app '
+                f'{source_app!r}, but env was constructed with '
+                f'app_name={app_name!r}'
+            )
+    else:
+        expected_app = _TASK_CLASS_TO_APP.get(task_class)
+        if expected_app is not None and expected_app != app_name:
+            raise ValueError(
+                f'Task {task_key!r} ({task_class}) targets app '
+                f'{expected_app!r}, but env was constructed with '
+                f'app_name={app_name!r}'
+            )
     return instantiate(task_cfg)
 
 
@@ -145,6 +158,10 @@ def list_tasks(app_name: str | None = None) -> list[str]:
             keys.append(k)
             continue
         cls = v.get('_target_', '').rsplit('.', 1)[-1]
+        if cls == 'NavigateToAppTask':
+            if v.get('source_app') == app_name:
+                keys.append(k)
+            continue
         if _TASK_CLASS_TO_APP.get(cls) == app_name:
             keys.append(k)
     return keys
@@ -496,6 +513,13 @@ class OpenAppsEnv(gym.Env):
 
         try:
             current_state = get_current_state(self.base_url)
+            # Inject the live page URL so URL-based tasks (e.g.
+            # NavigateToAppTask) can read it. Underscore-prefixed key
+            # avoids colliding with any future app-state key.
+            try:
+                current_state['_url'] = self._page.url
+            except Exception:
+                current_state['_url'] = ''
             return (
                 1.0
                 if self.task.check_if_task_is_complete(
