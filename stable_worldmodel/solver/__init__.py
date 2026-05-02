@@ -1,16 +1,18 @@
+from .categorical_cem import CategoricalCEMSolver
 from .cem import CEMSolver
 from .gd import GradientSolver
 from .icem import ICEMSolver
 from .lagrangian import LagrangianSolver
 from .mppi import MPPISolver
+from .pgd import PGDSolver
 from .predictive_sampling import PredictiveSamplingSolver
 from .solver import Solver
-from .discrete_solvers import PGDSolver
 
 __all__ = [
     'Solver',
     'GradientSolver',
     'CEMSolver',
+    'CategoricalCEMSolver',
     'ICEMSolver',
     'PGDSolver',
     'MPPISolver',
