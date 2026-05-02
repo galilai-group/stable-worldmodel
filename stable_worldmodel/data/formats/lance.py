@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,17 @@ from stable_worldmodel.data.format import (
     validate_write_mode,
 )
 from stable_worldmodel.data.formats.utils import is_image_column
+
+# JPEG blobs from Lance are immutable `bytes`; we wrap them in a
+# torch tensor view (zero-copy) and hand straight to torchvision's
+# decoder, which returns a fresh tensor for the output. The warning
+# is correct in general (writes via the view would corrupt the
+# source) but doesn't apply since downstream is read-only.
+warnings.filterwarnings(
+    'ignore',
+    message='The given buffer is not writable',
+    category=UserWarning,
+)
 
 
 # Optional fast-path: torchvision's libjpeg-turbo-backed batch decoder.
@@ -401,11 +413,11 @@ class LanceDataset(Dataset):
 
         if _tv_decode_jpeg is not None:
             try:
-                # bytearray() copies into a writable buffer — the bytes
-                # we get from Lance are immutable, and torch.frombuffer
-                # warns on non-writable input.
                 byte_tensors = [
-                    torch.frombuffer(bytearray(b), dtype=torch.uint8)
+                    torch.frombuffer(
+                        b if isinstance(b, (bytes, bytearray)) else bytes(b),
+                        dtype=torch.uint8,
+                    )
                     for b in blobs
                 ]
                 decoded = _tv_decode_jpeg(byte_tensors, mode=_TV_RGB)
