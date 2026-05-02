@@ -12,6 +12,7 @@ class LeWM(nn.Module):
         action_encoder,
         projector=None,
         pred_proj=None,
+        **kwargs,
     ):
         super().__init__()
 
@@ -69,11 +70,14 @@ class LeWM(nn.Module):
         info['action'] = act_0
         n_steps = T - H
 
-        # encode initial state, or reuse cached embedding from a prior rollout
+        # encode initial state, or reuse cached embedding from a prior rollout.
+        # detach: to avoid backprop in encoder
         if 'emb' not in info:
             _init = {k: v[:, 0] for k, v in info.items() if torch.is_tensor(v)}
             _init = self.encode(_init)
-            info['emb'] = _init['emb'].unsqueeze(1).expand(B, S, -1, -1)
+            info['emb'] = (
+                _init['emb'].detach().unsqueeze(1).expand(B, S, -1, -1)
+            )
 
         # flatten batch and sample dimensions for rollout
         emb_init = rearrange(info['emb'], 'b s ... -> (b s) ...')

@@ -9,6 +9,7 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
+from .callbacks import Callback
 from .solver import Costable
 
 
@@ -36,6 +37,7 @@ class CEMSolver:
         topk: int = 30,
         device: str | torch.device = 'cpu',
         seed: int = 1234,
+        callbacks: list[Callback] | None = None,
     ) -> None:
         self.model = model
         self.batch_size = batch_size
@@ -45,6 +47,7 @@ class CEMSolver:
         self.topk = topk
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
+        self.callbacks = list(callbacks) if callbacks else []
         try:
             self._dtype = next(model.parameters()).dtype
         except (AttributeError, StopIteration):
@@ -131,6 +134,9 @@ class CEMSolver:
         mean = mean.to(self.device)
         var = var.to(self.device)
 
+        for cb in self.callbacks:
+            cb.reset()
+
         # --- Iterate over batches ---
         for start_idx in range(0, total_envs, self.batch_size):
             end_idx = min(start_idx + self.batch_size, total_envs)
@@ -165,6 +171,9 @@ class CEMSolver:
 
             # Optimization Loop
             final_batch_cost = None
+
+            for cb in self.callbacks:
+                cb.start_batch()
 
             for step in range(self.n_steps):
                 # Sample action sequences: (Batch, Num_Samples, Horizon, Dim)
@@ -219,8 +228,24 @@ class CEMSolver:
                 topk_candidates = candidates[batch_indices, topk_inds]
 
                 # Update Mean and Variance based on Top-K
+                prev_mean = batch_mean
+                prev_var = batch_var
                 batch_mean = topk_candidates.mean(dim=1)
                 batch_var = topk_candidates.std(dim=1)
+
+                for cb in self.callbacks:
+                    cb(
+                        step=step,
+                        candidates=candidates,
+                        costs=costs,
+                        topk_vals=topk_vals,
+                        topk_inds=topk_inds,
+                        topk_candidates=topk_candidates,
+                        mean=batch_mean,
+                        var=batch_var,
+                        prev_mean=prev_mean,
+                        prev_var=prev_var,
+                    )
 
                 # Update final cost for logging
                 # We average the cost of the top elites
@@ -236,6 +261,12 @@ class CEMSolver:
         outputs['actions'] = mean.detach().cpu()
         outputs['mean'] = [mean.detach().cpu()]
         outputs['var'] = [var.detach().cpu()]
+
+        if self.callbacks:
+            outputs['callbacks'] = {}
+            for cb in self.callbacks:
+                cb.end_solve()
+                outputs['callbacks'][cb.output_key] = cb.history
 
         print(f'CEM solve time: {time.time() - start_time:.4f} seconds')
         return outputs

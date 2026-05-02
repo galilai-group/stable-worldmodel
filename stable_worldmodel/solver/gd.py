@@ -9,6 +9,7 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
+from .callbacks import Callback
 from .solver import Costable
 
 
@@ -40,6 +41,8 @@ class GradientSolver(torch.nn.Module):
         seed: int = 1234,
         optimizer_cls: type[torch.optim.Optimizer] = torch.optim.SGD,
         optimizer_kwargs: dict | None = None,
+        grad_clip: float | None = None,
+        callbacks: list[Callback] | None = None,
     ) -> None:
         super().__init__()
         self.model = model
@@ -55,6 +58,8 @@ class GradientSolver(torch.nn.Module):
         self.optimizer_kwargs = (
             optimizer_kwargs if optimizer_kwargs is not None else {'lr': 1.0}
         )
+        self.grad_clip = grad_clip
+        self.callbacks = list(callbacks) if callbacks else []
 
         try:
             self._dtype = next(model.parameters()).dtype
@@ -159,6 +164,9 @@ class GradientSolver(torch.nn.Module):
         with torch.no_grad():
             self.init_action(total_envs, init_action)
 
+        for cb in self.callbacks:
+            cb.reset()
+
         # Determine batch size (default to all envs if not specified which can cause memory issues)
         batch_size = (
             self.batch_size if self.batch_size is not None else total_envs
@@ -180,26 +188,31 @@ class GradientSolver(torch.nn.Module):
 
             expanded_infos = {}
             for k, v in info_dict.items():
+                v_batch = v[start_idx:end_idx]
                 if torch.is_tensor(v):
-                    v_batch = v[start_idx:end_idx]
                     target_dtype = (
                         self.dtype if v_batch.is_floating_point() else None
                     )
-                    batch_v = (
+                    v_batch = (
                         v_batch.to(device=self.device, dtype=target_dtype)
                         .unsqueeze(1)
-                        .expand(current_bs, self.num_samples, *v.shape[1:])
+                        .expand(
+                            current_bs,
+                            self.num_samples,
+                            *v_batch.shape[1:],
+                        )
                     )
                 elif isinstance(v, np.ndarray):
-                    batch_v = np.repeat(
-                        v[start_idx:end_idx, None, ...],
-                        self.num_samples,
-                        axis=1,
+                    v_batch = np.repeat(
+                        v_batch[:, None, ...], self.num_samples, axis=1
                     )
-                expanded_infos[k] = batch_v
+                expanded_infos[k] = v_batch
 
             # Perform Gradient Descent for this batch
             batch_cost_history = []
+
+            for cb in self.callbacks:
+                cb.start_batch()
 
             for step in range(self.n_steps):
                 costs = self.model.get_cost(expanded_infos, batch_init)
@@ -220,6 +233,18 @@ class GradientSolver(torch.nn.Module):
 
                 cost = costs.sum()  # Sum cost for this batch
                 cost.backward()
+
+                for cb in self.callbacks:
+                    cb(
+                        step=step,
+                        params=batch_init,
+                        cost=cost,
+                        costs=costs,
+                    )
+
+                if self.grad_clip is not None:
+                    torch.nn.utils.clip_grad_norm_(batch_init, self.grad_clip)
+
                 optim.step()
                 optim.zero_grad(set_to_none=True)
 
@@ -247,6 +272,13 @@ class GradientSolver(torch.nn.Module):
 
         # Concatenate all batch results
         outputs['actions'] = torch.cat(batch_top_actions_list, dim=0)
+
+        if self.callbacks:
+            outputs['callbacks'] = {}
+            for cb in self.callbacks:
+                cb.end_solve()
+                outputs['callbacks'][cb.output_key] = cb.history
+
         end_time = time.time()
         print(
             f'GradientSolver.solve completed in {end_time - start_time:.4f} seconds.'
