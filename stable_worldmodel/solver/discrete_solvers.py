@@ -191,7 +191,9 @@ class PGDSolver(torch.nn.Module):
                     v_batch = np.repeat(
                         v_batch[:, None, ...], self.num_samples, axis=1
                     )
-                expanded_infos[k] = v_batch
+                else:
+                    batch_v = v
+                expanded_infos[k] = batch_v
 
             # Perform Gradient Descent for this batch
             batch_cost_history = []
