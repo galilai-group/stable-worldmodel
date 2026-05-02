@@ -8,13 +8,17 @@ class Costable(Protocol):
     """Protocol for world model cost functions."""
 
     def criterion(
-        self, info_dict: dict, action_candidates: torch.Tensor
+        self,
+        info_dict: dict,
+        action_candidates: torch.Tensor | dict[str, torch.Tensor],
     ) -> torch.Tensor:
         """Compute the cost criterion for action candidates.
 
         Args:
             info_dict: Dictionary containing environment state information.
-            action_candidates: Tensor of proposed actions.
+            action_candidates: Proposed actions, either a single tensor of
+                shape ``(B, N, H, dim)`` or a dict mapping sub-action keys
+                to per-key tensors with the same leading ``(B, N, H)`` dims.
 
         Returns:
             A tensor of cost values for each action candidate.
@@ -22,13 +26,16 @@ class Costable(Protocol):
         ...
 
     def get_cost(
-        self, info_dict: dict, action_candidates: torch.Tensor
+        self,
+        info_dict: dict,
+        action_candidates: torch.Tensor | dict[str, torch.Tensor],
     ) -> torch.Tensor:  # pragma: no cover
         """Compute cost for given action candidates based on info dictionary.
 
         Args:
             info_dict: Dictionary containing environment state information.
-            action_candidates: Tensor of proposed actions.
+            action_candidates: Proposed actions, either a single tensor or
+                a dict of per-key tensors (used by ``CompositeSolver``).
 
         Returns:
             A tensor of cost values for each action candidate.

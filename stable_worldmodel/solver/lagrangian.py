@@ -10,38 +10,32 @@ import torch.nn.functional as F
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
+from .base import BaseSolver
 from .solver import Costable
 
 
-class LagrangianSolver(torch.nn.Module):
-    """Lagrangian solver for stable world model.
+class LagrangianSolver(BaseSolver):
+    """Augmented Lagrangian solver with nested primal/dual updates.
 
-    get_cost returns the cost tensor (B, S). If the model also implements get_constraints,
-    it should return the constraint violations (B, S, C), where C is the number of constraints.
-    The constraint_cost should represent the cost of violating the constraints, where the constraint
-    is satisfied when constraint_cost <= 0. The Lagrangian solver will optimize the following objective:
-
-    L = cost + sum_{i=1}^C lambda_i * constraint_cost_i + sum_{i=1}^C rho_i * max(0, constraint_cost_i)^2
-
-    If you want to use equality constraint, you can convert it to two inequality constraints. For example, if you want to enforce constraint_cost_i == 0, you can add two constraints: constraint_cost_i <= 0 and -constraint_cost_i <= 0.
+    L = cost + Σ_i λ_i * g_i + Σ_i ρ * max(0, g_i)^2
 
     Args:
-        model: World model implementing the Costable protocol. Its get_cost() returns
-            a plain cost tensor (B, S). If it also has get_constraints(), that method
-            returns constraints of shape (B, S, C).
-        n_steps: Number of gradient descent steps per outer iteration.
+        model: Cost model. If it implements ``get_constraints(infos, actions)
+            -> (B, S, C)``, the solver enforces constraints (satisfied when
+            ``constraint <= 0``).
+        n_steps: Inner gradient descent steps per outer iteration.
         n_outer_steps: Number of dual ascent (outer) iterations.
         batch_size: Number of environments to process in parallel.
         num_samples: Number of action samples to optimize in parallel.
         var_scale: Initial variance scale for action perturbations.
-        action_noise: Noise added to actions during optimization.
-        rho_init: Initial penalty coefficient for the quadratic constraint term.
-        rho_max: Maximum value of the penalty coefficient.
-        rho_scale: Multiplicative growth factor for rho after each outer step.
-        persist_multipliers: Whether to warm-start Lagrange multipliers across solve() calls.
+        action_noise: Per-step Gaussian action noise std.
+        rho_init: Initial quadratic penalty coefficient.
+        rho_max: Cap on the quadratic penalty.
+        rho_scale: Multiplicative growth factor for rho per outer step.
+        persist_multipliers: Warm-start λ across solve() calls.
         device: Device for tensor computations.
         seed: Random seed for reproducibility.
-        optimizer_cls: PyTorch optimizer class to use.
+        optimizer_cls: PyTorch optimizer class.
         optimizer_kwargs: Keyword arguments for the optimizer.
     """
 
@@ -63,75 +57,57 @@ class LagrangianSolver(torch.nn.Module):
         optimizer_cls: type[torch.optim.Optimizer] = torch.optim.Adam,
         optimizer_kwargs: dict | None = None,
     ) -> None:
-        super().__init__()
-        self.model = model
-        self.n_steps = n_steps
+        super().__init__(
+            model=model,
+            n_steps=n_steps,
+            batch_size=batch_size,
+            num_samples=num_samples,
+            device=device,
+            callbacks=None,
+        )
         self.n_outer_steps = n_outer_steps
-        self.batch_size = batch_size
-        self.num_samples = num_samples
         self.var_scale = var_scale
         self.action_noise = action_noise
         self.rho_init = rho_init
         self.rho_max = rho_max
         self.rho_scale = rho_scale
         self.persist_multipliers = persist_multipliers
-        self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
         self.optimizer_cls = optimizer_cls
         self.optimizer_kwargs = (
             optimizer_kwargs if optimizer_kwargs is not None else {'lr': 1.0}
         )
-
-        self._configured = False
-        self._n_envs = None
-        self._action_dim = None
-        self._config = None
-        self._lambdas: torch.Tensor | None = None  # (n_envs, C)
+        self._lambdas: torch.Tensor | None = None
+        self.init: torch.Tensor | None = None
 
     def configure(
         self, *, action_space: gym.Space, n_envs: int, config: Any
     ) -> None:
-        """Configure the solver with environment specifications."""
-        self._action_space = action_space
-        self._n_envs = n_envs
-        self._config = config
-        self._action_dim = int(np.prod(action_space.shape[1:]))
-        self._configured = True
-
+        super().configure(
+            action_space=action_space, n_envs=n_envs, config=config
+        )
+        shape = action_space.shape
+        self._action_dim = (
+            int(np.prod(shape[1:])) if len(shape) > 1 else int(np.prod(shape))
+        )
         if not isinstance(action_space, Box):
             logging.warning(
-                f'Action space is discrete, got {type(action_space)}. LagrangianSolver may not work as expected.'
+                f'Action space is discrete, got {type(action_space)}. '
+                'LagrangianSolver may not work as expected.'
             )
 
     @property
-    def n_envs(self) -> int:
-        """Number of parallel environments."""
-        return self._n_envs
-
-    @property
     def action_dim(self) -> int:
-        """Flattened action dimension including action_block grouping."""
-        return self._action_dim * self._config.action_block
-
-    @property
-    def horizon(self) -> int:
-        """Planning horizon in timesteps."""
-        return self._config.horizon
-
-    def __call__(self, *args: Any, **kwargs: Any) -> dict:
-        """Make solver callable, forwarding to solve()."""
-        return self.solve(*args, **kwargs)
+        return self._action_dim * self.action_block
 
     def init_action(self, actions: torch.Tensor | None = None) -> None:
-        """Initialize the action tensor for optimization."""
+        """Initialize ``self.init`` to ``(n_envs, num_samples, horizon, action_dim)``."""
         if actions is None:
             actions = torch.zeros((self._n_envs, 0, self.action_dim))
-
         remaining = self.horizon - actions.shape[1]
         if remaining > 0:
             new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
-
         actions = actions.unsqueeze(1).repeat_interleave(
             self.num_samples, dim=1
         )
@@ -143,52 +119,54 @@ class LagrangianSolver(torch.nn.Module):
             )
             * self.var_scale
         )
-
-        if hasattr(self, 'init'):
-            self.init.copy_(actions)
-        else:
-            self.register_parameter('init', torch.nn.Parameter(actions))
+        self.init = actions
 
     def _init_multipliers(self, num_constraints: int) -> None:
-        """Lazily initialize Lagrange multipliers to zeros."""
         self._lambdas = torch.zeros(
             self._n_envs, num_constraints, device=self.device
         )
 
     def _augmented_lagrangian_loss(
         self,
-        costs: torch.Tensor,  # (B, S)
-        constraints: torch.Tensor,  # (B, S, C)
-        lambdas_batch: torch.Tensor,  # (B, C)
+        costs: torch.Tensor,
+        constraints: torch.Tensor,
+        lambdas_batch: torch.Tensor,
         rho: float,
     ) -> torch.Tensor:
-        """Compute the augmented Lagrangian loss.
-
-        L = cost + Σ_i lambda_i * g_i + Σ_i rho * max(0, g_i)^2
-        """
-        # lambdas_batch: (B, C) -> (B, 1, C) for broadcasting with constraints (B, S, C)
-        linear_penalty = (lambdas_batch.unsqueeze(1) * constraints).sum(
-            dim=-1
-        )  # (B, S)
-        quadratic_penalty = rho * F.relu(constraints).pow(2).sum(
-            dim=-1
-        )  # (B, S)
+        linear_penalty = (lambdas_batch.unsqueeze(1) * constraints).sum(dim=-1)
+        quadratic_penalty = rho * F.relu(constraints).pow(2).sum(dim=-1)
         return (costs + linear_penalty + quadratic_penalty).sum()
 
     def _update_multipliers(
         self,
-        constraints: torch.Tensor,  # (B, S, C) — detached, no grad
-        lambdas_batch: torch.Tensor,  # (B, C)
+        constraints: torch.Tensor,
+        lambdas_batch: torch.Tensor,
         rho: float,
     ) -> torch.Tensor:
-        """Dual ascent: lambda_i <- max(0, lambda_i + rho * mean_samples(g_i))."""
-        mean_g = constraints.mean(dim=1)  # (B, C)
+        mean_g = constraints.mean(dim=1)
         return torch.clamp(lambdas_batch + rho * mean_g, min=0.0)
+
+    # === BaseSolver hooks (unused — solve overrides the loop) ===
+
+    def init_state(self, n_envs: int, init=None) -> None:  # pragma: no cover
+        raise NotImplementedError(
+            'LagrangianSolver overrides solve(); hooks are unused.'
+        )
+
+    def propose(self, state):  # pragma: no cover
+        raise NotImplementedError
+
+    def update(self, state, candidates, costs):  # pragma: no cover
+        raise NotImplementedError
+
+    def finalize(self, state):  # pragma: no cover
+        raise NotImplementedError
+
+    # === Custom outer/inner loop ===
 
     def solve(
         self, info_dict: dict, init_action: torch.Tensor | None = None
     ) -> dict:
-        """Solve the planning problem using augmented Lagrangian gradient descent."""
         start_time = time.time()
         outputs: dict = {
             'cost': [],
@@ -203,55 +181,39 @@ class LagrangianSolver(torch.nn.Module):
         if not self.persist_multipliers:
             self._lambdas = None
 
-        batch_size = (
-            self.batch_size if self.batch_size is not None else self.n_envs
-        )
-        total_envs = self.n_envs
-        batch_top_actions_list = []
+        bs = self.batch_size if self.batch_size is not None else self._n_envs
+        total_envs = self._n_envs
+        batch_top_actions: list[torch.Tensor] = []
 
-        for start_idx in range(0, total_envs, batch_size):
-            end_idx = min(start_idx + batch_size, total_envs)
-            current_bs = end_idx - start_idx
+        for start in range(0, total_envs, bs):
+            end = min(start + bs, total_envs)
+            current_bs = end - start
 
-            batch_init = self.init[start_idx:end_idx].clone().detach()
+            batch_init = self.init[start:end].clone().detach()
             batch_init.requires_grad = True
 
-            # Expand info_dict for current batch — same pattern as GradientSolver
-            expanded_infos = {}
-            for k, v in info_dict.items():
-                if torch.is_tensor(v):
-                    batch_v = v[start_idx:end_idx]
-                    batch_v = batch_v.unsqueeze(1)
-                    batch_v = batch_v.expand(
-                        current_bs, self.num_samples, *batch_v.shape[2:]
-                    )
-                elif isinstance(v, np.ndarray):
-                    batch_v = v[start_idx:end_idx]
-                    batch_v = np.repeat(
-                        batch_v[:, None, ...], self.num_samples, axis=1
-                    )
-                else:
-                    batch_v = v
-                expanded_infos[k] = batch_v
-
+            expanded_infos = self._expand_infos(
+                info_dict, start, end, current_bs
+            )
             for k, v in expanded_infos.items():
                 if torch.is_tensor(v):
                     expanded_infos[k] = v.to(self.device)
 
             rho = self.rho_init
-            batch_cost_history = []
+            batch_cost_history: list[float] = []
             costs = None
             final_constraints = None
+            lambdas_batch = None
 
             for _outer in range(self.n_outer_steps):
-                # Fresh optimizer each outer step — avoids stale momentum after dual ascent
                 optim = self.optimizer_cls(
                     [batch_init], **self.optimizer_kwargs
                 )
 
                 for _step in range(self.n_steps):
-                    current_info = expanded_infos.copy()
-                    costs = self.model.get_cost(current_info, batch_init)
+                    costs = self.model.get_cost(
+                        expanded_infos.copy(), batch_init
+                    )
                     constraints = (
                         self.model.get_constraints(
                             expanded_infos.copy(), batch_init
@@ -267,7 +229,8 @@ class LagrangianSolver(torch.nn.Module):
                         current_bs,
                         self.num_samples,
                     ), (
-                        f'Cost should be of shape ({current_bs}, {self.num_samples}), got {costs.shape}'
+                        f'Cost should be of shape ({current_bs}, '
+                        f'{self.num_samples}), got {costs.shape}'
                     )
                     assert costs.requires_grad, (
                         'Cost must requires_grad for LagrangianSolver.'
@@ -277,11 +240,12 @@ class LagrangianSolver(torch.nn.Module):
                         assert constraints.ndim == 3 and constraints.shape[
                             :2
                         ] == (current_bs, self.num_samples), (
-                            f'Constraints should be of shape ({current_bs}, {self.num_samples}, C), got {constraints.shape}'
+                            f'Constraints should be of shape ({current_bs}, '
+                            f'{self.num_samples}, C), got {constraints.shape}'
                         )
                         if self._lambdas is None:
                             self._init_multipliers(constraints.shape[-1])
-                        lambdas_batch = self._lambdas[start_idx:end_idx]
+                        lambdas_batch = self._lambdas[start:end]
                         loss = self._augmented_lagrangian_loss(
                             costs, constraints, lambdas_batch, rho
                         )
@@ -302,7 +266,6 @@ class LagrangianSolver(torch.nn.Module):
 
                     batch_cost_history.append(loss.item())
 
-                # Dual ascent after inner loop converges
                 if constraints is not None:
                     with torch.no_grad():
                         final_constraints = self.model.get_constraints(
@@ -311,16 +274,14 @@ class LagrangianSolver(torch.nn.Module):
                         lambdas_batch = self._update_multipliers(
                             final_constraints, lambdas_batch, rho
                         )
-                        self._lambdas[start_idx:end_idx] = lambdas_batch
+                        self._lambdas[start:end] = lambdas_batch
                         rho = min(self.rho_max, rho * self.rho_scale)
 
                 with torch.no_grad():
                     mean_cost = costs.mean().item()
                     if constraints is not None:
-                        viol = F.relu(final_constraints).mean(
-                            dim=(0, 1)
-                        )  # (C,)
-                        lam = lambdas_batch.mean(dim=0)  # (C,)
+                        viol = F.relu(final_constraints).mean(dim=(0, 1))
+                        lam = lambdas_batch.mean(dim=0)
                         viol_str = ', '.join(f'{v:.4f}' for v in viol.tolist())
                         lam_str = ', '.join(f'{lv:.4f}' for lv in lam.tolist())
                         print(
@@ -337,21 +298,21 @@ class LagrangianSolver(torch.nn.Module):
                         )
 
             outputs['cost'].append(batch_cost_history)
-
             if final_constraints is not None:
                 outputs['constraint_violation'].append(
                     F.relu(final_constraints).mean().item()
                 )
 
             with torch.no_grad():
-                self.init[start_idx:end_idx] = batch_init
+                self.init[start:end] = batch_init
 
             top_idx = torch.argsort(costs, dim=1)[:, 0]
             batch_indices = torch.arange(current_bs)
-            top_actions_batch = batch_init[batch_indices, top_idx]
-            batch_top_actions_list.append(top_actions_batch.detach().cpu())
+            batch_top_actions.append(
+                batch_init[batch_indices, top_idx].detach().cpu()
+            )
 
-        outputs['actions'] = torch.cat(batch_top_actions_list, dim=0)
+        outputs['actions'] = torch.cat(batch_top_actions, dim=0)
         outputs['lambdas'] = (
             self._lambdas.cpu() if self._lambdas is not None else None
         )
@@ -361,6 +322,7 @@ class LagrangianSolver(torch.nn.Module):
             mean_viol = np.mean(outputs['constraint_violation'])
             constraint_info = f' | constraint_violation={mean_viol:.4f}'
         print(
-            f'LagrangianSolver.solve completed in {time.time() - start_time:.4f} seconds{constraint_info}.'
+            f'LagrangianSolver.solve completed in '
+            f'{time.time() - start_time:.4f} seconds{constraint_info}.'
         )
         return outputs

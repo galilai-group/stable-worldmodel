@@ -1,9 +1,199 @@
 ---
 title: Solver
-summary: Model-based planning solvers for action optimization
+summary: Model-based planning solvers — design, conventions, and implementations
 ---
 
-## **[ Base Class ]**
+## **[ Overview ]**
+
+A **solver** is the optimisation engine of a model-based planner. Given a
+*world model* that scores action sequences, a solver searches the action
+space for a low-cost plan. `stable-worldmodel` ships a small family of
+solvers (CEM, iCEM, MPPI, gradient descent, projected gradient,
+predictive sampling, augmented Lagrangian, categorical CEM) and a
+`CompositeSolver` that composes them across `Dict` action spaces.
+
+All solvers expose the same minimal public surface — the
+[`Solver`][stable_worldmodel.solver.Solver] protocol — so policies and
+training loops can swap optimisers without changing surrounding code:
+
+```python
+solver.configure(action_space=action_space, n_envs=n_envs, config=plan_cfg)
+out = solver.solve(info_dict, init_action=warm_start)
+actions = out["actions"]   # (n_envs, horizon, action_dim)
+```
+
+## **[ Design Philosophy ]**
+
+The package is built around four ideas. They are worth reading once
+before subclassing or composing solvers — most subtleties downstream
+follow from them.
+
+### 1. One outer loop, four hooks
+
+Every search algorithm in this package is structured the same way:
+
+1. **`init_state`** — build an opaque per-env search state from
+   (optionally) a warm-start.
+2. **`propose`** — sample candidate action plans from the current state.
+3. **evaluate** — `model.get_cost` scores all candidates in one batched
+   call.
+4. **`update`** — refit the state (mean/variance, distribution, action
+   parameters, dual variables, …) from the costs.
+5. **`finalize`** — read out the final plan from the converged state.
+
+[`BaseSolver`][stable_worldmodel.solver.BaseSolver] owns the outer
+iteration loop, env-batching, info-dict expansion, callback firing, and
+state plumbing. Subclasses implement only the four algorithm-specific
+hooks. The common loop is roughly:
+
+```python
+state = self.init_state(n_envs, init_action)
+for step in range(n_steps):
+    candidates = self.propose(state)              # (B, N, H, D)
+    costs       = model.get_cost(infos, candidates)  # (B, N)
+    state, payload = self.update(state, candidates, costs)
+    fire_callbacks(step, candidates, costs, **payload)
+actions = self.finalize(state)
+```
+
+This is the **template-method pattern**: the parent owns the *sequence*,
+the child owns the *steps*. Two consequences:
+
+- A new solver is typically 30–80 lines (see CEM, MPPI, predictive
+  sampling).
+- Cross-cutting concerns — env-batching, callbacks, dtype/device,
+  warm-starts — are written once and reused everywhere.
+
+### 2. Protocol over inheritance at the edge
+
+Inside the package, solvers subclass `BaseSolver`. At the *boundary*
+(the policy, the training loop, user code) they are seen through the
+[`Solver`][stable_worldmodel.solver.Solver] **runtime-checkable
+Protocol**:
+
+```python
+@runtime_checkable
+class Solver(Protocol):
+    def configure(self, *, action_space, n_envs, config) -> None: ...
+    def solve(self, info_dict, init_action=None) -> dict: ...
+    @property
+    def action_dim(self) -> int: ...
+    @property
+    def n_envs(self) -> int: ...
+    @property
+    def horizon(self) -> int: ...
+```
+
+A class is a valid `Solver` as soon as it implements this surface — no
+inheritance required. This is what lets `GradientSolver` and
+`PredictiveSamplingSolver` (which do not inherit from `BaseSolver`) and
+external user-written solvers all be drop-in compatible.
+
+Use `isinstance(obj, Solver)` to validate at boundaries; use
+`BaseSolver` as the default starting point when writing a new one.
+
+### 3. Composition for structured action spaces
+
+Real environments often have heterogeneous action spaces — a continuous
+gripper command alongside a discrete mode switch, for example. Rather
+than baking this into every solver,
+[`CompositeSolver`][stable_worldmodel.solver.CompositeSolver] holds one
+solver per sub-key and runs **a single shared outer loop**:
+
+- Each child proposes candidates for its own component.
+- The joint dict of candidates is passed through **one** call to
+  `model.get_cost`.
+- Every child refits from the same cost tensor.
+
+The cost is the only coupling, but it is enough — children see each
+other's choices in the score they refit against.
+
+### 4. Callbacks for diagnostics, not control flow
+
+Callbacks observe the loop; they never steer it. Each callback receives
+the per-step state (`step`, `candidates`, `costs`, plus solver-specific
+payload like `topk_vals`, `mean`, `var`, `params`), reduces it to a
+scalar (or list) per env, and accumulates a history that is returned in
+`outputs["callbacks"]`. This keeps `solve()` clean, makes solvers
+unit-testable without instrumentation, and lets users add metrics
+(`GradNormRecorder`, `EliteSpreadRecorder`, custom ones) without
+touching solver code.
+
+## **[ Mental Model: Tensor Conventions ]**
+
+Solvers are vectorised over three dimensions. Internalising the layout
+makes the rest of the API obvious.
+
+| Symbol | Meaning                                          |
+|--------|--------------------------------------------------|
+| `B`    | env-batch (subset of `n_envs` processed at once) |
+| `N`    | `num_samples` — candidate trajectories per env   |
+| `H`    | `horizon` — planning horizon in timesteps        |
+| `D`    | `action_dim × action_block` — flat per-step action |
+
+Shapes you will see:
+
+| Object                                | Shape                | Notes                                      |
+|---------------------------------------|----------------------|--------------------------------------------|
+| Candidate plans (continuous solvers)  | `(B, N, H, D)`       | Tensor                                     |
+| Candidate plans (composite)           | `dict[str, (B,N,H,Dk)]` | One tensor per sub-action key           |
+| Per-candidate cost                    | `(B, N)`             | Returned by `model.get_cost`               |
+| Final actions                         | `(n_envs, H, D)`     | After `finalize`, on CPU                   |
+| Expanded `info_dict` value            | `(B, N, ...)`        | Each entry broadcast over the sample axis  |
+
+Two conventions worth highlighting:
+
+- **`action_block`** lets a single planning step emit several consecutive
+  environment actions. The flat per-step dim is `action_dim × action_block`;
+  the planner treats the block as one decision, the executor unrolls it.
+- **Warm-starts** (`init_action`) may supply only a *prefix* of the horizon.
+  The base classes pad the remainder with zeros, so receding-horizon
+  control naturally reuses the previous plan minus the executed step.
+
+## **[ Solver Lifecycle ]**
+
+A solver is used in three phases:
+
+1. **Construct** — algorithm hyperparameters only (`n_steps`,
+   `num_samples`, learning rate, noise scale, …). At this point the
+   solver knows nothing about the environment.
+2. **Configure** — bind to the environment: `action_space`, `n_envs`,
+   `config` (a `PlanConfig`-like object exposing `horizon` and
+   `action_block`). After `configure`, properties like `action_dim`,
+   `horizon`, `n_envs` are valid.
+3. **Solve** — call `solve(info_dict, init_action=...)` repeatedly. The
+   solver may keep state across calls (e.g. `LagrangianSolver` warm-starts
+   its dual variables; CEM's mean is implicitly carried via
+   `init_action`).
+
+```python
+# 1. Construct
+solver = CEMSolver(model=world_model, n_steps=20, num_samples=128, topk=16)
+
+# 2. Configure (once per environment)
+solver.configure(action_space=env.action_space, n_envs=8, config=plan_cfg)
+
+# 3. Solve (every control step)
+for obs in rollout:
+    out  = solver.solve({"obs": obs}, init_action=prev_plan)
+    plan = out["actions"]
+```
+
+## **[ Output Contract ]**
+
+`solve()` returns a dict. Every solver guarantees:
+
+| Key         | Shape / Type                                | Always present |
+|-------------|---------------------------------------------|:---:|
+| `actions`   | `(n_envs, H, D)` tensor on CPU              | yes |
+| `costs`     | `list[float]` of length `n_envs`            | yes for `BaseSolver` subclasses |
+| `callbacks` | `dict[output_key, list[list[Any]]]`         | only if callbacks were attached |
+
+Solvers are free to add their own keys via `extra_outputs(state)`
+(`mean`, `var`, `probs`, `lambdas`, `constraint_violation`, …). See the
+implementation tables below for what each one returns.
+
+## **[ Solver Protocol ]**
 
 ::: stable_worldmodel.solver.Solver
     options:
@@ -19,7 +209,113 @@ summary: Model-based planning solvers for action optimization
 ::: stable_worldmodel.solver.Solver.n_envs
 ::: stable_worldmodel.solver.Solver.horizon
 
+## **[ BaseSolver ]**
+
+The recommended starting point for a new sampling-based solver. It owns
+the outer loop, env-batching, callback firing, and state plumbing.
+Subclasses implement four hooks; everything else is inherited.
+
+::: stable_worldmodel.solver.BaseSolver
+    options:
+        heading_level: 3
+        members:
+            - configure
+            - solve
+            - init_state
+            - propose
+            - update
+            - finalize
+            - step
+            - extra_outputs
+            - action_block
+            - dtype
+            - horizon
+            - n_envs
+        show_source: false
+
+### Writing a custom solver
+
+The minimal recipe: subclass `BaseSolver`, implement the four hooks,
+and you get the outer loop, env-batching, info-dict expansion, dtype
+handling, and callbacks for free.
+
+```python
+import numpy as np
+import torch
+from stable_worldmodel.solver import BaseSolver
+
+
+class RandomShootingSolver(BaseSolver):
+    """Baseline: sample candidates around the current best plan, keep argmin.
+
+    State is the current best plan ``(B, H, D)``. Each iteration samples
+    ``num_samples`` Gaussian perturbations around it and replaces the
+    state with the cheapest candidate.
+    """
+
+    def __init__(self, model, n_steps, num_samples, noise=1.0, **kw):
+        super().__init__(model=model, n_steps=n_steps,
+                         num_samples=num_samples, **kw)
+        self.noise = noise
+
+    def configure(self, *, action_space, n_envs, config):
+        super().configure(action_space=action_space, n_envs=n_envs, config=config)
+        # Convention: vector Box spaces have a leading "envs" dim.
+        self._action_dim = int(np.prod(action_space.shape[1:]))
+
+    @property
+    def action_dim(self):
+        return self._action_dim * self.action_block
+
+    # --- four hooks ---
+
+    def init_state(self, n_envs, init=None):
+        if init is None:
+            init = torch.zeros(n_envs, self.horizon, self.action_dim,
+                               dtype=self.dtype, device=self.device)
+        return init
+
+    def propose(self, state):
+        # state: (B, H, D) -> candidates: (B, N, H, D)
+        eps = torch.randn(state.shape[0], self.num_samples, *state.shape[1:],
+                          device=self.device, dtype=self.dtype) * self.noise
+        cands = state.unsqueeze(1) + eps
+        cands[:, 0] = state                      # always keep current best
+        return cands
+
+    def update(self, state, candidates, costs):
+        best = costs.argmin(dim=1)               # (B,)
+        idx  = torch.arange(state.shape[0], device=self.device)
+        new_state = candidates[idx, best]
+        return new_state, {}                     # no extra callback payload
+
+    def finalize(self, state):
+        return state.detach().cpu()
+```
+
+That is a complete, working solver. It is callable
+(`solver(info_dict)`), batches over environments, accepts callbacks,
+respects warm-starts, and integrates with `CompositeSolver`.
+
+The `update` hook returns `(new_state, payload)`. `payload` is merged
+with `step`, `candidates`, `costs` and forwarded to every callback —
+this is how solver-specific diagnostics (`mean`, `var`, `topk_vals`,
+`probs`, `params`, …) flow out without polluting the loop.
+
 ## **[ Implementations ]**
+
+| Solver | Action space | Gradient required | Strengths |
+|--------|--------------|:-:|-----------|
+| `PredictiveSamplingSolver` | Box       | no  | One-shot, real-time control, tiny code path |
+| `CEMSolver`                | Box       | no  | Robust on smooth costs, well-understood |
+| `ICEMSolver`               | Box       | no  | Sample-efficient CEM (colored noise + elite memory) |
+| `MPPISolver`               | Box       | no  | Soft-weighted refit, good on noisy costs |
+| `GradientSolver`           | Box       | yes | Direct backprop through the world model |
+| `LagrangianSolver`         | Box       | yes | Inequality-constrained planning (`g(a) ≤ 0`) |
+| `PGDSolver`                | Discrete  | yes | Projected gradient on the simplex |
+| `CategoricalCEMSolver`     | Discrete  | no  | Gradient-free CEM over categorical distributions |
+
+Reference docs for each implementation follow below.
 
 ::: stable_worldmodel.solver.CEMSolver
     options:
@@ -101,6 +397,75 @@ summary: Model-based planning solvers for action optimization
 
 ::: stable_worldmodel.solver.LagrangianSolver.solve
 
+## **[ Composite Solvers ]**
+
+[`CompositeSolver`][stable_worldmodel.solver.CompositeSolver] composes
+one `BaseSolver` per key of a `gym.spaces.Dict` action space and runs a
+single shared outer loop. Each child proposes candidates for its
+component; the joint dict is evaluated through **one** call to
+`model.get_cost`; each child refits from the same cost tensor.
+
+This keeps coupled action components synchronised: the discrete mode
+switch sees the continuous gripper command's effect in the cost, and
+vice versa.
+
+### Constraints
+
+- All children must share `num_samples` so candidates align under one
+  joint cost evaluation.
+- `n_steps`, `batch_size`, and the planning `config` are taken from the
+  first child; per-child `n_steps` is ignored — the composite owns the
+  outer loop.
+- Callbacks attach to the **composite**, not the children. Payload keys
+  are namespaced by sub-key: `"<child>.mean"`, `"<child>.topk_vals"`, …
+- The model's `get_cost(info_dict, action_candidates)` receives
+  `action_candidates` as a `dict[str, Tensor]` rather than a single
+  tensor.
+
+### Example
+
+```python
+import gymnasium as gym
+from stable_worldmodel.solver import (
+    CEMSolver, CategoricalCEMSolver, CompositeSolver,
+)
+from stable_worldmodel.policy import PlanConfig
+
+# Hybrid action space: continuous arm command + discrete gripper mode.
+action_space = gym.spaces.Dict({
+    "arm":     gym.spaces.Box(low=-1, high=1, shape=(1, 6)),
+    "gripper": gym.spaces.Discrete(3),
+})
+
+solver = CompositeSolver(
+    sub_solvers={
+        "arm":     CEMSolver(model=model, n_steps=20, num_samples=128, topk=16),
+        "gripper": CategoricalCEMSolver(model=model, n_steps=20,
+                                        num_samples=128, topk=16),
+    },
+)
+
+solver.configure(action_space=action_space, n_envs=4,
+                 config=PlanConfig(horizon=8, action_block=1))
+
+out = solver.solve({"obs": obs})
+out["actions"]              # dict: {"arm": (...), "gripper": (...)}
+out["arm.mean"]             # CEM extras, namespaced
+out["gripper.probs"]        # CategoricalCEM extras, namespaced
+```
+
+::: stable_worldmodel.solver.CompositeSolver
+    options:
+        heading_level: 3
+        members:
+            - configure
+            - init_state
+            - propose
+            - update
+            - finalize
+            - extra_outputs
+        show_source: false
+
 ## **[ Callbacks ]**
 
 Solvers accept a `callbacks=[...]` list of [`Callback`][stable_worldmodel.solver.callbacks.Callback]
@@ -117,7 +482,7 @@ from stable_worldmodel.solver.callbacks import (
 solver = GradientSolver(
     model=model, n_steps=20, num_samples=8,
     callbacks=[
-        BestCostRecorder(),                # mean over envs (default)
+        BestCostRecorder(),                 # mean over envs (default)
         GradNormRecorder(reduction='none'), # one entry per env
         ActionNormRecorder(reduction='sum'),
     ],
@@ -217,7 +582,7 @@ from stable_worldmodel.solver import LagrangianSolver
 from stable_worldmodel.policy import PlanConfig
 
 
-# ── 1. Define a world model with cost and optional constraints ──────────────
+# 1. Define a world model with cost and optional constraints
 
 class MyModel(torch.nn.Module):
     """Minimal example: cost is MSE to a goal; two inequality constraints."""
@@ -237,7 +602,7 @@ class MyModel(torch.nn.Module):
         return torch.stack([g0, g1], dim=-1)
 
 
-# ── 2. Build and configure the solver ──────────────────────────────────────
+# 2. Build and configure the solver
 
 model = MyModel()
 
@@ -259,7 +624,7 @@ config = PlanConfig(horizon=10, receding_horizon=1, action_block=1)
 solver.configure(action_space=action_space, n_envs=2, config=config)
 
 
-# ── 3. Solve ────────────────────────────────────────────────────────────────
+# 3. Solve
 
 info_dict = {"obs": torch.zeros(2, 4)}  # current env observations
 out = solver.solve(info_dict)
@@ -269,7 +634,7 @@ print(out["lambdas"])              # (2, 2)       — dual variables
 print(out["constraint_violation"]) # mean ReLU(g) across samples
 
 
-# ── 4. Receding-horizon planning (warm start) ───────────────────────────────
+# 4. Receding-horizon planning (warm start)
 
 # Execute the first step, shift the plan, re-plan
 executed_steps = 1
@@ -315,7 +680,7 @@ from stable_worldmodel.solver import CategoricalCEMSolver
 from stable_worldmodel.policy import PlanConfig
 
 
-# ── 1. World model: cost defined over one-hot candidates ────────────────────
+# 1. World model: cost defined over one-hot candidates
 
 class DiscreteModel(torch.nn.Module):
     """Cost is minimized by selecting category 2 at every position."""
@@ -329,7 +694,7 @@ class DiscreteModel(torch.nn.Module):
         return -c[..., 2].sum(dim=(-1, -2))
 
 
-# ── 2. Build and configure the solver ──────────────────────────────────────
+# 2. Build and configure the solver
 
 solver = CategoricalCEMSolver(
     model=DiscreteModel(),
@@ -346,7 +711,7 @@ config = PlanConfig(horizon=8, receding_horizon=4, action_block=1)
 solver.configure(action_space=action_space, n_envs=2, config=config)
 
 
-# ── 3. Solve ───────────────────────────────────────────────────────────────
+# 3. Solve
 
 info_dict = {"obs": torch.zeros(2, 4)}
 out = solver.solve(info_dict)

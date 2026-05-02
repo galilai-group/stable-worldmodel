@@ -1,6 +1,5 @@
 """Projected Gradient Descent solver for discrete action spaces."""
 
-import time
 from typing import Any
 
 import gymnasium as gym
@@ -8,10 +7,11 @@ import numpy as np
 import torch
 from gymnasium.spaces import Discrete
 
+from .base import BaseSolver
 from .solver import Costable
 
 
-class PGDSolver(torch.nn.Module):
+class PGDSolver(BaseSolver):
     """Projected Gradient Descent solver for discrete action optimization.
 
     Args:
@@ -36,73 +36,57 @@ class PGDSolver(torch.nn.Module):
         device: str | torch.device = 'cpu',
         seed: int = 1234,
     ) -> None:
-        super().__init__()
-        self.model = model
-        self.n_steps = n_steps
-        self.batch_size = batch_size
-        self.num_samples = num_samples
+        super().__init__(
+            model=model,
+            n_steps=n_steps,
+            batch_size=batch_size,
+            num_samples=num_samples,
+            device=device,
+            callbacks=None,
+        )
         self.var_scale = var_scale
         self.action_noise = action_noise
-        self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
 
-        self._configured = False
-        self._n_envs = None
-        self._action_dim = None
         self._action_simplex_dim = None
-        self._config = None
+        self.init: torch.Tensor | None = None
+        self._from_scalar_pending: bool = False
 
     def configure(
         self, *, action_space: gym.Space, n_envs: int, config: Any
     ) -> None:
-        """Configure the solver with environment specifications."""
         assert isinstance(action_space, Discrete), (
             f'Action space must be discrete, got {type(action_space)}'
         )
-
-        self._action_space = action_space
-        self._n_envs = n_envs
-        self._config = config
-        self._action_dim = int(np.prod(action_space.shape[1:]))
+        super().configure(
+            action_space=action_space, n_envs=n_envs, config=config
+        )
+        shape = action_space.shape
+        self._action_dim = (
+            int(np.prod(shape[1:]))
+            if len(shape) > 1
+            else int(np.prod(shape) or 1)
+        )
         self._action_simplex_dim = int(action_space.n)
-        self._configured = True
-
-    @property
-    def n_envs(self) -> int:
-        """Number of parallel environments."""
-        return self._n_envs
 
     @property
     def action_dim(self) -> int:
-        """Flattened action dimension including action_block grouping."""
-        return self._action_dim * self._config.action_block
+        return self._action_dim * self.action_block
 
     @property
     def action_simplex_dim(self) -> int:
-        """Simplex dimension for discrete action probabilities."""
-        return self._action_simplex_dim * self._config.action_block
-
-    @property
-    def horizon(self) -> int:
-        """Planning horizon in timesteps."""
-        return self._config.horizon
-
-    def __call__(self, *args: Any, **kwargs: Any) -> dict:
-        """Make solver callable, forwarding to solve()."""
-        return self.solve(*args, **kwargs)
+        return self._action_simplex_dim * self.action_block
 
     def init_action(
         self, actions: torch.Tensor | None = None, from_scalar: bool = False
     ) -> None:
-        """Initialize the action tensor for optimization."""
+        """Initialize ``self.init`` to ``(n_envs, num_samples, horizon, action_simplex_dim)``."""
         if actions is None:
             actions = torch.zeros((self._n_envs, 0, self.action_simplex_dim))
         elif from_scalar:
-            # convert scalar to one-hot
             actions = torch.nn.functional.one_hot(
                 actions, num_classes=self._action_simplex_dim
             ).to(torch.float32)
-            # merge action_block dim
             actions = actions.reshape(
                 *actions.shape[:-2], self.action_simplex_dim
             )
@@ -112,9 +96,7 @@ class PGDSolver(torch.nn.Module):
                 and actions.shape[2] == self.action_simplex_dim
             )
 
-        # fill remaining action
         remaining = self.horizon - actions.shape[1]
-
         if remaining > 0:
             new_actions = torch.zeros(
                 self._n_envs, remaining, self.action_simplex_dim
@@ -123,7 +105,7 @@ class PGDSolver(torch.nn.Module):
 
         actions = actions.unsqueeze(1).repeat_interleave(
             self.num_samples, dim=1
-        )  # add sample dim
+        )
         actions[:, 1:] += (
             torch.randn(
                 actions[:, 1:].shape,
@@ -131,13 +113,34 @@ class PGDSolver(torch.nn.Module):
                 device=self.device,
             )
             * self.var_scale
-        )  # add small noise to all samples except the first one
+        )
+        self.init = actions
 
-        # reset actions
-        if hasattr(self, 'init'):
-            self.init.copy_(actions)
-        else:
-            self.register_parameter('init', torch.nn.Parameter(actions))
+    def _factor_action_block(self, actions: torch.Tensor) -> torch.Tensor:
+        original_shape = actions.shape
+        return actions.reshape(
+            *original_shape[:-1], self.action_block, self._action_simplex_dim
+        )
+
+    def _project_action_simplex(self, actions: torch.Tensor) -> torch.Tensor:
+        original_shape = actions.shape
+        s = self._factor_action_block(actions).reshape(
+            -1, self._action_simplex_dim
+        )
+        mu, _ = torch.sort(s, descending=True, dim=-1)
+        cumulative = mu.cumsum(dim=-1)
+        d = s.size(-1)
+        indices = torch.arange(1, d + 1, device=s.device, dtype=s.dtype)
+        threshold = (cumulative - 1) / indices
+        cond = (mu > threshold).to(torch.int32)
+        rho = cond.cumsum(dim=-1)
+        valid_rho = rho * cond
+        rho_max = valid_rho.max(dim=-1, keepdim=True)[0]
+        rho_min = torch.clamp(rho_max, min=1)
+        psi = (cumulative.gather(-1, rho_min - 1) - 1) / rho_min
+        return torch.clamp(s - psi, min=0.0).reshape(original_shape)
+
+    # === BaseSolver hooks ===
 
     def solve(
         self,
@@ -145,155 +148,89 @@ class PGDSolver(torch.nn.Module):
         init_action: torch.Tensor | None = None,
         from_scalar: bool = False,
     ) -> dict:
-        """Solve the planning problem using projected gradient descent."""
-        start_time = time.time()
-        outputs = {
-            'cost': [],  # Will store list of cost histories per batch
-            'actions': None,
+        # Stash from_scalar so init_state can pick it up via the BaseSolver loop.
+        self._from_scalar_pending = from_scalar
+        try:
+            return super().solve(info_dict, init_action=init_action)
+        finally:
+            self._from_scalar_pending = False
+
+    def init_state(
+        self, n_envs: int, init: torch.Tensor | None = None
+    ) -> dict[str, Any]:
+        with torch.no_grad():
+            self.init_action(init, from_scalar=self._from_scalar_pending)
+        best = torch.zeros(
+            n_envs, self.horizon, self.action_block, dtype=torch.long
+        )
+        return {'init': self.init, 'best': best}
+
+    def _slice_state(
+        self, state: dict[str, Any], start: int, end: int
+    ) -> dict[str, Any]:
+        params = state['init'][start:end].clone().detach()
+        params.requires_grad = True
+        return {
+            'params': params,
+            'optim': torch.optim.SGD([params], lr=1.0),
+            'last_costs': None,
         }
 
+    def _write_back_state(
+        self,
+        state: dict[str, Any],
+        bstate: dict[str, Any],
+        start: int,
+        end: int,
+    ) -> None:
         with torch.no_grad():
-            self.init_action(init_action, from_scalar=from_scalar)
-
-        # Determine batch size (default to all envs if not specified which can cause memory issues)
-        batch_size = (
-            self.batch_size if self.batch_size is not None else self.n_envs
-        )
-        total_envs = self.n_envs
-
-        # Lists to hold results from each batch to be concatenated later
-        batch_top_actions_list = []
-
-        # --- Outer Loop: Iterate over batches ---
-        for start_idx in range(0, total_envs, batch_size):
-            end_idx = min(start_idx + batch_size, total_envs)
-            current_bs = end_idx - start_idx
-
-            batch_init = self.init[start_idx:end_idx].clone().detach()
-            batch_init.requires_grad = True
-
-            optim = torch.optim.SGD([batch_init], lr=1.0)
-
-            expanded_infos = {}
-            for k, v in info_dict.items():
-                if torch.is_tensor(v):
-                    v_batch = v[start_idx:end_idx]
-                    v_batch = (
-                        v_batch.unsqueeze(1)
-                        .expand(
-                            current_bs,
-                            self.num_samples,
-                            *v_batch.shape[1:],
-                        )
-                        .to(self.device)
-                    )
-                elif isinstance(v, np.ndarray):
-                    v_batch = v[start_idx:end_idx]
-                    v_batch = np.repeat(
-                        v_batch[:, None, ...], self.num_samples, axis=1
-                    )
-                else:
-                    v_batch = v
-                expanded_infos[k] = v_batch
-
-            # Perform Gradient Descent for this batch
-            batch_cost_history = []
-
-            for step in range(self.n_steps):
-                costs = self.model.get_cost(expanded_infos, batch_init)
-
-                assert isinstance(costs, torch.Tensor), (
-                    f'Got {type(costs)} cost, expect torch.Tensor'
-                )
-                assert (
-                    costs.ndim == 2
-                    and costs.shape[0] == current_bs
-                    and costs.shape[1] == self.num_samples
-                ), (
-                    f'Cost should be of shape ({current_bs}, {self.num_samples}), got {costs.shape}'
-                )
-                assert costs.requires_grad, (
-                    'Cost must requires_grad for PGD solver.'
+            state['init'][start:end] = bstate['params']
+            costs = bstate['last_costs']
+            if costs is not None:
+                top_idx = costs.argmin(dim=1)
+                bs = bstate['params'].shape[0]
+                idx = torch.arange(bs, device=bstate['params'].device)
+                top_one_hot = bstate['params'][idx, top_idx]
+                state['best'][start:end] = (
+                    self._factor_action_block(top_one_hot).argmax(dim=-1).cpu()
                 )
 
-                cost = costs.sum()  # Sum cost for this batch
-                cost.backward()
-                optim.step()
-                optim.zero_grad(set_to_none=True)
+    def propose(self, state: dict[str, Any]) -> torch.Tensor:
+        return state['params']
 
-                # Add noise
-                if self.action_noise > 0:
-                    batch_init.data += (
-                        torch.randn(
-                            batch_init.shape,
-                            generator=self.torch_gen,
-                            device=batch_init.device,
-                        )
-                        * self.action_noise
-                    )
-                # projection onto simplex
-                with torch.no_grad():
-                    batch_init.copy_(self._project_action_simplex(batch_init))
+    def update(
+        self,
+        state: dict[str, Any],
+        candidates: torch.Tensor,
+        costs: torch.Tensor,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if not costs.requires_grad:
+            raise RuntimeError('Cost must require grad for PGDSolver.')
 
-                batch_cost_history.append(cost.item())
+        cost = costs.sum()
+        cost.backward()
+        state['optim'].step()
+        state['optim'].zero_grad(set_to_none=True)
 
-            # Store cost history for this batch
-            outputs['cost'].append(batch_cost_history)
-
-            # Update the global self.init with the optimized batch values
+        if self.action_noise > 0:
             with torch.no_grad():
-                self.init[start_idx:end_idx] = batch_init
+                candidates.data += (
+                    torch.randn(
+                        candidates.shape,
+                        generator=self.torch_gen,
+                        device=candidates.device,
+                    )
+                    * self.action_noise
+                )
 
-            top_idx = torch.argsort(costs, dim=1)[:, 0]
-            batch_indices = torch.arange(current_bs)
+        with torch.no_grad():
+            candidates.copy_(self._project_action_simplex(candidates))
 
-            top_actions_batch = batch_init[batch_indices, top_idx]
+        state['last_costs'] = costs.detach()
+        return state, {'params': candidates, 'cost': cost}
 
-            # convert one-hot back to discrete actions
-            top_actions_batch = self._factor_action_block(
-                top_actions_batch
-            ).argmax(dim=-1)
-            batch_top_actions_list.append(top_actions_batch.detach().cpu())
+    def finalize(self, state: dict[str, Any]) -> torch.Tensor:
+        return state['best']
 
-        # Concatenate all batch results
-        outputs['actions'] = torch.cat(batch_top_actions_list, dim=0)
-        end_time = time.time()
-        print(
-            f'PGDSolver.solve completed in {end_time - start_time:.4f} seconds.'
-        )
-
-        return outputs
-
-    def _factor_action_block(self, actions: torch.Tensor) -> torch.Tensor:
-        """Factor the action block dimension from action_simplex_dim."""
-        original_shape = actions.shape
-        action_block = self._config.action_block
-        simplex_dim = self._action_simplex_dim
-        return actions.reshape(*original_shape[:-1], action_block, simplex_dim)
-
-    def _project_action_simplex(self, actions: torch.Tensor) -> torch.Tensor:
-        """Project the action onto the probability simplex."""
-        original_shape = actions.shape
-
-        s = self._factor_action_block(actions).reshape(
-            -1, self._action_simplex_dim
-        )
-
-        mu, _ = torch.sort(s, descending=True, dim=-1)
-        cumulative = mu.cumsum(dim=-1)
-
-        d = s.size(-1)
-        indices = torch.arange(1, d + 1, device=s.device, dtype=s.dtype)
-
-        threshold = (cumulative - 1) / indices
-
-        cond = (mu > threshold).to(torch.int32)
-        rho = cond.cumsum(dim=-1)
-        valid_rho = rho * cond
-        rho_max = valid_rho.max(dim=-1, keepdim=True)[0]
-
-        rho_min = torch.clamp(rho_max, min=1)
-        psi = (cumulative.gather(-1, rho_min - 1) - 1) / rho_min
-
-        projected = torch.clamp(s - psi, min=0.0).reshape(original_shape)
-        return projected
+    def _cost_summary(self, payload: dict, costs: torch.Tensor) -> list[float]:
+        return costs.detach().min(dim=1).values.cpu().tolist()
