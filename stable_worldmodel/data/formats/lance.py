@@ -891,6 +891,18 @@ class Lance(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> LanceDataset:
+        # Remote URI (s3://, gs://, ...) — Lance reads natively via
+        # object_store. Auto-inject region from env if caller didn't.
+        if '://' in str(path) and 'connect_kwargs' not in kwargs:
+            import os
+
+            region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+            kwargs['connect_kwargs'] = {
+                'storage_options': {
+                    'region': region,
+                    'virtual_hosted_style_request': 'true',
+                }
+            }
         return LanceDataset(path=path, **kwargs)
 
     @classmethod

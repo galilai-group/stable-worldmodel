@@ -303,6 +303,18 @@ class HDF5(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> HDF5Dataset:
+        s = str(path)
+        # Remote URI (s3://, gs://, ...) — pass through; HDF5Dataset uses
+        # fsspec to read. Auto-inject region from env if caller didn't.
+        if '://' in s:
+            if 'storage_options' not in kwargs:
+                import os
+
+                region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+                kwargs['storage_options'] = {
+                    'client_kwargs': {'region_name': region}
+                }
+            return HDF5Dataset(path=s, **kwargs)
         p = Path(path)
         if p.is_dir():
             files = sorted(p.glob('*.h5')) + sorted(p.glob('*.hdf5'))
