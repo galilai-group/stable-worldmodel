@@ -401,11 +401,11 @@ class LanceDataset(Dataset):
 
         if _tv_decode_jpeg is not None:
             try:
+                # bytearray() copies into a writable buffer — the bytes
+                # we get from Lance are immutable, and torch.frombuffer
+                # warns on non-writable input.
                 byte_tensors = [
-                    torch.frombuffer(
-                        b if isinstance(b, (bytes, bytearray)) else bytes(b),
-                        dtype=torch.uint8,
-                    )
+                    torch.frombuffer(bytearray(b), dtype=torch.uint8)
                     for b in blobs
                 ]
                 decoded = _tv_decode_jpeg(byte_tensors, mode=_TV_RGB)
