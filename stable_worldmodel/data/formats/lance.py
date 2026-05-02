@@ -169,8 +169,8 @@ class LanceDataset(Dataset):
 
         if keys_to_cache:
             logging.warning(
-                'LanceDataset: keys_to_cache=%s is unnecessary — '
-                '__getitems__ already batches reads; caching risks OOM.',
+                'LanceDataset: keys_to_cache=%s is not required — Lance '
+                'has efficient random access via batched __getitems__.',
                 keys_to_cache,
             )
             for key in keys_to_cache:
