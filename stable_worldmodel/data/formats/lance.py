@@ -181,6 +181,14 @@ class LanceDataset(Dataset):
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state['_perm'] = None
+        # spt.Module sets `dataset._trainer = trainer` on every dataset to
+        # inject `global_step` / `current_epoch` into samples. The trainer
+        # transitively reaches `train_dataloader._iterator` (a
+        # `_MultiProcessingDataLoaderIter`, which raises NotImplementedError
+        # on pickle). Drop the back-reference so worker spawn closures
+        # don't traverse into it; workers see a stale snapshot of trainer
+        # state anyway, so a missing trainer is fine.
+        state['_trainer'] = None
         return state
 
     def _connect_table(self):
