@@ -248,6 +248,21 @@ class LanceDataset(Dataset):
                 exc,
             )
 
+        # Spawn-mode workers IPC tensors via PyTorch's shared-memory layer.
+        # Default is 'file_descriptor' which mmap()s files under /dev/shm —
+        # cloud instances often reject the ftruncate() with EINVAL despite
+        # plenty of free space (kernel/AppArmor quirks vary). 'file_system'
+        # uses regular files and works everywhere; the throughput delta is
+        # negligible for our batch sizes.
+        try:
+            torch.multiprocessing.set_sharing_strategy('file_system')
+        except RuntimeError as exc:
+            logging.warning(
+                'LanceDataset could not switch torch sharing strategy to '
+                "'file_system' (%s); workers may crash on shm IPC.",
+                exc,
+            )
+
     def _compute_episode_structure(
         self, table
     ) -> tuple[np.ndarray, np.ndarray]:
