@@ -342,9 +342,7 @@ class TwoRoomDoorKeyEnv(gym.Env):
             pickup_r = float(
                 self.variation_space['key']['pickup_radius'].value.item()
             )
-            d_key = float(
-                torch.norm(self.agent_position - self.key_position)
-            )
+            d_key = float(torch.norm(self.agent_position - self.key_position))
             if d_key < pickup_r:
                 self.has_key = True
                 self.door_open = True
@@ -479,9 +477,7 @@ class TwoRoomDoorKeyEnv(gym.Env):
         # key (only while not picked up)
         if not self.has_key:
             key_color = self.variation_space['key']['color'].value
-            key_r = float(
-                self.variation_space['key']['radius'].value.item()
-            )
+            key_r = float(self.variation_space['key']['radius'].value.item())
             key_dot = self._gaussian_dot(self.key_position, key_r)
             img = self._alpha_blend(img, key_dot, key_color)
 

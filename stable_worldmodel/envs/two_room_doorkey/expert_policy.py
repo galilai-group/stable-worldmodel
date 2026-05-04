@@ -1,5 +1,3 @@
-
-
 import numpy as np
 from stable_worldmodel.policy import BasePolicy
 
@@ -13,6 +11,7 @@ class DoorKeyExpertPolicy(BasePolicy):
         through the closest door opening that fits the agent.
       - Otherwise (already in target's room), head straight to the target.
     """
+
     def __init__(
         self,
         action_noise: float = 0.0,
