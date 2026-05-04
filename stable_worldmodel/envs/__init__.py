@@ -37,6 +37,11 @@ register(
 )
 
 register(
+    id='swm/TwoRoomDoorKey-v1',
+    entry_point='stable_worldmodel.envs.two_room_doorkey.env:TwoRoomDoorKeyEnv',
+)
+
+register(
     id='swm/OGBCube-v0',
     entry_point='stable_worldmodel.envs.ogbench.cube_env:CubeEnv',
 )
