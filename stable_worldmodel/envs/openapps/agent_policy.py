@@ -1,9 +1,5 @@
 """VLMPolicy — BasePolicy subclass that calls VLMs for action selection.
 
-Implements get_action(obs, **kwargs) -> np.ndarray, which is the only
-interface swm calls. The VLM complexity (screenshot encoding, prompt
-construction, action parsing) is fully hidden from swm.
-
 Supported agents: UI-TARS, Dummy (random).
 """
 
@@ -20,10 +16,6 @@ from .executor import (
     action_str_to_multidiscrete,
 )
 
-
-# browsergym is an optional dependency used only to parse TARS-formatted
-# action strings. When it isn't installed we fall back to passing the raw
-# string through unchanged.
 try:
     from browsergym.core.action.parsers import uitars_parser
 except ImportError:
