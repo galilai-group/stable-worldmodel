@@ -1,30 +1,3 @@
-"""WORKAROUND module for LanceDB's incomplete fork-safety.
-
-Everything in this file exists to work around `lancedb` < TBD's
-fork-mode DataLoader crash (the ``free(): invalid pointer`` SIGABRT we
-hit when workers fork while the parent's tokio runtime has work in
-flight). See ``lancedb_fork_segfault_ticket.md`` at the repo root for
-the full upstream report.
-
-Until the lance/lancedb runtime fully quiesces around ``fork()``, we:
-
-  1. Force the multiprocessing start method to ``'spawn'`` on Linux
-     so workers re-import everything from a clean state instead of
-     inheriting the parent's mid-flight async heap.
-  2. Switch PyTorch's tensor-sharing strategy to ``'file_system'`` —
-     spawn workers IPC tensors via ``/dev/shm`` fds, and cloud
-     instances often reject the matching ``ftruncate`` even with
-     plenty of free shm.
-  3. Wrap user-supplied ``forward=`` callables in a ``__name__``-bearing
-     class so spt.Module's bound-method reducer survives pickling
-     under spawn (``functools.partial`` lacks ``__name__``).
-
-**Drop this module and its imports** once the upstream fix lands —
-LanceDataset can stop forcing spawn, ``forward=`` can take
-``functools.partial`` directly, and the file_system strategy switch
-becomes unnecessary.
-"""
-
 from __future__ import annotations
 
 import logging
