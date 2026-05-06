@@ -12,6 +12,7 @@ from omegaconf import OmegaConf, open_dict
 from torch import nn
 from torch.utils.data import DataLoader
 
+from stable_worldmodel._spawn_compat import ForwardWithCfg
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.pldm.module import (
     MLP,
@@ -60,20 +61,6 @@ class SaveCkptCallback(Callback):
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
         )
-
-
-class _ForwardWithCfg:
-    # WORKAROUND: spt.Module binds `forward=` as a method; multiprocessing's
-    # bound-method reducer needs `__name__`. Fix belongs upstream in
-    # stable_pretraining.Module.
-    __name__ = 'forward'
-
-    def __init__(self, fn, cfg):
-        self.fn = fn
-        self.cfg = cfg
-
-    def __call__(self, module, batch, stage):
-        return self.fn(module, batch, stage, self.cfg)
 
 
 def pldm_forward(self, batch, stage, cfg):
@@ -242,7 +229,7 @@ def run(cfg):
     world_model = spt.Module(
         **models,
         **losses,
-        forward=_ForwardWithCfg(pldm_forward, cfg),
+        forward=ForwardWithCfg(pldm_forward, cfg),
         optim=optimizers,
     )
 

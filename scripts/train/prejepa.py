@@ -7,6 +7,7 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel._spawn_compat import ForwardWithCfg
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
@@ -147,20 +148,6 @@ def _strip_action_dims(tensor, action_range):
         [tensor[..., : action_range[0]], tensor[..., action_range[1] :]],
         dim=-1,
     )
-
-
-class _ForwardWithCfg:
-    # WORKAROUND: spt.Module binds `forward=` as a method; multiprocessing's
-    # bound-method reducer needs `__name__`. Fix belongs upstream in
-    # stable_pretraining.Module.
-    __name__ = 'forward'
-
-    def __init__(self, fn, cfg):
-        self.fn = fn
-        self.cfg = cfg
-
-    def __call__(self, module, batch, stage):
-        return self.fn(module, batch, stage, self.cfg)
 
 
 def dinowm_forward(self, batch, stage, cfg):
@@ -337,7 +324,7 @@ def run(cfg):
 
     world_model = spt.Module(
         model=world_model,
-        forward=_ForwardWithCfg(dinowm_forward, cfg),
+        forward=ForwardWithCfg(dinowm_forward, cfg),
         optim={
             'model_opt': {'modules': 'model', 'optimizer': dict(cfg.optimizer)}
         },

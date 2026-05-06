@@ -9,6 +9,7 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
+from stable_worldmodel._spawn_compat import ForwardWithCfg
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.lewm.module import (
     Predictor,
@@ -57,20 +58,6 @@ class SaveCkptCallback(Callback):
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
         )
-
-
-class _ForwardWithCfg:
-    # WORKAROUND: spt.Module binds `forward=` as a method; multiprocessing's
-    # bound-method reducer needs `__name__`. Fix belongs upstream in
-    # stable_pretraining.Module.
-    __name__ = 'forward'
-
-    def __init__(self, fn, cfg):
-        self.fn = fn
-        self.cfg = cfg
-
-    def __call__(self, module, batch, stage):
-        return self.fn(module, batch, stage, self.cfg)
 
 
 def lejepa_forward(self, batch, stage, cfg):
@@ -219,7 +206,7 @@ def run(cfg):
     world_model = spt.Module(
         model=world_model,
         sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
-        forward=_ForwardWithCfg(lejepa_forward, cfg),
+        forward=ForwardWithCfg(lejepa_forward, cfg),
         optim=optimizers,
     )
 
