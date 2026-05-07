@@ -875,18 +875,21 @@ class Lance(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> LanceDataset:
-        # Remote URI (s3://, gs://, ...) — Lance reads natively via
-        # object_store. Auto-inject region from env if caller didn't.
+        # Auto-inject scheme-appropriate storage_options from env if the
+        # caller didn't pass connect_kwargs. AWS creds are picked up by
+        # lance automatically; HF_TOKEN isn't, so forward it explicitly.
         if '://' in str(path) and 'connect_kwargs' not in kwargs:
             import os
 
-            region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-            kwargs['connect_kwargs'] = {
-                'storage_options': {
-                    'region': region,
-                    'virtual_hosted_style_request': 'true',
-                }
-            }
+            scheme = str(path).split('://', 1)[0]
+            opts: dict[str, str] = {}
+            if scheme in ('s3', 's3a'):
+                opts['region'] = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+                opts['virtual_hosted_style_request'] = 'true'
+            elif scheme == 'hf' and os.environ.get('HF_TOKEN'):
+                opts['token'] = os.environ['HF_TOKEN']
+            if opts:
+                kwargs['connect_kwargs'] = {'storage_options': opts}
         return LanceDataset(path=path, **kwargs)
 
     @classmethod
