@@ -881,7 +881,8 @@ class Lance(Format):
                 'region': os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'),
                 'virtual_hosted_style_request': 'true',
             }
-            if os.environ.get('HF_TOKEN'):
+            # `token` collides with AWS session token on s3:// — only inject for hf://.
+            if str(path).startswith('hf://') and os.environ.get('HF_TOKEN'):
                 opts['token'] = os.environ['HF_TOKEN']
             kwargs['connect_kwargs'] = {'storage_options': opts}
         return LanceDataset(path=path, **kwargs)
