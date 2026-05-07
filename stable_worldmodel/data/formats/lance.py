@@ -448,15 +448,15 @@ class LanceDataset(Dataset):
                 else self._pylist_to_numpy(values, col)
             )
 
-            if data.dtype == object and data.size > 0:
+            if data.size > 0 and (
+                data.dtype == object or data.dtype.kind in ('S', 'U')
+            ):
                 first = data.flat[0]
                 if isinstance(first, (bytes, bytearray)):
-                    steps[col] = (
-                        first.decode() if isinstance(first, bytes) else first
-                    )
+                    steps[col] = bytes(first).decode()
                     continue
                 if isinstance(first, str):
-                    steps[col] = first
+                    steps[col] = str(first)
                     continue
 
             steps[col] = self._prepare_numeric_tensor(
