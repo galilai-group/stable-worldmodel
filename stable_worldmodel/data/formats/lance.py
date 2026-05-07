@@ -28,7 +28,6 @@ import lancedb
 import pyarrow as pa
 from lancedb.permutation import Permutation
 
-from stable_worldmodel._spawn_compat import force_spawn_for_lancedb
 from stable_worldmodel.data.dataset import Dataset
 from stable_worldmodel.data.format import (
     Format,
@@ -87,6 +86,34 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
     return buf.getvalue()
 
 
+_SPAWN_FORCED = False
+
+
+def _force_spawn() -> None:
+    """Switch Linux multiprocessing to spawn — workaround for lancedb fork-unsafety."""
+    import logging
+    import multiprocessing as mp
+    import sys
+
+    import torch
+
+    global _SPAWN_FORCED
+    if _SPAWN_FORCED or sys.platform != 'linux':
+        _SPAWN_FORCED = True
+        return
+    _SPAWN_FORCED = True
+
+    if mp.get_start_method(allow_none=True) in (None, 'fork'):
+        try:
+            mp.set_start_method('spawn', force=True)
+        except RuntimeError as exc:
+            logging.warning('Could not switch to spawn (%s)', exc)
+    try:
+        torch.multiprocessing.set_sharing_strategy('file_system')
+    except RuntimeError:
+        pass
+
+
 class LanceDataset(Dataset):
     """Reader for a LanceDB table written by :class:`LanceWriter`.
 
@@ -135,7 +162,7 @@ class LanceDataset(Dataset):
         self._perm = None
         self._fetch_columns: list[str] | None = None
 
-        force_spawn_for_lancedb()
+        _force_spawn()
         table = self._connect_table()
         self._schema_names = list(table.schema.names)
         available = [

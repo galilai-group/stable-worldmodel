@@ -7,7 +7,7 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
-from stable_worldmodel._spawn_compat import ForwardWithCfg
+from functools import partial
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
@@ -324,7 +324,7 @@ def run(cfg):
 
     world_model = spt.Module(
         model=world_model,
-        forward=ForwardWithCfg(dinowm_forward, cfg),
+        forward=partial(dinowm_forward, cfg=cfg),
         optim={
             'model_opt': {'modules': 'model', 'optimizer': dict(cfg.optimizer)}
         },

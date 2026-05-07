@@ -9,7 +9,7 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
-from stable_worldmodel._spawn_compat import ForwardWithCfg
+from functools import partial
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.lewm.module import (
     Predictor,
@@ -206,7 +206,7 @@ def run(cfg):
     world_model = spt.Module(
         model=world_model,
         sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
-        forward=ForwardWithCfg(lejepa_forward, cfg),
+        forward=partial(lejepa_forward, cfg=cfg),
         optim=optimizers,
     )
 

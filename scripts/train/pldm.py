@@ -12,7 +12,8 @@ from omegaconf import OmegaConf, open_dict
 from torch import nn
 from torch.utils.data import DataLoader
 
-from stable_worldmodel._spawn_compat import ForwardWithCfg
+from functools import partial
+
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.pldm.module import (
     MLP,
@@ -229,7 +230,7 @@ def run(cfg):
     world_model = spt.Module(
         **models,
         **losses,
-        forward=ForwardWithCfg(pldm_forward, cfg),
+        forward=partial(pldm_forward, cfg=cfg),
         optim=optimizers,
     )
 
