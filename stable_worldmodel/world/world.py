@@ -49,6 +49,7 @@ import torch
 from stable_worldmodel.policy import Policy
 
 from .env_pool import EnvPool
+from ..plot import save_panel_videos, save_video
 from ..wrapper import MegaWrapper
 
 
@@ -431,7 +432,7 @@ class World:
             results['episode_successes'][ep_idx] = world.terminateds[env_idx]
             results['seeds'][ep_idx] = world.envs.seeds[env_idx]
             if frames is not None:
-                _save_video(
+                save_video(
                     Path(video) / f'episode_{ep_idx}.mp4',
                     frames.pop(env_idx, []),
                 )
@@ -450,9 +451,7 @@ class World:
         )
         if frames:
             for env_idx, f in frames.items():
-                _save_video(
-                    Path(video) / f'episode_remaining_{env_idx}.mp4', f
-                )
+                save_video(Path(video) / f'episode_remaining_{env_idx}.mp4', f)
         return results
 
     def _evaluate_from_dataset(
@@ -469,7 +468,7 @@ class World:
         n = len(episodes_idx)
         assert n == self.num_envs
 
-        init_state, goal_state = _extract_init_goal(
+        init_state, goal_state, dataset_videos = _extract_init_goal(
             dataset,
             episodes_idx,
             start_steps,
@@ -519,22 +518,15 @@ class World:
             float(results['episode_successes'].sum()) / n * 100.0
         )
         if frames:
-            Path(video).mkdir(parents=True, exist_ok=True)
-            for env_idx, f in frames.items():
-                _save_video(Path(video) / f'env_{env_idx}.mp4', f)
+            save_panel_videos(
+                Path(video),
+                {
+                    'agent': frames,
+                    'dataset': dataset_videos,
+                    'goal': goal_state['goal'],
+                },
+            )
         return results
-
-
-def _save_video(path: Path, frames: list[np.ndarray], fps: int = 15) -> None:
-    if not frames:
-        return
-    import imageio
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    out = imageio.get_writer(str(path), fps=fps, codec='libx264')
-    for f in frames:
-        out.append_data(f)
-    out.close()
 
 
 def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
@@ -546,6 +538,7 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
 
     init_lists: dict[str, list] = {}
     goal_lists: dict[str, list] = {}
+    dataset_videos: list = []
 
     for ep in data:
         for col in dataset.column_names:
@@ -559,13 +552,15 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
             arr = val.numpy() if isinstance(val, torch.Tensor) else val
             init_lists.setdefault(col, []).append(arr[0])
             goal_lists.setdefault(col, []).append(arr[-1])
+            if col == 'pixels':
+                dataset_videos.append(arr)
 
     init_state = {k: np.stack(v) for k, v in init_lists.items()}
     goal_state = {}
     for k, v in goal_lists.items():
         goal_state['goal' if k == 'pixels' else f'goal_{k}'] = np.stack(v)
 
-    return init_state, goal_state
+    return init_state, goal_state, dataset_videos
 
 
 def _apply_callables(env, callables, init_state):
