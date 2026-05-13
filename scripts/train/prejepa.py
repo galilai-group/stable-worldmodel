@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 from pathlib import Path
 
@@ -221,12 +222,16 @@ def run(cfg):
     encoding_keys = list(cfg.wm.get('encoding', {}).keys())
     keys_to_load = ['pixels'] + encoding_keys
 
+    cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
+    print(
+        f'Loading dataset "{cfg.dataset_name}" from {"local cache: " + cache_dir if cache_dir else "default location"}'
+    )
     dataset = swm.data.load_dataset(
         cfg.dataset_name,
         num_steps=cfg.n_steps,
         frameskip=cfg.frameskip,
         transform=None,
-        cache_dir=cfg.get('cache_dir', None),
+        cache_dir=cache_dir,
         keys_to_load=keys_to_load,
         keys_to_cache=encoding_keys,
     )

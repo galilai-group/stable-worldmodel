@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import hydra
@@ -101,8 +102,12 @@ def run(cfg):
 
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop('name')
+    cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
+    print(
+        f'Loading dataset "{dataset_name}" from {"local cache: " + cache_dir if cache_dir else "default location"}'
+    )
     dataset = swm.data.load_dataset(
-        dataset_name, transform=None, **dataset_cfg
+        dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg
     )
     transforms = [
         get_img_preprocessor(
