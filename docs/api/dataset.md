@@ -408,6 +408,12 @@ class ParquetWriter:
 
 ## **[ Implementations ]**
 
+::: stable_worldmodel.data.LanceDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
 ::: stable_worldmodel.data.HDF5Dataset
     options:
         heading_level: 3
