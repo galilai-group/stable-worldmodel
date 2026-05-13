@@ -103,7 +103,7 @@ Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'erro
 <details>
 <summary><b>Throughput & storage benchmarks</b></summary>
 
-Numbers below were produced by [`scripts/benchmark/compare_h5_lance.py`](scripts/benchmark/compare_h5_lance.py) and can be reproduced with it. Benchmarks use the PushT dataset from the [LeWorldModel](https://le-wm.github.io/) paper.
+Numbers below were produced by [`scripts/benchmark/compare_h5_lance.py`](scripts/benchmark/compare_h5_lance.py) and can be reproduced with it. Benchmarks use the [PushT dataset](https://huggingface.co/datasets/galilai-group/lewm-pusht) from the [LeWorldModel](https://le-wm.github.io/) paper.
 
 ## Throughput
 
