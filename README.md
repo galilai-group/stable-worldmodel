@@ -100,6 +100,35 @@ swm.data.convert("data/pusht.lance", "data/pusht_video",
 
 Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'error'`); re-running `world.collect` extends the existing dataset rather than failing.
 
+<details>
+<summary><b>Throughput & storage benchmarks</b></summary>
+
+Numbers below were produced by [`scripts/benchmark/compare_h5_lance.py`](scripts/benchmark/compare_h5_lance.py) and can be reproduced with it. Benchmarks use the PushT dataset from the [LeWorldModel](https://le-wm.github.io/) paper.
+
+## Throughput
+
+| Format  | Source   | Cache    | samples/s | ms/step  |
+|---------|----------|----------|-----------|----------|
+| HDF5    | local    | no-cache |    1416.1 |     45.2 |
+| HDF5    | local    | cached   |    1474.0 |     43.4 |
+| Lance   | local    | no-cache |    4814.8 |     13.3 |
+| Lance   | local    | cached   |    4431.3 |     14.4 |
+| Video   | local    | -        |    1330.6 |     48.1 |
+| Lance   | s3       | no-cache |    3183.7 |     20.1 |
+| Lance   | s3       | cached   |    3253.2 |     19.7 |
+| HDF5    | s3       | no-cache |       9.1 |   7032.5 |
+| HDF5    | s3       | cached   |     756.5 |     84.6 |
+
+## Storage size per format (local)
+
+| Format  | Local size |
+|---------|------------|
+| HDF5    |   43.12 GB |
+| Lance   |   13.31 GB |
+| Video   |  496.29 MB |
+
+</details>
+
 ## Environments
 
 <div align="center">
@@ -155,7 +184,10 @@ Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'erro
 
 </div>
 
-Environments are pulled from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), the [Arcade Learning Environment](https://ale.farama.org/) (100+ Atari games), and classical world model benchmarks ([Two-Room](https://arxiv.org/abs/2411.04983), [PushT](https://arxiv.org/abs/2303.04137)). Each ships with both visual and physical factors of variation for robustness studies. Adding a new environment only requires conforming to the [Gymnasium](https://gymnasium.farama.org/) interface.
+Environments are pulled from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), the [Arcade Learning Environment](https://ale.farama.org/) (100+ Atari games), and classical world model benchmarks ([Two-Room](https://arxiv.org/abs/2411.04983), [PushT](https://arxiv.org/abs/2303.04137)). Most environments ship with a set of **factors of variation** — independently controllable visual and physical parameters (lighting, textures, dynamics, morphology) — that make it straightforward to evaluate zero-shot generalization to distribution shifts without any additional setup. Adding a new environment only requires conforming to the [Gymnasium](https://gymnasium.farama.org/) interface.
+
+<details>
+<summary><b>Full environment list</b></summary>
 
 <div align="center">
 
@@ -193,6 +225,8 @@ Environments are pulled from the [DeepMind Control Suite](https://github.com/goo
 | [ALE/* (100+ Atari games)](https://ale.farama.org/) | — |
 
 </div>
+
+</details>
 
 ## Solvers and Baselines
 
