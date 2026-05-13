@@ -111,11 +111,11 @@ Numbers below were produced by [`scripts/benchmark/compare_h5_lance.py`](scripts
 |---------|----------|----------|-----------|----------|
 | HDF5    | local    | no-cache |    1416.1 |     45.2 |
 | HDF5    | local    | cached   |    1474.0 |     43.4 |
-| Lance   | local    | no-cache |    4814.8 |     13.3 |
-| Lance   | local    | cached   |    4431.3 |     14.4 |
+| LanceDB | local    | no-cache |    4814.8 |     13.3 |
+| LanceDB | local    | cached   |    4431.3 |     14.4 |
 | Video   | local    | -        |    1330.6 |     48.1 |
-| Lance   | s3       | no-cache |    3183.7 |     20.1 |
-| Lance   | s3       | cached   |    3253.2 |     19.7 |
+| LanceDB | s3       | no-cache |    3183.7 |     20.1 |
+| LanceDB | s3       | cached   |    3253.2 |     19.7 |
 | HDF5    | s3       | no-cache |       9.1 |   7032.5 |
 | HDF5    | s3       | cached   |     756.5 |     84.6 |
 
@@ -124,7 +124,7 @@ Numbers below were produced by [`scripts/benchmark/compare_h5_lance.py`](scripts
 | Format  | Local size |
 |---------|------------|
 | HDF5    |   43.12 GB |
-| Lance   |   13.31 GB |
+| LanceDB |   13.31 GB |
 | Video   |  496.29 MB |
 
 </details>
