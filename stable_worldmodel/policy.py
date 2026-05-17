@@ -576,3 +576,463 @@ def AutoCostModel(
 
 # Alias for backward compatibility and type hinting
 Policy = BasePolicy
+
+
+# ─── Hierarchical World Model (HWM) planning ────────────────────────────────
+
+import torch.nn.functional as F
+from einops import rearrange
+
+
+class HWMCostModel(torch.nn.Module):
+    """L2 CEM cost model that searches in latent macro-action space.
+
+    The HWM uses a non-standard action key (e.g. 'latent_action') that is
+    incompatible with PreJEPA.rollout (which hardcodes 'action'). This class
+    encodes the observation and goal once, then embeds latent action candidates
+    and calls the predictor directly.
+
+    Cost = MSE(predicted_pixels_emb[-1], goal_pixels_emb).
+    """
+
+    def __init__(self, model: torch.nn.Module, action_key: str = 'latent_action'):
+        super().__init__()
+        self.model = model
+        self.action_key = action_key
+
+    def parameters(self):
+        return self.model.parameters()
+
+    def criterion(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+        return self.get_cost(info_dict, action_candidates)
+
+    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            info_dict: CEM-expanded; each tensor has shape (B, N, T, ...).
+                       Required keys: 'pixels', 'goal', 'proprio', 'id', 'step_idx'.
+            action_candidates: (B, N, H, latent_dim) — latent macro-action candidates.
+
+        Returns:
+            cost: (B, N) — scalar cost per candidate.
+        """
+        B, N, H, latent_dim = action_candidates.shape
+        device = action_candidates.device
+        dtype = action_candidates.dtype
+
+        # Keys that are encoded but are NOT the macro-action (e.g. 'proprio')
+        emb_keys = [k for k in self.model.extra_encoders if k != self.action_key]
+
+        # ── Cache obs encoding (invalidate on new episode step) ─────────────
+        id_now = info_dict['id'][:, 0]
+        step_now = info_dict['step_idx'][:, 0]
+        need_obs = not (
+            hasattr(self, '_obs_id')
+            and self._obs_id.shape == id_now.shape
+            and torch.equal(self._obs_id, id_now)
+            and torch.equal(self._obs_step, step_now)
+        )
+        if need_obs:
+            obs = {k: (v[:, 0].to(device=device, dtype=dtype)
+                       if (torch.is_tensor(v) and v.is_floating_point())
+                       else (v[:, 0].to(device) if torch.is_tensor(v) else v))
+                   for k, v in info_dict.items()}
+            obs = self.model.encode(obs, pixels_key='pixels', emb_keys=emb_keys, target='emb')
+            self._obs_id = id_now.detach()
+            self._obs_step = step_now.detach()
+            self._pixels_emb = obs['pixels_emb'].detach()            # (B, 1, P, pixel_dim)
+            self._extra_embs = {k: obs[f'{k}_emb'].detach() for k in emb_keys}
+
+        pixel_dim = self._pixels_emb.shape[-1]
+        n_patches = self._pixels_emb.shape[2]
+
+        # ── Cache goal encoding ──────────────────────────────────────────────
+        need_goal = not (
+            hasattr(self, '_goal_id')
+            and self._goal_id.shape == id_now.shape
+            and torch.equal(self._goal_id, id_now)
+        )
+        if need_goal:
+            goal = {k: (v[:, 0].to(device=device, dtype=dtype)
+                        if (torch.is_tensor(v) and v.is_floating_point())
+                        else (v[:, 0].to(device) if torch.is_tensor(v) else v))
+                    for k, v in info_dict.items()}
+            goal = self.model.encode(goal, pixels_key='goal', emb_keys=[], target='goal_emb')
+            self._goal_id = id_now.detach()
+            self._goal_pixels_emb = goal['pixels_goal_emb'].detach()  # (B, 1, P, pixel_dim)
+
+        # ── Build base embedding: pixels + non-action extras (no action yet) ─
+        pix_exp = self._pixels_emb.to(device, dtype).unsqueeze(1).expand(-1, N, -1, -1, -1)
+        base_parts = [pix_exp]
+        for key in emb_keys:
+            key_emb = self._extra_embs[key].to(device, dtype)           # (B, 1, emb_dim)
+            key_tiled = (key_emb
+                         .unsqueeze(2).expand(-1, -1, n_patches, -1)    # (B, 1, P, emb_dim)
+                         .unsqueeze(1).expand(-1, N, -1, -1, -1))       # (B, N, 1, P, emb_dim)
+            base_parts.append(key_tiled)
+        base_emb = torch.cat(base_parts, dim=-1)                        # (B, N, 1, P, D_base)
+
+        # ── Embed all latent action candidates ──────────────────────────────
+        act_enc = self.model.extra_encoders[self.action_key]
+        act_flat = action_candidates.to(device, dtype).reshape(B * N, H, latent_dim)
+        act_emb = act_enc(act_flat)                                     # (B*N, H, act_emb_dim)
+        act_emb_dim = act_emb.shape[-1]
+        act_emb = act_emb.reshape(B, N, H, act_emb_dim)
+
+        # Offset of the action slot in the full embedding
+        action_start = pixel_dim + sum(self._extra_embs[k].shape[-1] for k in emb_keys)
+
+        # ── Multi-step predictor rollout ─────────────────────────────────────
+        # h=0: build initial embedding = base + z_0 tiled across patches
+        act_tiled_0 = (act_emb[:, :, 0:1]
+                       .unsqueeze(3).expand(-1, -1, -1, n_patches, -1))  # (B, N, 1, P, act_emb_dim)
+        z = torch.cat([base_emb, act_tiled_0], dim=-1)                   # (B, N, 1, P, D)
+        z_flat = rearrange(z, 'b n t p d -> (b n) t p d')               # (B*N, 1, P, D)
+
+        for h in range(H - 1):
+            pred = self.model.predict(z_flat[:, -self.model.history_size:])[:, -1:]  # (B*N, 1, P, D)
+            act_h1 = (act_emb[:, :, h + 1:h + 2]
+                      .unsqueeze(3).expand(-1, -1, -1, n_patches, -1)
+                      .reshape(B * N, 1, n_patches, act_emb_dim))        # (B*N, 1, P, act_emb_dim)
+            pred_injected = torch.cat([
+                pred[..., :action_start],
+                act_h1,
+                pred[..., action_start + act_emb_dim:],
+            ], dim=-1)
+            z_flat = torch.cat([z_flat, pred_injected], dim=1)
+
+        # Final prediction — the waypoint arrived at after the last macro-action
+        pred_final = self.model.predict(z_flat[:, -self.model.history_size:])[:, -1:]
+        pred_final = pred_final.reshape(B, N, 1, n_patches, -1)         # (B, N, 1, P, D)
+
+        # ── Cost: MSE over pixel embedding ───────────────────────────────────
+        goal_exp = (self._goal_pixels_emb.to(device, dtype)
+                    .unsqueeze(1).expand(-1, N, -1, -1, -1))             # (B, N, 1, P, pixel_dim)
+        pred_pixels = pred_final[..., :pixel_dim]                        # (B, N, 1, P, pixel_dim)
+        cost = F.mse_loss(pred_pixels, goal_exp, reduction='none')       # (B, N, 1, P, pixel_dim)
+        return cost.mean(dim=tuple(range(2, cost.ndim)))                 # (B, N)
+
+
+class _FixedGoalCostModel(torch.nn.Module):
+    """L1 CEM cost model with a precomputed subgoal pixel embedding.
+
+    Wraps a low-level PreJEPA (which has 'action' in extra_encoders and is
+    therefore compatible with PreJEPA.rollout) but replaces the goal-image
+    encoding step with a precomputed pixel embedding produced by the L2 planner.
+
+    Cost = MSE(predicted_pixels_emb[-1], goal_pixels_emb).
+    """
+
+    def __init__(self, model: torch.nn.Module, goal_pixels_emb: torch.Tensor):
+        """
+        Args:
+            model: Low-level PreJEPA; must have 'action' in extra_encoders.
+            goal_pixels_emb: (B, P, pixel_dim) — pixel embedding of the subgoal.
+        """
+        super().__init__()
+        self.model = model
+        self.goal_pixels_emb = goal_pixels_emb   # (B, P, pixel_dim)
+
+    def parameters(self):
+        return self.model.parameters()
+
+    def criterion(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+        return self.get_cost(info_dict, action_candidates)
+
+    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            info_dict: CEM-expanded; 'pixels' has shape (B, N, T, C, H, W).
+            action_candidates: (B, N, horizon, primitive_dim * frameskip).
+
+        Returns:
+            cost: (B, N).
+        """
+        B, N = action_candidates.shape[:2]
+
+        # Run low-level WM rollout (PreJEPA.rollout handles 'action' key)
+        info_dict = self.model.rollout(info_dict, action_candidates)
+
+        # predicted_pixels_emb: (B, N, T + n_steps + 1, P, pixel_dim)
+        pred_pixels = info_dict['predicted_pixels_emb']
+        pred_last = pred_pixels[:, :, -1:]                              # (B, N, 1, P, pixel_dim)
+
+        goal = (self.goal_pixels_emb
+                .unsqueeze(1).unsqueeze(2)
+                .expand(-1, N, 1, -1, -1)
+                .to(pred_last.device, pred_last.dtype))                 # (B, N, 1, P, pixel_dim)
+
+        cost = F.mse_loss(pred_last, goal, reduction='none')            # (B, N, 1, P, pixel_dim)
+        return cost.mean(dim=tuple(range(2, cost.ndim)))                # (B, N)
+
+
+class HWMPolicy(BasePolicy):
+    """Hierarchical World Model policy (L2 macro-planner + L1 primitive planner).
+
+    L2 CEM searches in latent macro-action space (using HWMCostModel).
+    The best macro-action sequence is rolled out through the HWM to extract
+    subgoal pixel embeddings.  For each subgoal, L1 CEM plans a primitive
+    action sequence using _FixedGoalCostModel, and the resulting actions fill
+    a per-environment buffer that is drained one step at a time.
+
+    Args:
+        hwm_model: Trained HWM PreJEPA (extra_encoders has action_key).
+        low_level_model: Frozen low-level PreJEPA (extra_encoders has 'action').
+        l2_solver: CEMSolver whose model should be HWMCostModel(hwm_model).
+        l1_solver: CEMSolver whose model is replaced per-subgoal with
+                   _FixedGoalCostModel before each L1 solve.
+        l2_config: PlanConfig for L2 (action_block=1, horizon=K, receding_horizon=M).
+        l1_config: PlanConfig for L1 (action_block=frameskip, horizon=l1_horizon).
+        macro_action_dim: Latent macro-action dimension (e.g. 4).
+        process: Preprocessing dict (StandardScaler per key).
+        transform: Image transform dict.
+    """
+
+    def __init__(
+        self,
+        hwm_model: torch.nn.Module,
+        low_level_model: torch.nn.Module,
+        l2_solver: Any,
+        l1_solver: Any,
+        l2_config: PlanConfig,
+        l1_config: PlanConfig,
+        macro_action_dim: int,
+        process: dict[str, Any] | None = None,
+        transform: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.type = 'hwm'
+        self.hwm_model = hwm_model
+        self.low_level_model = low_level_model
+        self.l2_solver = l2_solver
+        self.l1_solver = l1_solver
+        self.l2_cfg = l2_config
+        self.l1_cfg = l1_config
+        self.macro_action_dim = macro_action_dim
+        self.process = process or {}
+        self.transform = transform or {}
+        self._action_buffer: list[deque] | None = None
+
+    def set_env(self, env: Any) -> None:
+        """Attach the policy to an environment and configure both solvers."""
+        import gymnasium as gym
+
+        self.env = env
+        n_envs = getattr(env, 'num_envs', 1)
+
+        # L2 solver uses a fake Box action space of size macro_action_dim
+        l2_action_space = gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(n_envs, self.macro_action_dim),
+            dtype=np.float32,
+        )
+        self.l2_solver.configure(
+            action_space=l2_action_space, n_envs=n_envs, config=self.l2_cfg
+        )
+
+        # L1 solver uses the real environment action space
+        self.l1_solver.configure(
+            action_space=env.action_space, n_envs=n_envs, config=self.l1_cfg
+        )
+
+        # Each buffer entry holds primitive actions for l2_receding subgoals
+        l1_steps = self.l1_cfg.receding_horizon * self.l1_cfg.action_block
+        capacity = l1_steps * self.l2_cfg.receding_horizon
+        self._action_buffer = [deque(maxlen=capacity) for _ in range(n_envs)]
+
+    def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
+        assert hasattr(self, 'env'), 'Environment not set for the policy'
+        info_dict = self._prepare_info(info_dict)
+        n_envs = self.env.num_envs
+
+        needs_flush = info_dict.pop('_needs_flush', None)
+        if needs_flush is not None:
+            for i in range(n_envs):
+                if needs_flush[i]:
+                    self._action_buffer[i].clear()
+
+        terminated = info_dict.get('terminated')
+        dead = (
+            np.asarray(terminated, dtype=bool)
+            if terminated is not None
+            else np.zeros(n_envs, dtype=bool)
+        )
+
+        replan_idx = [
+            i for i in range(n_envs)
+            if len(self._action_buffer[i]) == 0 and not dead[i]
+        ]
+        if replan_idx:
+            self._replan(info_dict, replan_idx)
+
+        action_dim = self.env.single_action_space.shape[-1]
+        action = torch.full((n_envs, action_dim), float('nan'))
+        for i in range(n_envs):
+            if not dead[i]:
+                action[i] = self._action_buffer[i].popleft()
+
+        action = action.reshape(*self.env.action_space.shape).float().numpy()
+        if 'action' in self.process:
+            action = self.process['action'].inverse_transform(action)
+        return action
+
+    # ── Internal helpers ─────────────────────────────────────────────────────
+
+    def _slice_info(self, info_dict: dict, replan_idx: list, idx_tensor: torch.Tensor) -> dict:
+        sliced: dict = {}
+        for k, v in info_dict.items():
+            if torch.is_tensor(v):
+                sliced[k] = v[idx_tensor]
+            elif isinstance(v, np.ndarray):
+                sliced[k] = v[replan_idx]
+            elif isinstance(v, list):
+                sliced[k] = [v[i] for i in replan_idx]
+            else:
+                sliced[k] = v
+        return sliced
+
+    def _replan(self, info_dict: dict, replan_idx: list) -> None:
+        idx_tensor = torch.as_tensor(replan_idx, dtype=torch.long)
+        sliced = self._slice_info(info_dict, replan_idx, idx_tensor)
+
+        device_l2 = next(self.hwm_model.parameters()).device
+        dtype_l2 = next(self.hwm_model.parameters()).dtype
+
+        # ── Step 1: L2 CEM — find best macro-action sequence ─────────────────
+        # Clear HWM cost-model obs/goal caches so stale entries don't persist
+        for attr in ('_obs_id', '_obs_step', '_goal_id'):
+            if hasattr(self.l2_solver.model, attr):
+                delattr(self.l2_solver.model, attr)
+
+        outputs_l2 = self.l2_solver(sliced)
+        mean_z = outputs_l2['actions'].to(device_l2, dtype_l2)  # (B', l2_horizon, latent_dim)
+
+        # ── Step 2: Roll HWM forward to extract subgoal pixel embeddings ─────
+        subgoal_pixels_embs = self._hwm_subgoal_rollout(sliced, mean_z, device_l2, dtype_l2)
+        # subgoal_pixels_embs[k]: (B', P, pixel_dim)
+
+        # ── Step 3: L1 CEM for each subgoal ──────────────────────────────────
+        l1_info = {k: (v.clone() if torch.is_tensor(v) else v) for k, v in sliced.items()}
+
+        device_l1 = next(self.low_level_model.parameters()).device
+        dtype_l1 = next(self.low_level_model.parameters()).dtype
+
+        for k in range(self.l2_cfg.receding_horizon):
+            subgoal_emb = subgoal_pixels_embs[k].to(device_l1, dtype_l1)  # (B', P, pixel_dim)
+
+            l1_actions = []
+            solver_batch_size = max(1, int(getattr(self.l1_solver, 'batch_size', len(replan_idx))))
+            for start in range(0, len(replan_idx), solver_batch_size):
+                end = min(start + solver_batch_size, len(replan_idx))
+                local_rows = list(range(start, end))
+                local_idx = torch.arange(start, end, dtype=torch.long)
+                l1_info_chunk = self._slice_info(l1_info, local_rows, local_idx)
+
+                # Swap in a fixed-goal cost model whose subgoal batch matches
+                # the info batch CEM is solving for.
+                self.l1_solver.model = _FixedGoalCostModel(
+                    self.low_level_model, subgoal_emb[start:end]
+                )
+
+                # Clear low-level WM observation cache so rollout re-encodes
+                if hasattr(self.low_level_model, '_init_cached_info'):
+                    del self.low_level_model._init_cached_info
+
+                outputs_l1 = self.l1_solver(l1_info_chunk)
+                l1_actions.append(outputs_l1['actions'])
+
+            prim_actions = torch.cat(l1_actions, dim=0)  # (B', l1_horizon, prim_dim*frameskip)
+
+            # Flatten to individual primitive env steps
+            B_prime = prim_actions.shape[0]
+            flat = prim_actions.reshape(
+                B_prime,
+                self.l1_cfg.receding_horizon * self.l1_cfg.action_block,
+                -1,
+            )  # (B', l1_steps, action_dim)
+
+            for row, env_i in enumerate(replan_idx):
+                self._action_buffer[env_i].extend(flat[row])
+
+            # NOTE: for l2_receding > 1, l1_info is not advanced to the predicted
+            # next state — all subgoals are planned from the same current observation.
+            # This is a deliberate simplification; add WM-based state advancement here
+            # if multi-step hierarchical open-loop planning is needed.
+
+    def _hwm_subgoal_rollout(
+        self,
+        info_single: dict,
+        mean_z: torch.Tensor,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> list[torch.Tensor]:
+        """Roll the HWM forward with the best macro-action and return per-step subgoal embeddings.
+
+        Args:
+            info_single: Observation dict (not CEM-expanded); B' × T × ...
+            mean_z: (B', H, latent_dim) — the optimal macro-action sequence from L2 CEM.
+
+        Returns:
+            List of H tensors, each (B', P, pixel_dim) — predicted pixel embeddings
+            after each macro-action step.  Only the first l2_receding entries are used.
+        """
+        model = self.hwm_model
+        action_key = getattr(self.l2_solver.model, 'action_key', 'latent_action')
+        emb_keys = [k for k in model.extra_encoders if k != action_key]
+        H = mean_z.shape[1]
+
+        with torch.no_grad():
+            # Encode current observation (pixels + non-action extras)
+            obs = {
+                k: (v.to(device=device, dtype=dtype)
+                    if (torch.is_tensor(v) and v.is_floating_point())
+                    else (v.to(device) if torch.is_tensor(v) else v))
+                for k, v in info_single.items()
+            }
+            obs = model.encode(obs, pixels_key='pixels', emb_keys=emb_keys, target='emb')
+
+            pixels_emb = obs['pixels_emb']     # (B', 1, P, pixel_dim)
+            pixel_dim = pixels_emb.shape[-1]
+            n_patches = pixels_emb.shape[2]
+
+            # Base embedding (without macro-action)
+            base_parts = [pixels_emb]
+            for key in emb_keys:
+                tiled = (obs[f'{key}_emb']
+                         .unsqueeze(2)
+                         .expand(-1, -1, n_patches, -1))   # (B', 1, P, emb_dim)
+                base_parts.append(tiled)
+            base_emb = torch.cat(base_parts, dim=-1)        # (B', 1, P, D_base)
+
+            act_enc = model.extra_encoders[action_key]
+            action_start = pixel_dim + sum(obs[f'{k}_emb'].shape[-1] for k in emb_keys)
+
+            current_emb = None   # tracks the most recent predicted state embedding
+            subgoal_embs: list[torch.Tensor] = []
+
+            for h in range(H):
+                z_h = mean_z[:, h:h + 1].to(device, dtype)    # (B', 1, latent_dim)
+                z_h_emb = act_enc(z_h)                         # (B', 1, act_emb_dim)
+                act_emb_dim = z_h_emb.shape[-1]
+                z_h_tiled = (z_h_emb
+                             .unsqueeze(2)
+                             .expand(-1, -1, n_patches, -1))   # (B', 1, P, act_emb_dim)
+
+                if current_emb is None:
+                    # First step: start from the encoded observation
+                    full_emb = torch.cat([base_emb, z_h_tiled], dim=-1)   # (B', 1, P, D)
+                else:
+                    # Subsequent steps: inject new macro-action into the last prediction
+                    full_emb = torch.cat([
+                        current_emb[..., :action_start],
+                        z_h_tiled,
+                        current_emb[..., action_start + act_emb_dim:],
+                    ], dim=-1)
+
+                pred = model.predict(full_emb)[:, -1:]          # (B', 1, P, D)
+                subgoal_embs.append(pred[:, 0, :, :pixel_dim])  # (B', P, pixel_dim)
+                current_emb = pred
+
+        return subgoal_embs[: self.l2_cfg.receding_horizon]

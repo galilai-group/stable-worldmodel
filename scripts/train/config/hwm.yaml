@@ -1,0 +1,105 @@
+defaults:
+  - _self_
+  - launcher: local
+
+hydra:
+  job:
+    chdir: true
+
+# --- Run ---
+output_model_name: pusht_hwm_${backbone.type}_p${predictor.size}_span${macro_action.max_span}_la${macro_action.latent_dim}
+subdir: null
+seed: 42
+save_epoch_interval: 100
+
+# --- Data ---
+dataset_name: pusht_expert_train
+cache_dir: null
+n_steps: ${eval:'${macro_action.max_span} // ${low_level.frameskip} + 1'}
+
+batch_size: 64
+num_workers: 8
+train_split: 0.9
+
+# --- Low-level DINO-WM reference ---
+low_level:
+  checkpoint: pusht_dinowm_8xa100
+  frameskip: 5
+  history_size: 3
+  frozen: true
+
+# --- Random-waypoint high-level macro action ---
+macro_action:
+  primitive_action_dim: 2
+  low_level_action_dim: ${eval:'${macro_action.primitive_action_dim} * ${low_level.frameskip}'}
+  max_span: 70
+  max_chunk: ${eval:'${macro_action.max_span} // ${low_level.frameskip} + 1'}
+  latent_dim: 4
+  sample_stride: 70
+
+action_encoder:
+  type: sequence
+  d_model: 64
+  step_mlp: true
+  nhead: 2
+  num_layers: 1
+  ff_mult: 2
+  dropout: 0.1
+  use_cls: true
+  stochastic: false
+  norm_first: true
+  uniform_input: false
+
+# --- Backbone ---
+backbone:
+  name: facebook/dinov2-small
+  type: dinov2_small
+  is_video_encoder: false
+
+image_size: 224
+patch_size: 14
+
+# --- High-level HWM predictor ---
+wm:
+  history_size: 1
+  num_preds: 1
+  encoding:
+    proprio: 10
+    latent_action: 4
+
+predictor:
+  size: small
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+
+loss:
+  # HWM paper uses latent prediction losses; L1 is a good first match.
+  type: l1
+  action_key: latent_action
+
+# --- Optimizer ---
+optimizer:
+  type: AdamW
+  lr: 2e-4
+  weight_decay: 0.0
+
+# --- Trainer ---
+trainer:
+  max_epochs: 100
+  strategy: ddp
+  devices: auto
+  accelerator: gpu
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+
+# --- Logging ---
+wandb:
+  enable: false
+  project: swm
+  entity: null
+
+dump_object: true

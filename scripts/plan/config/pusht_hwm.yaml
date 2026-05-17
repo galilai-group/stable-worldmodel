@@ -1,0 +1,103 @@
+defaults:
+  - launcher: local
+  - _self_
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Hierarchical World Model evaluation — Push-T
+# Paper reference: Table B.3 / B.4 in arXiv 2604.03208
+# ═══════════════════════════════════════════════════════════════════════════════
+
+world:
+  env_name: swm/PushT-v1
+  num_envs: ${eval.num_eval}
+  max_episode_steps: ???    # set automatically in eval_hwm.py (2 × eval_budget)
+
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+    - action
+    - proprio
+    - state
+
+seed: 42
+
+# HWM checkpoint (run_name loaded via swm.wm.utils.load_pretrained)
+policy: pusht_hwm_dinov2_small_psmall_span70_la4
+
+low_level:
+  checkpoint: pusht_dinowm_8xa100   # low-level DINO-WM
+  frameskip: 5                      # primitive actions per macro-action step
+
+macro_action:
+  latent_dim: 4                     # must match HWM training config
+
+# ── L2 planner: CEM in latent macro-action space ────────────────────────────
+# Push-T(d=25) table setting: elites=10, iters=20, samples=900,
+# var=0, pred H=2.
+# Horizon K: number of subgoals planned in one L2 solve.
+# Receding M: number of subgoals actually executed before the next L2 replan
+#             (M ≤ K).  Default M=1 matches "L1 only MPC to the first subgoal".
+l2:
+  horizon: 2                        # K — subgoals to plan
+  receding_horizon: 1               # M — subgoals to execute (≤ K)
+  action_key: latent_action         # must match loss.action_key in HWM config
+  solver:
+    _target_: stable_worldmodel.solver.CEMSolver
+    model: ???                      # injected in eval_hwm.py as HWMCostModel(hwm)
+    batch_size: 1
+    num_samples: 900
+    var_scale: 0.0
+    n_steps: 20
+    topk: 10
+    device: cuda
+    seed: ${seed}
+
+# ── L1 planner: CEM for primitive actions toward each subgoal embedding ──────
+# horizon × action_block = number of env steps committed per subgoal.
+# Push-T(d=25) table setting: elites=10, iters=30, samples=300,
+# var=0, pred h=5, k=5.
+l1:
+  horizon: 5                        # action-block steps (= d / frameskip)
+  solver:
+    _target_: stable_worldmodel.solver.CEMSolver
+    model: ???                      # swapped in per-subgoal with _FixedGoalCostModel
+    batch_size: 1
+    num_samples: 300
+    var_scale: 0.0
+    n_steps: 30
+    topk: 10
+    device: cuda
+    seed: ${seed}
+
+# ── Evaluation ───────────────────────────────────────────────────────────────
+eval:
+  num_eval: 50
+  goal_offset_steps: 25
+  # eval_budget must be ≥ l1.horizon × low_level.frameskip × l2.receding_horizon
+  # Push-T(d=25): 5 steps × 5 frameskip × 1 subgoal = 25 primitive steps per replan.
+  eval_budget: 100
+  img_size: 224
+  dataset_name: pusht_expert_train
+  callables:
+    - method: _set_state
+      args:
+        state:
+          value: state
+    - method: _set_goal_state
+      args:
+        goal_state:
+          value: goal_state
+
+compile: false
+bf16: false
+
+output:
+  filename: pusht_hwm_results.txt
+
+# ── Parameter guide ──────────────────────────────────────────────────────────
+# l2.horizon (K):         Number of high-level latent subgoals planned.
+# l2.receding_horizon (M):Execute M subgoals then re-run L2.  M=1 is safest.
+# l1.horizon:             = d / frameskip for the selected Push-T table row.
+# eval.eval_budget:       Must be ≥ l1.horizon × frameskip × l2.receding_horizon.
+# l2.solver.num_samples:  More samples → better coverage, slower planning.
+# l1.solver.num_samples:  Idem for the primitive planner.
