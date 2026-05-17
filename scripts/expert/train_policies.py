@@ -14,10 +14,16 @@ import numpy as np
 import torch
 from loguru import logger
 from stable_baselines3 import SAC
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 import stable_worldmodel
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 
 # Define default architectures and hyperparameters
@@ -75,13 +81,13 @@ PARAMS_REGISTRY = {
         'run': {**QUADRUPED_CFG, 'total_timesteps': 3_500_000},
     },
     'cheetah': {
-        'run': {**DEFAULT_CFG, 'total_timesteps': 750_000},
-        'run-backward': {**DEFAULT_CFG, 'total_timesteps': 750_000},
-        'run-front': {**DEFAULT_CFG, 'total_timesteps': 750_000},
-        'run-back': {**DEFAULT_CFG, 'total_timesteps': 750_000},
-        'stand-front': {**DEFAULT_CFG, 'total_timesteps': 1_000_000},
-        'stand-back': {**DEFAULT_CFG, 'total_timesteps': 1_000_000},
-        'lie-down': {**DEFAULT_CFG, 'total_timesteps': 1_000_000},
+        'run': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'run-backward': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'run-front': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'run-back': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'stand-front': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'stand-back': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'lie-down': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
         'jump': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
         'legs-up': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
         'flip': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
@@ -147,9 +153,9 @@ PARAMS_REGISTRY = {
         },
     },
     'finger': {
-        'spin': {**DEFAULT_CFG, 'total_timesteps': 750_000},
-        'turn_easy': {**DEFAULT_CFG, 'total_timesteps': 1_000_000},
-        'turn_hard': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'spin': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'turn_easy': {**DEFAULT_CFG, 'total_timesteps': 1_500_000},
+        'turn_hard': {**DEFAULT_CFG, 'total_timesteps': 3_000_000},
     },
     'humanoid': {
         'stand': {**HUMANOID_CFG, 'total_timesteps': 5_000_000},
@@ -157,6 +163,68 @@ PARAMS_REGISTRY = {
         'run': {**HUMANOID_CFG, 'total_timesteps': 5_000_000},
     },
 }
+
+
+class RewardLoggerCallback(BaseCallback):
+    """Logs episode rewards to .npy and optionally to wandb."""
+
+    def __init__(
+        self,
+        save_path: str,
+        save_freq: int = 5_000,
+        use_wandb: bool = False,
+        train_log_freq: int = 500,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.save_path = Path(save_path)
+        self.save_freq = save_freq
+        self.use_wandb = use_wandb
+        self.train_log_freq = train_log_freq
+        self._log: list[list[float]] = []
+        self._last_save = 0
+        self._last_train_log = 0
+        self._ep_rew_acc: np.ndarray | None = None
+        self._completed_ep_rews: list[float] = []
+
+    def _on_training_start(self) -> None:
+        self._ep_rew_acc = np.zeros(self.training_env.num_envs)
+
+    def _on_step(self) -> bool:
+        rewards = np.asarray(self.locals.get('rewards', np.zeros(self.training_env.num_envs)))
+        dones = np.asarray(self.locals.get('dones', np.zeros(self.training_env.num_envs, dtype=bool)))
+
+        self._ep_rew_acc += rewards
+        for i, done in enumerate(dones):
+            if done:
+                ep_rew = float(self._ep_rew_acc[i])
+                self._completed_ep_rews.append(ep_rew)
+                self._log.append([float(self.num_timesteps), ep_rew])
+                self._ep_rew_acc[i] = 0.0
+
+        if self.use_wandb and self.num_timesteps - self._last_train_log >= self.train_log_freq:
+            metrics: dict = {}
+            if self._completed_ep_rews:
+                metrics['rollout/ep_rew_mean'] = float(np.mean(self._completed_ep_rews[-100:]))
+            metrics.update({
+                k: v for k, v in self.model.logger.name_to_value.items()
+                if k.startswith('train/')
+            })
+            if metrics:
+                wandb.log(metrics, step=self.num_timesteps)
+            self._last_train_log = self.num_timesteps
+
+        if self.num_timesteps - self._last_save >= self.save_freq:
+            self._flush()
+            self._last_save = self.num_timesteps
+        return True
+
+    def _on_training_end(self) -> None:
+        self._flush()
+
+    def _flush(self) -> None:
+        if self._log:
+            np.save(self.save_path, np.array(self._log, dtype=np.float32))
 
 
 class DMControlTrainer:
@@ -172,6 +240,9 @@ class DMControlTrainer:
         task_name: str,
         config: dict[str, Any],
         base_dir: str = './models/sac_dmcontrol',
+        n_envs: int = 4,
+        seed: int = 0,
+        use_wandb: bool = False,
     ):
         """Initializes the DMControlTrainer.
 
@@ -180,13 +251,21 @@ class DMControlTrainer:
             task_name (str): The specific task within the domain (e.g., 'run').
             config (Dict[str, Any]): Dictionary containing SAC hyperparameters and total_timesteps.
             base_dir (str, optional): Base directory for saving models. Defaults to "./models/sac_dmcontrol".
+            n_envs (int, optional): Number of parallel envs for data collection. Defaults to 4.
+            seed (int, optional): Random seed. Defaults to 0.
+            use_wandb (bool, optional): Whether to log to Weights & Biases. Defaults to False.
         """
         self.domain = domain_name
         self.task = task_name
         self.config = config.copy()
         self.total_timesteps = self.config.pop('total_timesteps')
+        self.n_envs = n_envs
+        self.seed = seed
+        self.use_wandb = use_wandb and WANDB_AVAILABLE
 
-        self.gym_id = f'swm/{self.domain.capitalize()}DMControl-v0'
+        _GYM_NAME = {'ballincup': 'BallInCup'}
+        gym_name = _GYM_NAME.get(self.domain, self.domain.capitalize())
+        self.gym_id = f'swm/{gym_name}DMControl-v0'
         self.save_dir = Path(base_dir) / f'{self.domain.lower()}_{self.task}'
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -230,11 +309,32 @@ class DMControlTrainer:
         checkpoints, the final expert policy, and normalization statistics.
         """
         logger.info(
-            f'Training {self.domain} | Task: {self.task} | Steps: {self.total_timesteps}'
+            f'Training {self.domain} | Task: {self.task} | Steps: {self.total_timesteps} | n_envs: {self.n_envs} | seed: {self.seed}'
         )
         logger.info(f'Device: {self.device} | Config: {self.config}')
 
-        vec_env = DummyVecEnv([self.make_env])
+        if self.use_wandb:
+            wandb.init(
+                project='dmcontrol-sac',
+                name=f'{self.domain}_{self.task}_seed{self.seed}',
+                config={
+                    **self.config,
+                    'domain': self.domain,
+                    'task': self.task,
+                    'total_timesteps': self.total_timesteps,
+                    'n_envs': self.n_envs,
+                    'seed': self.seed,
+                },
+                sync_tensorboard=False,
+            )
+        elif not WANDB_AVAILABLE and self.use_wandb:
+            logger.warning('wandb not installed — skipping. Run: pip install wandb')
+
+        env_fns = [self.make_env for _ in range(self.n_envs)]
+        if self.n_envs > 1:
+            vec_env = SubprocVecEnv(env_fns)
+        else:
+            vec_env = DummyVecEnv(env_fns)
         vec_env = VecNormalize(
             vec_env, norm_obs=True, norm_reward=False, clip_obs=10.0
         )
@@ -242,28 +342,35 @@ class DMControlTrainer:
         sac_kwargs = {
             'policy': 'MlpPolicy',
             'env': vec_env,
-            'verbose': 1,
+            'verbose': 0,
             'learning_rate': 3e-4,
             'buffer_size': 1_000_000,
             'ent_coef': 'auto',
             'device': self.device,
+            'seed': self.seed,
         }
         sac_kwargs.update(self.config)
 
         model = SAC(**sac_kwargs)
 
         checkpoint_callback = CheckpointCallback(
-            save_freq=200_000,
+            save_freq=max(200_000 // self.n_envs, 1),
             save_path=str(self.save_dir),
             name_prefix=f'sac_{self.domain}_{self.task}',
         )
+        reward_callback = RewardLoggerCallback(
+            save_path=str(self.save_dir / 'rewards.npy'),
+            save_freq=5_000,
+            use_wandb=self.use_wandb,
+        )
+        callbacks = CallbackList([checkpoint_callback, reward_callback])
 
         try:
             model.learn(
                 total_timesteps=self.total_timesteps,
-                callback=checkpoint_callback,
+                callback=callbacks,
                 progress_bar=True,
-                log_interval=30,
+                log_interval=10,
             )
 
             model.save(self.save_dir / 'expert_policy')
@@ -281,6 +388,8 @@ class DMControlTrainer:
             vec_env.close()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            if self.use_wandb:
+                wandb.finish()
 
 
 def main():
@@ -301,8 +410,25 @@ def main():
     parser.add_argument(
         '--base_dir',
         type=str,
-        default='./models/sac_dmcontrol',
-        help='Output directory',
+        default=None,
+        help='Output directory (default: ./models/sac_dmcontrol)',
+    )
+    parser.add_argument(
+        '--n_envs',
+        type=int,
+        default=4,
+        help='Number of parallel environments (default: 4)',
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=0,
+        help='Random seed (default: 0)',
+    )
+    parser.add_argument(
+        '--wandb',
+        action='store_true',
+        help='Log metrics to Weights & Biases (requires: pip install wandb)',
     )
     parser.add_argument(
         '--list', action='store_true', help='List all available configurations'
@@ -320,8 +446,11 @@ def main():
         sys.exit(1)
 
     domain = args.domain.lower()
+
     if domain not in PARAMS_REGISTRY:
-        logger.error(f"Domain '{domain}' not found in configs.")
+        logger.error(
+            f"Domain '{domain}' not found. Use --list to see available options."
+        )
         sys.exit(1)
 
     tasks_to_run = []
@@ -339,7 +468,10 @@ def main():
             domain_name=domain,
             task_name=task,
             config=config,
-            base_dir=args.base_dir,
+            base_dir=args.base_dir or './models/sac_dmcontrol',
+            n_envs=args.n_envs,
+            seed=args.seed,
+            use_wandb=args.wandb,
         )
         trainer.train()
 

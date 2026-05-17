@@ -1,0 +1,29 @@
+# TD-MPC2 Online config
+
+wm:
+  name: tdmpc2
+  horizon: 3          
+  mlp_dim: 256
+  enc_dim: 256
+  simnorm_dim: 8
+  num_q: 5
+  rho: 0.5
+  tau: 0.01
+  consistency_coef: 20.0
+  reward_coef: 0.1
+  value_coef: 0.1
+  discount: 0.99      
+  uncertainty_penalty: 0.0  
+  entropy_coef: 1e-4
+
+  num_bins: 101
+  vmin: -10
+  vmax: 10
+
+  encoding:
+    observation: 128
+
+optimizer:
+  type: Adam
+  lr: 3e-4
+enc_lr_scale: 0.3
