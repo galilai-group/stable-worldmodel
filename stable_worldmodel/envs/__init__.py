@@ -181,6 +181,29 @@ for _swm_id, _gym_id in [
     )
 
 ############
+# OPENAPPS #
+############
+
+_OPENAPPS_ENTRY = 'stable_worldmodel.envs.openapps.env:OpenAppsEnv'
+
+try:
+    # ``open_apps`` and ``playwright`` ride in the swm[env] extra. Guard
+    # the registration so a user without the extra still gets a usable
+    # ``stable_worldmodel.envs`` module.
+    import open_apps  # noqa: F401
+    import playwright  # noqa: F401
+
+    for _app in ('todo', 'calendar', 'messages', 'codeeditor', 'map'):
+        register(
+            id=f'swm/OpenApps-{_app.capitalize()}-v0',
+            entry_point=_OPENAPPS_ENTRY,
+            kwargs={'app_name': _app},
+        )
+except ImportError:
+    pass
+
+
+############
 # DISCRETE #
 ############
 
