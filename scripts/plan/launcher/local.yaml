@@ -1,0 +1,13 @@
+# @package _global_
+# Local launcher configuration (no SLURM)
+
+defaults:
+  - override /hydra/launcher: basic
+
+n_gpus: 1
+cpus_per_task: 4
+cache_dir: null # Use stable-worldmodel default cache
+wandb:
+  use_wandb: false
+  entity: stable-wm
+  project: stable-wm
