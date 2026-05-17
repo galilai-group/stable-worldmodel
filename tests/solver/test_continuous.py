@@ -82,7 +82,7 @@ def test_cem_solver_init_action_distrib():
 
 
 def test_cem_solver_init_action_distrib_with_init():
-    """Test CEMSolver action distribution returns provided actions as mean."""
+    """Test CEMSolver action distribution with initial actions."""
     model = DummyCostModel()
     solver = CEMSolver(model=model, n_steps=10)
     action_space = gym_spaces.Box(

@@ -41,6 +41,7 @@ import os
 os.environ["MUJOCO_GL"] = "egl"
 
 import argparse
+import contextlib
 import random
 import sys
 from pathlib import Path
@@ -52,10 +53,12 @@ from gymnasium import spaces
 from omegaconf import OmegaConf, open_dict
 from loguru import logger as logging
 
-import stable_worldmodel as swm
+import stable_worldmodel  
+from stable_worldmodel.data.buffer import ReplayBuffer
 from stable_worldmodel.solver.cem import CEMSolver
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.wm.tdmpc2 import TDMPC2, tdmpc2_forward
+from stable_worldmodel.world.env_pool import EnvPool
 
 try:
     import wandb
@@ -136,9 +139,12 @@ EVAL_N_STEPS      = 6
 CEM_TOPK          = 64
 CEM_VAR_SCALE     = 2.0
 RECEDING_HORIZON  = 1
+N_COLLECT_ENVS    = 1
+GRAD_STEPS        = 1
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _CONFIG_PATH = Path(__file__).parent / "config" / "tdmpc2_online.yaml"
+_DEVNULL = open(os.devnull, 'w')
 
 
 def load_cfg(obs_dim: int, action_dim: int, discount: float) -> OmegaConf:
@@ -179,9 +185,6 @@ def make_env(gym_id: str, task: str | None = None) -> gym.Env:
     DMControlWrapper.step always returns truncated=False, so episode end
     must come from a TimeLimit wrapper. This function applies one if the
     env registration does not include max_episode_steps.
-
-    Note: the correct library fix is DMControlWrapper.step returning
-    truncated=step.last() — this is a workaround until that lands.
     """
     domain = gym_id.split("/")[-1].replace("DMControl-v0", "").lower()
     env_kwargs = {"task": task} if (task is not None and domain not in _TASKLESS_DOMAINS) else {}
@@ -204,31 +207,21 @@ def make_env(gym_id: str, task: str | None = None) -> gym.Env:
     )
     return gym.wrappers.TransformObservation(env, lambda o: o.astype(np.float32), f32)
 
-# Needed to handle the action space shape expected by CEMSolver without modifying cem.py
-class _EnvProxy:
-    num_envs = 1
-    def __init__(self, action_dim: int):
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(1, action_dim), dtype=np.float32
-        )
-
 
 class _ForwardContext:
-    """
-    Satisfies the self.model / self.log_dict interface that tdmpc2_forward
-    expects from a LightningModule, without requiring Lightning.
-    """
+    """Minimal Lightning-module shim for tdmpc2_forward."""
     def __init__(self, model: TDMPC2):
         self.model   = model
         self.metrics: dict = {}
 
-    def log_dict(self, d: dict, **kwargs):
+    def log_dict(self, d: dict, **_):
         self.metrics.update({
             k: v.item() if torch.is_tensor(v) else v for k, v in d.items()
         })
 
 
 def build_policy(model: TDMPC2,
+                 env: EnvPool,
                  num_samples: int = TRAIN_NUM_SAMPLES,
                  n_steps: int = TRAIN_N_STEPS) -> WorldModelPolicy:
     solver   = CEMSolver(model=model, num_samples=num_samples, n_steps=n_steps,
@@ -236,62 +229,10 @@ def build_policy(model: TDMPC2,
     plan_cfg = PlanConfig(horizon=model.cfg.wm.horizon,
                           receding_horizon=RECEDING_HORIZON, warm_start=True)
     policy   = WorldModelPolicy(solver=solver, config=plan_cfg, process={})
-    policy.set_env(_EnvProxy(model.cfg.action_dim))
+    policy.set_env(env)
     return policy
 
 
-class SequenceReplayBuffer:
-    """Stores full episodes; samples contiguous windows of length (horizon + 1)."""
-
-    def __init__(self, capacity: int, horizon: int, obs_dim: int,
-                 action_dim: int, device: torch.device):
-        self.capacity   = capacity
-        self.horizon    = horizon
-        self.obs_dim    = obs_dim
-        self.action_dim = action_dim
-        self.device     = device
-        self._episodes: list[dict] = []
-        self._cur_obs:  list[np.ndarray] = []
-        self._cur_act:  list[np.ndarray] = []
-        self._cur_rew:  list[float]      = []
-        self._total     = 0
-
-    def add(self, obs: np.ndarray, action: np.ndarray, reward: float):
-        self._cur_obs.append(obs.copy())
-        self._cur_act.append(action.copy())
-        self._cur_rew.append(float(reward))
-
-    def end_episode(self):
-        if len(self._cur_obs) > self.horizon:
-            ep = {"obs": np.stack(self._cur_obs).astype(np.float32),
-                  "act": np.stack(self._cur_act).astype(np.float32),
-                  "rew": np.array(self._cur_rew, np.float32)}
-            self._episodes.append(ep)
-            self._total += len(self._cur_obs)
-            while self._total > self.capacity and len(self._episodes) > 1:
-                self._total -= len(self._episodes.pop(0)["obs"])
-        self._cur_obs.clear(); self._cur_act.clear(); self._cur_rew.clear()
-
-    def sample(self, batch_size: int) -> dict[str, torch.Tensor]:
-        seq_len = self.horizon + 1
-        obs_b = np.zeros((batch_size, seq_len, self.obs_dim),    np.float32)
-        act_b = np.zeros((batch_size, seq_len, self.action_dim), np.float32)
-        rew_b = np.zeros((batch_size, seq_len),                  np.float32)
-        for i in range(batch_size):
-            ep    = random.choice(self._episodes)
-            T     = len(ep["obs"])
-            start = random.randint(0, max(0, T - seq_len))
-            end   = min(start + seq_len, T)
-            n     = end - start
-            obs_b[i, :n] = ep["obs"][start:end]
-            act_b[i, :n] = ep["act"][start:end]
-            rew_b[i, :n] = ep["rew"][start:end]
-        return {ENC_KEY:  torch.as_tensor(obs_b).pin_memory().to(self.device, non_blocking=True),
-                "action": torch.as_tensor(act_b).pin_memory().to(self.device, non_blocking=True),
-                "reward": torch.as_tensor(rew_b).pin_memory().to(self.device, non_blocking=True)}
-
-    def __len__(self) -> int:
-        return self._total
 
 def update_model(model: TDMPC2, batch: dict, cfg: OmegaConf,
                  optimizers: dict) -> dict:
@@ -323,25 +264,28 @@ def save_checkpoint(model: TDMPC2, save_dir: Path, tag: str):
 @torch.no_grad()
 def evaluate(model: TDMPC2, gym_id: str, task: str,
              n_episodes: int = EVAL_EPS) -> float:
-    env    = make_env(gym_id, task=task)
-    policy = build_policy(model, num_samples=EVAL_NUM_SAMPLES, n_steps=EVAL_N_STEPS)
+    pool   = EnvPool([lambda: make_env(gym_id, task=task)])
+    policy = build_policy(model, pool, num_samples=EVAL_NUM_SAMPLES, n_steps=EVAL_N_STEPS)
+    env    = pool.envs[0]
     rewards = []
     for _ in range(n_episodes):
         obs, _    = env.reset()
         obs       = obs.astype(np.float32)
         ep_reward = 0.0
         done      = False
-        policy._action_buffer.clear()
+        for buf in policy._action_buffer:
+            buf.clear()
         policy._next_init = None
         while not done:
-            action = policy.get_action({ENC_KEY: obs[np.newaxis]})
+            with contextlib.redirect_stdout(_DEVNULL):
+                action = policy.get_action({ENC_KEY: obs[np.newaxis]})
             action = np.asarray(action).reshape(-1)
             obs, r, term, trunc, _ = env.step(action)
             obs        = obs.astype(np.float32)
             ep_reward += r
             done       = term or trunc
         rewards.append(ep_reward)
-    env.close()
+    pool.close()
     return float(np.mean(rewards))
 
 
@@ -357,14 +301,13 @@ def train_task(domain: str, task: str, total_steps: int, base_dir: Path,
     logging.info(f"TD-MPC2 | {domain}-{task} | {total_steps:,} steps | device={DEVICE}")
     logging.info(f"{'='*60}")
 
-    env    = make_env(gym_id, task=task)
-    obs, _ = env.reset()
-    obs    = obs.astype(np.float32)
+    pool    = EnvPool([lambda: make_env(gym_id, task=task) for _ in range(N_COLLECT_ENVS)])
+    obs_arr = np.stack([e.reset()[0].astype(np.float32) for e in pool.envs])
 
-    obs_dim    = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
+    obs_dim    = pool.envs[0].observation_space.shape[0]
+    action_dim = pool.envs[0].action_space.shape[0]
 
-    max_ep_steps = _get_max_episode_steps(env)
+    max_ep_steps = _get_max_episode_steps(pool.envs[0])
     discount     = float(np.clip(
         (max_ep_steps / 5 - 1) / (max_ep_steps / 5), 0.95, 0.995
     ))
@@ -409,46 +352,60 @@ def train_task(domain: str, task: str, total_steps: int, base_dir: Path,
         "pi":  torch.optim.Adam(model.pi.parameters(), lr=lr, eps=1e-5),
     }
 
-    buffer = SequenceReplayBuffer(BUFFER_CAP, horizon, obs_dim, action_dim, DEVICE)
-    policy = build_policy(model)
+    buffer = ReplayBuffer(max_steps=BUFFER_CAP, history_len=horizon + 1)
+    policy = build_policy(model, pool)
 
-    ep_reward, ep_steps, best_eval = 0.0, 0, -float("inf")
+    best_eval = -float("inf")
+    ep_reward = np.zeros(N_COLLECT_ENVS)
+    ep_steps  = np.zeros(N_COLLECT_ENVS, dtype=int)
+    cur_obs   = [[] for _ in range(N_COLLECT_ENVS)]
+    cur_act   = [[] for _ in range(N_COLLECT_ENVS)]
+    cur_rew   = [[] for _ in range(N_COLLECT_ENVS)]
 
-    for step in range(1, total_steps + 1):
+    for step in range(N_COLLECT_ENVS, total_steps + 1, N_COLLECT_ENVS):
 
         if step <= SEED_STEPS:
-            action = env.action_space.sample().astype(np.float32)
+            actions = np.stack([e.action_space.sample().astype(np.float32) for e in pool.envs])
         else:
-            action = policy.get_action({ENC_KEY: obs[np.newaxis]})
-            action = np.asarray(action).reshape(-1)
+            with contextlib.redirect_stdout(_DEVNULL):
+                actions = np.asarray(policy.get_action({ENC_KEY: obs_arr})).reshape(N_COLLECT_ENVS, -1)
 
-        next_obs, reward, terminated, truncated, _ = env.step(action)
-        next_obs = next_obs.astype(np.float32)
-        done     = terminated or truncated
+        for i in range(N_COLLECT_ENVS):
+            next_obs, reward, terminated, truncated, _ = pool.envs[i].step(actions[i])
+            next_obs = next_obs.astype(np.float32)
+            done     = terminated or truncated
+            cur_obs[i].append(obs_arr[i].copy())
+            cur_act[i].append(actions[i].copy())
+            cur_rew[i].append(float(reward))
+            ep_reward[i] += reward
+            ep_steps[i]  += 1
+            obs_arr[i]    = next_obs
+            if done:
+                buffer.write_episode({
+                    ENC_KEY:  np.stack(cur_obs[i]).astype(np.float32),
+                    "action": np.stack(cur_act[i]).astype(np.float32),
+                    "reward": np.array(cur_rew[i], np.float32),
+                })
+                cur_obs[i].clear(); cur_act[i].clear(); cur_rew[i].clear()
+                logging.info(f"[{domain}-{task}] step={step:,} | ep_reward={ep_reward[i]:.2f} | ep_len={ep_steps[i]}")
+                if use_wandb:
+                    wandb.log({"rollout/ep_reward": ep_reward[i], "rollout/ep_len": ep_steps[i]}, step=step)
+                obs_arr[i], _ = pool.envs[i].reset()
+                obs_arr[i]    = obs_arr[i].astype(np.float32)
+                ep_reward[i], ep_steps[i] = 0.0, 0
+                if step > SEED_STEPS:
+                    policy._action_buffer[i].clear()
+                    if policy._next_init is not None:
+                        policy._next_init[i] = 0
 
-        buffer.add(obs, action, reward)
-        ep_reward += reward
-        ep_steps  += 1
-        obs        = next_obs
-
-        if done:
-            buffer.end_episode()
-            logging.info(
-                f"[{domain}-{task}] step={step:,} | "
-                f"ep_reward={ep_reward:.2f} | ep_len={ep_steps}"
-            )
-            if use_wandb:
-                wandb.log({"rollout/ep_reward": ep_reward,
-                           "rollout/ep_len":    ep_steps}, step=step)
-            obs, _    = env.reset()
-            obs       = obs.astype(np.float32)
-            ep_reward, ep_steps = 0.0, 0
-            if step > SEED_STEPS:
-                policy._action_buffer.clear()
-                policy._next_init = None
-
-        if step >= SEED_STEPS and len(buffer) >= BATCH_SIZE * (horizon + 1):
-            metrics = update_model(model, buffer.sample(BATCH_SIZE), cfg, optimizers)
+        if step >= SEED_STEPS and len(buffer) >= BATCH_SIZE:
+            for _ in range(GRAD_STEPS):
+                raw = buffer.sample(BATCH_SIZE)
+                batch = {
+                    k: torch.as_tensor(v).pin_memory().to(DEVICE, non_blocking=True)
+                    for k, v in raw.items()
+                }
+                metrics = update_model(model, batch, cfg, optimizers)
             if step % 5_000 == 0:
                 logging.info(
                     f"[{domain}-{task}] step={step:,} | "
@@ -480,7 +437,7 @@ def train_task(domain: str, task: str, total_steps: int, base_dir: Path,
 
     save_checkpoint(model, save_dir, tag="final")
     logging.info(f"[{domain}-{task}] Done. Best eval reward: {best_eval:.2f}")
-    env.close()
+    pool.close()
     del model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

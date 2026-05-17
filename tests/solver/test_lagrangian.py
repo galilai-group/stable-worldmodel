@@ -167,30 +167,31 @@ def test_n_envs_before_configure_is_none():
 ###########################
 
 
-def test_init_action_zeros_creates_zero_init():
-    """init_action with a zeros tensor creates a zero init of correct shape."""
+def test_init_action_none_creates_zeros():
+    """init_action(None) creates zero tensor of correct shape."""
     solver = make_solver(num_samples=1, var_scale=0.0)
     configure(solver, action_dim=4, n_envs=2, horizon=5, action_block=1)
 
     with torch.no_grad():
-        solver.init_action(torch.zeros(2, 5, 4))
+        solver.init_action(None)
 
     # shape: (n_envs, num_samples, horizon, action_dim)
     assert solver.init.shape == (2, 1, 5, 4)
     assert torch.allclose(solver.init, torch.zeros_like(solver.init))
 
 
-def test_init_action_full_tensor_preserved_as_first_sample():
-    """Providing a full-horizon tensor preserves it as the first sample."""
+def test_init_action_partial_fills_remaining_with_zeros():
+    """Providing fewer steps pads the rest with zeros (first sample only)."""
     solver = make_solver(num_samples=1, var_scale=0.0)
     configure(solver, action_dim=4, n_envs=2, horizon=6, action_block=1)
 
-    init = torch.ones(2, 6, 4)
+    init = torch.ones(2, 3, 4)  # 3 of 6 steps
     with torch.no_grad():
         solver.init_action(init)
 
     first_sample = solver.init[:, 0]  # (n_envs, horizon, action_dim)
-    assert torch.allclose(first_sample, init)
+    assert torch.allclose(first_sample[:, :3], init)
+    assert torch.allclose(first_sample[:, 3:], torch.zeros(2, 3, 4))
 
 
 def test_init_action_full_horizon_preserved():

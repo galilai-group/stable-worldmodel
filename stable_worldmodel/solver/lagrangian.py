@@ -10,8 +10,8 @@ import torch.nn.functional as F
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
-from stable_worldmodel.protocols import Costable
 from stable_worldmodel.solver.utils import prepare_init_action
+from .solver import Costable
 
 
 class LagrangianSolver(torch.nn.Module):
@@ -123,12 +123,16 @@ class LagrangianSolver(torch.nn.Module):
         """Make solver callable, forwarding to solve()."""
         return self.solve(*args, **kwargs)
 
-    def init_action(self, actions: torch.Tensor) -> None:
+    def init_action(self, actions: torch.Tensor | None = None) -> None:
         """Initialize the action tensor for optimization."""
-        assert actions.shape == (self.n_envs, self.horizon, self.action_dim), (
-            f'Expected actions shape ({self.n_envs}, {self.horizon}, {self.action_dim}), '
-            f'got {tuple(actions.shape)}'
-        )
+        if actions is None:
+            actions = torch.zeros((self._n_envs, 0, self.action_dim))
+
+        remaining = self.horizon - actions.shape[1]
+        if remaining > 0:
+            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
+            actions = torch.cat([actions, new_actions], dim=1).to(self.device)
+
         actions = actions.unsqueeze(1).repeat_interleave(
             self.num_samples, dim=1
         )

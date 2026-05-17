@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from gymnasium.spaces import Discrete
 
-from stable_worldmodel.protocols import Costable
+from .solver import Costable
 
 
 class PGDSolver(torch.nn.Module):
@@ -201,7 +201,6 @@ class PGDSolver(torch.nn.Module):
 
             for step in range(self.n_steps):
                 costs = self.model.get_cost(expanded_infos, batch_init)
-
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Got {type(costs)} cost, expect torch.Tensor'

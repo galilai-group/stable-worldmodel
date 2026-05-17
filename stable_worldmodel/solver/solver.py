@@ -1,7 +1,7 @@
 from typing import Any, Protocol, runtime_checkable
 
-import torch
 import gymnasium as gym
+import torch
 
 
 class Costable(Protocol):
