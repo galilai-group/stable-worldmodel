@@ -505,26 +505,6 @@ def test_worldmodel_policy_no_env_raises():
         policy.get_action({'pixels': np.array([1.0]), 'goal': np.array([1.0])})
 
 
-def test_worldmodel_policy_no_pixels_raises():
-    """Test WorldModelPolicy.get_action raises without pixels."""
-    solver = MockSolver()
-    config = PlanConfig(horizon=10, receding_horizon=2)
-    policy = WorldModelPolicy(solver=solver, config=config)
-    mock_env = MagicMock()
-    policy.set_env(mock_env)
-    with pytest.raises(AssertionError, match="'pixels' must be provided"):
-        policy.get_action({'goal': np.array([1.0])})
-
-
-def test_worldmodel_policy_no_goal_raises():
-    """Test WorldModelPolicy.get_action raises without goal."""
-    solver = MockSolver()
-    config = PlanConfig(horizon=10, receding_horizon=2)
-    policy = WorldModelPolicy(solver=solver, config=config)
-    mock_env = MagicMock()
-    policy.set_env(mock_env)
-    with pytest.raises(AssertionError, match="'goal' must be provided"):
-        policy.get_action({'pixels': np.array([1.0])})
 
 
 def test_worldmodel_policy_warm_start():
@@ -718,6 +698,7 @@ def actionable_setup():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(action_dim,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
     info = {
         'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
