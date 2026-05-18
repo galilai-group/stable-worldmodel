@@ -1,5 +1,12 @@
 from .utils import *  # noqa: F403
 from .dataset import *  # noqa: F403
+from .normalization import (
+    IdentityScaler,
+    PercentileScaler,
+    ZScoreScaler,
+    get_scaler,
+)
+from .utils import column_normalizer
 from .buffer import ReplayBuffer
 from .format import (
     FORMATS,
@@ -41,15 +48,20 @@ __all__ = [
     'Format',
     'FolderDataset',
     'FolderWriter',
+    'IdentityScaler',
     'ImageDataset',
     'LanceDataset',
     'LanceWriter',
     'LeRobotAdapter',
+    'PercentileScaler',
     'ReplayBuffer',
     'WRITE_MODES',
     'Writer',
+    'ZScoreScaler',
+    'column_normalizer',
     'detect_format',
     'get_format',
+    'get_scaler',
     'list_formats',
     'register_format',
     'validate_write_mode',

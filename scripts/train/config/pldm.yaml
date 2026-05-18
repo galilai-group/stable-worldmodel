@@ -46,13 +46,53 @@ wm:
   embed_dim: 192
   use_proprio: False
 
-predictor:
-  depth: 6
-  heads: 16
-  mlp_dim: 2048
-  dim_head: 64
-  dropout: 0.1
-  emb_dropout: 0.0
+model:
+  _target_: stable_worldmodel.wm.pldm.pldm.PLDM
+  encoder:
+    _target_: stable_pretraining.backbone.utils.vit_hf
+    size: ${encoder_scale}
+    patch_size: ${patch_size}
+    image_size: ${img_size}
+    pretrained: false
+    use_mask_token: false
+  predictor:
+    _target_: stable_worldmodel.wm.pldm.module.Predictor
+    num_frames: ${wm.history_size}
+    input_dim: ${wm.embed_dim}
+    hidden_dim: ${wm.embed_dim}
+    output_dim: ${wm.embed_dim}
+    depth: 6
+    heads: 16
+    mlp_dim: 2048
+    dim_head: 64
+    dropout: 0.1
+    emb_dropout: 0.0
+  action_encoder:
+    _target_: stable_worldmodel.wm.pldm.module.Embedder
+    input_dim: ???
+    emb_dim: ${wm.embed_dim}
+  projector:
+    _target_: stable_worldmodel.wm.pldm.module.MLP
+    input_dim: ${wm.embed_dim}
+    output_dim: ${wm.embed_dim}
+    hidden_dim: 2048
+    norm_fn:
+      _target_: torch.nn.BatchNorm1d
+      _partial_: true
+  pred_proj:
+    _target_: stable_worldmodel.wm.pldm.module.MLP
+    input_dim: ${wm.embed_dim}
+    output_dim: ${wm.embed_dim}
+    hidden_dim: 2048
+    norm_fn:
+      _target_: torch.nn.BatchNorm1d
+      _partial_: true
+
+idm:
+  _target_: stable_worldmodel.wm.pldm.module.MLP
+  input_dim: ???
+  hidden_dim: 512
+  output_dim: ???
 
 loss:
   sigreg:

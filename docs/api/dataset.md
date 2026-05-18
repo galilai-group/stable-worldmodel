@@ -408,6 +408,12 @@ class ParquetWriter:
 
 ## **[ Implementations ]**
 
+::: stable_worldmodel.data.LanceDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
 ::: stable_worldmodel.data.HDF5Dataset
     options:
         heading_level: 3
@@ -472,6 +478,91 @@ fill/sample/dump examples and a step-conditioned sampler walkthrough.
         show_source: false
 
 ::: stable_worldmodel.data.ConcatDataset
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+## **[ Normalization ]**
+
+Per-column scalers for normalizing heterogeneous numeric columns (actions,
+proprio, state) before training. Each one implements three interfaces at once:
+
+- **sklearn**: `fit`, `transform`, `inverse_transform`, `fit_transform`.
+- **`Transformable` protocol** (see `stable_worldmodel.policy`): `transform` / `inverse_transform`.
+- **callable**: `scaler(x)` returns `transform(x)`, cast to `float32` when
+  `x` is a tensor — exactly what `WrapTorchTransform` consumes.
+
+| Method        | Class              | Behavior                                                      |
+| ------------- | ------------------ | ------------------------------------------------------------- |
+| `'zscore'`    | `ZScoreScaler`     | `(x - mean) / std`. Default. Sensitive to outliers.           |
+| `'percentile'`| `PercentileScaler` | Per-dim `[q_low, q_high]` → `[-1, 1]`, clipped. Robust.       |
+| `'none'`      | `IdentityScaler`   | Pass-through; for columns already in a usable range.          |
+
+**Plug into a transform pipeline.** `column_normalizer` fetches the column,
+fits the chosen scaler, and wraps it as a `WrapTorchTransform`:
+
+```python
+import stable_worldmodel as swm
+from stable_worldmodel.data import column_normalizer
+
+dataset = swm.data.load_dataset('data/pusht.lance')
+
+transforms = [
+    column_normalizer(dataset, 'action',  'action',  method='zscore'),
+    column_normalizer(dataset, 'proprio', 'proprio', method='percentile'),
+    column_normalizer(dataset, 'state',   'state',   method='none'),
+]
+```
+
+**Drive it from a Hydra config** with a per-column mapping and `'zscore'`
+as the default for unlisted columns:
+
+```yaml
+dataset:
+  normalizers:
+    action: zscore
+    proprio: percentile
+    state: none
+```
+
+```python
+normalizers_cfg = cfg.dataset.get('normalizers', {}) or {}
+for col in cols_to_normalize:
+    method = normalizers_cfg.get(col, 'zscore')
+    transforms.append(column_normalizer(dataset, col, col, method=method))
+```
+
+**Use a scaler standalone** — handy for evaluation where you need the
+inverse to recover raw units:
+
+```python
+from stable_worldmodel.data import PercentileScaler, get_scaler
+
+scaler = PercentileScaler(low=1.0, high=99.0).fit(train_actions)
+a_norm  = scaler.transform(action)             # → [-1, 1]
+a_raw   = scaler.inverse_transform(pred)       # back to original units
+
+# Or fetch by name, useful when method comes from a config string.
+scaler = get_scaler('zscore').fit(train_actions)
+```
+
+::: stable_worldmodel.data.column_normalizer
+::: stable_worldmodel.data.get_scaler
+
+::: stable_worldmodel.data.ZScoreScaler
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+::: stable_worldmodel.data.PercentileScaler
+    options:
+        heading_level: 3
+        members: false
+        show_source: false
+
+::: stable_worldmodel.data.IdentityScaler
     options:
         heading_level: 3
         members: false

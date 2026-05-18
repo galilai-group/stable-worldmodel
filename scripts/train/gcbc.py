@@ -34,9 +34,10 @@ def get_data(cfg):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    cache_dir = None
-    if not hasattr(cfg, 'local_cache_dir'):
-        cache_dir = os.environ.get('SLURM_TMPDIR', None)
+    cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
+    print(
+        f'Loading dataset "{cfg.dataset_name}" from {"local cache: " + cache_dir if cache_dir else "default location"}'
+    )
 
     use_proprio = cfg.dinowm.get('use_proprio_encoder', True)
     keys_to_load = ['pixels', 'action']
