@@ -78,9 +78,9 @@ where $\lambda$ is the only hyperparameter.
 
 ## TD-MPC2
 
-TD-MPC2 (TDMPC2) is a model-based reinforcement learning algorithm introduced by [Hansen et al., 2023](https://arxiv.org/pdf/2310.16828). It jointly learns a latent dynamics model, a reward predictor, an ensemble of Q-functions, and a stochastic actor. At test time, optimal actions are found by planning with MPPI using the Q-functions as a cost signal, while the actor provides warm-start initializations for the solver (via the Actionable protocol).
+TD-MPC2 (TDMPC2) is a model-based reinforcement learning algorithm introduced by [Hansen et al., 2023](https://arxiv.org/pdf/2310.16828). It jointly learns a latent dynamics model, a reward predictor, an ensemble of Q-functions, and a stochastic actor. At test time, optimal actions are found by planning with MPPI/CEM using the Q-functions as a cost signal, while the actor provides warm-start initializations for the solver (via the Actionable protocol).
 
-The model encodes observations and goals into a latent state using a CNN backbone (for pixels) and MLP encoders (for extra modalities), followed by [SimNorm](https://arxiv.org/pdf/2204.00485) regularization. Rewards and Q-values are represented with two-hot encoding over a fixed bin range, and a running scale normalizes the temporal-difference targets.
+The model encodes observations and goals into a latent state using a CNN backbone (for pixels) and MLP encoders (for extra modalities), followed by [SimNorm](https://arxiv.org/pdf/2204.00485) regularization. Rewards and Q-values are represented with two-hot encoding over a fixed bin range, and a running scale (moving 5th–95th percentile spread) normalizes the Q-value signal inside the actor loss to prevent premature entropy collapse.
 
 ### Training Objective
 
@@ -89,9 +89,9 @@ Training jointly optimizes four losses:
 - $\mathcal{L}_{\text{cons}}$: latent consistency loss — $\ell_2$ between predicted and target next latent states (teacher-forcing)
 - $\mathcal{L}_{\text{rew}}$: reward prediction loss — cross-entropy between predicted and two-hot encoded rewards
 - $\mathcal{L}_{Q}$: Q-function loss — cross-entropy against two-hot encoded TD targets using a target Q-network ensemble
-- $\mathcal{L}_{\pi}$: actor loss — maximize the minimum Q-value over the ensemble
+- $\mathcal{L}_{\pi}$: actor loss — maximize the expected Q-value (average of two randomly sampled Q-functions) plus a maximum-entropy bonus
 
-$$ \mathcal{L}_{\text{TDMPC2}} = \mathcal{L}_{\text{cons}} + \mathcal{L}_{\text{rew}} + \mathcal{L}_{Q} + \mathcal{L}_{\pi} $$
+$$ \mathcal{L}_{\text{TDMPC2}} = 20\,\mathcal{L}_{\text{cons}} + 0.1\,\mathcal{L}_{\text{rew}} + 0.1\,\mathcal{L}_{Q} + \mathcal{L}_{\pi} $$
 
 At planning time, the cost for a candidate action sequence is the negative discounted return with an **uncertainty penalty** on the terminal Q-value:
 
@@ -103,7 +103,8 @@ where $\bar{Q}$ and $\sigma_Q$ are the mean and standard deviation of the Q-ense
 
 | Environment | Success Rate | Checkpoint |
 |-------------|--------------|------------|
-| ? | ? | NA |
+| Push-T | 12% | NA |
+| OGB Cube | 4% | NA |
 
 ## Goal-Conditioned Behavioural Cloning
 

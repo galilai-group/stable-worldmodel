@@ -1,6 +1,5 @@
 from functools import partial
 from pathlib import Path
-import random
 import hydra
 import lightning as pl
 import stable_pretraining as spt
@@ -10,7 +9,6 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
-from torch.nn import functional as F
 from torch.utils.data import DataLoader
 import numpy as np
 
@@ -21,9 +19,7 @@ from stable_worldmodel.wm.tdmpc2 import (
 
 
 class ModelObjectCallBack(Callback):
-    """
-    PyTorch Lightning callback to periodically save the entire model object to disk.
-    """
+    """Periodically saves the entire model object (not just state dict) to disk."""
 
     def __init__(self, dirpath, filename='model_object', epoch_interval=1):
         super().__init__()
@@ -46,17 +42,7 @@ class ModelObjectCallBack(Callback):
 
 
 def get_column_normalizer(dataset, source, target):
-    """
-    Creates a Z-score normalization transform for a specific dataset column.
-
-    Args:
-        dataset: The target dataset used to compute the global mean and standard deviation.
-        source (str): The key of the input column to read.
-        target (str): The key where the normalized output will be stored.
-
-    Returns:
-        Transform: A callable transform that applies the computed normalization to the data.
-    """
+    """Z-score normalization transform computed from the full dataset column."""
     data = torch.from_numpy(dataset.get_col_data(source)[:])
     data = data[~torch.isnan(data).any(dim=1)]
     mean, std = (
@@ -74,18 +60,7 @@ def get_column_normalizer(dataset, source, target):
 
 
 def get_img_preprocessor(source, target, img_size=64):
-    """
-    Creates a standardized image preprocessing pipeline.
-    Applies ImageNet statistical normalization and resizes the images to the requested dimensions.
-
-    Args:
-        source (str): The dictionary key of the raw image input.
-        target (str): The dictionary key to store the processed image output.
-        img_size (int): The target height and width for the resizing operation.
-
-    Returns:
-        Transform: A composed image transformation pipeline.
-    """
+    """ImageNet-normalized + resized image preprocessing pipeline."""
     stats = spt.data.dataset_stats.ImageNet
     return spt.data.transforms.Compose(
         spt.data.transforms.ToImage(**stats, source=source, target=target),
@@ -120,6 +95,7 @@ def run(cfg):
         cfg.dataset_name,
         num_steps=cfg.wm.horizon + 1,
         keys_to_load=keys_to_load,
+        keys_to_cache=keys_to_load if cfg.get('cache_dataset', True) else [],
         cache_dir=cfg.get('cache_dir'),
     )
 
@@ -136,7 +112,7 @@ def run(cfg):
         for _ep, (_off, _len) in enumerate(zip(_ep_off.tolist(), _ep_len.tolist())):
             goals_by_step[_off:_off + _len] = _raw_obs[_goal_idx[_ep]]
         base_dataset._cache[goal_obs_key] = np.concatenate(
-            [base_dataset._cache[goal_obs_key], goals_by_step], axis=-1
+            [_raw_obs, goals_by_step], axis=-1
         )
         logging.info(
             f'Goal augmentation: appended last obs of each episode to "{goal_obs_key}" '
@@ -192,10 +168,8 @@ def run(cfg):
 
     base_dataset.transform = spt.data.transforms.Compose(*transforms)
 
-    dataset = base_dataset
-
     train_set, val_set = spt.data.random_split(
-        dataset, [cfg.train_split, 1 - cfg.train_split]
+        base_dataset, [cfg.train_split, 1 - cfg.train_split]
     )
     train_loader = DataLoader(
         train_set,

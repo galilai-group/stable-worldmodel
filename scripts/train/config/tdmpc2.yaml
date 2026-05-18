@@ -8,13 +8,14 @@ hydra:
 
 # --- Run ---
 output_model_name: tdmpc2_output
-subdir: pusht
+subdir: null
 seed: 1
 
 # --- Data ---
-dataset_name: pusht
+dataset_name: null
 goal_obs_key: state
 cache_dir: null
+cache_dataset: true
 batch_size: 256
 num_workers: 16
 train_split: 0.9
@@ -72,5 +73,5 @@ trainer:
 # --- Logging ---
 wandb:
   enable: True
-  project: swm
-  entity: swm
+  project: null
+  entity: null

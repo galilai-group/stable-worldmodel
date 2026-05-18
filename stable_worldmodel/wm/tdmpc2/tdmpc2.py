@@ -140,19 +140,8 @@ class TDMPC2(nn.Module):
     def encode(self, obs_dict: dict) -> torch.Tensor:
         """Encode observations into a SimNorm-normalized latent state.
 
-        Handles any number of leading dimensions without ndim checks, following
-        the DINO-WM convention where the encoder owns the reshaping and callers
-        pass observations as-is:
-
-        - (B, dim)       → (B, latent_dim)          single-step inference
-        - (B, T, dim)    → (B, T, latent_dim)        offline training sequence
-        - (B, N, dim)    → (B, N, latent_dim)        CEM candidate expansion
-
-        Args:
-            obs_dict: Dictionary of observations with any leading shape.
-
-        Returns:
-            SimNorm-regularized latent state preserving all leading dimensions.
+        Handles arbitrary leading dimensions — (B,), (B, T), (B, N) — by
+        flattening into the batch axis per modality and restoring afterward.
         """
         embeddings = []
         target_dtype = next(self.parameters()).dtype
@@ -401,7 +390,7 @@ def tdmpc2_forward(self, batch, stage, cfg):
         log_prob = gaussian_logprob(eps, log_std_bounded)
 
         action_pi_raw = mean_raw + eps * log_std_bounded.exp()
-        mu, action_pi, log_prob = squash(mean_raw, action_pi_raw, log_prob)
+        _, action_pi, log_prob = squash(mean_raw, action_pi_raw, log_prob)
 
         scaled_entropy = -log_prob * cfg.action_dim
 
