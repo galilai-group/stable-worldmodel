@@ -87,7 +87,9 @@ class SimNorm(nn.Module):
 
 
 class NormedLinear(nn.Linear):
-    def __init__(self, in_features, out_features, bias=True, dropout=0., act=None):
+    def __init__(
+        self, in_features, out_features, bias=True, dropout=0.0, act=None
+    ):
         super().__init__(in_features, out_features, bias=bias)
         self.ln = nn.LayerNorm(out_features)
         self.act = act if act is not None else nn.Mish()

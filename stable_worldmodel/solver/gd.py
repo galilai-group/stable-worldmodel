@@ -128,7 +128,6 @@ class GradientSolver(torch.nn.Module):
             )
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
-
         actions = actions.unsqueeze(1).repeat_interleave(
             self.num_samples, dim=1
         )  # add sample dim

@@ -99,8 +99,10 @@ class TDMPC2(nn.Module):
 
         # Latent dynamics model: predicts next latent state z' from (z, a)
         self.dynamics = mlp(
-            self.latent_dim + cfg.action_dim, cfg.wm.mlp_dim,
-            self.latent_dim, act=SimNorm(cfg),
+            self.latent_dim + cfg.action_dim,
+            cfg.wm.mlp_dim,
+            self.latent_dim,
+            act=SimNorm(cfg),
         )
 
         # Reward predictor: predicts expected reward from (z, a) as a two-hot distribution
@@ -151,24 +153,28 @@ class TDMPC2(nn.Module):
             obs = obs_dict['pixels'].to(target_dtype)
             if obs.shape[-1] == 3:
                 obs = obs.movedim(-1, -3)
-            lead_dims = obs.shape[:-3]                      # e.g. (B,) or (B, T)
-            obs_flat  = obs.reshape(-1, *obs.shape[-3:])    # (prod(lead), C, H, W)
-            cnn_out   = self.cnn(obs_flat)
-            z_pixels  = self.pixel_encoder(cnn_out).view(*lead_dims, -1)
+            lead_dims = obs.shape[:-3]  # e.g. (B,) or (B, T)
+            obs_flat = obs.reshape(
+                -1, *obs.shape[-3:]
+            )  # (prod(lead), C, H, W)
+            cnn_out = self.cnn(obs_flat)
+            z_pixels = self.pixel_encoder(cnn_out).view(*lead_dims, -1)
             embeddings.append(z_pixels)
 
         # Process extra modalities (state, proprioception, etc.)
         for key, encoder in self.extra_encoders.items():
-            obs      = obs_dict[key].to(target_dtype)       # (*lead, dim)
-            lead     = obs.shape[:-1]
-            obs_flat = obs.reshape(-1, obs.shape[-1])       # (prod(lead), dim)
-            z        = encoder(obs_flat).view(*lead, -1)    # (*lead, enc_dim)
+            obs = obs_dict[key].to(target_dtype)  # (*lead, dim)
+            lead = obs.shape[:-1]
+            obs_flat = obs.reshape(-1, obs.shape[-1])  # (prod(lead), dim)
+            z = encoder(obs_flat).view(*lead, -1)  # (*lead, enc_dim)
             embeddings.append(z)
 
         z_concat = torch.cat(embeddings, dim=-1)
         return self.sim_norm(z_concat)
 
-    def forward(self, z: torch.Tensor, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, z: torch.Tensor, action: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """One-step world model prediction.
 
         Given a latent state and action, predicts the next latent state via the
@@ -213,7 +219,7 @@ class TDMPC2(nn.Module):
                 traj.append(act)
                 curr_z = self.dynamics(torch.cat([curr_z, act], dim=-1))
             trajs.append(torch.stack(traj, dim=1))  # (B, horizon, action_dim)
-        return torch.stack(trajs).mean(0)            # (B, horizon, action_dim)
+        return torch.stack(trajs).mean(0)  # (B, horizon, action_dim)
 
     def get_action(
         self,
@@ -253,7 +259,9 @@ class TDMPC2(nn.Module):
         num_trajs = self.cfg.get('num_pi_trajs', 1)
         return self.rollout(z, horizon, num_trajs)  # (B, horizon, action_dim)
 
-    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+    def get_cost(
+        self, info_dict: dict, action_candidates: torch.Tensor
+    ) -> torch.Tensor:
         """Evaluate the cost of candidate action trajectories.
 
         Rolls out the world model for each candidate, accumulates discounted
@@ -288,7 +296,9 @@ class TDMPC2(nn.Module):
 
         G, discount = 0, 1.0
         c = self.cfg.wm.get('uncertainty_penalty', 0.5)
-        termination = torch.zeros(B * N, 1, dtype=torch.float32, device=z.device)
+        termination = torch.zeros(
+            B * N, 1, dtype=torch.float32, device=z.device
+        )
 
         for t in range(H):
             z_a = torch.cat([z, actions[:, t]], dim=-1)
@@ -302,14 +312,16 @@ class TDMPC2(nn.Module):
         z_a_term = torch.cat([z, action], dim=-1)
 
         q_logits = torch.stack([q(z_a_term) for q in self.qs])
-        q_values  = torch.stack([two_hot_inv(logits, self.cfg) for logits in q_logits])
+        q_values = torch.stack(
+            [two_hot_inv(logits, self.cfg) for logits in q_logits]
+        )
 
         q_mean = q_values.mean(dim=0)
-        q_std  = q_values.std(dim=0)
+        q_std = q_values.std(dim=0)
 
-        penalty        = c * q_mean.abs() * q_std
+        penalty = c * q_mean.abs() * q_std
         conservative_q = q_mean - penalty
-        total_return   = G + discount * (1 - termination) * conservative_q
+        total_return = G + discount * (1 - termination) * conservative_q
 
         return -total_return.view(B, N)
 
@@ -362,10 +374,14 @@ def tdmpc2_forward(self, batch, stage, cfg):
 
         with torch.no_grad():
             next_z_for_q = target_zs[:, t].detach()
-            mean_raw, log_std_raw = self.model.pi(next_z_for_q).chunk(2, dim=-1)
+            mean_raw, log_std_raw = self.model.pi(next_z_for_q).chunk(
+                2, dim=-1
+            )
             log_std_bounded = log_std(log_std_raw, low=-10, dif=12)
             eps = torch.randn_like(mean_raw)
-            next_action_pred = torch.tanh(mean_raw + eps * log_std_bounded.exp())
+            next_action_pred = torch.tanh(
+                mean_raw + eps * log_std_bounded.exp()
+            )
 
             next_z_a = torch.cat([next_z_for_q, next_action_pred], dim=-1)
             q_indices = random.sample(range(cfg.wm.num_q), 2)

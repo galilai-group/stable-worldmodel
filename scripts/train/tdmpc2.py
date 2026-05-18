@@ -39,8 +39,6 @@ class ModelObjectCallBack(Callback):
             logging.info(f'Saved world model to {path}')
 
 
-
-
 def get_column_normalizer(dataset, source, target):
     """Z-score normalization transform computed from the full dataset column."""
     data = torch.from_numpy(dataset.get_col_data(source)[:])
@@ -68,7 +66,6 @@ def get_img_preprocessor(source, target, img_size=64):
     )
 
 
-
 @hydra.main(version_base=None, config_path='./config', config_name='tdmpc2')
 def run(cfg):
     """
@@ -86,7 +83,9 @@ def run(cfg):
         raise ValueError('No encoding modalities defined in cfg.wm.encoding!')
 
     use_pixels = 'pixels' in encoding_keys
-    goal_obs_key = cfg.get('goal_obs_key')  # if set, concatenate episode goal into this key
+    goal_obs_key = cfg.get(
+        'goal_obs_key'
+    )  # if set, concatenate episode goal into this key
     extra_keys = [k for k in encoding_keys if k != 'pixels']
 
     keys_to_load = list(encoding_keys) + ['action', 'reward']
@@ -105,12 +104,16 @@ def run(cfg):
                 f'cfg.goal_obs_key="{goal_obs_key}" must be one of the encoding keys {encoding_keys}.'
             )
         _raw_obs = base_dataset.get_col_data(goal_obs_key)[:]
-        _ep_off = base_dataset.get_col_data('ep_offset')[:].flatten().astype(int)
+        _ep_off = (
+            base_dataset.get_col_data('ep_offset')[:].flatten().astype(int)
+        )
         _ep_len = base_dataset.get_col_data('ep_len')[:].flatten().astype(int)
         _goal_idx = np.clip(_ep_off + _ep_len - 1, 0, len(_raw_obs) - 1)
         goals_by_step = np.empty_like(_raw_obs)
-        for _ep, (_off, _len) in enumerate(zip(_ep_off.tolist(), _ep_len.tolist())):
-            goals_by_step[_off:_off + _len] = _raw_obs[_goal_idx[_ep]]
+        for _ep, (_off, _len) in enumerate(
+            zip(_ep_off.tolist(), _ep_len.tolist())
+        ):
+            goals_by_step[_off : _off + _len] = _raw_obs[_goal_idx[_ep]]
         base_dataset._cache[goal_obs_key] = np.concatenate(
             [_raw_obs, goals_by_step], axis=-1
         )
@@ -158,7 +161,9 @@ def run(cfg):
             _std = aug_clean.std(0).clone() + 1e-2
             transforms.append(
                 spt.data.transforms.WrapTorchTransform(
-                    lambda x, m=_mean, s=_std: ((x - m.to(x.device)) / s.to(x.device)).float(),
+                    lambda x, m=_mean, s=_std: (
+                        (x - m.to(x.device)) / s.to(x.device)
+                    ).float(),
                     source=key,
                     target=key,
                 )
@@ -177,12 +182,15 @@ def run(cfg):
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
     )
 
     val_loader = DataLoader(
-        val_set, batch_size=cfg.batch_size, num_workers=cfg.num_workers,
-        pin_memory=True, persistent_workers=True
+        val_set,
+        batch_size=cfg.batch_size,
+        num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
     model = TDMPC2(cfg)
@@ -206,7 +214,9 @@ def run(cfg):
                 r'model\.(dynamics|reward|qs).*',
                 cfg.optimizer.lr,
             ),
-            'pi_opt': add_opt(r'model\.pi.*', cfg.optimizer.lr * 0.1, eps=1e-5),
+            'pi_opt': add_opt(
+                r'model\.pi.*', cfg.optimizer.lr * 0.1, eps=1e-5
+            ),
         },
     )
     subdir = cfg.subdir
