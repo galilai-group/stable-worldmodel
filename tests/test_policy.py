@@ -505,8 +505,6 @@ def test_worldmodel_policy_no_env_raises():
         policy.get_action({'pixels': np.array([1.0]), 'goal': np.array([1.0])})
 
 
-
-
 def test_worldmodel_policy_warm_start():
     """Test WorldModelPolicy warm start feature."""
     solver = MockSolver()
@@ -772,6 +770,7 @@ def test_worldmodel_policy_no_warmstart_without_actionable():
     mock_env = MagicMock()
     mock_env.num_envs = 1
     mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
     policy.set_env(mock_env)
     info = {
         'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
