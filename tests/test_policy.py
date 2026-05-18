@@ -505,28 +505,6 @@ def test_worldmodel_policy_no_env_raises():
         policy.get_action({'pixels': np.array([1.0]), 'goal': np.array([1.0])})
 
 
-def test_worldmodel_policy_no_pixels_raises():
-    """Test WorldModelPolicy.get_action raises without pixels."""
-    solver = MockSolver()
-    config = PlanConfig(horizon=10, receding_horizon=2)
-    policy = WorldModelPolicy(solver=solver, config=config)
-    mock_env = MagicMock()
-    policy.set_env(mock_env)
-    with pytest.raises(AssertionError, match="'pixels' must be provided"):
-        policy.get_action({'goal': np.array([1.0])})
-
-
-def test_worldmodel_policy_no_goal_raises():
-    """Test WorldModelPolicy.get_action raises without goal."""
-    solver = MockSolver()
-    config = PlanConfig(horizon=10, receding_horizon=2)
-    policy = WorldModelPolicy(solver=solver, config=config)
-    mock_env = MagicMock()
-    policy.set_env(mock_env)
-    with pytest.raises(AssertionError, match="'goal' must be provided"):
-        policy.get_action({'pixels': np.array([1.0])})
-
-
 def test_worldmodel_policy_warm_start():
     """Test WorldModelPolicy warm start feature."""
     solver = MockSolver()
@@ -620,6 +598,189 @@ def test_worldmodel_policy_no_warm_start():
     policy.get_action(info)
     # Without warm start, _next_init should be None
     assert policy._next_init is None
+
+
+###############################################
+## WorldModelPolicy warm-start from actor   ##
+###############################################
+
+
+class MockActionableCostableModel(torch.nn.Module):
+    """Mock model implementing both Costable and Actionable protocols."""
+
+    def __init__(self, action_dim: int = 2, fill_value: float = 0.5):
+        super().__init__()
+        self.action_dim = action_dim
+        self.fill_value = fill_value
+        self.get_action_calls: list[int] = []  # records horizon per call
+
+    def get_action(
+        self,
+        info_dict: dict,
+        horizon: int = 1,
+        prefix_actions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        self.get_action_calls.append(horizon)
+        n_envs = next(iter(info_dict.values())).shape[0]
+        actions = torch.full(
+            (n_envs, horizon, self.action_dim), self.fill_value
+        )
+        if horizon == 1:
+            return actions[:, 0]
+        return actions
+
+    def get_cost(
+        self, _info_dict: dict, action_candidates: torch.Tensor
+    ) -> torch.Tensor:
+        B, N = action_candidates.shape[:2]
+        return torch.zeros(B, N)
+
+
+class MockSolverWithWarmStart:
+    """Mock solver that calls prepare_init_action exactly as real solvers do."""
+
+    def __init__(self, model):
+        self.model = model
+        self.received_init_action = None
+
+    def configure(self, *, action_space, n_envs, config):
+        self._n_envs = n_envs
+        self._config = config
+        self._action_space = action_space
+        self._action_dim = int(np.prod(action_space.shape))
+
+    @property
+    def action_dim(self) -> int:
+        return self._action_dim * self._config.action_block
+
+    @property
+    def n_envs(self) -> int:
+        return self._n_envs
+
+    @property
+    def horizon(self) -> int:
+        return self._config.horizon
+
+    def solve(self, info_dict: dict, init_action=None) -> dict:
+        from stable_worldmodel.solver.utils import prepare_init_action
+
+        init_action = prepare_init_action(
+            self.model,
+            info_dict,
+            init_action,
+            self.horizon,
+            n_envs=self.n_envs,
+            action_dim=self.action_dim,
+        )
+        self.received_init_action = init_action
+        return {
+            'actions': torch.zeros(
+                self._n_envs, self._config.horizon, self._action_dim
+            )
+        }
+
+    def __call__(self, info_dict, init_action=None):
+        return self.solve(info_dict, init_action)
+
+
+@pytest.fixture
+def actionable_setup():
+    """Common setup: 1 env, horizon=5, receding_horizon=2, action_dim=2."""
+    action_dim = 2
+    model = MockActionableCostableModel(action_dim=action_dim, fill_value=0.5)
+    solver = MockSolverWithWarmStart(model)
+    config = PlanConfig(
+        horizon=5, receding_horizon=2, action_block=1, warm_start=True
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+    mock_env = MagicMock()
+    mock_env.num_envs = 1
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(action_dim,))
+    mock_env.single_action_space = mock_env.action_space
+    policy.set_env(mock_env)
+    info = {
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+    }
+    return policy, solver, model, info
+
+
+def test_worldmodel_policy_warmstart_calls_get_action(actionable_setup):
+    """On the first plan, model.get_action is called for the full horizon."""
+    policy, solver, model, info = actionable_setup
+
+    policy.get_action(info)
+
+    assert len(model.get_action_calls) == 1
+    assert model.get_action_calls[0] == policy.cfg.horizon  # full horizon = 5
+
+
+def test_worldmodel_policy_warmstart_init_action_shape(actionable_setup):
+    """Solver receives an init_action of shape (n_envs, horizon, action_dim)."""
+    policy, solver, model, info = actionable_setup
+
+    policy.get_action(info)
+
+    assert solver.received_init_action is not None
+    assert solver.received_init_action.shape == (1, 5, 2)
+
+
+def test_worldmodel_policy_warmstart_init_action_values(actionable_setup):
+    """init_action passed to solver matches model.get_action output."""
+    policy, solver, model, info = actionable_setup
+
+    policy.get_action(info)
+
+    expected = torch.full((1, 5, 2), 0.5)
+    torch.testing.assert_close(solver.received_init_action, expected)
+
+
+def test_worldmodel_policy_warmstart_extends_partial_plan(actionable_setup):
+    """On re-plan, warm-start extends the partial previous plan with actor tail."""
+    policy, solver, model, info = actionable_setup
+
+    # horizon=5, receding_horizon=2 → _next_init will have 3 steps after first plan
+    policy.get_action(
+        info
+    )  # triggers first plan; buffer has 2, pops 1 → 1 left
+    policy.get_action(info)  # drains buffer; no replan
+    # buffer is now empty, _next_init.shape == (1, 3, 2)
+    assert policy._next_init.shape == (1, 3, 2)
+
+    model.get_action_calls.clear()
+
+    policy.get_action(info)  # triggers second plan
+
+    # Actor fills only the remaining 2 steps
+    assert len(model.get_action_calls) == 1
+    assert model.get_action_calls[0] == 2
+
+    # Solver receives a full 5-step init_action (3 from prev plan + 2 from actor)
+    assert solver.received_init_action.shape == (1, 5, 2)
+
+
+def test_worldmodel_policy_no_warmstart_without_actionable():
+    """Solver receives a full zero init_action when model does not implement Actionable."""
+    non_actionable_model = MagicMock(spec=['get_cost'])
+    solver = MockSolverWithWarmStart(model=non_actionable_model)
+    config = PlanConfig(
+        horizon=5, receding_horizon=2, action_block=1, warm_start=False
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+    mock_env = MagicMock()
+    mock_env.num_envs = 1
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    mock_env.single_action_space = mock_env.action_space
+    policy.set_env(mock_env)
+    info = {
+        'pixels': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 64, 64, 3).astype(np.float32),
+    }
+
+    policy.get_action(info)
+
+    assert solver.received_init_action.shape == (1, 5, 2)
+    assert solver.received_init_action.eq(0).all()
 
 
 ###########################

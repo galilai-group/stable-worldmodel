@@ -9,6 +9,7 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
+from stable_worldmodel.solver.utils import prepare_init_action
 from .callbacks import Callback
 from .solver import Costable
 
@@ -162,6 +163,14 @@ class GradientSolver(torch.nn.Module):
         total_envs = len(next(iter(info_dict.values())))
 
         with torch.no_grad():
+            init_action = prepare_init_action(
+                self.model,
+                info_dict,
+                init_action,
+                self.horizon,
+                n_envs=total_envs,
+                action_dim=self.action_dim,
+            )
             self.init_action(total_envs, init_action)
 
         for cb in self.callbacks:

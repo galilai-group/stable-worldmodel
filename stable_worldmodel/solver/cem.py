@@ -9,6 +9,7 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
+from stable_worldmodel.solver.utils import prepare_init_action
 from .callbacks import Callback
 from .solver import Costable
 
@@ -128,6 +129,16 @@ class CEMSolver:
 
         # Batch size is taken from info_dict so callers can solve for a subset of envs
         total_envs = len(next(iter(info_dict.values())))
+
+        # -- warm-start from actor if model is Actionable, else zero-pad
+        init_action = prepare_init_action(
+            self.model,
+            info_dict,
+            init_action,
+            self.horizon,
+            n_envs=total_envs,
+            action_dim=self.action_dim,
+        )
 
         # -- initialize the action distribution globally
         mean, var = self.init_action_distrib(total_envs, init_action)
