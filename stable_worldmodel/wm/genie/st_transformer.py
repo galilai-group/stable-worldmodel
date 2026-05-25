@@ -73,6 +73,7 @@ class MLP(nn.Module):
         self._model = nn.Sequential(
             nn.Linear(d_model, hidden_dim, bias=use_bias),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, d_model, bias=use_bias),
             nn.Dropout(dropout),
         )
@@ -119,12 +120,12 @@ class STBlock(nn.Module):
 
 
     def forward(self, x_TSC: Tensor) -> Tensor:
-        # spatial attn
+        # spatial attn (no ffw mlp)
         T, S = x_TSC.size(1), x_TSC.size(2)
         x_SC = rearrange(x_TSC, 'B T S C -> (B T) S C')
         x_SC = x_SC + self.spatial_attn(self.norm1(x_SC), causal=False)
 
-        # temporal attn
+        # temporal attn (causal)
         x_TC = rearrange(x_SC, '(B T) S C -> (B S) T C', T=T)
         x_TC = x_TC + self.temporal_attn(x_TC, causal=True)
 
@@ -132,3 +133,41 @@ class STBlock(nn.Module):
         x_TC = x_TC + self.mlp(self.norm2(x_TC))
         x_TSC = rearrange(x_TC, '(B S) T C -> B T S C', S=S)
         return x_TSC
+
+
+class ST_TransformerDecoder(nn.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        num_heads: int,
+        d_model: int,
+        qkv_use_bias: bool = False,
+        proj_use_bias: bool = True,
+        qk_use_norm: bool = True,
+        qk_use_mup: bool = True,
+        attn_dropout: float = 0.0,
+        mlp_ratio: float = 4.0,
+        mlp_use_bias: bool = True,
+        mlp_dropout: float = 0.0,
+    ):
+        super().__init__()
+        st_block_args = dict(
+            num_heads=num_heads,
+            d_model=d_model,
+            qkv_use_bias=qkv_use_bias,
+            proj_use_bias=proj_use_bias,
+            qk_use_norm=qk_use_norm,
+            qk_use_mup=qk_use_mup,
+            attn_dropout=attn_dropout,
+            mlp_ratio=mlp_ratio,
+            mlp_use_bias=mlp_use_bias,
+            mlp_dropout=mlp_dropout,
+        )
+        self.blocks = nn.ModuleList([STBlock(**st_block_args) for _ in range(num_layers)])
+
+    def forward(self, x: Tensor) -> Tensor:
+        
+        for blk in self.blocks:
+            x = blk(x)
+
+        return x
