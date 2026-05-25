@@ -1,9 +1,10 @@
 from einops import rearrange
 import torch
 from torch import nn, Tensor
-from typing import Optional, Iterator
+from typing import Optional
 import math
 import torch.nn.functional as F
+from stable_worldmodel.wm.genie.utils import init_weights, cosine_schedule
 
 class SelfAttention(nn.Module):
     def __init__(
@@ -135,7 +136,7 @@ class ST_Block(nn.Module):
         return x_TSC
 
 
-class ST_TransformerDecoder(nn.Module):
+class ST_Transformer(nn.Module):
     def __init__(
         self,
         num_layers: int,
@@ -173,37 +174,15 @@ class ST_TransformerDecoder(nn.Module):
         return x
 
 
-def cosine_schedule(u: torch.Tensor | float) -> torch.Tensor | float:
-    if isinstance(u, torch.Tensor): cos = torch.cos
-    if isinstance(u, float): cos = math.cos
-    return cos(u * math.pi / 2)
-
-
-def init_weights(modules: Iterator[nn.Module]):
-    std = 0.02
-    
-    def _init_linear(m_: nn.Linear):
-        m_.weight.data.normal_(mean=0.0, std=std)
-        if m_.bias is not None: m_.bias.data.zero_()
-
-    def _init_embedding(m_: nn.Embedding):
-        m_.weight.data.normal_(mean=0.0, std=std)
-        if m_.padding_idx is not None: m_.weight.data[m_.padding_idx].zero_()
-
-    for module in modules:
-        if isinstance(module, nn.Linear): _init_linear(module)
-        elif isinstance(module, nn.Embedding): _init_embedding(module)
-
-
 class ST_MaskGIT(nn.Module):
     def __init__(
         self,
-        decoder: ST_TransformerDecoder,
+        decoder: ST_Transformer,
         spatial_dim: int,
         temporal_dim: int,
         d_model: int,
         image_vocab_size: int,
-        num_actions: int,
+        action_embed_dim: int,
     ):
         super().__init__()
         self.d_model = d_model
@@ -217,7 +196,7 @@ class ST_MaskGIT(nn.Module):
         self.image_vocab_size = image_vocab_size
         self.mask_token_id = image_vocab_size
         self.out_x_proj = nn.Linear(d_model, image_vocab_size)
-        self.action_embed_AD = nn.Embedding(num_actions, d_model)
+        self.action_proj_ED = nn.Linear(action_embed_dim, d_model)
         init_weights(self.modules())
 
     def forward(
@@ -276,7 +255,8 @@ class ST_MaskGIT(nn.Module):
 
         # broadcast to spatial dim
         if actions_T is not None:
-            a_TC = self.action_embed_AD(actions_T)
+            # actions_T: (B, T, E) or (B, T-1, E) quantized embeddings from LAM (caller has .detach()'d)
+            a_TC = self.action_proj_ED(actions_T)
             if a_TC.size(1) == T - 1:
                 pad = torch.zeros_like(a_TC[:, :1])
                 a_TC = torch.cat([a_TC, pad], dim=1)
