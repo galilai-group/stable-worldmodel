@@ -55,15 +55,21 @@ class LeWM(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(self, info, action_sequence, history_size: int | None = None):
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
          - S is the number of action plan samples
          - T is the time horizon
+
+        history_size: context window the autoregressive predictor consumes.
+            Defaults to ``self.predictor.num_frames`` so inference matches the
+            value the checkpoint was trained with.
         """
 
         assert 'pixels' in info, 'pixels not in info_dict'
+        if history_size is None:
+            history_size = self.predictor.num_frames
         H = info['pixels'].size(2)
         B, S, T = action_sequence.shape[:3]
         act_0, act_future = torch.split(action_sequence, [H, T - H], dim=2)
