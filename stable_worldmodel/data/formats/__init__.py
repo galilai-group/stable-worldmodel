@@ -26,3 +26,5 @@ def _try_import(modname: str) -> None:
 
 _try_import('hdf5')
 _try_import('video')
+# Blob-v2 video format depends on torchcodec + imageio (optional extras).
+_try_import('lance_video')
