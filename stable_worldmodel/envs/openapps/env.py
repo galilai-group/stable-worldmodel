@@ -100,9 +100,7 @@ class OpenAppsEnv(gym.Env):
         if isinstance(task, str):
             task = load_task(task, app=app_name)
         self.task = task
-        self.task_description = task_description or (
-            task.goal if task else ''
-        )
+        self.task_description = task_description or (task.goal if task else '')
         self.max_steps = max_steps
         self.render_mode = render_mode
 
@@ -113,9 +111,7 @@ class OpenAppsEnv(gym.Env):
         self.observation_space = spaces.Box(
             0, 255, (VIEWPORT_HEIGHT, VIEWPORT_WIDTH, 3), np.uint8
         )
-        self.action_space = spaces.MultiDiscrete(
-            [NUM_ACTIONS, GRID_X, GRID_Y]
-        )
+        self.action_space = spaces.MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
 
         self._appearance_variants = list_variants(app_name, 'appearance')
         self._content_variants = list_variants(app_name, 'content')
@@ -198,9 +194,7 @@ class OpenAppsEnv(gym.Env):
         self._page.goto(self.runtime.url_for())
         self._page.wait_for_load_state('networkidle')
 
-        scroll_idx = int(
-            np.asarray(v['browser']['scroll_y']).reshape(-1)[0]
-        )
+        scroll_idx = int(np.asarray(v['browser']['scroll_y']).reshape(-1)[0])
         scroll_y = SCROLL_Y_CHOICES[scroll_idx]
         if scroll_y > 0:
             self._page.evaluate(f'window.scrollTo(0, {scroll_y})')
@@ -216,9 +210,7 @@ class OpenAppsEnv(gym.Env):
 
     def _apply_variations(self, v: dict) -> None:
         """Translate sampled variation values into ``runtime.reconfigure(...)``."""
-        appearance = self._appearance_variants[
-            int(v['appearance']['theme'])
-        ]
+        appearance = self._appearance_variants[int(v['appearance']['theme'])]
         content = self._content_variants[int(v['content']['variant'])]
         seed = int(v['content']['seed'])
 
@@ -268,9 +260,7 @@ class OpenAppsEnv(gym.Env):
         png_bytes = self._page.screenshot()
         img = Image.open(io.BytesIO(png_bytes)).convert('RGB')
         if img.size != (VIEWPORT_WIDTH, VIEWPORT_HEIGHT):
-            img = img.resize(
-                (VIEWPORT_WIDTH, VIEWPORT_HEIGHT), Image.BILINEAR
-            )
+            img = img.resize((VIEWPORT_WIDTH, VIEWPORT_HEIGHT), Image.BILINEAR)
         arr = np.array(img, dtype=np.uint8)
         self._last_screenshot = arr
         return arr
