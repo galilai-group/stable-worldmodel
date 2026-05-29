@@ -4,38 +4,70 @@ from einops import einsum
 
 
 class SIGReg(torch.nn.Module):
-    """Sketch Isotropic Gaussian Regularizer.
+    """Sketch Isotropic Gaussian Regularizer (SIGReg).
 
-    Warning: This version only support single-gpu.
+    Device-agnostic, multi-GPU-capable adapter over the canonical LeJEPA
+    implementation shipped in ``stable_pretraining`` (already a dependency of
+    this package's ``train`` extra):
+    :class:`stable_pretraining.methods.lejepa.SlicedEppsPulley`.
+
+    Compared to the previous in-house implementation this version:
+
+    * runs on any device (CPU / CUDA / MPS) -- the random projection matrix is
+      drawn on the input's device rather than a hard-coded ``"cuda"``;
+    * supports distributed (DDP) training -- ``SlicedEppsPulley`` all-reduces the
+      per-direction Epps-Pulley statistic across ranks (``ReduceOp.AVG``), scales
+      by the global batch size, and seeds the random projections identically on
+      every rank, so the multi-GPU loss matches the single global-batch
+      statistic. It transparently falls back to single-process behaviour when
+      ``torch.distributed`` is not initialised.
+
+    Note:
+        Embeddings are pooled across all leading axes into ``(N, D)`` before the
+        sliced Epps-Pulley test, matching the reference LeJEPA application
+        (``all_projected.reshape(-1, D)``). The previous version instead computed
+        a separate statistic per time-step; pooling uses a larger effective
+        sample count, so the loss magnitude -- and therefore a good SIGReg
+        weight -- differs from the old single-GPU version.
+
+    Args:
+        knots: number of Epps-Pulley quadrature nodes (maps to ``n_points``);
+            must be odd.
+        num_proj: number of random 1-D projections (maps to ``num_slices``).
+
     Reference: https://arxiv.org/abs/2511.08544
     """
 
     def __init__(self, knots=17, num_proj=1024):
         super().__init__()
+        try:
+            from stable_pretraining.methods.lejepa import SlicedEppsPulley
+        except ImportError as exc:  # pragma: no cover - requires train extra
+            raise ImportError(
+                'SIGReg delegates to '
+                'stable_pretraining.methods.lejepa.SlicedEppsPulley, which '
+                'requires the optional training dependency. Install it with '
+                '`pip install "stable-worldmodel[train]"` '
+                '(or `pip install stable-pretraining`).'
+            ) from exc
+
         self.num_proj = num_proj
-        t = torch.linspace(0, 3, knots, dtype=torch.float32)
-        dt = 3 / (knots - 1)
-        weights = torch.full((knots,), 2 * dt, dtype=torch.float32)
-        weights[[0, -1]] = dt
-        window = torch.exp(-t.square() / 2.0)
-        self.register_buffer('t', t)
-        self.register_buffer('phi', window)
-        self.register_buffer('weights', weights * window)
+        # knots -> Epps-Pulley quadrature nodes; num_proj -> random slices.
+        self.sliced_ep = SlicedEppsPulley(num_slices=num_proj, n_points=knots)
 
     def forward(self, proj):
+        """Compute the SIGReg loss.
+
+        Args:
+            proj: embeddings of shape ``(..., D)`` (e.g. ``(T, B, D)``). All
+                leading axes are flattened into the sample axis; the statistic
+                is invariant to their order.
+
+        Returns:
+            Scalar tensor: the mean sliced Epps-Pulley statistic.
         """
-        proj: (T, B, D)
-        """
-        # sample random projections
-        A = torch.randn(proj.size(-1), self.num_proj, device='cuda')
-        A = A.div_(A.norm(p=2, dim=0))
-        # compute the epps-pulley statistic
-        x_t = (proj @ A).unsqueeze(-1) * self.t
-        err = (x_t.cos().mean(-3) - self.phi).square() + x_t.sin().mean(
-            -3
-        ).square()
-        statistic = (err @ self.weights) * proj.size(-2)
-        return statistic.mean()  # average over projections and time
+        proj = proj.reshape(-1, proj.size(-1))
+        return self.sliced_ep(proj)
 
 
 class VCReg(torch.nn.Module):
