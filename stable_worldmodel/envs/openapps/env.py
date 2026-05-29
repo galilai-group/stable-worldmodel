@@ -23,8 +23,6 @@ from .executor import (
 )
 
 
-VIEWPORT_CHOICES_W = [800, 1024, 1280, 1920]
-VIEWPORT_CHOICES_H = [600, 640, 720, 1080]
 SCROLL_Y_CHOICES = [0, 100, 300, 600]
 
 MAP_CITY_CHOICES: list[tuple[str, list[float]]] = [
@@ -128,13 +126,6 @@ class OpenAppsEnv(gym.Env):
                     'theme': swm_space.Discrete(
                         len(self._appearance_variants), init_value=0
                     ),
-                    'font_scale': swm_space.Box(
-                        low=0.8,
-                        high=1.4,
-                        shape=(1,),
-                        dtype=np.float32,
-                        init_value=np.array([1.0], dtype=np.float32),
-                    ),
                 }
             ),
             'content': swm_space.Dict(
@@ -147,10 +138,6 @@ class OpenAppsEnv(gym.Env):
             ),
             'browser': swm_space.Dict(
                 {
-                    'viewport': swm_space.MultiDiscrete(
-                        [len(VIEWPORT_CHOICES_W), len(VIEWPORT_CHOICES_H)],
-                        init_value=np.array([1, 1], dtype=np.int64),
-                    ),
                     'scroll_y': swm_space.Discrete(
                         len(SCROLL_Y_CHOICES), init_value=0
                     ),
@@ -211,16 +198,6 @@ class OpenAppsEnv(gym.Env):
         self._page.goto(self.runtime.url_for())
         self._page.wait_for_load_state('networkidle')
 
-        font_scale = float(
-            np.asarray(v['appearance']['font_scale']).reshape(-1)[0]
-        )
-        if abs(font_scale - 1.0) > 1e-3:
-            self._page.add_style_tag(
-                content=(
-                    f'html {{ font-size: {font_scale * 16:.2f}px '
-                    f'!important; }}'
-                )
-            )
         scroll_idx = int(
             np.asarray(v['browser']['scroll_y']).reshape(-1)[0]
         )
@@ -257,13 +234,6 @@ class OpenAppsEnv(gym.Env):
             seed=seed,
             extras=extras or None,
         )
-
-        vp_idx = np.asarray(v['browser']['viewport']).reshape(-1)
-        vw = VIEWPORT_CHOICES_W[int(vp_idx[0])]
-        vh = VIEWPORT_CHOICES_H[int(vp_idx[1])]
-        current = self._page.viewport_size
-        if (vw, vh) != (current['width'], current['height']):
-            self._page.set_viewport_size({'width': vw, 'height': vh})
 
     def step(self, action: np.ndarray):
         """Execute one action and return the new observation."""
