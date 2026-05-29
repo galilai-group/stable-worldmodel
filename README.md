@@ -6,6 +6,7 @@
   <a href="https://galilai-group.github.io/stable-worldmodel/"><img alt="Documentation" src="https://img.shields.io/badge/Docs-blue.svg"/></a>
   <a href="https://github.com/galilai-group/stable-worldmodel"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/galilai-group/stable-worldmodel/tests.yaml?label=Tests"/></a>
   <a href="https://pypi.python.org/pypi/stable-worldmodel/#history"><img alt="PyPI" src="https://img.shields.io/pypi/v/stable-worldmodel.svg"/></a>
+  <a href="https://arxiv.org/abs/2605.21800v1" target="_blank" style="margin: 2px;"><img alt="ArXiv" src="https://img.shields.io/badge/arXiv-2605.21800-b5212f?logo=arxiv" style="display: inline-block; vertical-align: middle;"/></a>
   <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"/></a>
   <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"/></a>
 </p>
@@ -16,6 +17,7 @@
   <a href="#environments"><b>Environments</b></a> ·
   <a href="#solvers-and-baselines"><b>Solvers & Baselines</b></a> ·
   <a href="https://galilai-group.github.io/stable-worldmodel/"><b>Documentation</b></a> ·
+  <a href="https://arxiv.org/abs/2605.21800v1"><b>Paper</b></a> ·
   <a href="#citation"><b>Citation</b></a>
 </p>
 
@@ -28,8 +30,11 @@
 From PyPI:
 
 ```bash
-pip install stable-worldmodel
+pip install stable-worldmodel            # base only
+pip install 'stable-worldmodel[all]'     # + training, environments, and data formats
 ```
+
+LeRobot dataset support is a separate opt-in extra (requires Python 3.12+): `pip install 'stable-worldmodel[lerobot]'`.
 
 From source (development):
 
@@ -37,7 +42,7 @@ From source (development):
 git clone https://github.com/galilai-group/stable-worldmodel
 cd stable-worldmodel
 uv venv --python=3.10 && source .venv/bin/activate
-uv sync --all-extras --group dev
+uv sync --extra all --group dev
 ```
 
 Datasets and checkpoints are stored under `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). Override the variable to point at your preferred storage location.
@@ -69,12 +74,12 @@ results = world.evaluate(episodes=50)
 print(f"Success Rate: {results['success_rate']:.1f}%")
 ```
 
-Reference implementations are provided in [`scripts/train/`](scripts/train): [`prejepa.py`](scripts/train/prejepa.py) reproduces [DINO-WM](https://arxiv.org/abs/2411.04983), and [`gcivl.py`](scripts/train/gcivl.py) implements several [goal-conditioned RL baselines](https://arxiv.org/abs/2410.20092).
+Reference implementations are provided in [`scripts/train/`](scripts/train): [`lewm.py`](scripts/train/lewm.py) implements [LeWM](https://le-wm.github.io/), and [`prejepa.py`](scripts/train/prejepa.py) reproduces [DINO-WM](https://arxiv.org/abs/2411.04983).
 
 <p align="center">
-  <img src="docs/assets/dinowm-gpu-usage.png" alt="GPU utilization comparison" width="60%">
+  <img src="docs/assets/lewm-gpu-usage.png" alt="GPU utilization comparison" width="60%">
   <br>
-  <em>GPU utilization for DINO-WM trained on Push-T with a DINOv2-Small backbone.</em>
+  <em>GPU utilization for LeWM trained with  Push-T LanceDB dataset on a H200 GPU.</em>
 </p>
 
 ## Data Formats
@@ -99,6 +104,35 @@ swm.data.convert("data/pusht.lance", "data/pusht_video",
 ```
 
 Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'error'`); re-running `world.collect` extends the existing dataset rather than failing.
+
+<details>
+<summary><b>Throughput & storage benchmarks</b></summary>
+
+Numbers below were produced by [`scripts/benchmark/compare_h5_lance.py`](scripts/benchmark/compare_h5_lance.py) and can be reproduced with it. Benchmarks use the [PushT dataset](https://huggingface.co/datasets/galilai-group/lewm-pusht) from the [LeWorldModel](https://le-wm.github.io/) paper.
+
+## Throughput
+
+| Format  | Source   | Cache    | samples/s | ms/step  |
+|---------|----------|----------|-----------|----------|
+| HDF5    | local    | no-cache |    1416.1 |     45.2 |
+| HDF5    | local    | cached   |    1474.0 |     43.4 |
+| LanceDB | local    | no-cache |    4814.8 |     13.3 |
+| LanceDB | local    | cached   |    4431.3 |     14.4 |
+| Video   | local    | -        |    1330.6 |     48.1 |
+| LanceDB | s3       | no-cache |    3183.7 |     20.1 |
+| LanceDB | s3       | cached   |    3253.2 |     19.7 |
+| HDF5    | s3       | no-cache |       9.1 |   7032.5 |
+| HDF5    | s3       | cached   |     756.5 |     84.6 |
+
+## Storage size per format (local)
+
+| Format  | Local size |
+|---------|------------|
+| HDF5    |   43.12 GB |
+| LanceDB |   13.31 GB |
+| Video   |  496.29 MB |
+
+</details>
 
 ## Environments
 
@@ -155,7 +189,10 @@ Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'erro
 
 </div>
 
-Environments are pulled from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), the [Arcade Learning Environment](https://ale.farama.org/) (100+ Atari games), and classical world model benchmarks ([Two-Room](https://arxiv.org/abs/2411.04983), [PushT](https://arxiv.org/abs/2303.04137)). Each ships with both visual and physical factors of variation for robustness studies. Adding a new environment only requires conforming to the [Gymnasium](https://gymnasium.farama.org/) interface.
+Environments are pulled from the [DeepMind Control Suite](https://github.com/google-deepmind/dm_control), [Gymnasium classic control](https://gymnasium.farama.org/environments/classic_control/), [OGBench](https://github.com/seohongpark/ogbench), [Craftax](https://github.com/MichaelTMatthews/Craftax), the [Arcade Learning Environment](https://ale.farama.org/) (100+ Atari games), and classical world model benchmarks ([Two-Room](https://arxiv.org/abs/2411.04983), [PushT](https://arxiv.org/abs/2303.04137)). Most environments ship with a set of **factors of variation** — independently controllable visual and physical parameters (lighting, textures, dynamics, morphology) — that make it straightforward to evaluate zero-shot generalization to distribution shifts without any additional setup. Adding a new environment only requires conforming to the [Gymnasium](https://gymnasium.farama.org/) interface.
+
+<details>
+<summary><b>Full environment list</b></summary>
 
 <div align="center">
 
@@ -194,6 +231,8 @@ Environments are pulled from the [DeepMind Control Suite](https://github.com/goo
 
 </div>
 
+</details>
+
 ## Solvers and Baselines
 
 <div align="center">
@@ -221,14 +260,15 @@ Environments are pulled from the [DeepMind Control Suite](https://github.com/goo
 
 ## Command-Line Interface
 
-After installation, the `swm` command is available for inspecting datasets, environments, and checkpoints without writing code:
+After installation, the `swm` command is available for inspecting/converting datasets, environments, and checkpoints without writing code:
 
 ```bash
-swm datasets                    # list cached datasets
-swm inspect pusht_expert_train  # inspect a specific dataset
-swm envs                        # list all registered environments
-swm fovs PushT-v1               # show factors of variation for an environment
-swm checkpoints                 # list available model checkpoints
+swm datasets                                        # list cached datasets
+swm inspect pusht_expert_train                      # inspect a specific dataset
+swm envs                                            # list all registered environments
+swm fovs PushT-v1                                   # show factors of variation for an environment
+swm checkpoints                                     # list available model checkpoints
+swm convert pusht_expert_train --dest-format video  # convert a dataset to another format
 ```
 
 ## Documentation
@@ -243,16 +283,16 @@ The full documentation lives at [galilai-group.github.io/stable-worldmodel](http
 ## Citation
 
 ```bibtex
-@misc{maes_lelidec2026swm-1,
-  title  = {stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation},
-  author = {Lucas Maes and Quentin Le Lidec and Dan Haramati and
-            Nassim Massaudi and Damien Scieur and Yann LeCun and
-            Randall Balestriero},
+@misc{maes_lld2026swm,
+  title  = {stable-worldmodel: A Platform for Reproducible World Modeling Research and Evaluation},
+  author = {Lucas Maes and Quentin Le Lidec and Luiz Facury and Nassim Massaudi and
+            Ayush Chaurasia and Francesco Capuano and Richard Gao and Taj Gillin and
+            Dan Haramati and Damien Scieur and Yann LeCun and Randall Balestriero},
   year   = {2026},
-  eprint = {2602.08968},
+  eprint = {2605.21800},
   archivePrefix = {arXiv},
-  primaryClass = {cs.AI},
-  url    = {https://arxiv.org/abs/2602.08968},
+  primaryClass = {cs.LG},
+  url    = {https://arxiv.org/abs/2605.21800},
 }
 ```
 

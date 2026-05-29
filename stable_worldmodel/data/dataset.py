@@ -226,6 +226,30 @@ class ConcatDataset:
         ds_idx, local_idx = self._loc(idx)
         return self.datasets[ds_idx][local_idx]
 
+    def __getitems__(self, indices: list[int]) -> list[dict]:
+        mapped = [self._loc(idx) for idx in indices]
+
+        # Group by sub-dataset, preserving original positions.
+        groups: dict[int, list[tuple[int, int]]] = {}
+        for orig_pos, (ds_idx, local_idx) in enumerate(mapped):
+            if ds_idx not in groups:
+                groups[ds_idx] = []
+            groups[ds_idx].append((orig_pos, local_idx))
+
+        results: list[dict | None] = [None] * len(indices)
+        for ds_idx, items in groups.items():
+            ds = self.datasets[ds_idx]
+            orig_positions = [pos for pos, _ in items]
+            local_indices = [local_idx for _, local_idx in items]
+            if hasattr(ds, '__getitems__'):
+                fetched = ds.__getitems__(local_indices)
+            else:
+                fetched = [ds[i] for i in local_indices]
+            for orig_pos, item in zip(orig_positions, fetched):
+                results[orig_pos] = item
+
+        return results  # type: ignore[return-value]
+
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
     ) -> list[dict]:

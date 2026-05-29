@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,32 @@ from stable_worldmodel.data.format import (
     validate_write_mode,
 )
 from stable_worldmodel.data.formats.utils import is_image_column
+
+# JPEG blobs from Lance are immutable `bytes`; we wrap them in a
+# torch tensor view (zero-copy) and hand straight to torchvision's
+# decoder, which returns a fresh tensor for the output. The warning
+# is correct in general (writes via the view would corrupt the
+# source) but doesn't apply since downstream is read-only.
+warnings.filterwarnings(
+    'ignore',
+    message='The given buffer is not writable',
+    category=UserWarning,
+)
+
+
+# Optional fast-path: torchvision's libjpeg-turbo-backed batch decoder.
+# Falls back to PIL on a thread pool when unavailable or when a blob is
+# malformed (decode_jpeg is stricter about JPEG conformance than PIL).
+try:
+    from torchvision.io import (
+        ImageReadMode as _TVImageReadMode,
+        decode_jpeg as _tv_decode_jpeg,
+    )
+
+    _TV_RGB = _TVImageReadMode.RGB
+except (ImportError, AttributeError):
+    _tv_decode_jpeg = None
+    _TV_RGB = None
 
 
 _DEFAULT_JPEG_QUALITY = 95
@@ -59,6 +87,34 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
     return buf.getvalue()
 
 
+_SPAWN_FORCED = False
+
+
+def _force_spawn() -> None:
+    """Switch Linux multiprocessing to spawn — workaround for lancedb fork-unsafety."""
+    import logging
+    import multiprocessing as mp
+    import sys
+
+    import torch
+
+    global _SPAWN_FORCED
+    if _SPAWN_FORCED or sys.platform != 'linux':
+        _SPAWN_FORCED = True
+        return
+    _SPAWN_FORCED = True
+
+    if mp.get_start_method(allow_none=True) in (None, 'fork'):
+        try:
+            mp.set_start_method('spawn', force=True)
+        except RuntimeError as exc:
+            logging.warning('Could not switch to spawn (%s)', exc)
+    try:
+        torch.multiprocessing.set_sharing_strategy('file_system')
+    except RuntimeError:
+        pass
+
+
 class LanceDataset(Dataset):
     """Reader for a LanceDB table written by :class:`LanceWriter`.
 
@@ -73,8 +129,6 @@ class LanceDataset(Dataset):
         episode_index_column, step_index_column: index column names.
         connect_kwargs: forwarded to :func:`lancedb.connect` (e.g. S3 creds).
     """
-
-    _fork_warning_emitted = False
 
     def __init__(
         self,
@@ -109,7 +163,7 @@ class LanceDataset(Dataset):
         self._perm = None
         self._fetch_columns: list[str] | None = None
 
-        self._maybe_warn_fork_start_method()
+        _force_spawn()
         table = self._connect_table()
         self._schema_names = list(table.schema.names)
         available = [
@@ -142,8 +196,8 @@ class LanceDataset(Dataset):
 
         if keys_to_cache:
             logging.warning(
-                'LanceDataset: keys_to_cache=%s is unnecessary — '
-                '__getitems__ already batches reads; caching risks OOM.',
+                'LanceDataset: keys_to_cache=%s is not required — Lance '
+                'has efficient random access via batched __getitems__.',
                 keys_to_cache,
             )
             for key in keys_to_cache:
@@ -166,6 +220,14 @@ class LanceDataset(Dataset):
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state['_perm'] = None
+        # spt.Module sets `dataset._trainer = trainer` on every dataset to
+        # inject `global_step` / `current_epoch` into samples. The trainer
+        # transitively reaches `train_dataloader._iterator` (a
+        # `_MultiProcessingDataLoaderIter`, which raises NotImplementedError
+        # on pickle). Drop the back-reference so worker spawn closures
+        # don't traverse into it; workers see a stale snapshot of trainer
+        # state anyway, so a missing trainer is fine.
+        state['_trainer'] = None
         return state
 
     def _connect_table(self):
@@ -205,33 +267,6 @@ class LanceDataset(Dataset):
             f'LanceDataset: cannot infer table from {loc!r}. Pass '
             '`table_name=` explicitly or point to a `*.lance` directory.'
         )
-
-    @classmethod
-    def _maybe_warn_fork_start_method(cls) -> None:
-        if cls._fork_warning_emitted:
-            return
-        import multiprocessing as mp
-        import sys
-
-        cls._fork_warning_emitted = True
-        if sys.platform != 'linux':
-            return
-        current = mp.get_start_method(allow_none=True)
-        if current not in (None, 'fork'):
-            return
-        try:
-            mp.set_start_method('spawn', force=True)
-            logging.info(
-                "LanceDataset: multiprocessing start method set to 'spawn' "
-                '(was %s).',
-                current or 'default (fork)',
-            )
-        except RuntimeError as exc:
-            logging.warning(
-                "LanceDataset could not switch multiprocessing to 'spawn' "
-                '(%s); DataLoader workers may deadlock.',
-                exc,
-            )
 
     def _compute_episode_structure(
         self, table
@@ -348,6 +383,35 @@ class LanceDataset(Dataset):
             arr = np.array(img.convert('RGB'))
         return torch.from_numpy(arr).permute(2, 0, 1)
 
+    def _decode_images(self, blobs) -> torch.Tensor:
+        """Decode a list of JPEG blobs into a stacked ``(N, C, H, W)`` uint8 tensor.
+
+        Fast path: ``torchvision.io.decode_jpeg`` when available —
+        libjpeg-turbo with internal SIMD, GIL-released, supports CUDA
+        decode if a GPU is present. Single Python call so DataLoader
+        workers (which are already process-parallel) don't compete with
+        an extra thread pool of our own. Falls back to a sequential PIL
+        loop when torchvision is missing or a blob is non-conformant.
+        """
+        if not blobs:
+            return torch.empty(0, dtype=torch.uint8)
+
+        if _tv_decode_jpeg is not None:
+            try:
+                byte_tensors = [
+                    torch.frombuffer(
+                        b if isinstance(b, (bytes, bytearray)) else bytes(b),
+                        dtype=torch.uint8,
+                    )
+                    for b in blobs
+                ]
+                decoded = _tv_decode_jpeg(byte_tensors, mode=_TV_RGB)
+                return torch.stack(decoded)
+            except (RuntimeError, TypeError):
+                pass  # malformed blob — fall through to PIL
+
+        return torch.stack([self._decode_image(b) for b in blobs])
+
     def _prepare_numeric_tensor(
         self, data: np.ndarray, downsample: bool
     ) -> torch.Tensor:
@@ -358,8 +422,11 @@ class LanceDataset(Dataset):
             tensor = tensor.permute(0, 3, 1, 2)
         return tensor
 
-    def _process_batch(self, ep_idx: int, g_start: int, batch) -> dict:
-        g_end = g_start + self.span
+    def _process_batch(
+        self, ep_idx: int, g_start: int, batch, g_end: int | None = None
+    ) -> dict:
+        if g_end is None:
+            g_end = g_start + self.span
         steps: dict[str, Any] = {}
         for col in self._keys:
             if col in self._cache:
@@ -375,12 +442,7 @@ class LanceDataset(Dataset):
                 blobs = values[:: self.frameskip]
                 if isinstance(blobs, np.ndarray):
                     blobs = blobs.tolist()
-                frames = [self._decode_image(v) for v in blobs]
-                steps[col] = (
-                    torch.stack(frames)
-                    if frames
-                    else torch.empty(0, dtype=torch.uint8)
-                )
+                steps[col] = self._decode_images(blobs)
                 continue
 
             data = (
@@ -389,15 +451,15 @@ class LanceDataset(Dataset):
                 else self._pylist_to_numpy(values, col)
             )
 
-            if data.dtype == object and data.size > 0:
+            if data.size > 0 and (
+                data.dtype == object or data.dtype.kind in ('S', 'U')
+            ):
                 first = data.flat[0]
                 if isinstance(first, (bytes, bytearray)):
-                    steps[col] = (
-                        first.decode() if isinstance(first, bytes) else first
-                    )
+                    steps[col] = bytes(first).decode()
                     continue
                 if isinstance(first, str):
-                    steps[col] = first
+                    steps[col] = str(first)
                     continue
 
             steps[col] = self._prepare_numeric_tensor(
@@ -409,7 +471,9 @@ class LanceDataset(Dataset):
         g_start = int(self.offsets[ep_idx] + start)
         rows = list(range(g_start, g_start + (end - start)))
         batch = self._fetch_rows(rows)
-        steps = self._process_batch(ep_idx, g_start, batch)
+        steps = self._process_batch(
+            ep_idx, g_start, batch, g_end=g_start + (end - start)
+        )
         return self.transform(steps) if self.transform else steps
 
     def __getitems__(self, indices: list[int]) -> list[dict]:
@@ -817,6 +881,15 @@ class Lance(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> LanceDataset:
+        if '://' in str(path) and 'connect_kwargs' not in kwargs:
+            opts = {
+                'region': os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'),
+                'virtual_hosted_style_request': 'true',
+            }
+            # `token` collides with AWS session token on s3:// — only inject for hf://.
+            if str(path).startswith('hf://') and os.environ.get('HF_TOKEN'):
+                opts['token'] = os.environ['HF_TOKEN']
+            kwargs['connect_kwargs'] = {'storage_options': opts}
         return LanceDataset(path=path, **kwargs)
 
     @classmethod

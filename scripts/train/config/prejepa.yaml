@@ -23,9 +23,10 @@ train_split: 0.9
 
 # --- Backbone ---
 backbone:
-  name: facebook/dinov2-small
+  name: dinov2_small
   type: dinov2_small
   is_video_encoder: false
+  interpolate_pos_encoding: true  # set to false for CNN backbones (e.g. resnet)
 
 image_size: 224
 patch_size: 14  # must match the encoder's patch size (14 for dinov2/dino/mae)
@@ -46,6 +47,26 @@ predictor:
   dim_head: 64
   dropout: 0.1
   emb_dropout: 0.0
+
+model:
+  _target_: stable_worldmodel.wm.PreJEPA
+  history_size: ${wm.history_size}
+  num_pred: ${wm.num_preds}
+  interpolate_pos_encoding: ${backbone.interpolate_pos_encoding}
+  encoder:
+    _target_: stable_worldmodel.wm.prejepa.module.create_backbone
+    name: ${backbone.name}
+  predictor:
+    _target_: stable_worldmodel.wm.prejepa.CausalPredictor
+    num_patches: ???
+    num_frames: ${wm.history_size}
+    dim: ???
+    depth: ${predictor.depth}
+    heads: ${predictor.heads}
+    mlp_dim: ${predictor.mlp_dim}
+    dim_head: ${predictor.dim_head}
+    dropout: ${predictor.dropout}
+    emb_dropout: ${predictor.emb_dropout}
 
 # --- Optimizer ---
 optimizer:

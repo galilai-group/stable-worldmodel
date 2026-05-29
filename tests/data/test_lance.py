@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from stable_worldmodel.data import (
+    GoalDataset,
     LanceDataset,
     LanceWriter,
     convert,
@@ -268,6 +269,48 @@ def test_invalid_mode_raises(tmp_path):
     out = tmp_path / 'demo.lance'
     with pytest.raises(ValueError, match='write mode'):
         LanceWriter(out, mode='nope')
+
+
+def test_goal_dataset_single_step_cached_column(tmp_path):
+    """GoalDataset._load_single_step must return 1 frame for cached columns.
+
+    Regression: _process_batch always sliced self._cache by self.span rows,
+    so goal_proprio came back as (num_steps, dim) instead of (1, dim).
+    Triggered when a column is in the cache via keys_to_cache.
+    """
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(8, 7, 9))
+
+    num_steps = 4
+    ds = LanceDataset(path=out, num_steps=num_steps, keys_to_cache=['proprio'])
+    goal_ds = GoalDataset(ds, seed=0)
+
+    item = goal_ds[0]
+
+    assert 'goal_proprio' in item
+    assert item['proprio'].shape == (num_steps, 3)
+    assert item['goal_proprio'].shape == (1, 3), (
+        f'goal_proprio must be 1 frame, got {item["goal_proprio"].shape}'
+    )
+
+
+def test_goal_dataset_single_step_merged_column(tmp_path):
+    """Same regression triggered via merge_col, which also populates self._cache."""
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(8, 7, 9), extra_cols={'velocity': (3,)})
+
+    num_steps = 4
+    ds = LanceDataset(path=out, num_steps=num_steps)
+    ds.merge_col(['proprio', 'velocity'], 'state')
+    goal_ds = GoalDataset(ds, goal_keys={'state': 'goal_state'}, seed=0)
+
+    item = goal_ds[0]
+
+    assert 'goal_state' in item
+    assert item['state'].shape == (num_steps, 6)
+    assert item['goal_state'].shape == (1, 6), (
+        f'goal_state must be 1 frame, got {item["goal_state"].shape}'
+    )
 
 
 def test_convert_lance_to_folder_and_back(tmp_path):

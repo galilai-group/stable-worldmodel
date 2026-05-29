@@ -29,19 +29,27 @@ class VideoDataset(FolderDataset):
         video_keys: list[str] | None = None,
         **kw: Any,
     ) -> None:
-        if VideoDataset._decord is None:
+        # Probe decord up-front so we fail fast if it's missing, but don't
+        # rely on the cached reference surviving DataLoader worker spawn —
+        # _ensure_decord re-imports lazily inside the worker process.
+        self._ensure_decord()
+        super().__init__(name=name, folder_keys=video_keys or ['video'], **kw)
+
+    @classmethod
+    def _ensure_decord(cls):
+        if cls._decord is None:
             try:
                 import decord
 
                 decord.bridge.set_bridge('torch')
-                VideoDataset._decord = decord
+                cls._decord = decord
             except ImportError:
                 raise ImportError('VideoDataset requires decord')
-        super().__init__(name=name, folder_keys=video_keys or ['video'], **kw)
+        return cls._decord
 
     @lru_cache(maxsize=8)
     def _reader(self, ep_idx: int, key: str) -> Any:
-        return VideoDataset._decord.VideoReader(
+        return self._ensure_decord().VideoReader(
             str(self.path / key / f'ep_{ep_idx}.mp4'), num_threads=1
         )
 

@@ -1,0 +1,64 @@
+hydra:
+  job:
+    chdir: false  # keep working directory where you launched the script
+
+benchmark:
+  num_steps: 4
+  frameskip: 5
+  batch_size: 64
+  num_workers: 4
+  warmup: 5
+  steps: 100
+
+# Each entry here becomes one benchmark group (two rows when keys_to_cache is
+# set: one no-cache pass and one cached pass).
+#
+# Required fields per entry:
+#   name         – label shown in the output table
+#   format       – hdf5 | lance | video
+#   path         – filename relative to the SWM datasets cache dir, absolute path, or s3:// URI
+#   keys_to_load – list of columns to read each step
+#
+# Optional fields:
+#   source         – local (default) | s3
+#   keys_to_cache  – columns to pre-load into RAM; omit or set [] for no cache
+#
+# S3-only fields (ignored when source is local):
+#   aws_region          – defaults to us-east-2
+#   aws_access_key_id   – omit to use an IAM instance role
+#   aws_secret_access_key
+
+datasets:
+  - name: pusht
+    format: lance
+    source: local
+    path: pusht_expert_train.lance
+    keys_to_load: [pixels, action, proprio]
+    keys_to_cache: [action, proprio]
+
+  - name: pusht
+    format: hdf5
+    source: local
+    path: pusht_expert_train.h5
+    keys_to_load: [pixels, action, proprio]
+    keys_to_cache: [action, proprio]
+
+# ---- S3 example (uncomment and fill in to benchmark remote datasets) --------
+#
+# - name: tworoom
+#   format: hdf5
+#   source: s3
+#   path: s3://lancedb-datasets-dev-us-east-2-devrel/training/stableworldmodel/tworoom/tworoom.h5
+#   aws_region: us-east-2
+#   # aws_access_key_id: ...
+#   # aws_secret_access_key: ...
+#   keys_to_load: [pixels, action, proprio]
+#   keys_to_cache: [action, proprio]
+#
+# - name: tworoom
+#   format: lance
+#   source: s3
+#   path: s3://lancedb-datasets-dev-us-east-2-devrel/training/stableworldmodel/tworoom/tworoom.lance
+#   aws_region: us-east-2
+#   keys_to_load: [pixels, action, proprio]
+#   keys_to_cache: [action, proprio]

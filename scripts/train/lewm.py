@@ -1,4 +1,4 @@
-from functools import partial
+import os
 from pathlib import Path
 
 import hydra
@@ -9,14 +9,9 @@ import stable_worldmodel as swm
 import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
-import numpy as np
 
-from stable_worldmodel.wm.lewm.module import (
-    Predictor,
-    Embedder,
-    MLP,
-)
-from stable_worldmodel.wm.lewm import LeWM
+from functools import partial
+from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.loss import SIGReg
 from lightning.pytorch.callbacks import Callback
 from stable_worldmodel.wm.utils import save_pretrained
@@ -29,23 +24,6 @@ def get_img_preprocessor(source: str, target: str, img_size: int = 224):
     )
     resize = dt.transforms.Resize(img_size, source=source, target=target)
     return dt.transforms.Compose(to_image, resize)
-
-
-def get_column_normalizer(dataset, source: str, target: str):
-    """Get normalizer for a specific column in the dataset."""
-    col_data = dataset.get_col_data(source)
-    data = torch.from_numpy(np.array(col_data))
-    data = data[~torch.isnan(data).any(dim=1)]
-    mean = data.mean(0, keepdim=True).clone()
-    std = data.std(0, keepdim=True).clone()
-
-    def norm_fn(x):
-        return ((x - mean) / std).float()
-
-    normalizer = dt.transforms.WrapTorchTransform(
-        norm_fn, source=source, target=target
-    )
-    return normalizer
 
 
 class SaveCkptCallback(Callback):
@@ -118,8 +96,12 @@ def run(cfg):
 
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop('name')
+    cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
+    print(
+        f'Loading dataset "{dataset_name}" from {"local cache: " + cache_dir if cache_dir else "default location"}'
+    )
     dataset = swm.data.load_dataset(
-        dataset_name, transform=None, **dataset_cfg
+        dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg
     )
     transforms = [
         get_img_preprocessor(
@@ -135,7 +117,9 @@ def run(cfg):
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
 
-            setattr(cfg.wm, f'{col}_dim', dataset.get_dim(col))
+        cfg.model.action_encoder.input_dim = (
+            cfg.data.dataset.frameskip * dataset.get_dim('action')
+        )
 
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform
@@ -161,55 +145,18 @@ def run(cfg):
     ##       model / optim      ##
     ##############################
 
-    encoder = spt.backbone.utils.vit_hf(
-        cfg.encoder_scale,
-        patch_size=cfg.patch_size,
-        image_size=cfg.img_size,
-        pretrained=False,
-        use_mask_token=False,
-    )
+    world_model = hydra.utils.instantiate(cfg.model)
 
-    hidden_dim = encoder.config.hidden_size
-    embed_dim = cfg.wm.get('embed_dim', hidden_dim)
-    effective_act_dim = cfg.data.dataset.frameskip * cfg.wm.action_dim
-
-    predictor = Predictor(
-        num_frames=cfg.wm.history_size,
-        input_dim=embed_dim,
-        hidden_dim=hidden_dim,
-        output_dim=hidden_dim,
-        **cfg.predictor,
-    )
-
-    action_encoder = Embedder(input_dim=effective_act_dim, emb_dim=embed_dim)
-
-    projector = MLP(
-        input_dim=hidden_dim,
-        output_dim=embed_dim,
-        hidden_dim=2048,
-        norm_fn=torch.nn.BatchNorm1d,
-    )
-
-    predictor_proj = MLP(
-        input_dim=hidden_dim,
-        output_dim=embed_dim,
-        hidden_dim=2048,
-        norm_fn=torch.nn.BatchNorm1d,
-    )
-
-    world_model = LeWM(
-        encoder=encoder,
-        predictor=predictor,
-        action_encoder=action_encoder,
-        projector=projector,
-        pred_proj=predictor_proj,
-    )
-
+    total_steps = cfg.trainer.max_epochs * len(train)
     optimizers = {
         'model_opt': {
             'modules': 'model',
             'optimizer': dict(cfg.optimizer),
-            'scheduler': {'type': 'LinearWarmupCosineAnnealingLR'},
+            'scheduler': {
+                'type': 'LinearWarmupCosineAnnealingLR',
+                'warmup_steps': max(1, int(0.01 * total_steps)),
+                'max_steps': total_steps,
+            },
             'interval': 'epoch',
         },
     }
@@ -254,11 +201,12 @@ def run(cfg):
         enable_checkpointing=True,
     )
 
+    ckpt_path = run_dir / f'{cfg.output_model_name}_weights.ckpt'
     manager = spt.Manager(
         trainer=trainer,
         module=world_model,
         data=data_module,
-        ckpt_path=run_dir / f'{cfg.output_model_name}_weights.ckpt',
+        ckpt_path=ckpt_path if ckpt_path.exists() else None,
     )
 
     manager()

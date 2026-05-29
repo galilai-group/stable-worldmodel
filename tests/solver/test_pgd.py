@@ -5,7 +5,7 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
-from stable_worldmodel.solver.discrete_solvers import PGDSolver
+from stable_worldmodel.solver.pgd import PGDSolver
 
 
 class DummyCostModel:

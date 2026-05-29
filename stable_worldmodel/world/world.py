@@ -49,14 +49,18 @@ import torch
 from stable_worldmodel.policy import Policy
 
 from .env_pool import EnvPool
+from ..plot import save_panel_videos, save_video
 from ..wrapper import MegaWrapper
 
 
 RESET_MODES = ('auto', 'wait')
 
 
-def _make_env(env_name, max_episode_steps, wrappers, **kwargs):
-    kwargs.setdefault('render_mode', 'rgb_array')
+def _make_env(
+    env_name, max_episode_steps, wrappers, add_pixels=True, **kwargs
+):
+    if add_pixels:
+        kwargs.setdefault('render_mode', 'rgb_array')
     env = gym.make(env_name, max_episode_steps=max_episode_steps, **kwargs)
     for wrapper in wrappers:
         env = wrapper(env)
@@ -67,8 +71,8 @@ class World:
     """Drive a policy through a pool of preprocessed envs.
 
     After construction, ``world.envs`` is an ``EnvPool`` of ``num_envs``
-    environments, each wrapped by ``MegaWrapper`` (and any ``extra_wrappers``
-    you pass). Attach a policy with ``set_policy(...)`` and then call
+    environments, each wrapped by ``MegaWrapper`` (and any ``pre_wrappers`` /
+    ``extra_wrappers`` you pass). Attach a policy with ``set_policy(...)`` and then call
     ``collect()`` or ``evaluate()`` to run rollouts.
 
     Attributes populated during a run:
@@ -82,11 +86,17 @@ class World:
             (e.g. ``'swm/PushT-v1'``).
         num_envs: Number of parallel envs in the pool.
         image_shape: ``(H, W)`` that pixels/goal are resized to.
+            Required unless ``add_pixels=False``.
         max_episode_steps: Per-env step cap before truncation.
         goal_conditioned: If True, the goal key is kept separate from
             regular observations (controls ``MegaWrapper.separate_goal``).
-        extra_wrappers: Additional ``gym.Wrapper`` factories applied
-            after ``MegaWrapper``.
+        pre_wrappers: ``gym.Wrapper`` factories applied *before*
+            ``MegaWrapper`` (closer to the raw env). Use for env-level
+            modifiers (action repeat, reward shaping, obs injection) whose
+            output ``MegaWrapper`` should then standardize and validate.
+        extra_wrappers: ``gym.Wrapper`` factories applied *after*
+            ``MegaWrapper``. Use for transforms that consume the canonical
+            observation (frame stacking, normalization).
         image_transform: Optional callable applied to pixels inside
             ``MegaWrapper``.
         goal_transform: Optional callable applied to the goal inside
@@ -94,6 +104,10 @@ class World:
         image_resample: PIL resample mode for pixel/goal resizing
             (``'nearest'``, ``'bilinear'``, ...). Defaults to bilinear;
             use ``'nearest'`` for crisp pixel-art envs (e.g. Craftax).
+        add_pixels: If True (default), render each env and add a resized
+            ``pixels`` observation; goal images are resized too. Set False
+            for envs without pixels (e.g. audio): ``image_shape`` may then
+            be omitted and the raw observation is lifted into info as-is.
         **kwargs: Forwarded to ``gym.make`` (e.g. ``render_mode``).
     """
 
@@ -101,16 +115,21 @@ class World:
         self,
         env_name: str,
         num_envs: int,
-        image_shape: tuple[int, int],
+        image_shape: tuple[int, int] | None = None,
         max_episode_steps: int = 100,
         goal_conditioned: bool = True,
+        pre_wrappers: list | None = None,
         extra_wrappers: list | None = None,
         image_transform: Callable | None = None,
         goal_transform: Callable | None = None,
         image_resample: str | int | None = None,
+        add_pixels: bool = True,
         **kwargs: Any,
     ):
+        if add_pixels and image_shape is None:
+            raise ValueError('image_shape is required when add_pixels=True.')
         wrappers = [
+            *(pre_wrappers or []),
             partial(
                 MegaWrapper,
                 image_shape=image_shape,
@@ -118,11 +137,17 @@ class World:
                 goal_transform=goal_transform,
                 separate_goal=goal_conditioned,
                 image_resample=image_resample,
+                add_pixels=add_pixels,
             ),
             *(extra_wrappers or []),
         ]
         env_fn = partial(
-            _make_env, env_name, max_episode_steps, wrappers, **kwargs
+            _make_env,
+            env_name,
+            max_episode_steps,
+            wrappers,
+            add_pixels=add_pixels,
+            **kwargs,
         )
         self.envs = EnvPool([env_fn] * num_envs)
         self.policy: Policy | None = None
@@ -231,14 +256,20 @@ class World:
 
     def collect(
         self,
-        path: str | Path,
-        episodes: int,
+        path: str | Path | None = None,
+        episodes: int = 0,
         seed: int | None = None,
         options: dict | None = None,
         format: str = 'lance',
+        writer: Any = None,
+        progress: bool = True,
     ) -> None:
-        """Roll out ``episodes`` and dump their trajectories using the writer
-        registered for ``format``.
+        """Roll out ``episodes`` and dump their trajectories.
+
+        Pass either ``path`` (a registered format writer is constructed for
+        you) **or** ``writer`` (a pre-built object implementing the
+        :class:`~stable_worldmodel.data.Writer` protocol — for example a
+        :class:`~stable_worldmodel.data.ReplayBuffer` to fill in-memory).
 
         Each info key becomes a column. Leading length-1 time dims are
         squeezed. Columns starting with ``_`` (e.g. ``_needs_flush``)
@@ -246,20 +277,34 @@ class World:
 
         Args:
             path: Output path (file or directory, depending on the format).
-                Parent dirs are auto-created.
+                Parent dirs are auto-created. Mutually exclusive with
+                ``writer``.
             episodes: Number of episodes to record.
             seed: Base seed for env resets.
             options: Reset options forwarded to ``envs.reset``.
-            format: Registered format name (default ``'lance'``). See
+            format: Registered format name (default ``'lance'``); ignored
+                when ``writer`` is provided. See
                 :func:`stable_worldmodel.data.list_formats` for available
                 writers; new formats can be added via
                 :func:`stable_worldmodel.data.register_format`.
+            writer: A pre-built writer (e.g. ``ReplayBuffer``) to fill
+                directly. Mutually exclusive with ``path``.
+            progress: Whether to show the ``Recording`` progress bar.
         """
         from tqdm import tqdm
 
         from stable_worldmodel.data.format import get_format
 
-        writer_cls = get_format(format)
+        if (path is None) == (writer is None):
+            raise ValueError(
+                'World.collect: pass exactly one of `path` or `writer`.'
+            )
+
+        if writer is None:
+            writer_cm = get_format(format).open_writer(path)
+        else:
+            writer_cm = writer
+
         buffers = [defaultdict(list) for _ in range(self.num_envs)]
 
         def on_step(world):
@@ -282,8 +327,10 @@ class World:
                     buffers[i][col].append(val)
 
         with (
-            writer_cls.open_writer(path) as writer,
-            tqdm(total=episodes, desc='Recording') as pbar,
+            writer_cm as w,
+            tqdm(
+                total=episodes, desc='Recording', disable=not progress
+            ) as pbar,
         ):
 
             def episode_iter():
@@ -301,7 +348,7 @@ class World:
                     pbar.update(1)
                     yield ep
 
-            writer.write_episodes(episode_iter())
+            w.write_episodes(episode_iter())
 
     def _run(
         self,
@@ -368,12 +415,18 @@ class World:
             if not done.any():
                 continue
 
+            budget_reached = False
             for i in np.where(done)[0]:
                 yield int(i), ep_count
                 ep_count += 1
                 if episodes is not None and ep_count >= episodes:
-                    return
+                    budget_reached = True
+                    break
 
+            # Always reset the done envs before stopping. Returning straight
+            # from the loop above would leave the env that completed the final
+            # episode in its terminal state, so the next _run_iter/collect call
+            # steps a dead env and records a spurious length-1 episode.
             if mode == 'auto':
                 seeds = [None] * self.num_envs
                 if next_seed is not None:
@@ -388,8 +441,9 @@ class World:
                 self.infos['_needs_flush'] = done
             elif mode == 'wait':
                 alive[done] = False
-                if not alive.any():
-                    return
+
+            if budget_reached or (mode == 'wait' and not alive.any()):
+                return
 
     def _get_actions(self) -> np.ndarray:
         return self.policy.get_action(self.infos)
@@ -413,7 +467,7 @@ class World:
             results['episode_successes'][ep_idx] = world.terminateds[env_idx]
             results['seeds'][ep_idx] = world.envs.seeds[env_idx]
             if frames is not None:
-                _save_video(
+                save_video(
                     Path(video) / f'episode_{ep_idx}.mp4',
                     frames.pop(env_idx, []),
                 )
@@ -432,9 +486,7 @@ class World:
         )
         if frames:
             for env_idx, f in frames.items():
-                _save_video(
-                    Path(video) / f'episode_remaining_{env_idx}.mp4', f
-                )
+                save_video(Path(video) / f'episode_remaining_{env_idx}.mp4', f)
         return results
 
     def _evaluate_from_dataset(
@@ -451,7 +503,7 @@ class World:
         n = len(episodes_idx)
         assert n == self.num_envs
 
-        init_state, goal_state = _extract_init_goal(
+        init_state, goal_state, dataset_videos = _extract_init_goal(
             dataset,
             episodes_idx,
             start_steps,
@@ -501,22 +553,15 @@ class World:
             float(results['episode_successes'].sum()) / n * 100.0
         )
         if frames:
-            Path(video).mkdir(parents=True, exist_ok=True)
-            for env_idx, f in frames.items():
-                _save_video(Path(video) / f'env_{env_idx}.mp4', f)
+            save_panel_videos(
+                Path(video),
+                {
+                    'agent': frames,
+                    'dataset': dataset_videos,
+                    'goal': goal_state['goal'],
+                },
+            )
         return results
-
-
-def _save_video(path: Path, frames: list[np.ndarray], fps: int = 15) -> None:
-    if not frames:
-        return
-    import imageio
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    out = imageio.get_writer(str(path), fps=fps, codec='libx264')
-    for f in frames:
-        out.append_data(f)
-    out.close()
 
 
 def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
@@ -528,6 +573,7 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
 
     init_lists: dict[str, list] = {}
     goal_lists: dict[str, list] = {}
+    dataset_videos: list = []
 
     for ep in data:
         for col in dataset.column_names:
@@ -541,13 +587,15 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
             arr = val.numpy() if isinstance(val, torch.Tensor) else val
             init_lists.setdefault(col, []).append(arr[0])
             goal_lists.setdefault(col, []).append(arr[-1])
+            if col == 'pixels':
+                dataset_videos.append(arr)
 
     init_state = {k: np.stack(v) for k, v in init_lists.items()}
     goal_state = {}
     for k, v in goal_lists.items():
         goal_state['goal' if k == 'pixels' else f'goal_{k}'] = np.stack(v)
 
-    return init_state, goal_state
+    return init_state, goal_state, dataset_videos
 
 
 def _apply_callables(env, callables, init_state):

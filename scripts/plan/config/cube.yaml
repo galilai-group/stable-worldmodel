@@ -7,8 +7,6 @@ world:
   env_name: swm/OGBCube-v0
   num_envs: ${eval.num_eval}
   max_episode_steps: ??? # make sure it's >= eval_budget
-  history_size: 1
-  frame_skip: 1
   env_type: single
   ob_type: states
   multiview: False

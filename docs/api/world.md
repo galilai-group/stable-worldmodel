@@ -26,6 +26,29 @@ world.reset(seed=0)
 ```
 ///
 
+/// tab | Env without pixels (audio / state-only)
+```python
+import stable_worldmodel as swm
+
+# For envs with no rendered observation (e.g. audio), skip pixel
+# rendering with add_pixels=False. `image_shape` is then optional and
+# no `pixels` key is added; the raw observation is lifted into info.
+world = swm.World(
+    env_name="swm/YourEnv-v0",   # your non-pixel env
+    num_envs=4,
+    add_pixels=False,
+)
+world.set_policy(policy)
+
+world.reset(seed=0)
+# world.infos has no "pixels"; the observation is under
+# "observation" (or your env's own dict keys).
+```
+
+Video recording (`evaluate(video=...)`) renders from the `pixels` key, so
+it is unavailable when `add_pixels=False`.
+///
+
 /// tab | Collect a dataset
 ```python
 import stable_worldmodel as swm
@@ -36,6 +59,24 @@ world.set_policy(expert_policy)
 # Roll out 500 episodes in parallel and dump them to an HDF5 file.
 world.collect("data/pusht_expert.h5", episodes=500, seed=0)
 ```
+///
+
+/// tab | Collect into a ReplayBuffer
+```python
+import stable_worldmodel as swm
+from stable_worldmodel.data import ReplayBuffer
+
+world = swm.World("swm/PushT-v1", num_envs=8, image_shape=(64, 64))
+world.set_policy(policy)
+
+# Pass any object implementing the Writer protocol (e.g. ReplayBuffer)
+# via writer=. Mutually exclusive with path=.
+buf = ReplayBuffer(max_steps=200_000, history_len=4)
+world.collect(writer=buf, episodes=20, seed=0)
+```
+
+See the [online-learning guide](../guides/online_learning.md) for the full
+fill / sample / dump workflow.
 ///
 
 /// tab | Episodic evaluation
