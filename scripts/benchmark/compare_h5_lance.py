@@ -28,6 +28,11 @@ try:
 except ImportError:
     VideoDataset = None
 
+try:
+    from stable_worldmodel.data import LanceVideoDataset
+except ImportError:
+    LanceVideoDataset = None
+
 
 # ---- Storage-options helpers ------------------------------------------------
 
@@ -93,6 +98,22 @@ def _make_dataset(ds_cfg: DictConfig, keys_to_cache: list[str], common: dict):
                 'storage_options': _lance_storage_opts(ds_cfg)
             }
         return LanceDataset(
+            path=path, keys_to_cache=keys_to_cache, **kwargs, **common
+        )
+
+    if fmt == 'lance_video':
+        if LanceVideoDataset is None:
+            raise ImportError(
+                'LanceVideoDataset not available (install torchcodec/imageio)'
+            )
+        kwargs = {}
+        if source == 's3':
+            kwargs['connect_kwargs'] = {
+                'storage_options': _lance_storage_opts(ds_cfg)
+            }
+        # keys_to_cache caches tabular columns only; image columns are always
+        # decoded on demand from the per-episode MP4 blobs.
+        return LanceVideoDataset(
             path=path, keys_to_cache=keys_to_cache, **kwargs, **common
         )
 
@@ -193,21 +214,26 @@ def main(cfg: DictConfig) -> None:
             if not raw_path.is_absolute():
                 raw_path = get_cache_dir(sub_folder='datasets') / raw_path
             size = _local_size(raw_path) if source == 'local' else 0
+            # Normalize storage by stored frame count so formats holding
+            # different slices stay comparable (bytes/frame).
+            n_frames = int(sum(ds.lengths)) if len(ds.lengths) else 0
+            bpf = size / n_frames if (size and n_frames) else 0.0
             results.append(
-                (name, fmt, source, cache_label, sps, ms_step, size)
+                (name, fmt, source, cache_label, sps, ms_step, size, bpf)
             )
 
     print('\n## Throughput\n')
     print(
-        '| Dataset        | Format  | Source   | Cache    | samples/s | ms/step  | Storage    |'
+        '| Dataset        | Format       | Source   | Cache    | samples/s | ms/step  | Storage    | Bytes/frame |'
     )
     print(
-        '|----------------|---------|----------|----------|-----------|----------|------------|'
+        '|----------------|--------------|----------|----------|-----------|----------|------------|-------------|'
     )
-    for name, fmt, source, cache, sps, ms_step, size in results:
+    for name, fmt, source, cache, sps, ms_step, size, bpf in results:
+        bpf_str = f'{bpf:,.0f}' if bpf else '—'
         print(
-            f'| {name:<14} | {fmt:<7} | {source:<8} | {cache:<8} | '
-            f'{sps:9.1f} | {ms_step:8.1f} | {_fmt_bytes(size):>10} |'
+            f'| {name:<14} | {fmt:<12} | {source:<8} | {cache:<8} | '
+            f'{sps:9.1f} | {ms_step:8.1f} | {_fmt_bytes(size):>10} | {bpf_str:>11} |'
         )
 
 

@@ -435,49 +435,60 @@ class LanceDataset(Dataset):
         return tensor
 
     def _process_batch(
-        self, ep_idx: int, g_start: int, batch, g_end: int | None = None
+        self,
+        ep_idx: int,
+        g_start: int,
+        batch,
+        g_end: int | None = None,
+        decoded_images: dict | None = None,
     ) -> dict:
         if g_end is None:
             g_end = g_start + self.span
-        steps: dict[str, Any] = {}
+        decoded_images = decoded_images or {}
+        steps = {}
         for col in self._keys:
-            if col in self._cache:
-                values = self._cache[col][g_start:g_end]
-            elif batch is None:
-                raise KeyError(
-                    f"Column '{col}' not cached and no batch provided"
-                )
+            if col in decoded_images:
+                steps[col] = decoded_images[col]
             else:
-                values = self._extract_column(batch, col)
-
-            if col in self.image_columns:
-                blobs = values[:: self.frameskip]
-                if isinstance(blobs, np.ndarray):
-                    blobs = blobs.tolist()
-                steps[col] = self._decode_images(blobs)
-                continue
-
-            data = (
-                values
-                if isinstance(values, np.ndarray)
-                else self._pylist_to_numpy(values, col)
-            )
-
-            if data.size > 0 and (
-                data.dtype == object or data.dtype.kind in ('S', 'U')
-            ):
-                first = data.flat[0]
-                if isinstance(first, (bytes, bytearray)):
-                    steps[col] = bytes(first).decode()
-                    continue
-                if isinstance(first, str):
-                    steps[col] = str(first)
-                    continue
-
-            steps[col] = self._prepare_numeric_tensor(
-                data, downsample=col != 'action'
-            )
+                steps[col] = self._process_col(col, batch, g_start, g_end)
         return steps
+
+    def _process_col(self, col: str, batch, g_start: int, g_end: int) -> Any:
+        """Decode a single window column into its tensor / scalar value.
+
+        Split out from :meth:`_process_batch` so subclasses (e.g. the
+        video-blob reader) can intercept select columns while reusing the
+        tabular / JPEG decode path verbatim.
+        """
+        if col in self._cache:
+            values = self._cache[col][g_start:g_end]
+        elif batch is None:
+            raise KeyError(f"Column '{col}' not cached and no batch provided")
+        else:
+            values = self._extract_column(batch, col)
+
+        if col in self.image_columns:
+            blobs = values[:: self.frameskip]
+            if isinstance(blobs, np.ndarray):
+                blobs = blobs.tolist()
+            return self._decode_images(blobs)
+
+        data = (
+            values
+            if isinstance(values, np.ndarray)
+            else self._pylist_to_numpy(values, col)
+        )
+
+        if data.size > 0 and (
+            data.dtype == object or data.dtype.kind in ('S', 'U')
+        ):
+            first = data.flat[0]
+            if isinstance(first, (bytes, bytearray)):
+                return bytes(first).decode()
+            if isinstance(first, str):
+                return str(first)
+
+        return self._prepare_numeric_tensor(data, downsample=col != 'action')
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         g_start = int(self.offsets[ep_idx] + start)
@@ -500,18 +511,31 @@ class LanceDataset(Dataset):
             sample_meta.append((ep_idx, g_start))
 
         big_batch = None
+        unique_pos: dict[int, int] | None = None
+        decoded_images: dict[str, torch.Tensor] = {}
         if self._fetch_columns and all_rows:
             self._ensure_open()
             unique_rows = sorted(set(all_rows))
             unique_batch = self._perm.__getitems__(unique_rows)
+            unique_pos = {row: i for i, row in enumerate(unique_rows)}
             if len(unique_rows) == len(all_rows) and all_rows == unique_rows:
                 big_batch = unique_batch
             else:
-                row_lookup = {row: i for i, row in enumerate(unique_rows)}
                 gather = pa.array(
-                    [row_lookup[r] for r in all_rows], type=pa.int64()
+                    [unique_pos[r] for r in all_rows], type=pa.int64()
                 )
                 big_batch = unique_batch.take(gather)
+
+            # Decode each fetched image column once over the deduped rows;
+            # overlapping windows then gather shared frames instead of
+            # re-decoding the same blob per window.
+            for col in self.image_columns:
+                if col in self._cache:
+                    continue
+                blobs = self._extract_column(unique_batch, col)
+                if isinstance(blobs, np.ndarray):
+                    blobs = blobs.tolist()
+                decoded_images[col] = self._decode_images(blobs)
 
         results: list[dict] = []
         for i, (ep_idx, g_start) in enumerate(sample_meta):
@@ -520,7 +544,22 @@ class LanceDataset(Dataset):
                 if big_batch is not None
                 else None
             )
-            steps = self._process_batch(ep_idx, g_start, sub_batch)
+            if decoded_images:
+                window_rows = range(
+                    g_start, g_start + self.span, self.frameskip
+                )
+                gather_idx = [unique_pos[r] for r in window_rows]
+                steps = self._process_batch(
+                    ep_idx,
+                    g_start,
+                    sub_batch,
+                    decoded_images={
+                        col: frames[gather_idx]
+                        for col, frames in decoded_images.items()
+                    },
+                )
+            else:
+                steps = self._process_batch(ep_idx, g_start, sub_batch)
             if self.transform:
                 steps = self.transform(steps)
             if 'action' in steps:
@@ -929,6 +968,10 @@ class Lance(Format):
             return True
         p = Path(s)
         if p.is_dir():
+            # A `*_videos.lance` sibling marks a video-blob dataset; defer to
+            # the `lance_video` format so it claims the directory instead.
+            if any(p.glob('*_videos.lance')):
+                return False
             return any(p.glob('*.lance'))
         return False
 
