@@ -11,11 +11,11 @@ def sigma_sampling(batch_size, device, mean=-0.4, std=1.2):
 
 def c_preconditioners(sigma, sigma_data=0.5):
     # sigma: (B,)
-    sigma = sigma.view(-1, 1, 1, 1)
-    c_in = 1.0 / (sigma**2 + sigma_data**2).sqrt()
-    c_out = (sigma * sigma_data / (sigma**2 + sigma_data**2)).sqrt()
-    c_skip = (sigma_data**2) / (sigma_data**2 + sigma**2)
-    c_noise = 0.25 * torch.log(sigma)
+    sigma1 = sigma.view(-1, 1, 1, 1)
+    c_in = 1.0 / (sigma1**2 + sigma_data**2).sqrt()
+    c_out = (sigma1 * sigma_data / (sigma1**2 + sigma_data**2)).sqrt()
+    c_skip = (sigma_data**2) / (sigma_data**2 + sigma1**2)
+    c_noise = 0.25 * torch.log(sigma1.squeeze())
     return c_in, c_out, c_skip, c_noise
 
 
