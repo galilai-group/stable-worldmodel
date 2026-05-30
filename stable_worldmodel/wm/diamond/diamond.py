@@ -30,6 +30,8 @@ class Diamond(nn.Module):
         self.action_encoder = action_encoder
         self.projector = projector or nn.Identity()
         self.pred_proj = pred_proj or nn.Identity()
+        # optional reward/termination head
+        self.rhead = kwargs.get('rhead', None)
 
     def encode(self, info):
         """Encode observations and actions into embeddings.
@@ -54,6 +56,12 @@ class Diamond(nn.Module):
         preds = self.pred_proj(rearrange(preds, 'b t d -> (b t) d'))
         preds = rearrange(preds, '(b t) d -> b t d', b=emb.size(0))
         return preds
+
+    def predict_reward_term(self, emb):
+        """Optional helper to call reward/termination head if present."""
+        if self.rhead is None:
+            raise RuntimeError('No reward/termination head attached')
+        return self.rhead(emb)
 
     ####################
     ## Inference only ##

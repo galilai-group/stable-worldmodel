@@ -51,4 +51,32 @@ class DiffusionPredictor(nn.Module):
         return out
 
 
+class RewardTerminationHead(nn.Module):
+    """A small model to predict scalar reward and binary termination from an embedding."""
+
+    def __init__(self, emb_dim, hidden=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(emb_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+        )
+        self.reward_head = nn.Linear(hidden, 1)
+        self.terminal_head = nn.Linear(hidden, 1)
+
+    def forward(self, emb):
+        # emb: (B, T, D)
+        B, T, D = emb.shape
+        x = emb.view(B * T, D)
+        h = self.net(x)
+        reward = self.reward_head(h).view(B, T, 1)
+        terminal_logits = self.terminal_head(h).view(B, T, 1)
+        terminal = torch.sigmoid(terminal_logits)
+        return reward, terminal
+
+
+__all__ = ['DiffusionPredictor', 'RewardTerminationHead']
+
+
 __all__ = ['DiffusionPredictor']
