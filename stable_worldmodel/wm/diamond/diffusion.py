@@ -72,8 +72,7 @@ class RewardTerminationHead(nn.Module):
         h = self.net(x)
         reward = self.reward_head(h).view(B, T, 1)
         terminal_logits = self.terminal_head(h).view(B, T, 1)
-        terminal = torch.sigmoid(terminal_logits)
-        return reward, terminal
+        return reward, terminal_logits
 
 
 __all__ = ['DiffusionPredictor', 'RewardTerminationHead']

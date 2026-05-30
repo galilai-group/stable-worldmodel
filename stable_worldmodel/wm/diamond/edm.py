@@ -43,12 +43,15 @@ class EDMModel(nn.Module):
         )
 
         x_in = c_in * x_noisy
-        inp = (
-            torch.cat([x_in, cond['history']], dim=1)
-            if 'history' in cond
-            else x_in
-        )
-        out = self.unet(inp, cond['cond_vec'])
+        # Concatenate historical frames channel-wise if present; otherwise
+        # duplicate the noisy input to match the U-Net expected channels.
+        if 'history' in cond and cond['history'] is not None:
+            inp = torch.cat([x_in, cond['history']], dim=1)
+        else:
+            inp = torch.cat([x_in, x_in], dim=1)
+
+        cond_vec = cond.get('cond_vec', None)
+        out = self.unet(inp, cond_vec)
         denoised = c_out * out + c_skip * x_noisy
         return denoised
 

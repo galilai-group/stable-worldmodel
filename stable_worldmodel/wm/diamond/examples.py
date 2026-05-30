@@ -2,6 +2,7 @@ import torch
 
 from .edm import EDMModel, sigma_sampling
 from .edm_sampling import sample_euler, sample_heun
+from .diffusion import RewardTerminationHead
 
 
 def example_infer(

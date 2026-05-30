@@ -3,19 +3,38 @@ import torch
 from torch import nn
 
 
+class AdaptiveGroupNorm(nn.Module):
+    """Adaptive GroupNorm: group-norm then affine modulation from cond vector."""
+
+    def __init__(self, num_groups, num_channels, cond_dim=None):
+        super().__init__()
+        self.gn = nn.GroupNorm(num_groups, num_channels, affine=False)
+        self.cond_dim = cond_dim
+        if cond_dim is not None:
+            self.proj = nn.Linear(cond_dim, num_channels * 2)
+        else:
+            self.proj = None
+
+    def forward(self, x, cond=None):
+        # x: (B, C, H, W)
+        h = self.gn(x)
+        if self.proj is not None and cond is not None:
+            # cond: (B, cond_dim)
+            ss = self.proj(cond).view(-1, 2, x.size(1), 1, 1)
+            scale = 1 + ss[:, 0]
+            shift = ss[:, 1]
+            h = h * scale + shift
+        return h
+
+
 class ResidualBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, cond_dim=None):
+    def __init__(self, in_ch, out_ch, cond_dim=None, num_groups=8):
         super().__init__()
         self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
         self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
         self.act = nn.SiLU()
-        self.norm1 = nn.GroupNorm(8, out_ch)
-        self.norm2 = nn.GroupNorm(8, out_ch)
-
-        if cond_dim is not None:
-            self.cond_proj = nn.Linear(cond_dim, out_ch * 2)
-        else:
-            self.cond_proj = None
+        self.norm1 = AdaptiveGroupNorm(num_groups, out_ch, cond_dim)
+        self.norm2 = AdaptiveGroupNorm(num_groups, out_ch, cond_dim)
 
         if in_ch != out_ch:
             self.skip = nn.Conv2d(in_ch, out_ch, 1)
@@ -24,15 +43,10 @@ class ResidualBlock(nn.Module):
 
     def forward(self, x, cond=None):
         h = self.conv1(x)
-        h = self.norm1(h)
-        if cond is not None:
-            scale_shift = self.cond_proj(cond).view(-1, 2, h.size(1), 1, 1)
-            scale = 1 + scale_shift[:, 0]
-            shift = scale_shift[:, 1]
-            h = h * scale + shift
+        h = self.norm1(h, cond)
         h = self.act(h)
         h = self.conv2(h)
-        h = self.norm2(h)
+        h = self.norm2(h, cond)
         h = self.act(h)
         return h + self.skip(x)
 

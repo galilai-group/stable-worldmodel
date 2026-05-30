@@ -61,6 +61,7 @@ class Diamond(nn.Module):
         """Optional helper to call reward/termination head if present."""
         if self.rhead is None:
             raise RuntimeError('No reward/termination head attached')
+        # returns reward (B,T,1) and terminal logits (B,T,1)
         return self.rhead(emb)
 
     ####################

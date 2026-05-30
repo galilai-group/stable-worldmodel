@@ -40,7 +40,24 @@ def edm_loss_step(model, batch, device):
     ) / c_out.view(-1, 1, 1, 1)
 
     loss = F.mse_loss(x0_hat, target)
-    return loss
+
+    # optional reward/termination training if model exposes rhead
+    extra_loss = 0.0
+    if hasattr(model, 'rhead') and model.rhead is not None:
+        # derive embedding by encoding x0_hat through a provided encoder if present
+        # here we assume model has an optional `embedder` that maps frames to embeddings
+        if hasattr(model, 'embedder') and model.embedder is not None:
+            emb = model.embedder(x0_hat.detach())
+            # expected batch fields: reward and terminal
+            if 'reward' in batch:
+                pred_r, pred_t_logits = model.rhead(emb)
+                extra_loss += F.mse_loss(pred_r, batch['reward'])
+                extra_loss += F.binary_cross_entropy_with_logits(
+                    pred_t_logits, batch['terminal']
+                )
+
+    total_loss = loss + extra_loss
+    return total_loss
 
 
 def example_train_step(model, optimizer, batch, device):
