@@ -1,14 +1,14 @@
 import os
 from pathlib import Path
 
-import hydra
+import importlib
 import lightning as pl
 import stable_pretraining as spt
 from stable_pretraining import data as dt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.loggers import WandbLogger
-from omegaconf import OmegaConf, open_dict
+from omegaconf import OmegaConf
 
 from functools import partial
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
@@ -67,13 +67,20 @@ def diamond_forward(self, batch, stage, cfg):
 
     cond_vec = None
     if 'action' in batch:
-        # simple action encoding: flatten first L actions
-        actions = (
-            batch['action'][:, :L]
-            .reshape(B, -1)
-            .to(next(self.model.parameters()).device)
+        actions = batch['action'][:, :L].to(
+            next(self.model.parameters()).device
         )
-        cond_vec = actions
+        if (
+            hasattr(self.model, 'action_encoder')
+            and self.model.action_encoder is not None
+        ):
+            # action_encoder: expects (B, T, action_dim) -> (B, T, emb_dim)
+            act_emb = self.model.action_encoder(actions)
+            # aggregate across time (mean pooling) to produce a single cond vector
+            cond_vec = act_emb.mean(dim=1)
+        else:
+            # fallback: simple flatten
+            cond_vec = actions.reshape(B, -1)
 
     train_batch = {
         'next_frame': next_frame.float(),
@@ -89,8 +96,29 @@ def diamond_forward(self, batch, stage, cfg):
     return out
 
 
-@hydra.main(version_base=None, config_path='./config', config_name='diamond')
-def run(cfg):
+def instantiate_from_config(conf):
+    """Instantiate object from a small OmegaConf/dict spec with _target_."""
+    if conf is None:
+        return None
+    if isinstance(conf, dict) or OmegaConf.is_config(conf):
+        conf = OmegaConf.to_container(conf, resolve=True)
+    assert '_target_' in conf, 'config must contain _target_'
+    target = conf['_target_']
+    module_name, class_name = target.rsplit('.', 1)
+    mod = importlib.import_module(module_name)
+    cls = getattr(mod, class_name)
+    # build kwargs excluding _target_
+    kwargs = {k: v for k, v in conf.items() if not k.startswith('_')}
+    return cls(**kwargs)
+
+
+def run(config_path: str = None):
+    # load config yaml (default path under scripts/train/config/diamond.yaml)
+    if config_path is None:
+        here = Path(__file__).parent / 'config' / 'diamond.yaml'
+        config_path = str(here)
+    cfg = OmegaConf.load(config_path)
+
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop('name')
     cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
@@ -129,7 +157,16 @@ def run(cfg):
     val_cfg['drop_last'] = False
     val = torch.utils.data.DataLoader(val_set, **val_cfg)
 
-    world_model = hydra.utils.instantiate(cfg.model)
+    world_model = instantiate_from_config(cfg.model)
+
+    # instantiate and attach action_encoder from config if present
+    action_encoder = None
+    if 'action_encoder' in cfg and cfg.action_encoder is not None:
+        try:
+            action_encoder = instantiate_from_config(cfg.action_encoder)
+            world_model.action_encoder = action_encoder
+        except Exception:
+            action_encoder = None
 
     optimizers = {
         'model_opt': {

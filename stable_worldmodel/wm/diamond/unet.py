@@ -52,24 +52,42 @@ class ResidualBlock(nn.Module):
 
 
 class SimpleUNet(nn.Module):
-    """A small U-Net for 2D images with conditioning vector.
+    """A U-Net for 2D images with conditioning vector and AdaptiveGroupNorm.
 
-    This is intentionally compact but expressive enough for experiments.
+    Parameters:
+    - in_channels: input image channels (per frame)
+    - base_ch: base number of channels
+    - cond_dim: conditioning vector dimension
+    - num_groups: number of groups for AdaptiveGroupNorm
     """
 
-    def __init__(self, in_channels=3, base_ch=64, cond_dim=256):
+    def __init__(self, in_channels=3, base_ch=96, cond_dim=256, num_groups=8):
         super().__init__()
         self.inc = nn.Conv2d(in_channels, base_ch, 3, padding=1)
 
-        self.down1 = ResidualBlock(base_ch, base_ch, cond_dim)
-        self.down2 = ResidualBlock(base_ch, base_ch * 2, cond_dim)
-        self.down3 = ResidualBlock(base_ch * 2, base_ch * 4, cond_dim)
+        self.down1 = ResidualBlock(
+            base_ch, base_ch, cond_dim, num_groups=num_groups
+        )
+        self.down2 = ResidualBlock(
+            base_ch, base_ch * 2, cond_dim, num_groups=num_groups
+        )
+        self.down3 = ResidualBlock(
+            base_ch * 2, base_ch * 4, cond_dim, num_groups=num_groups
+        )
 
-        self.mid = ResidualBlock(base_ch * 4, base_ch * 4, cond_dim)
+        self.mid = ResidualBlock(
+            base_ch * 4, base_ch * 4, cond_dim, num_groups=num_groups
+        )
 
-        self.up3 = ResidualBlock(base_ch * 8, base_ch * 2, cond_dim)
-        self.up2 = ResidualBlock(base_ch * 4, base_ch, cond_dim)
-        self.up1 = ResidualBlock(base_ch * 2, base_ch, cond_dim)
+        self.up3 = ResidualBlock(
+            base_ch * 8, base_ch * 2, cond_dim, num_groups=num_groups
+        )
+        self.up2 = ResidualBlock(
+            base_ch * 4, base_ch, cond_dim, num_groups=num_groups
+        )
+        self.up1 = ResidualBlock(
+            base_ch * 2, base_ch, cond_dim, num_groups=num_groups
+        )
 
         self.outc = nn.Conv2d(base_ch, in_channels, 1)
 

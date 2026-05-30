@@ -1,0 +1,52 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: pusht
+
+output_model_name: diamond
+subdir: diamond_run
+
+img_size: 64
+
+trainer:
+  max_epochs: 1
+  devices: auto
+  accelerator: cpu
+  precision: bf16
+
+loader:
+  batch_size: 2
+  num_workers: 0
+  drop_last: True
+  persistent_workers: False
+  prefetch_factor: 1
+  pin_memory: False
+  shuffle: True
+
+optimizer:
+  type: AdamW
+  lr: 1e-4
+  weight_decay: 1e-2
+
+wm:
+  history_size: 4
+
+model:
+  _target_: stable_worldmodel.wm.diamond.edm.EDMModel
+  in_ch: 3
+  base_ch: 32
+  cond_dim: 64
+  emb_dim: 128
+
+action_encoder:
+  _target_: stable_worldmodel.wm.lewm.module.Embedder
+  input_dim: 8
+  emb_dim: 64
+
+data:
+  dataset:
+    name: pusht
+    keys_to_load: ['pixels', 'action']
+
+wandb:
+  enabled: False

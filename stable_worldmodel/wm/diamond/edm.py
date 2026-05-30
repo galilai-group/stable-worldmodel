@@ -65,6 +65,12 @@ class EDMModel(nn.Module):
             inp = torch.cat([x_in, x_in], dim=1)
 
         cond_vec = cond.get('cond_vec', None)
+        # append scalar c_noise to conditioning vector if present
+        if cond_vec is not None:
+            # ensure shape (B, cond_dim)
+            if isinstance(cond_vec, torch.Tensor):
+                c_noise_vec = c_noise.view(-1, 1)
+                cond_vec = torch.cat([cond_vec, c_noise_vec], dim=-1)
         out = self.unet(inp, cond_vec)
         denoised = c_out * out + c_skip * x_noisy
         return denoised
