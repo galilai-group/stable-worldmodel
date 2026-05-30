@@ -40,28 +40,32 @@ def sample_euler(
 def sample_heun(
     model, cond, shape, device, n_steps=3, sigma_max=1.0, sigma_min=1e-3
 ):
-    """Heun's method (improved Euler) adapted for denoising.
+    """Heun's method using score estimates from model.score.
 
-    Uses two evaluations per step but improves stability.
+    This implements a mathematically consistent Heun update for the probability
+    flow ODE by using score = (x0_hat - x) / sigma^2 as the derivative estimator.
     """
     schedule = make_sigma_schedule(sigma_max, sigma_min, n_steps)
     x = torch.randn(*shape, device=device) * schedule[0]
 
     for i in range(len(schedule) - 1):
-        sigma = torch.tensor(schedule[i], device=device)
-        sigma_next = torch.tensor(schedule[i + 1], device=device)
+        s = schedule[i]
+        s_next = schedule[i + 1]
+        sigma = torch.tensor(s, device=device)
+        sigma_next = torch.tensor(s_next, device=device)
 
-        # first (Euler) prediction
-        x0_1 = model.predict(x, sigma, cond)
-        x_euler = x0_1 + (sigma_next / sigma) * (x - x0_1)
+        # compute score at current point
+        score1 = model.score(x, sigma, cond)
+        # Euler step (deterministic ODE-like step)
+        x_euler = x - (s_next - s) * score1
 
-        # second prediction at provisional point
-        x0_2 = model.predict(x_euler, sigma_next, cond)
+        # compute score at provisional point
+        score2 = model.score(x_euler, sigma_next, cond)
 
-        # Heun update: use the provisional Euler step for stability. A true
-        # Heun update would average derivatives (requires score estimates).
-        x = x_euler
+        # Heun update (improved): average the two slopes
+        x = x - 0.5 * (s_next - s) * (score1 + score2)
 
+    # final denoise
     x_final = model.predict(x, torch.tensor(schedule[-1], device=device), cond)
     return x_final
 

@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .unet import SimpleUNet
+from .diffusion import RewardTerminationHead
+import torch.nn as nn
 
 
 def sigma_sampling(batch_size, device, mean=-0.4, std=1.2):
@@ -27,12 +29,24 @@ class EDMModel(nn.Module):
     inputs and conditioning (frame-stack + actions embedding).
     """
 
-    def __init__(self, in_ch=3, base_ch=64, cond_dim=256, sigma_data=0.5):
+    def __init__(
+        self, in_ch=3, base_ch=64, cond_dim=256, sigma_data=0.5, emb_dim=256
+    ):
         super().__init__()
         self.unet = SimpleUNet(
             in_channels=in_ch * 2, base_ch=base_ch, cond_dim=cond_dim
         )
         self.sigma_data = sigma_data
+        # embedder: map predicted frames to embeddings for reward/termination
+        self.embedder = nn.Sequential(
+            nn.Conv2d(in_ch, base_ch, 3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(base_ch, emb_dim),
+        )
+        # reward/termination head attached by default
+        self.rhead = RewardTerminationHead(emb_dim)
 
     def forward(self, x_noisy, sigma, cond):
         # x_noisy: (B, C, H, W)
@@ -57,6 +71,15 @@ class EDMModel(nn.Module):
 
     def predict(self, x_noisy, sigma, cond):
         return self.forward(x_noisy, sigma, cond)
+
+    def score(self, x_noisy, sigma, cond):
+        """Estimate score = grad_x log p_sigma(x) using the relation
+        score = (x0_hat - x) / sigma^2 where x0_hat is predicted clean image.
+        """
+        x0_hat = self.predict(x_noisy, sigma, cond)
+        sigma1 = sigma.view(-1, 1, 1, 1)
+        score = (x0_hat - x_noisy) / (sigma1**2)
+        return score
 
 
 __all__ = ['EDMModel', 'sigma_sampling']
