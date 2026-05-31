@@ -7,9 +7,10 @@ Continuous analog of MiniGrid's DoorKey, implemented as a thin subclass of
   more door openings. Doors start locked (impassable, rendered with
   ``door.locked_color``).
 - A key is randomly placed in the agent's room.
-- When the agent gets within ``key.pickup_radius`` of the key, the key
-  disappears, doors unlock (rendered with ``door.unlocked_color``), and
-  the agent can pass through to reach the target.
+- When the agent gets within the success radius of the key (the SAME threshold
+  used to reach the target, ``self._success_dist``), the key disappears, doors
+  unlock (rendered with ``door.unlocked_color``), and the agent can pass
+  through to reach the target.
 
 All collision physics, wall/door rendering, and the variation-space scaffolding
 come from the parent. DoorKey only overrides what genuinely differs:
@@ -82,14 +83,14 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
         pos_min = float(self.BORDER_SIZE)
         pos_max = float(self.IMG_SIZE - self.BORDER_SIZE - 1)
 
-        # Key sizes/pickup-radius scale with img_size via self._scale so the
-        # key looks/behaves the same at any resolution.
+        # Key render size scales with img_size via self._scale so the key looks
+        # the same at any resolution (matches the parent's agent/target radius
+        # bounds, incl. the scaled lower floor). Key PICKUP is NOT a separate
+        # tunable radius: it uses the env success radius (self._success_dist),
+        # the same threshold as reaching the target — see _after_step_state_update.
         r_def = self._default_dot_std
-        r_lo = max(1.0, 0.5 * r_def)
+        r_lo = max(1.0 * self._scale, 0.5 * r_def)
         r_hi = 3.0 * r_def
-        pickup_def = float(15.0 * self._scale)  # ≈ 51 at 224
-        pickup_lo = float(8.0 * self._scale)
-        pickup_hi = float(25.0 * self._scale)
         # Key default in agent's room — agent default is (W*0.6, W*0.6), so
         # place the key a bit further from the wall on both axes. Valid for
         # both wall orientations.
@@ -117,15 +118,8 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
                     ),
                     constrain_fn=self._constrain_key_in_agent_room,
                 ),
-                'pickup_radius': swm_spaces.Box(
-                    low=np.array([pickup_lo], dtype=np.float32),
-                    high=np.array([pickup_hi], dtype=np.float32),
-                    init_value=np.array([pickup_def], dtype=np.float32),
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
             },
-            sampling_order=['color', 'radius', 'position', 'pickup_radius'],
+            sampling_order=['color', 'radius', 'position'],
         )
 
         # Door: reuse parent's number/size/position by reference; swap the
@@ -268,9 +262,10 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
     ):
         if self.has_key:
             return
-        pickup_r = float(
-            self.variation_space['key']['pickup_radius'].value.item()
-        )
+        # Pick the key up using the SAME radius as reaching the target
+        # (self._success_dist = _REF_SUCCESS_DIST * scale) — scale-consistent,
+        # not a fixed pixel count and not a separate tunable.
+        pickup_r = self._success_dist
         if float(torch.norm(post_pos - self.key_position)) < pickup_r:
             self.has_key = True
             # Refresh the cache so the NEXT step's physics treats doors as
