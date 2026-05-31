@@ -306,10 +306,11 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
         wall_axis = int(self.variation_space['wall']['axis'].value)
         wall_thickness = int(self.variation_space['wall']['thickness'].value)
         half_thickness = wall_thickness // 2
-        key_r = float(self.variation_space['key']['radius'].value.item())
 
-        wall_min = self.WALL_CENTER - half_thickness - key_r
-        wall_max = self.WALL_CENTER + half_thickness + key_r
+        # Key is a point (pickup is a center-distance test): exclude only the
+        # actual wall slab, no radius padding.
+        wall_min = self.WALL_CENTER - half_thickness
+        wall_max = self.WALL_CENTER + half_thickness
 
         if wall_axis == 1:  # vertical wall — rooms split on x
             agent_side = agent_pos[0] < self.WALL_CENTER
@@ -334,10 +335,11 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
         wall_axis = int(self.variation_space['wall']['axis'].value)
         wall_thickness = int(self.variation_space['wall']['thickness'].value)
         half_thickness = wall_thickness // 2
-        target_r = float(self.variation_space['target']['radius'].value.item())
 
-        wall_min = self.WALL_CENTER - half_thickness - target_r
-        wall_max = self.WALL_CENTER + half_thickness + target_r
+        # Target is a point (success is a center-distance test): exclude only
+        # the actual wall slab, no radius padding.
+        wall_min = self.WALL_CENTER - half_thickness
+        wall_max = self.WALL_CENTER + half_thickness
 
         if wall_axis == 1:  # vertical wall
             agent_side = agent_pos[0] < self.WALL_CENTER

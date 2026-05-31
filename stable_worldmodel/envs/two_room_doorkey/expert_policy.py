@@ -16,7 +16,6 @@ class DoorKeyExpertPolicy(BasePolicy):
         self,
         action_noise: float = 0.0,
         action_repeat_prob: float = 0.0,
-        door_fit_margin: float = 1.10,
         seed: int | None = None,
         **kwargs,
     ):
@@ -24,7 +23,6 @@ class DoorKeyExpertPolicy(BasePolicy):
         self.type = 'expert'
         self.action_noise = float(action_noise)
         self.action_repeat_prob = float(action_repeat_prob)
-        self.door_fit_margin = float(door_fit_margin)
         self.set_seed(seed)
 
     def set_seed(self, seed: int | None) -> None:
@@ -105,6 +103,8 @@ class DoorKeyExpertPolicy(BasePolicy):
             half_w = wall_thickness // 2
             near = wall_pos - half_w
             far = wall_pos + half_w
+            # pixel offsets below scale with render size (1.0 @ the 65px ref)
+            scale = float(getattr(env, '_scale', 1.0))
 
             # perp_idx = the axis the dot crosses to change rooms; par_idx
             # = the axis the wall runs along (and doors vary on).
@@ -113,17 +113,30 @@ class DoorKeyExpertPolicy(BasePolicy):
 
             agent_side = agent_pos[perp_idx] > wall_pos
             target_side = goal_pos[perp_idx] > wall_pos
-            target_other_room = agent_side != target_side
-
-            waypoint = None
-            best = None  # chosen door center, if any
+            # "Still crossing" until the agent is clear of the wall slab on the
+            # target's side. Treat being inside the wall band [near, far] as
+            # not-yet-arrived: otherwise the moment the agent's perp passes the
+            # centerline it declares "same room" and beelines diagonally toward
+            # the target while still embedded in the doorway -> clips a doorpost.
+            in_wall_band = near <= float(agent_pos[perp_idx]) <= far
+            target_other_room = in_wall_band or (agent_side != target_side)
 
             if not has_key:
                 # Stage 1: pick up the key. Key is constrained to the agent's
                 # room, so a straight line is always valid (no door routing).
                 waypoint = key_pos
-            elif target_other_room:
-                # Stage 2: route through a fitting door, then to target.
+            elif not target_other_room:
+                # Stage 3: same room as target (and clear of the wall): straight.
+                waypoint = goal_pos
+            else:
+                # Stage 2: two-phase door traversal (ALIGN, then CROSS). Aiming
+                # straight at the door *center* and crossing diagonally jams the
+                # agent against the SOLID wall whenever its par-coord is outside
+                # the opening (the path reaches the wall before the agent slides
+                # into the doorway), and the collision pushback then cancels its
+                # motion -> a frozen fixed point. So first ALIGN to the door on
+                # our own side (a path that never crosses the wall), then CROSS
+                # straight through with par locked to the door center.
                 num = int(env.variation_space['door']['number'].value)
                 door_pos = np.asarray(
                     env.variation_space['door']['position'].value,
@@ -132,68 +145,79 @@ class DoorKeyExpertPolicy(BasePolicy):
                 door_size = np.asarray(
                     env.variation_space['door']['size'].value, dtype=np.float32
                 )[:num]
-                agent_radius = float(
-                    env.variation_space['agent']['radius'].value.item()
-                )
 
                 # Pick the door minimizing total path length
-                # (agent -> door -> target). Avoids choosing a door close to
-                # the agent that requires a diagonal exit clipping the
-                # far doorpost.
+                # (agent -> door -> target). The agent is a POINT, so a door is
+                # usable as long as its opening — clipped to the playable area —
+                # has positive width; route by the center of that usable slot
+                # (aiming at a door's geometric center can land under the border
+                # and jam the agent at the wall/border corner).
+                low_play = float(env.BORDER_SIZE)
+                high_play = float(env.IMG_SIZE - env.BORDER_SIZE)
+                best_par = None
+                best_half = 0.0
                 best_total = float('inf')
                 for c_1d, s in zip(door_pos, door_size):
-                    if float(s) < self.door_fit_margin * agent_radius:
-                        continue
+                    slot_lo = max(float(c_1d) - float(s), low_play)
+                    slot_hi = min(float(c_1d) + float(s), high_play)
+                    if (slot_hi - slot_lo) <= 1.0 * scale:
+                        continue  # opening lies entirely under the border
+                    par_center = 0.5 * (slot_lo + slot_hi)
+                    half_usable = 0.5 * (slot_hi - slot_lo)
                     if wall_axis == 1:
-                        door_center = np.array(
-                            [wall_pos, float(c_1d)], dtype=np.float32
+                        door_pt = np.array(
+                            [wall_pos, par_center], dtype=np.float32
                         )
                     else:
-                        door_center = np.array(
-                            [float(c_1d), wall_pos], dtype=np.float32
+                        door_pt = np.array(
+                            [par_center, wall_pos], dtype=np.float32
                         )
                     total = float(
-                        np.linalg.norm(door_center - agent_pos)
-                    ) + float(np.linalg.norm(goal_pos - door_center))
+                        np.linalg.norm(door_pt - agent_pos)
+                    ) + float(np.linalg.norm(goal_pos - door_pt))
                     if total < best_total:
                         best_total = total
-                        best = door_center
+                        best_par = par_center
+                        best_half = half_usable
 
-                if best is None:
-                    # Fallback: aim at the wall aligned with target.
-                    if wall_axis == 1:
-                        waypoint = np.array(
-                            [wall_pos, goal_pos[1]], dtype=np.float32
-                        )
-                    else:
-                        waypoint = np.array(
-                            [goal_pos[0], wall_pos], dtype=np.float32
-                        )
-                else:
-                    waypoint = best  # default: approach the chosen door
-            else:
-                # Stage 3: same room as target after pickup.
-                waypoint = goal_pos
-
-            # In-wall-band override (only relevant in Stage 2): once the agent
-            # is inside the wall thickness, drive perpendicular straight
-            # through, locking the par-axis to the chosen door's center.
-            agent_perp = float(agent_pos[perp_idx])
-            if best is not None and (near - 1.0) <= agent_perp <= (far + 1.0):
-                exit_perp = (
-                    far + 5.0 if goal_pos[perp_idx] > wall_pos else near - 5.0
-                )
                 waypoint = np.empty(2, dtype=np.float32)
-                waypoint[perp_idx] = exit_perp
-                waypoint[par_idx] = best[par_idx]
+                if best_par is None:
+                    # No door fits the agent — degenerate; aim at the wall in
+                    # line with the target so we at least try.
+                    waypoint[perp_idx] = wall_pos
+                    waypoint[par_idx] = goal_pos[par_idx]
+                else:
+                    # Collision is point-based (the env collides the dot's
+                    # CENTER, with no agent-radius padding), so the crossing
+                    # geometry uses small scale buffers, not the agent radius:
+                    # clear the wall face by a hair, and require the center to be
+                    # inside the usable opening (minus a small lip buffer) before
+                    # committing to the straight-through crossing.
+                    clear = half_w + 2.0 * scale
+                    half_in = max(0.5 * scale, best_half - 1.0 * scale)
+                    aligned = (
+                        abs(float(agent_pos[par_idx]) - best_par) <= half_in
+                    )
+                    on_side = target_side if aligned else agent_side
+                    waypoint[par_idx] = best_par
+                    waypoint[perp_idx] = (
+                        wall_pos + clear if on_side else wall_pos - clear
+                    )
 
-            # --- convert waypoint to action direction (unit vector) ---
-            direction = waypoint - agent_pos
-            norm = float(np.linalg.norm(direction))
+            # --- convert waypoint to an action ---
+            # Proportional speed near the waypoint: scale the unit heading by
+            # min(1, dist / speed) so the agent settles exactly onto staging
+            # points and the door-center par instead of overshooting (bang-bang
+            # oscillation). This is what lets it thread narrow / fast-speed
+            # doorways rather than orbiting them.
+            speed = float(env.variation_space['agent']['speed'].value.item())
+            delta = waypoint - agent_pos
+            norm = float(np.linalg.norm(delta))
             if norm > 1e-8:
-                direction = direction / norm
+                mag = min(1.0, norm / max(speed, 1e-6))
+                direction = (delta / norm) * mag
             else:
-                direction = np.zeros_like(direction, dtype=np.float32)
+                direction = np.zeros_like(delta, dtype=np.float32)
 
             if is_vectorized:
                 actions[i] = direction.astype(np.float32)
