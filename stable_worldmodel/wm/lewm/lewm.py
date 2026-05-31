@@ -55,13 +55,15 @@ class LeWM(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(self, info, action_sequence, history_size: int = None):
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
          - S is the number of action plan samples
          - T is the time horizon
         """
+        if history_size is None:
+            history_size = getattr(self.predictor, 'num_frames', 3)
 
         assert 'pixels' in info, 'pixels not in info_dict'
         H = info['pixels'].size(2)
