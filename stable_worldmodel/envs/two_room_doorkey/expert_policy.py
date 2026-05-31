@@ -172,9 +172,9 @@ class DoorKeyExpertPolicy(BasePolicy):
                         door_pt = np.array(
                             [par_center, wall_pos], dtype=np.float32
                         )
-                    total = float(
-                        np.linalg.norm(door_pt - agent_pos)
-                    ) + float(np.linalg.norm(goal_pos - door_pt))
+                    total = float(np.linalg.norm(door_pt - agent_pos)) + float(
+                        np.linalg.norm(goal_pos - door_pt)
+                    )
                     if total < best_total:
                         best_total = total
                         best_par = par_center
