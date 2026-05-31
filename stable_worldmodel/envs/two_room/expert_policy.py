@@ -15,16 +15,14 @@ class ExpertPolicy(BasePolicy):
         action_noise: float = 0.0,
         action_repeat_prob: float = 0.0,
         door_fit_margin: float = 1.10,
-        door_reach_tol: float | None = None,
         seed: int | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.type = 'expert'
         self.action_noise = float(action_noise)
+        self.action_repeat_prob = float(action_repeat_prob)
         self.door_fit_margin = float(door_fit_margin)
-        # If None, will default to ~3*scale per-env at runtime
-        self.door_reach_tol = door_reach_tol
         self.set_seed(seed)
 
     def set_seed(self, seed: int | None) -> None:
@@ -81,16 +79,26 @@ class ExpertPolicy(BasePolicy):
                 env.variation_space['wall']['axis'].value
             )  # 1 vertical, 0 horizontal
             wall_pos = float(env.wall_pos)  # must match env physics/collision
+            wall_thickness = int(
+                env.variation_space['wall']['thickness'].value
+            )
+            half_w = wall_thickness // 2
+            near = wall_pos - half_w
+            far = wall_pos + half_w
+            # pixel offsets below scale with render size (1.0 @ the 65px ref)
+            scale = float(getattr(env, '_scale', 1.0))
 
-            # Room is determined by x if vertical wall, by y if horizontal wall
-            room_idx = 0 if wall_axis == 1 else 1
+            # perp_idx = the axis the dot crosses to change rooms; par_idx
+            # = the axis the wall runs along (and doors vary on).
+            perp_idx = 0 if wall_axis == 1 else 1
+            par_idx = 1 - perp_idx
 
-            agent_side = agent_pos[room_idx] > wall_pos
-            target_side = goal_pos[room_idx] > wall_pos
+            agent_side = agent_pos[perp_idx] > wall_pos
+            target_side = goal_pos[perp_idx] > wall_pos
             target_other_room = agent_side != target_side
 
             waypoint = None
-
+            best = None  # chosen door center, if any
             if target_other_room:
                 # Doors: interpret consistently with env:
                 # - position: center coordinate along wall direction (no border offset)
@@ -107,29 +115,27 @@ class ExpertPolicy(BasePolicy):
                     env.variation_space['agent']['radius'].value.item()
                 )
 
-                # Choose closest door center that fits
-                best = None
-                best_dist = float('inf')
-
+                # Choose the door minimizing total path length
+                # (agent -> door -> target). The previous "closest to agent"
+                # rule can pick a door that requires a diagonal exit which
+                # clips the far doorpost.
+                best_total = float('inf')
                 for c_1d, s in zip(door_pos, door_size):
-                    # Fit test: opening half-extent should exceed radius (with margin)
                     if float(s) < self.door_fit_margin * agent_radius:
                         continue
-
                     if wall_axis == 1:
-                        # vertical wall at x=wall_pos, door center at y=c_1d
                         door_center = np.array(
                             [wall_pos, float(c_1d)], dtype=np.float32
                         )
                     else:
-                        # horizontal wall at y=wall_pos, door center at x=c_1d
                         door_center = np.array(
                             [float(c_1d), wall_pos], dtype=np.float32
                         )
-
-                    d = float(np.linalg.norm(door_center - agent_pos))
-                    if d < best_dist:
-                        best_dist = d
+                    total = float(
+                        np.linalg.norm(door_center - agent_pos)
+                    ) + float(np.linalg.norm(goal_pos - door_center))
+                    if total < best_total:
+                        best_total = total
                         best = door_center
 
                 if best is None:
@@ -143,18 +149,24 @@ class ExpertPolicy(BasePolicy):
                             [goal_pos[0], wall_pos], dtype=np.float32
                         )
                 else:
-                    # Two-stage: go to door center first; once close, go to target
-                    tol = (
-                        float(self.door_reach_tol)
-                        if self.door_reach_tol is not None
-                        else 10.5  # was 3.0 * scale (3.5)
-                    )
-                    if np.linalg.norm(best - agent_pos) > tol:
-                        waypoint = best
-                    else:
-                        waypoint = goal_pos
+                    waypoint = best  # default: approach the chosen door
             else:
                 waypoint = goal_pos
+
+            # In-wall-band: if the agent is inside the wall
+            # thickness, drive perpendicular straight through.
+            agent_perp = float(agent_pos[perp_idx])
+            if best is not None and (near - 1.0 * scale) <= agent_perp <= (
+                far + 1.0 * scale
+            ):
+                exit_perp = (
+                    far + 5.0 * scale
+                    if goal_pos[perp_idx] > wall_pos
+                    else near - 5.0 * scale
+                )
+                waypoint = np.empty(2, dtype=np.float32)
+                waypoint[perp_idx] = exit_perp
+                waypoint[par_idx] = best[par_idx]
 
             # --- convert waypoint to action direction (unit vector) ---
             direction = waypoint - agent_pos
