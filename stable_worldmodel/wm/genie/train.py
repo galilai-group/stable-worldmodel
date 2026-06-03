@@ -19,6 +19,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from einops import rearrange
@@ -29,10 +30,9 @@ import stable_worldmodel as swm
 from stable_worldmodel.envs.pusht import WeakPolicy
 
 # Adjust import paths to match your layout
-from stable_worldmodel.wm.genie.st_transformer import ST_Transformer
 from stable_worldmodel.wm.genie.st_vivit import ST_ViViT
 from stable_worldmodel.wm.genie.lam import LAM
-from stable_worldmodel.wm.genie.st_mask_git import ST_MaskGIT
+from stable_worldmodel.wm.genie.st_maskgit import ST_MaskGIT, ST_Transformer
 from stable_worldmodel.wm.genie.vq import VectorQuantizer
 from stable_worldmodel.wm.genie.genie import Genie
 
@@ -82,6 +82,10 @@ class TrainConfig:
     dead_code_reinit_every: int = 500
     log_every: int = 100
     save_every: int = 5_000
+    val_every: int = 1_000
+    val_samples: int = 4
+    wandb_project: str | None = None
+    wandb_run_name: str | None = None
     ckpt_dir: str = "checkpoints"
     device: str = "cuda"
     dtype: str = "bfloat16"
@@ -167,11 +171,11 @@ def maskgit_mask(tokens: Tensor, mask_token_id: int) -> tuple[Tensor, Tensor]:
 
 def build_genie(cfg: TrainConfig) -> Genie:
     def make_st() -> ST_Transformer:
-        # Adjust to match your ST_Transformer constructor signature
         return ST_Transformer(
             num_layers=cfg.num_layers,
             num_heads=cfg.num_heads,
             d_model=cfg.d_model,
+            temporal_dim=cfg.temporal_dim,
         )
 
     tokenizer = ST_ViViT(
@@ -234,7 +238,7 @@ def load_ckpt(module: nn.Module, optimizer, path: Path) -> int:
 @torch.no_grad()
 def _tokenizer_pre_vq(tok: ST_ViViT, video: Tensor) -> Tensor:
     B, T = video.size(0), video.size(1)
-    patches = tok.enc_patchify(rearrange(video, "B T H W c -> (B T) c H W"))
+    patches = tok.patchify(rearrange(video, "B T H W c -> (B T) c H W"))
     patches = rearrange(patches, "(B T) C h w -> B T (h w) C", B=B, T=T)
     return tok.pre_vq_proj(tok.encoder(patches + tok.enc_pos_embed_TSC))
 
@@ -249,10 +253,98 @@ def _lam_pre_vq(lam: LAM, video: Tensor) -> Tensor:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Validation + wandb helpers
+# ────────────────────────────────────────────────────────────────────────────
+
+def _video_to_uint8_grid(video: Tensor) -> np.ndarray:
+    """(B, T, H, W, c) float in [-1, 1] -> (B*H, T*W, 3) uint8 image grid."""
+    v = video.detach().clamp(-1, 1).add(1).mul(127.5).byte().cpu().numpy()
+    B, T, H, W, c = v.shape
+    return v.transpose(0, 2, 1, 3, 4).reshape(B * H, T * W, c)
+
+
+def _stack_recon_grid(gt: Tensor, recon: Tensor) -> np.ndarray:
+    g = _video_to_uint8_grid(gt)
+    r = _video_to_uint8_grid(recon)
+    sep = np.full((4, g.shape[1], 3), 255, dtype=np.uint8)
+    return np.concatenate([g, sep, r], axis=0)
+
+
+@torch.no_grad()
+def validate_tokenizer(tok: nn.Module, val_loader: DataLoader, cfg: TrainConfig) -> dict:
+    tok.eval()
+    device = torch.device(cfg.device)
+    total_recon, total_vq, n = 0.0, 0.0, 0
+    grid = None
+    for video in val_loader:
+        video = video.to(device)
+        video_hat, _, vq_loss = tok(video)
+        recon_loss = F.mse_loss(video_hat, video)
+        total_recon += recon_loss.item() * video.size(0)
+        total_vq += vq_loss.item() * video.size(0)
+        n += video.size(0)
+        if grid is None:
+            k = min(cfg.val_samples, video.size(0))
+            grid = _stack_recon_grid(video[:k], video_hat[:k])
+    tok.train()
+    return {"val/recon": total_recon / max(1, n), "val/vq": total_vq / max(1, n), "_grid": grid}
+
+
+@torch.no_grad()
+def validate_joint(genie: Genie, val_loader: DataLoader, cfg: TrainConfig) -> dict:
+    tok, lam, dyn = genie.tokenizer, genie.lam, genie.dynamics
+    tok.eval(); lam.eval(); dyn.eval()
+    device = torch.device(cfg.device)
+    total_lam_recon, total_lam_vq, total_dyn, total_acc, n = 0.0, 0.0, 0.0, 0.0, 0
+    grid = None
+    for video in val_loader:
+        video = video.to(device)
+        _, action_q_TE, lam_vq_loss = lam.extract_actions(video)
+        next_pred = lam.predict_next_frames(video[:, :-1], action_q_TE)
+        lam_recon = F.mse_loss(next_pred, video[:, 1:])
+        tokens, _, _ = tok.encode(video)
+        input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id)
+        dyn_out = dyn(input_ids, labels, actions_T=action_q_TE)
+        total_lam_recon += lam_recon.item() * video.size(0)
+        total_lam_vq += lam_vq_loss.item() * video.size(0)
+        total_dyn += dyn_out["loss"].item() * video.size(0)
+        total_acc += dyn_out["acc"].item() * video.size(0)
+        n += video.size(0)
+        if grid is None:
+            k = min(cfg.val_samples, video[:, :-1].size(0))
+            grid = _stack_recon_grid(video[:k, 1:], next_pred[:k])
+    lam.train(); dyn.train()
+    return {
+        "val/lam_recon": total_lam_recon / max(1, n),
+        "val/lam_vq": total_lam_vq / max(1, n),
+        "val/dyn_loss": total_dyn / max(1, n),
+        "val/dyn_acc": total_acc / max(1, n),
+        "_grid": grid,
+    }
+
+
+def _log_wandb(run, payload: dict, step: int) -> None:
+    if run is None:
+        return
+    import wandb
+    log = {k: v for k, v in payload.items() if not k.startswith("_")}
+    if "_grid" in payload and payload["_grid"] is not None:
+        log["val/reconstruction"] = wandb.Image(payload["_grid"], caption=f"step {step} (top: gt, bottom: recon)")
+    run.log(log, step=step)
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Phase 1: tokenizer
 # ────────────────────────────────────────────────────────────────────────────
 
-def train_tokenizer(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_step: int = 0):
+def train_tokenizer(
+    genie: Genie,
+    loader: DataLoader,
+    cfg: TrainConfig,
+    start_step: int = 0,
+    val_loader: DataLoader | None = None,
+    wandb_run=None,
+):
     tok = genie.tokenizer
     tok.train()
     device = torch.device(cfg.device)
@@ -266,7 +358,7 @@ def train_tokenizer(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_st
     step = start_step
     while step < cfg.tokenizer_steps:
         for video in loader:
-            video = video.to(device, non_blocking=True)
+            video = video.to(device, non_blocking=(device.type != "mps"))
 
             with torch.autocast(device_type=device.type, dtype=dtype):
                 video_hat, _, vq_loss = tok(video)
@@ -282,11 +374,23 @@ def train_tokenizer(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_st
             if step % cfg.log_every == 0:
                 print(f"[tokenizer] step {step:>7d} | recon {recon_loss.item():.4f} "
                       f"| vq {vq_loss.item():.4f} | lr {sched.get_last_lr()[0]:.2e}")
+                _log_wandb(wandb_run, {
+                    "train/recon": recon_loss.item(),
+                    "train/vq": vq_loss.item(),
+                    "train/lr": sched.get_last_lr()[0],
+                }, step)
 
             if step and step % cfg.dead_code_reinit_every == 0:
                 n = tok.vq.reinit_dead_codes(_tokenizer_pre_vq(tok, video))
                 if n:
                     print(f"[tokenizer] step {step:>7d} | reinit'd {n} dead codes")
+                    _log_wandb(wandb_run, {"train/dead_codes_reinit": n}, step)
+
+            if val_loader is not None and step and step % cfg.val_every == 0:
+                val = validate_tokenizer(tok, val_loader, cfg)
+                print(f"[tokenizer] step {step:>7d} | "
+                      f"val_recon {val['val/recon']:.4f} | val_vq {val['val/vq']:.4f}")
+                _log_wandb(wandb_run, val, step)
 
             if step and step % cfg.save_every == 0:
                 save_ckpt(tok, opt, step, ckpt_dir / f"tokenizer_step{step}.pt")
@@ -295,6 +399,10 @@ def train_tokenizer(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_st
             if step >= cfg.tokenizer_steps:
                 break
 
+    if val_loader is not None:
+        val = validate_tokenizer(tok, val_loader, cfg)
+        print(f"[tokenizer] step {step:>7d} | final val_recon {val['val/recon']:.4f} | val_vq {val['val/vq']:.4f}")
+        _log_wandb(wandb_run, val, step)
     save_ckpt(tok, opt, step, ckpt_dir / "tokenizer_final.pt")
 
 
@@ -302,7 +410,14 @@ def train_tokenizer(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_st
 # Phase 2: LAM + dynamics, tokenizer frozen
 # ────────────────────────────────────────────────────────────────────────────
 
-def train_joint(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_step: int = 0):
+def train_joint(
+    genie: Genie,
+    loader: DataLoader,
+    cfg: TrainConfig,
+    start_step: int = 0,
+    val_loader: DataLoader | None = None,
+    wandb_run=None,
+):
     tok, lam, dyn = genie.tokenizer, genie.lam, genie.dynamics
 
     tok.eval()
@@ -323,10 +438,10 @@ def train_joint(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_step: 
     step = start_step
     while step < cfg.joint_steps:
         for video in loader:
-            video = video.to(device, non_blocking=True)
+            video = video.to(device, non_blocking=(device.type != "mps"))
 
             with torch.autocast(device_type=device.type, dtype=dtype):
-                action_ids, action_q_TE, lam_vq_loss = lam.extract_actions(video)
+                _, action_q_TE, lam_vq_loss = lam.extract_actions(video)
                 next_pred = lam.predict_next_frames(video[:, :-1], action_q_TE)
                 lam_recon = F.mse_loss(next_pred, video[:, 1:])
                 lam_loss = lam_recon + lam_vq_loss
@@ -351,11 +466,26 @@ def train_joint(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_step: 
                       f"lam_recon {lam_recon.item():.4f} | lam_vq {lam_vq_loss.item():.4f} | "
                       f"dyn {dyn_out['loss'].item():.4f} | acc {dyn_out['acc'].item():.3f} | "
                       f"lr {sched.get_last_lr()[0]:.2e}")
+                _log_wandb(wandb_run, {
+                    "train/lam_recon": lam_recon.item(),
+                    "train/lam_vq": lam_vq_loss.item(),
+                    "train/dyn_loss": dyn_out["loss"].item(),
+                    "train/dyn_acc": dyn_out["acc"].item(),
+                    "train/lr": sched.get_last_lr()[0],
+                }, step)
 
             if step and step % cfg.dead_code_reinit_every == 0:
                 n = lam.vq.reinit_dead_codes(_lam_pre_vq(lam, video))
                 if n:
                     print(f"[joint] step {step:>7d} | reinit'd {n} LAM codes")
+                    _log_wandb(wandb_run, {"train/lam_dead_codes_reinit": n}, step)
+
+            if val_loader is not None and step and step % cfg.val_every == 0:
+                val = validate_joint(genie, val_loader, cfg)
+                print(f"[joint] step {step:>7d} | "
+                      f"val_lam_recon {val['val/lam_recon']:.4f} | val_dyn {val['val/dyn_loss']:.4f} "
+                      f"| val_acc {val['val/dyn_acc']:.3f}")
+                _log_wandb(wandb_run, val, step)
 
             if step and step % cfg.save_every == 0:
                 save_ckpt(genie, opt, step, ckpt_dir / f"joint_step{step}.pt")
@@ -364,6 +494,11 @@ def train_joint(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_step: 
             if step >= cfg.joint_steps:
                 break
 
+    if val_loader is not None:
+        val = validate_joint(genie, val_loader, cfg)
+        print(f"[joint] step {step:>7d} | final val_lam_recon {val['val/lam_recon']:.4f} "
+              f"| val_dyn {val['val/dyn_loss']:.4f} | val_acc {val['val/dyn_acc']:.3f}")
+        _log_wandb(wandb_run, val, step)
     save_ckpt(genie, opt, step, ckpt_dir / "joint_final.pt")
 
 
@@ -373,7 +508,7 @@ def train_joint(genie: Genie, loader: DataLoader, cfg: TrainConfig, start_step: 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=["tokenizer", "joint"], required=True)
+    parser.add_argument("--phase", choices=["tokenizer", "joint"], default="tokenizer")
     parser.add_argument("--tokenizer-ckpt", type=str, default=None)
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--config", type=str, default=None)
@@ -388,7 +523,7 @@ def main():
     ensure_pusht_dataset(cfg)
 
     # 2. Build dataset / loader
-    dataset = PushTVideoDataset(cfg.data_path, num_steps=cfg.temporal_dim)
+    dataset = PushTVideoDataset(str(Path(cfg.data_path).absolute()), num_steps=cfg.temporal_dim)
     loader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True,
                         num_workers=cfg.num_workers, pin_memory=True, drop_last=True)
 

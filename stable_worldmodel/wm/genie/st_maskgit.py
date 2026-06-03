@@ -17,6 +17,7 @@ class SelfAttention(nn.Module):
         qk_use_mup: bool = True,
         attn_drop: float = 0.0,
         causal: bool = True,
+        max_seq_len: int | None = None,
     ) -> None:
         super().__init__()
 
@@ -27,22 +28,20 @@ class SelfAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(d_model, d_model, bias=proj_use_bias)
         self.qk_norm = qk_use_norm
+        self.causal = causal
 
         if self.qk_norm:
             # use qk normalization using fp32 as in LN
             self.norm = nn.LayerNorm(self.head_dim, eps=1e-05)
-        
-        if self.causal:
-            self.causal_mask = self._generate_causal_mask(d_model)
-            self.register_buffer('causal_mask', self.causal_mask)
 
-    def _generate_causal_mask(self, n_tokens: int) -> Tensor:
-        mask = torch.tril(torch.ones(n_tokens, n_tokens))
-        return rearrange(mask, 'N N -> 1 1 N N')
+        if self.causal:
+            assert max_seq_len is not None, 'causal=True requires max_seq_len'
+            mask = torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool), diagonal=1)
+            self.register_buffer('causal_mask', mask.view(1, 1, max_seq_len, max_seq_len))
 
     def forward(self, x: Tensor, causal: bool = True) -> Tensor:
         qkv: Tensor = self.qkv(x)
-        qkv = rearrange(qkv, 'B N (3 H D) -> 3 B H N D', H=self.num_heads)
+        qkv = rearrange(qkv, 'B N (three H D) -> three B H N D', three=3, H=self.num_heads)
         q,k,v = qkv[0], qkv[1], qkv[2]
 
         if self.qk_norm:
@@ -54,7 +53,8 @@ class SelfAttention(nn.Module):
         attn = q @ rearrange(k, 'B H N D -> B H D N')
 
         if causal:
-            attn = attn.masked_fill(self.causal_mask, -torch.finfo(attn.dtype).max)
+            N = attn.size(-1)
+            attn = attn.masked_fill(self.causal_mask[..., :N, :N], -1e9)
 
         attn = attn.softmax(dim=-1)
 
@@ -91,6 +91,7 @@ class ST_Block(nn.Module):
         self,
         num_heads: int,
         d_model: int,
+        temporal_dim: int,
         proj_use_bias: bool = True,
         qkv_use_bias: bool = False,
         qk_use_norm: bool = True,
@@ -102,7 +103,7 @@ class ST_Block(nn.Module):
     ) -> None:
         super().__init__()
         self.norm1 = nn.Identity() if qk_use_norm else nn.LayerNorm(d_model, eps=1e-05)
-        
+
         attn_args = dict(
             num_heads=num_heads,
             d_model=d_model,
@@ -113,8 +114,8 @@ class ST_Block(nn.Module):
             attn_drop=attn_dropout,
         )
 
-        self.spatial_attn = SelfAttention(**attn_args)
-        self.temporal_attn = SelfAttention(**attn_args)
+        self.spatial_attn = SelfAttention(**attn_args, causal=False)
+        self.temporal_attn = SelfAttention(**attn_args, causal=True, max_seq_len=temporal_dim)
         
         self.norm2 = nn.Identity() if qk_use_norm else nn.LayerNorm(d_model, eps=1e-05)
         self.mlp = MLP(d_model=d_model, ratio=mlp_ratio, use_bias=mlp_use_bias, dropout=mlp_dropout)
@@ -142,6 +143,7 @@ class ST_Transformer(nn.Module):
         num_layers: int,
         num_heads: int,
         d_model: int,
+        temporal_dim: int,
         qkv_use_bias: bool = False,
         proj_use_bias: bool = True,
         qk_use_norm: bool = True,
@@ -155,6 +157,7 @@ class ST_Transformer(nn.Module):
         st_block_args = dict(
             num_heads=num_heads,
             d_model=d_model,
+            temporal_dim=temporal_dim,
             qkv_use_bias=qkv_use_bias,
             proj_use_bias=proj_use_bias,
             qk_use_norm=qk_use_norm,
