@@ -187,9 +187,11 @@ for _swm_id, _gym_id in [
 _OPENAPPS_ENTRY = 'stable_worldmodel.envs.openapps.env:OpenAppsEnv'
 
 try:
-    # ``open_apps`` and ``playwright`` ride in the swm[env] extra. Guard
-    # the registration so a user without the extra still gets a usable
-    # ``stable_worldmodel.envs`` module.
+    # ``open_apps``, ``playwright`` and ``mcp`` ride in the swm[env] extra.
+    # Guard the registration so a user without the extra still gets a
+    # usable ``stable_worldmodel.envs`` module. The env talks to an
+    # ``open_apps`` MCP server subprocess (which uses playwright).
+    import mcp  # noqa: F401
     import open_apps  # noqa: F401
     import playwright  # noqa: F401
 

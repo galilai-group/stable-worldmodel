@@ -1,6 +1,9 @@
-"""VLMPolicy — BasePolicy subclass that calls VLMs for action selection.
+"""Policies for the OpenApps MCP env.
 
-Supported agents: UI-TARS, Dummy (random).
+VLMPolicy emits raw UI-TARS / BrowserGym action *strings*; the env routes
+them to the server's ``act_str`` (which parses both formats), so there is
+no grid codec or action dropping here anymore. DummyPolicy samples the
+env's pixel-native Dict action space.
 """
 
 from collections import deque
@@ -10,15 +13,11 @@ from loguru import logger
 
 from stable_worldmodel.policy import BasePolicy
 
-from .executor import (
-    GRID_X,
-    GRID_Y,
-    action_str_to_multidiscrete,
-)
-
 try:
-    from browsergym.core.action.parsers import uitars_parser
-except ImportError:
+    # OpenApps' own UI-TARS -> BrowserGym translation, so the mapping is
+    # identical to running UI-TARS directly against OpenApps.
+    from open_apps.agent.utils import uitars_parser
+except Exception:  # pragma: no cover - optional heavy dep (agentlab)
     uitars_parser = None
 
 
@@ -26,37 +25,22 @@ class VLMPolicy(BasePolicy):
     """Policy that uses a Vision-Language Model to select UI actions.
 
     Args:
-        agent: Any object with a predict(screenshot, task, history) method
-               that returns a TARS-formatted or BrowserGym-formatted action
-               string.
-        task_description: Natural-language description of the task goal.
-        history_len: Number of past screenshots to include in the VLM prompt.
+        agent: Object with ``predict(screenshot, task, history)`` returning a
+            UI-TARS- or BrowserGym-formatted action string.
+        task_description: Natural-language goal for the VLM prompt.
+        history_len: Number of past screenshots to include in the prompt.
     """
 
-    def __init__(
-        self,
-        agent,
-        task_description: str,
-        history_len: int = 4,
-        **kwargs,
-    ):
+    def __init__(self, agent, task_description: str, history_len: int = 4, **kwargs):
         super().__init__(**kwargs)
         self.type = 'vlm'
         self.agent = agent
         self.task = task_description
         self.history: deque = deque(maxlen=history_len)
-        self._dropped_action_count = 0
         self._total_steps = 0
 
-    def get_action(self, obs, **kwargs) -> np.ndarray:
-        """Get action from VLM given the current observation.
-
-        Args:
-            obs: Dict with at least 'pixels' key (H, W, 3 uint8 array).
-
-        Returns:
-            MultiDiscrete int64 array [action_type, grid_x, grid_y].
-        """
+    def get_action(self, obs, **kwargs) -> str:
+        """Return a BrowserGym action string for the env's ``act`` path."""
         screenshot = obs['pixels'] if isinstance(obs, dict) else obs
         screenshot = np.squeeze(screenshot)
         self.history.append(screenshot)
@@ -67,63 +51,20 @@ class VLMPolicy(BasePolicy):
             task=self.task,
             history=list(self.history),
         )
-
-        parsed = self._parse_action(raw)
-
-        if not self._is_supported(parsed):
-            self._dropped_action_count += 1
-            logger.debug(
-                f'Unsupported action dropped ({self._dropped_action_count}/'
-                f'{self._total_steps}): {parsed}'
-            )
-            return np.array([[0, GRID_X // 2, GRID_Y // 2]], dtype=np.int64)
-
-        try:
-            return action_str_to_multidiscrete(parsed)[None, :]
-        except ValueError as e:
-            self._dropped_action_count += 1
-            logger.debug(
-                f'Malformed action dropped ({self._dropped_action_count}/'
-                f'{self._total_steps}): {parsed} ({e})'
-            )
-            return np.array([[0, GRID_X // 2, GRID_Y // 2]], dtype=np.int64)
-
-    @staticmethod
-    def _is_supported(parsed: str) -> bool:
-        """True if the parsed action maps to a click/scroll the env can run."""
-        supported = ('mouse_click', 'click(', 'scroll')
-        return parsed.startswith(supported)
-
-    def _parse_action(self, raw_action: str) -> str:
-        """Parse raw VLM output into a BrowserGym-style action string."""
-        if uitars_parser is None:
-            return raw_action
-        try:
-            return uitars_parser({'action': raw_action})['action']
-        except Exception:
-            return raw_action
-
-    @property
-    def dropped_action_rate(self) -> float:
-        """Fraction of steps where unsupported actions were dropped."""
-        if self._total_steps == 0:
-            return 0.0
-        return self._dropped_action_count / self._total_steps
+        action = uitars_parser({'action': raw})['action'] if uitars_parser else raw
+        logger.debug(f'VLM action: {raw!r} -> {action!r}')
+        return action
 
 
 class DummyPolicy(BasePolicy):
-    """Random action policy.
-
-    Samples uniformly from MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y]).
-    """
+    """Random policy: samples the env's Dict action space."""
 
     def __init__(self, seed: int | None = None, **kwargs):
         super().__init__(**kwargs)
         self.type = 'dummy'
         self.seed = seed
 
-    def get_action(self, obs, **kwargs) -> np.ndarray:
-        """Return a random MultiDiscrete action."""
+    def get_action(self, obs, **kwargs):
         return self.env.action_space.sample()
 
     def set_seed(self, seed: int) -> None:

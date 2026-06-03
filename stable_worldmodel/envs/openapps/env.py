@@ -1,6 +1,13 @@
-"""OpenAppsEnv — gymnasium environment wrapping Playwright + OpenApps Runtime."""
+"""OpenAppsEnv — gymnasium env backed by an OpenApps MCP server.
 
-import io
+Each env spawns its own ``python -m open_apps.mcp`` subprocess (process =
+session), so N envs run independently in one process — no Playwright /
+FastHTML singletons, no single-instance cap. Actions are full-resolution
+pixel actions (typed dicts or Dict-space samples) or raw UI-TARS /
+BrowserGym action strings; reward is computed server-side.
+"""
+
+from __future__ import annotations
 
 import gymnasium as gym
 import numpy as np
@@ -8,19 +15,15 @@ from gymnasium import spaces
 from loguru import logger
 from PIL import Image
 
-from open_apps.runtime import Runtime, list_variants, make_runtime
-from open_apps.tasks import Task, load_task
-
 from stable_worldmodel import spaces as swm_space
 
 from .executor import (
-    GRID_X,
-    GRID_Y,
-    NUM_ACTIONS,
     VIEWPORT_HEIGHT,
     VIEWPORT_WIDTH,
-    action_multidiscrete_to_playwright,
+    make_action_space,
+    to_browsergym_action,
 )
+from .mcp_client import OpenAppsMCPClient
 
 
 SCROLL_Y_CHOICES = [0, 100, 300, 600]
@@ -37,31 +40,16 @@ MAP_CITY_CHOICES: list[tuple[str, list[float]]] = [
 ]
 
 
-_playwright_ctx = None
-_browser = None
-
-
-def _get_playwright():
-    """Lazy-init Playwright to avoid import cost at registration time."""
-    global _playwright_ctx, _browser
-    if _browser is None:
-        from playwright.sync_api import sync_playwright
-
-        _playwright_ctx = sync_playwright().start()
-        _browser = _playwright_ctx.chromium.launch(headless=True)
-    return _browser
-
-
 class OpenAppsEnv(gym.Env):
-    """Gymnasium env for OpenApps browser-based UI tasks.
+    """Gymnasium env for OpenApps browser UI tasks (MCP-backed).
+
     Args:
         app_name: Which OpenApps app to target (e.g. ``"todo"``).
-        task: Either an :class:`open_apps.tasks.Task` instance, a task
-            key (str) into ``config/tasks/all_tasks.yaml``, or ``None``
-            (reward always 0.0 — useful for data collection).
-        task_description: Natural-language task goal (falls back to
-            ``task.goal``).
-        port: Port for the FastHTML server. Auto-picked if ``None``.
+        task: A task key (str) into ``config/tasks/all_tasks.yaml``, or
+            ``None`` (reward always 0.0 — data collection). Task instances
+            are not accepted: tasks are resolved/scored server-side.
+        task_description: Natural-language goal (falls back to the task goal).
+        port: Unused (kept for API compatibility; the server auto-picks a port).
         max_steps: Max steps per episode before truncation.
         render_mode: ``"rgb_array"`` (default).
     """
@@ -73,12 +61,10 @@ class OpenAppsEnv(gym.Env):
     VIEWPORT_HEIGHT = VIEWPORT_HEIGHT
     DEFAULT_IMAGE_SHAPE = (VIEWPORT_HEIGHT, VIEWPORT_WIDTH)
 
-    _active_instances: int = 0
-
     def __init__(
         self,
         app_name: str = 'todo',
-        task: 'Task | str | None' = None,
+        task: 'str | None' = None,
         task_description: str = '',
         port: int | None = None,
         max_steps: int = 50,
@@ -87,99 +73,66 @@ class OpenAppsEnv(gym.Env):
     ):
         super().__init__()
 
-        if OpenAppsEnv._active_instances > 0:
-            raise RuntimeError(
-                'OpenAppsEnv only supports a single live instance per '
-                'process (Playwright sync API and OpenApps Runtime are '
-                'global singletons). Close the existing env first, and '
-                'use num_envs=1 with swm.World for OpenApps.'
+        if task is not None and not isinstance(task, str):
+            raise TypeError(
+                'OpenAppsEnv task must be a task-key string or None; '
+                'Task instances are resolved/scored server-side via MCP.'
             )
 
         self.app_name = app_name
         self.env_name = f'OpenApps-{app_name}'
-        if isinstance(task, str):
-            task = load_task(task, app=app_name)
-        self.task = task
-        self.task_description = task_description or (
-            task.goal if task else ''
-        )
+        self._task_key = task
         self.max_steps = max_steps
         self.render_mode = render_mode
 
         self._step_count = 0
-        self._last_screenshot = None
-        self._initial_state: dict | None = None
+        self._last_screenshot: np.ndarray | None = None
 
         self.observation_space = spaces.Box(
             0, 255, (VIEWPORT_HEIGHT, VIEWPORT_WIDTH, 3), np.uint8
         )
-        self.action_space = spaces.MultiDiscrete(
-            [NUM_ACTIONS, GRID_X, GRID_Y]
-        )
+        self.action_space = make_action_space()
 
-        self._appearance_variants = list_variants(app_name, 'appearance')
-        self._content_variants = list_variants(app_name, 'content')
+        # Spawn the OpenApps MCP server subprocess (process = session).
+        self.client = OpenAppsMCPClient(app_name)
+
+        # Discover variant sets from the server for the variation space.
+        self._appearance_variants = self.client.list_variants(app_name, 'appearance')
+        self._content_variants = self.client.list_variants(app_name, 'content')
+
+        # Bind the task for server-side reward scoring; returns the goal.
+        goal = ''
+        if self._task_key is not None:
+            goal = self.client.load_task(self._task_key)
+        self.task_description = task_description or goal
 
         spaces_dict: dict = {
             'appearance': swm_space.Dict(
-                {
-                    'theme': swm_space.Discrete(
-                        len(self._appearance_variants), init_value=0
-                    ),
-                }
+                {'theme': swm_space.Discrete(len(self._appearance_variants), init_value=0)}
             ),
             'content': swm_space.Dict(
                 {
-                    'variant': swm_space.Discrete(
-                        len(self._content_variants), init_value=0
-                    ),
+                    'variant': swm_space.Discrete(len(self._content_variants), init_value=0),
                     'seed': swm_space.Discrete(2**31 - 1, init_value=233),
                 }
             ),
             'browser': swm_space.Dict(
-                {
-                    'scroll_y': swm_space.Discrete(
-                        len(SCROLL_Y_CHOICES), init_value=0
-                    ),
-                }
+                {'scroll_y': swm_space.Discrete(len(SCROLL_Y_CHOICES), init_value=0)}
             ),
         }
         if self.app_name == 'map':
             spaces_dict['map'] = swm_space.Dict(
-                {
-                    'city': swm_space.Discrete(
-                        len(MAP_CITY_CHOICES), init_value=0
-                    ),
-                }
+                {'city': swm_space.Discrete(len(MAP_CITY_CHOICES), init_value=0)}
             )
         self.variation_space = swm_space.Dict(spaces_dict)
 
-        default_vars: list[str] = [
-            'appearance.theme',
-            'content.variant',
-            'content.seed',
-            'browser.scroll_y',
-        ]
+        default_vars = ['appearance.theme', 'content.variant', 'content.seed', 'browser.scroll_y']
         if self.app_name == 'map':
             default_vars.append('map.city')
         self._default_variations = tuple(default_vars)
 
-        self.runtime: Runtime = make_runtime(app_name, port=port)
-        self.base_url = self.runtime.base_url
-
-        browser = _get_playwright()
-        self._context = browser.new_context(
-            viewport={
-                'width': VIEWPORT_WIDTH,
-                'height': VIEWPORT_HEIGHT,
-            }
-        )
-        self._page = self._context.new_page()
-
-        OpenAppsEnv._active_instances += 1
-
     def reset(self, *, seed=None, options=None):
-        """Sample a variation, push it to the runtime, and load the page."""
+        """Sample a variation, push it to the server, reset, and return obs."""
         super().reset(seed=seed, options=options)
         self._step_count = 0
 
@@ -192,21 +145,15 @@ class OpenAppsEnv(gym.Env):
         v = self.variation_space.value
         self._apply_variations(v)
 
-        self.runtime.reset()
-        self._initial_state = self.runtime.get_state()
+        img, _meta = self.client.reset(seed=seed)
+        obs = self._to_obs(img)
 
-        self._page.goto(self.runtime.url_for())
-        self._page.wait_for_load_state('networkidle')
-
-        scroll_idx = int(
-            np.asarray(v['browser']['scroll_y']).reshape(-1)[0]
-        )
+        scroll_idx = int(np.asarray(v['browser']['scroll_y']).reshape(-1)[0])
         scroll_y = SCROLL_Y_CHOICES[scroll_idx]
         if scroll_y > 0:
-            self._page.evaluate(f'window.scrollTo(0, {scroll_y})')
-            self._page.wait_for_timeout(50)
+            img, _ = self.client.act(f"scroll(0, {scroll_y})", with_reward=False)
+            obs = self._to_obs(img)
 
-        obs = self._capture_screenshot()
         info = {
             'pixels': obs,
             'env_name': self.env_name,
@@ -215,10 +162,8 @@ class OpenAppsEnv(gym.Env):
         return obs, info
 
     def _apply_variations(self, v: dict) -> None:
-        """Translate sampled variation values into ``runtime.reconfigure(...)``."""
-        appearance = self._appearance_variants[
-            int(v['appearance']['theme'])
-        ]
+        """Translate sampled variation values into a server ``reconfigure``."""
+        appearance = self._appearance_variants[int(v['appearance']['theme'])]
         content = self._content_variants[int(v['content']['variant'])]
         seed = int(v['content']['seed'])
 
@@ -228,90 +173,65 @@ class OpenAppsEnv(gym.Env):
             _, coords = MAP_CITY_CHOICES[city_idx]
             extras['apps.maps.init_location'] = list(coords)
 
-        self.runtime.reconfigure(
-            appearance=appearance,
-            content=content,
-            seed=seed,
-            extras=extras or None,
+        self.client.reconfigure(
+            appearance=appearance, content=content, seed=seed, extras=extras or None
         )
 
-    def step(self, action: np.ndarray):
-        """Execute one action and return the new observation."""
+    def step(self, action):
+        """Execute one action (typed dict, Dict-space sample, or action string)."""
         self._step_count += 1
+        img, meta = self._act(action)
+        obs = self._to_obs(img)
 
-        action_desc = action_multidiscrete_to_playwright(action, self._page)
-        logger.debug(f'Step {self._step_count}: {action_desc}')
-
-        self._page.wait_for_timeout(300)
-
-        obs = self._capture_screenshot()
-        reward = self._compute_reward()
-        terminated = reward == 1.0
+        reward = float(meta.get('reward', 0.0))
+        terminated = bool(meta.get('done', reward >= 1.0))
         truncated = self._step_count >= self.max_steps
 
         info = {
             'pixels': obs,
             'env_name': self.env_name,
             'task_description': self.task_description,
-            '_action_desc': action_desc,
+            '_action_desc': meta.get('action_desc'),
         }
-
         return obs, reward, terminated, truncated, info
 
+    def _act(self, action):
+        # ``action`` is a BrowserGym action string (VLM/scripted) or a
+        # Dict-space sample (random/learned); both map to a BrowserGym string.
+        img, meta = self.client.act(to_browsergym_action(action))
+        if img is None:
+            # Failed/errored action (e.g. unparseable output): fall back to
+            # the current screenshot so observations are never blank.
+            obs_img, obs_meta = self.client.observe()
+            if obs_img is not None:
+                img, meta = obs_img, (meta or obs_meta)
+        return img, meta
+
     def render(self) -> np.ndarray:
-        """Return the current screenshot as numpy (H, W, 3) uint8."""
         if self._last_screenshot is not None:
             return self._last_screenshot
-        return self._capture_screenshot()
+        img, _ = self.client.observe()
+        return self._to_obs(img)
 
-    def _capture_screenshot(self) -> np.ndarray:
-        png_bytes = self._page.screenshot()
-        img = Image.open(io.BytesIO(png_bytes)).convert('RGB')
-        if img.size != (VIEWPORT_WIDTH, VIEWPORT_HEIGHT):
-            img = img.resize(
-                (VIEWPORT_WIDTH, VIEWPORT_HEIGHT), Image.BILINEAR
+    def _to_obs(self, img: np.ndarray | None) -> np.ndarray:
+        if img is None:
+            return np.zeros((VIEWPORT_HEIGHT, VIEWPORT_WIDTH, 3), np.uint8)
+        if img.shape[:2] != (VIEWPORT_HEIGHT, VIEWPORT_WIDTH):
+            img = np.asarray(
+                Image.fromarray(img).resize(
+                    (VIEWPORT_WIDTH, VIEWPORT_HEIGHT), Image.BILINEAR
+                ),
+                dtype=np.uint8,
             )
-        arr = np.array(img, dtype=np.uint8)
-        self._last_screenshot = arr
-        return arr
-
-    def _compute_reward(self) -> float:
-        """Compute reward by delegating to the OpenApps Task."""
-        if self.task is None or self._initial_state is None:
-            return 0.0
-
-        try:
-            current_state = self.runtime.get_state()
-            try:
-                current_state['_url'] = self._page.url
-            except Exception:
-                current_state['_url'] = ''
-            return (
-                1.0
-                if self.task.check_if_task_is_complete(
-                    self._initial_state, current_state
-                )
-                else 0.0
-            )
-        except Exception as e:
-            logger.warning(f'Reward computation failed: {e}')
-            return 0.0
+        self._last_screenshot = img
+        return img
 
     def close(self):
-        """Tear down browser context and the OpenApps runtime."""
-        try:
-            if getattr(self, '_page', None):
-                self._page.close()
-            if getattr(self, '_context', None):
-                self._context.close()
-        except Exception as e:
-            logger.debug(f'Browser close failed: {e}')
-
-        runtime = getattr(self, 'runtime', None)
-        if runtime is not None:
-            runtime.close()
-
-        OpenAppsEnv._active_instances = max(
-            0, OpenAppsEnv._active_instances - 1
-        )
+        """Tear down the MCP server subprocess."""
+        client = getattr(self, 'client', None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception as e:
+                logger.debug(f'MCP client close failed: {e}')
         super().close()
