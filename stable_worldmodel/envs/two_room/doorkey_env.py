@@ -29,19 +29,7 @@ from gymnasium import spaces
 from stable_worldmodel import spaces as swm_spaces
 from stable_worldmodel.envs.two_room.env import TwoRoomEnv
 
-DEFAULT_VARIATIONS = (
-    'wall.axis',
-    'door.number',
-    'door.position',
-    'agent.position',
-    'key.position',
-    'target.position',
-    'agent.color',
-    'key.color',
-    'target.color',
-    'door.locked_color',
-    'door.unlocked_color',
-)
+DEFAULT_VARIATIONS = ('agent.position', 'key.position', 'target.position')
 
 
 class TwoRoomDoorKeyEnv(TwoRoomEnv):
