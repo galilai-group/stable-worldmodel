@@ -200,12 +200,15 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
 
 node_modules/
 
 # custom
 logs/
-.claude/
 .vscode/
 *.sh
 **/.mypy_cache/**
@@ -228,5 +231,4 @@ lightning_logs/
 old_tests/
 results/
 local_scripts/
-CLAUDE.md
 uv.lock
