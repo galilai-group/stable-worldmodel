@@ -38,7 +38,7 @@ register(
 
 register(
     id='swm/TwoRoomDoorKey-v1',
-    entry_point='stable_worldmodel.envs.two_room_doorkey.env:TwoRoomDoorKeyEnv',
+    entry_point='stable_worldmodel.envs.two_room.doorkey_env:TwoRoomDoorKeyEnv',
 )
 
 register(
