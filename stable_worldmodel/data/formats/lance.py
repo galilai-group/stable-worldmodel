@@ -579,9 +579,10 @@ class LanceWriter:
     the stem is the table name; otherwise ``table_name`` must be supplied.
 
     Image columns (``pixels`` / ``pixels_<view>``, or any uint8 HxWxC array)
-    are JPEG-encoded into ``pa.binary``. Tabular columns become fixed-size
-    lists of float32. Column names with ``.`` are renamed to ``_`` (Lance
-    rejects dots in top-level field names).
+    are JPEG-encoded into ``pa.binary``. String columns become ``pa.string``.
+    Other tabular columns become fixed-size lists of float32. Column names
+    with ``.`` are renamed to ``_`` (Lance rejects dots in top-level field
+    names).
 
     Two write paths:
       * :meth:`write_episode` — push one episode; one ``table.add`` per call,
@@ -629,6 +630,7 @@ class LanceWriter:
         self._appending_existing = False
         self._rename_map: dict[str, str] = {}
         self._image_cols: set[str] = set()
+        self._string_cols: set[str] = set()
         self._dims: dict[str, int] = {}
         self._schema: pa.Schema | None = None
         self._ep_idx = 0
@@ -707,12 +709,17 @@ class LanceWriter:
         self._table = self._db.open_table(self.table_name)
         schema = self._table.schema
         image_cols: set[str] = set()
+        string_cols: set[str] = set()
         dims: dict[str, int] = {}
         for f in schema:
             if f.name in ('episode_idx', 'step_idx'):
                 continue
             if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type):
                 image_cols.add(f.name)
+            elif pa.types.is_string(f.type) or pa.types.is_large_string(
+                f.type
+            ):
+                string_cols.add(f.name)
             elif pa.types.is_fixed_size_list(f.type):
                 dims[f.name] = f.type.list_size
             else:
@@ -725,6 +732,7 @@ class LanceWriter:
         existing = self._table.to_lance().to_table(columns=['episode_idx'])
         ep_col = existing.column('episode_idx').to_numpy()
         self._image_cols = image_cols
+        self._string_cols = string_cols
         self._dims = dims
         self._schema = schema
         self._global_ptr = int(len(ep_col))
@@ -735,9 +743,12 @@ class LanceWriter:
     def _validate_episode_against_existing(self, ep_data: dict) -> None:
         reserved = {'episode_idx', 'step_idx'}
         incoming_to_lance: dict[str, str] = {}
-        for col in ep_data:
+        for col, vals in ep_data.items():
             lance_name = _to_lance_name(col)
             if lance_name in reserved:
+                continue
+            is_image = _is_image_name(lance_name) or is_image_column(vals)
+            if not is_image and np.asarray(vals[0]).dtype.kind not in 'biufUS':
                 continue
             if lance_name in incoming_to_lance.values():
                 raise ValueError(
@@ -747,7 +758,9 @@ class LanceWriter:
             incoming_to_lance[col] = lance_name
         lance_to_incoming = {v: k for k, v in incoming_to_lance.items()}
 
-        expected = set(self._image_cols) | set(self._dims)
+        expected = (
+            set(self._image_cols) | set(self._string_cols) | set(self._dims)
+        )
         incoming = set(lance_to_incoming)
         missing = expected - incoming
         extra = incoming - expected
@@ -789,6 +802,7 @@ class LanceWriter:
     def _init_schema(self, sample_ep: dict) -> None:
         rename_map: dict[str, str] = {}
         image_cols: set[str] = set()
+        string_cols: set[str] = set()
         dims: dict[str, int] = {}
         ordered_cols: list[str] = []
 
@@ -801,19 +815,37 @@ class LanceWriter:
                 dropped,
             )
 
+        dropped_non_numeric: list[str] = []
         for col, vals in sample_ep.items():
             lance_name = _to_lance_name(col)
             if lance_name in reserved:
                 continue
+
+            is_image = _is_image_name(lance_name) or is_image_column(vals)
+            is_string = False
+            if not is_image:
+                sample = np.asarray(vals[0])
+                if sample.dtype.kind in 'US':
+                    is_string = True
+                elif sample.dtype.kind not in 'biuf':
+                    dropped_non_numeric.append(col)
+                    continue
+
             rename_map[col] = lance_name
             ordered_cols.append(lance_name)
-
-            if _is_image_name(lance_name) or is_image_column(vals):
+            if is_image:
                 image_cols.add(lance_name)
-                continue
+            elif is_string:
+                string_cols.add(lance_name)
+            else:
+                dims[lance_name] = int(sample.reshape(-1).shape[0])
 
-            sample = np.asarray(vals[0])
-            dims[lance_name] = int(sample.reshape(-1).shape[0])
+        if dropped_non_numeric:
+            logging.warning(
+                'LanceWriter: dropping non-numeric columns %s — values are '
+                'not convertible to float32.',
+                dropped_non_numeric,
+            )
 
         renamed = {k: v for k, v in rename_map.items() if k != v}
         if renamed:
@@ -829,11 +861,14 @@ class LanceWriter:
         for col in ordered_cols:
             if col in image_cols:
                 fields.append(pa.field(col, pa.binary()))
+            elif col in string_cols:
+                fields.append(pa.field(col, pa.string()))
             else:
                 fields.append(pa.field(col, pa.list_(pa.float32(), dims[col])))
 
         self._rename_map = rename_map
         self._image_cols = image_cols
+        self._string_cols = string_cols
         self._dims = dims
         self._schema = pa.schema(fields)
 
@@ -853,6 +888,12 @@ class LanceWriter:
                     for v in vals
                 ]
                 arrays.append(pa.array(blobs, type=pa.binary()))
+            elif lance_name in self._string_cols:
+                strs = [
+                    v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+                    for v in vals
+                ]
+                arrays.append(pa.array(strs, type=pa.string()))
             else:
                 dim = self._dims[lance_name]
                 flat = np.asarray(vals, dtype=np.float32).reshape(ep_len, dim)
