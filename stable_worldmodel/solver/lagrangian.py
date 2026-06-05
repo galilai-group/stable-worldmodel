@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
+from stable_worldmodel.solver.utils import prepare_init_action
 from .solver import Costable
 
 
@@ -198,6 +199,14 @@ class LagrangianSolver(torch.nn.Module):
         }
 
         with torch.no_grad():
+            init_action = prepare_init_action(
+                self.model,
+                info_dict,
+                init_action,
+                self.horizon,
+                n_envs=self.n_envs,
+                action_dim=self.action_dim,
+            )
             self.init_action(init_action)
 
         if not self.persist_multipliers:

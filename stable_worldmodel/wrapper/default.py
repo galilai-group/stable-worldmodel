@@ -323,6 +323,75 @@ class EverythingToInfoWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
+class MapKeysWrapper(gym.Wrapper):
+    """Renames keys in the info dict according to a mapping.
+
+    Useful when an env's observation is lifted into info under a name that
+    downstream code does not expect. For example, with ``add_pixels=False``
+    a raw pixel observation lands in ``info['observation']``; mapping
+    ``{'observation': 'pixels'}`` makes it visible to the rest of the
+    pipeline (eval video logging, goal handling, ...).
+    """
+
+    def __init__(self, env: gym.Env, key_map: dict[str, str]):
+        """Initialize the wrapper.
+
+        Args:
+            env: The environment to wrap.
+            key_map: Mapping from source key to destination key. Each source
+                key is removed from info and re-added under its destination
+                name.
+        """
+        super().__init__(env)
+        self.key_map = dict(key_map)
+
+    def _remap(self, info: dict) -> dict:
+        """Rename mapped keys in info.
+
+        Args:
+            info: The info dictionary to modify.
+
+        Returns:
+            The same info dictionary with keys renamed.
+
+        Raises:
+            KeyError: If a source key is absent from info.
+        """
+        for src, dst in self.key_map.items():
+            if src not in info:
+                raise KeyError(
+                    f'MapKeysWrapper: key {src!r} not found in info; '
+                    f'present keys: {list(info.keys())}'
+                )
+            info[dst] = info.pop(src)
+        return info
+
+    def reset(self, *args: Any, **kwargs: Any) -> tuple[Any, dict]:
+        """Reset environment and remap info keys.
+
+        Args:
+            *args: Positional arguments for reset.
+            **kwargs: Keyword arguments for reset.
+
+        Returns:
+            Standard Gymnasium reset results.
+        """
+        obs, info = self.env.reset(*args, **kwargs)
+        return obs, self._remap(info)
+
+    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict]:
+        """Perform step and remap info keys.
+
+        Args:
+            action: Action to perform.
+
+        Returns:
+            Standard Gymnasium step results.
+        """
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        return obs, reward, terminated, truncated, self._remap(info)
+
+
 class AddPixelsWrapper(gym.Wrapper):
     """Adds rendered environment pixels to info dict."""
 
@@ -532,6 +601,7 @@ class MegaWrapper(gym.Wrapper):
         required_keys: Iterable[str] | None = None,
         separate_goal: bool = True,
         image_resample: str | int | None = None,
+        add_pixels: bool = True,
     ):
         """Initialize the mega wrapper pipeline.
 
@@ -546,20 +616,29 @@ class MegaWrapper(gym.Wrapper):
                 goal images. Accepts a PIL constant or a string in
                 ``{'nearest','bilinear','bicubic','lanczos','box','hamming'}``.
                 Defaults to bilinear. Use ``'nearest'`` for crisp pixel art.
+            add_pixels: If True (default), render the env and add a ``pixels``
+                key (resized to ``image_shape``), require it, and resize goal
+                images. Set False for envs with no pixel observations (e.g.
+                audio); the raw observation is still lifted into info.
         """
         super().__init__(env)
 
         req_keys = list(required_keys) if required_keys is not None else []
-        req_keys.append(r'^pixels(?:\..*)?$')
 
-        resample = _resolve_resample(image_resample)
+        if add_pixels:
+            req_keys.append(r'^pixels(?:\..*)?$')
+            resample = _resolve_resample(image_resample)
+            # this adds `pixels` key to info with optional transform
+            env = AddPixelsWrapper(
+                env, image_shape, pixels_transform, resample
+            )
 
-        # this adds `pixels` key to info with optional transform
-        env = AddPixelsWrapper(env, image_shape, pixels_transform, resample)
         # this removes the info output, everything is in observation!
         env = EverythingToInfoWrapper(env)
         # check that necessary keys are in the observation
         env = EnsureInfoKeysWrapper(env, req_keys)
-        env = ResizeGoalWrapper(env, image_shape, goal_transform, resample)
+
+        if add_pixels:
+            env = ResizeGoalWrapper(env, image_shape, goal_transform, resample)
 
         self.env = env

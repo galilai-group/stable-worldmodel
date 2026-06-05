@@ -169,6 +169,12 @@ def run(cfg: DictConfig):
 
     world.set_policy(policy)
 
+    results_path.mkdir(parents=True, exist_ok=True)
+    print(
+        f'[eval] saving videos to {results_path.resolve()} '
+        '(one env_{i}.mp4 per env)'
+    )
+
     autocast_ctx = torch.autocast(
         device_type='cuda',
         dtype=torch.bfloat16,
@@ -184,35 +190,36 @@ def run(cfg: DictConfig):
         )
         with warmup_autocast_ctx:
             n = world.num_envs
-            world.evaluate_from_dataset(
-                dataset,
+            world.evaluate(
+                dataset=dataset,
                 start_steps=eval_start_idx.tolist()[:n],
-                goal_offset_steps=cfg.eval.goal_offset_steps,
+                goal_offset=cfg.eval.goal_offset_steps,
                 eval_budget=cfg.eval.eval_budget,
                 episodes_idx=eval_episodes.tolist()[:n],
                 callables=OmegaConf.to_container(
                     cfg.eval.get('callables'), resolve=True
                 ),
-                video_path=results_path,
+                video=results_path,
             )
         print('Warmup done.')
 
     start_time = time.time()
     with autocast_ctx:
-        metrics = world.evaluate_from_dataset(
-            dataset,
+        metrics = world.evaluate(
+            dataset=dataset,
             start_steps=eval_start_idx.tolist(),
-            goal_offset_steps=cfg.eval.goal_offset_steps,
+            goal_offset=cfg.eval.goal_offset_steps,
             eval_budget=cfg.eval.eval_budget,
             episodes_idx=eval_episodes.tolist(),
             callables=OmegaConf.to_container(
                 cfg.eval.get('callables'), resolve=True
             ),
-            video_path=results_path,
+            video=results_path,
         )
     end_time = time.time()
 
     print(metrics)
+    print(f'[eval] videos saved to {results_path.resolve()}')
 
     results_path = results_path / cfg.output.filename
     results_path.parent.mkdir(parents=True, exist_ok=True)

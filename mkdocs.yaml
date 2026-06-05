@@ -30,6 +30,7 @@ nav:
       - envs/ale.md
   - Guides:
       - guides/checkpoints.md
+      - guides/online_learning.md
   - cli.md
   # - Tutorial:
   #     - tutorial/collect_data.md

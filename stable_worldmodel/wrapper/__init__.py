@@ -4,6 +4,7 @@ from stable_worldmodel.wrapper.default import (
     EnsureImageShape,
     EnsureInfoKeysWrapper,
     EverythingToInfoWrapper,
+    MapKeysWrapper,
     MegaWrapper,
     ResizeGoalWrapper,
 )
@@ -38,6 +39,7 @@ __all__ = [
     'EnsureInfoKeysWrapper',
     'EverythingToInfoWrapper',
     'GrayscaleWrapper',
+    'MapKeysWrapper',
     'MegaWrapper',
     'MovingPatchWrapper',
     'NoiseWrapper',

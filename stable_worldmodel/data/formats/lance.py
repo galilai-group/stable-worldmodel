@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,32 @@ from stable_worldmodel.data.format import (
     validate_write_mode,
 )
 from stable_worldmodel.data.formats.utils import is_image_column
+
+# JPEG blobs from Lance are immutable `bytes`; we wrap them in a
+# torch tensor view (zero-copy) and hand straight to torchvision's
+# decoder, which returns a fresh tensor for the output. The warning
+# is correct in general (writes via the view would corrupt the
+# source) but doesn't apply since downstream is read-only.
+warnings.filterwarnings(
+    'ignore',
+    message='The given buffer is not writable',
+    category=UserWarning,
+)
+
+
+# Optional fast-path: torchvision's libjpeg-turbo-backed batch decoder.
+# Falls back to PIL on a thread pool when unavailable or when a blob is
+# malformed (decode_jpeg is stricter about JPEG conformance than PIL).
+try:
+    from torchvision.io import (
+        ImageReadMode as _TVImageReadMode,
+        decode_jpeg as _tv_decode_jpeg,
+    )
+
+    _TV_RGB = _TVImageReadMode.RGB
+except (ImportError, AttributeError):
+    _tv_decode_jpeg = None
+    _TV_RGB = None
 
 
 _DEFAULT_JPEG_QUALITY = 95
@@ -59,6 +87,34 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
     return buf.getvalue()
 
 
+_SPAWN_FORCED = False
+
+
+def _force_spawn() -> None:
+    """Switch Linux multiprocessing to spawn — workaround for lancedb fork-unsafety."""
+    import logging
+    import multiprocessing as mp
+    import sys
+
+    import torch
+
+    global _SPAWN_FORCED
+    if _SPAWN_FORCED or sys.platform != 'linux':
+        _SPAWN_FORCED = True
+        return
+    _SPAWN_FORCED = True
+
+    if mp.get_start_method(allow_none=True) in (None, 'fork'):
+        try:
+            mp.set_start_method('spawn', force=True)
+        except RuntimeError as exc:
+            logging.warning('Could not switch to spawn (%s)', exc)
+    try:
+        torch.multiprocessing.set_sharing_strategy('file_system')
+    except RuntimeError:
+        pass
+
+
 class LanceDataset(Dataset):
     """Reader for a LanceDB table written by :class:`LanceWriter`.
 
@@ -73,8 +129,6 @@ class LanceDataset(Dataset):
         episode_index_column, step_index_column: index column names.
         connect_kwargs: forwarded to :func:`lancedb.connect` (e.g. S3 creds).
     """
-
-    _fork_warning_emitted = False
 
     def __init__(
         self,
@@ -109,7 +163,7 @@ class LanceDataset(Dataset):
         self._perm = None
         self._fetch_columns: list[str] | None = None
 
-        self._maybe_warn_fork_start_method()
+        _force_spawn()
         table = self._connect_table()
         self._schema_names = list(table.schema.names)
         available = [
@@ -142,8 +196,8 @@ class LanceDataset(Dataset):
 
         if keys_to_cache:
             logging.warning(
-                'LanceDataset: keys_to_cache=%s is unnecessary — '
-                '__getitems__ already batches reads; caching risks OOM.',
+                'LanceDataset: keys_to_cache=%s is not required — Lance '
+                'has efficient random access via batched __getitems__.',
                 keys_to_cache,
             )
             for key in keys_to_cache:
@@ -166,6 +220,14 @@ class LanceDataset(Dataset):
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state['_perm'] = None
+        # spt.Module sets `dataset._trainer = trainer` on every dataset to
+        # inject `global_step` / `current_epoch` into samples. The trainer
+        # transitively reaches `train_dataloader._iterator` (a
+        # `_MultiProcessingDataLoaderIter`, which raises NotImplementedError
+        # on pickle). Drop the back-reference so worker spawn closures
+        # don't traverse into it; workers see a stale snapshot of trainer
+        # state anyway, so a missing trainer is fine.
+        state['_trainer'] = None
         return state
 
     def _connect_table(self):
@@ -205,33 +267,6 @@ class LanceDataset(Dataset):
             f'LanceDataset: cannot infer table from {loc!r}. Pass '
             '`table_name=` explicitly or point to a `*.lance` directory.'
         )
-
-    @classmethod
-    def _maybe_warn_fork_start_method(cls) -> None:
-        if cls._fork_warning_emitted:
-            return
-        import multiprocessing as mp
-        import sys
-
-        cls._fork_warning_emitted = True
-        if sys.platform != 'linux':
-            return
-        current = mp.get_start_method(allow_none=True)
-        if current not in (None, 'fork'):
-            return
-        try:
-            mp.set_start_method('spawn', force=True)
-            logging.info(
-                "LanceDataset: multiprocessing start method set to 'spawn' "
-                '(was %s).',
-                current or 'default (fork)',
-            )
-        except RuntimeError as exc:
-            logging.warning(
-                "LanceDataset could not switch multiprocessing to 'spawn' "
-                '(%s); DataLoader workers may deadlock.',
-                exc,
-            )
 
     def _compute_episode_structure(
         self, table
@@ -348,6 +383,35 @@ class LanceDataset(Dataset):
             arr = np.array(img.convert('RGB'))
         return torch.from_numpy(arr).permute(2, 0, 1)
 
+    def _decode_images(self, blobs) -> torch.Tensor:
+        """Decode a list of JPEG blobs into a stacked ``(N, C, H, W)`` uint8 tensor.
+
+        Fast path: ``torchvision.io.decode_jpeg`` when available —
+        libjpeg-turbo with internal SIMD, GIL-released, supports CUDA
+        decode if a GPU is present. Single Python call so DataLoader
+        workers (which are already process-parallel) don't compete with
+        an extra thread pool of our own. Falls back to a sequential PIL
+        loop when torchvision is missing or a blob is non-conformant.
+        """
+        if not blobs:
+            return torch.empty(0, dtype=torch.uint8)
+
+        if _tv_decode_jpeg is not None:
+            try:
+                byte_tensors = [
+                    torch.frombuffer(
+                        b if isinstance(b, (bytes, bytearray)) else bytes(b),
+                        dtype=torch.uint8,
+                    )
+                    for b in blobs
+                ]
+                decoded = _tv_decode_jpeg(byte_tensors, mode=_TV_RGB)
+                return torch.stack(decoded)
+            except (RuntimeError, TypeError):
+                pass  # malformed blob — fall through to PIL
+
+        return torch.stack([self._decode_image(b) for b in blobs])
+
     def _prepare_numeric_tensor(
         self, data: np.ndarray, downsample: bool
     ) -> torch.Tensor:
@@ -358,8 +422,11 @@ class LanceDataset(Dataset):
             tensor = tensor.permute(0, 3, 1, 2)
         return tensor
 
-    def _process_batch(self, ep_idx: int, g_start: int, batch) -> dict:
-        g_end = g_start + self.span
+    def _process_batch(
+        self, ep_idx: int, g_start: int, batch, g_end: int | None = None
+    ) -> dict:
+        if g_end is None:
+            g_end = g_start + self.span
         steps: dict[str, Any] = {}
         for col in self._keys:
             if col in self._cache:
@@ -375,12 +442,7 @@ class LanceDataset(Dataset):
                 blobs = values[:: self.frameskip]
                 if isinstance(blobs, np.ndarray):
                     blobs = blobs.tolist()
-                frames = [self._decode_image(v) for v in blobs]
-                steps[col] = (
-                    torch.stack(frames)
-                    if frames
-                    else torch.empty(0, dtype=torch.uint8)
-                )
+                steps[col] = self._decode_images(blobs)
                 continue
 
             data = (
@@ -389,15 +451,15 @@ class LanceDataset(Dataset):
                 else self._pylist_to_numpy(values, col)
             )
 
-            if data.dtype == object and data.size > 0:
+            if data.size > 0 and (
+                data.dtype == object or data.dtype.kind in ('S', 'U')
+            ):
                 first = data.flat[0]
                 if isinstance(first, (bytes, bytearray)):
-                    steps[col] = (
-                        first.decode() if isinstance(first, bytes) else first
-                    )
+                    steps[col] = bytes(first).decode()
                     continue
                 if isinstance(first, str):
-                    steps[col] = first
+                    steps[col] = str(first)
                     continue
 
             steps[col] = self._prepare_numeric_tensor(
@@ -409,7 +471,9 @@ class LanceDataset(Dataset):
         g_start = int(self.offsets[ep_idx] + start)
         rows = list(range(g_start, g_start + (end - start)))
         batch = self._fetch_rows(rows)
-        steps = self._process_batch(ep_idx, g_start, batch)
+        steps = self._process_batch(
+            ep_idx, g_start, batch, g_end=g_start + (end - start)
+        )
         return self.transform(steps) if self.transform else steps
 
     def __getitems__(self, indices: list[int]) -> list[dict]:
@@ -515,9 +579,10 @@ class LanceWriter:
     the stem is the table name; otherwise ``table_name`` must be supplied.
 
     Image columns (``pixels`` / ``pixels_<view>``, or any uint8 HxWxC array)
-    are JPEG-encoded into ``pa.binary``. Tabular columns become fixed-size
-    lists of float32. Column names with ``.`` are renamed to ``_`` (Lance
-    rejects dots in top-level field names).
+    are JPEG-encoded into ``pa.binary``. String columns become ``pa.string``.
+    Other tabular columns become fixed-size lists of float32. Column names
+    with ``.`` are renamed to ``_`` (Lance rejects dots in top-level field
+    names).
 
     Two write paths:
       * :meth:`write_episode` — push one episode; one ``table.add`` per call,
@@ -565,6 +630,7 @@ class LanceWriter:
         self._appending_existing = False
         self._rename_map: dict[str, str] = {}
         self._image_cols: set[str] = set()
+        self._string_cols: set[str] = set()
         self._dims: dict[str, int] = {}
         self._schema: pa.Schema | None = None
         self._ep_idx = 0
@@ -643,12 +709,17 @@ class LanceWriter:
         self._table = self._db.open_table(self.table_name)
         schema = self._table.schema
         image_cols: set[str] = set()
+        string_cols: set[str] = set()
         dims: dict[str, int] = {}
         for f in schema:
             if f.name in ('episode_idx', 'step_idx'):
                 continue
             if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type):
                 image_cols.add(f.name)
+            elif pa.types.is_string(f.type) or pa.types.is_large_string(
+                f.type
+            ):
+                string_cols.add(f.name)
             elif pa.types.is_fixed_size_list(f.type):
                 dims[f.name] = f.type.list_size
             else:
@@ -661,6 +732,7 @@ class LanceWriter:
         existing = self._table.to_lance().to_table(columns=['episode_idx'])
         ep_col = existing.column('episode_idx').to_numpy()
         self._image_cols = image_cols
+        self._string_cols = string_cols
         self._dims = dims
         self._schema = schema
         self._global_ptr = int(len(ep_col))
@@ -671,9 +743,12 @@ class LanceWriter:
     def _validate_episode_against_existing(self, ep_data: dict) -> None:
         reserved = {'episode_idx', 'step_idx'}
         incoming_to_lance: dict[str, str] = {}
-        for col in ep_data:
+        for col, vals in ep_data.items():
             lance_name = _to_lance_name(col)
             if lance_name in reserved:
+                continue
+            is_image = _is_image_name(lance_name) or is_image_column(vals)
+            if not is_image and np.asarray(vals[0]).dtype.kind not in 'biufUS':
                 continue
             if lance_name in incoming_to_lance.values():
                 raise ValueError(
@@ -683,7 +758,9 @@ class LanceWriter:
             incoming_to_lance[col] = lance_name
         lance_to_incoming = {v: k for k, v in incoming_to_lance.items()}
 
-        expected = set(self._image_cols) | set(self._dims)
+        expected = (
+            set(self._image_cols) | set(self._string_cols) | set(self._dims)
+        )
         incoming = set(lance_to_incoming)
         missing = expected - incoming
         extra = incoming - expected
@@ -725,6 +802,7 @@ class LanceWriter:
     def _init_schema(self, sample_ep: dict) -> None:
         rename_map: dict[str, str] = {}
         image_cols: set[str] = set()
+        string_cols: set[str] = set()
         dims: dict[str, int] = {}
         ordered_cols: list[str] = []
 
@@ -737,19 +815,37 @@ class LanceWriter:
                 dropped,
             )
 
+        dropped_non_numeric: list[str] = []
         for col, vals in sample_ep.items():
             lance_name = _to_lance_name(col)
             if lance_name in reserved:
                 continue
+
+            is_image = _is_image_name(lance_name) or is_image_column(vals)
+            is_string = False
+            if not is_image:
+                sample = np.asarray(vals[0])
+                if sample.dtype.kind in 'US':
+                    is_string = True
+                elif sample.dtype.kind not in 'biuf':
+                    dropped_non_numeric.append(col)
+                    continue
+
             rename_map[col] = lance_name
             ordered_cols.append(lance_name)
-
-            if _is_image_name(lance_name) or is_image_column(vals):
+            if is_image:
                 image_cols.add(lance_name)
-                continue
+            elif is_string:
+                string_cols.add(lance_name)
+            else:
+                dims[lance_name] = int(sample.reshape(-1).shape[0])
 
-            sample = np.asarray(vals[0])
-            dims[lance_name] = int(sample.reshape(-1).shape[0])
+        if dropped_non_numeric:
+            logging.warning(
+                'LanceWriter: dropping non-numeric columns %s — values are '
+                'not convertible to float32.',
+                dropped_non_numeric,
+            )
 
         renamed = {k: v for k, v in rename_map.items() if k != v}
         if renamed:
@@ -765,11 +861,14 @@ class LanceWriter:
         for col in ordered_cols:
             if col in image_cols:
                 fields.append(pa.field(col, pa.binary()))
+            elif col in string_cols:
+                fields.append(pa.field(col, pa.string()))
             else:
                 fields.append(pa.field(col, pa.list_(pa.float32(), dims[col])))
 
         self._rename_map = rename_map
         self._image_cols = image_cols
+        self._string_cols = string_cols
         self._dims = dims
         self._schema = pa.schema(fields)
 
@@ -789,6 +888,12 @@ class LanceWriter:
                     for v in vals
                 ]
                 arrays.append(pa.array(blobs, type=pa.binary()))
+            elif lance_name in self._string_cols:
+                strs = [
+                    v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+                    for v in vals
+                ]
+                arrays.append(pa.array(strs, type=pa.string()))
             else:
                 dim = self._dims[lance_name]
                 flat = np.asarray(vals, dtype=np.float32).reshape(ep_len, dim)
@@ -817,6 +922,15 @@ class Lance(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> LanceDataset:
+        if '://' in str(path) and 'connect_kwargs' not in kwargs:
+            opts = {
+                'region': os.environ.get('AWS_DEFAULT_REGION', 'us-east-1'),
+                'virtual_hosted_style_request': 'true',
+            }
+            # `token` collides with AWS session token on s3:// — only inject for hf://.
+            if str(path).startswith('hf://') and os.environ.get('HF_TOKEN'):
+                opts['token'] = os.environ['HF_TOKEN']
+            kwargs['connect_kwargs'] = {'storage_options': opts}
         return LanceDataset(path=path, **kwargs)
 
     @classmethod

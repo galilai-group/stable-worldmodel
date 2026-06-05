@@ -12,6 +12,7 @@ class LeWM(nn.Module):
         action_encoder,
         projector=None,
         pred_proj=None,
+        **kwargs,
     ):
         super().__init__()
 
@@ -54,13 +55,15 @@ class LeWM(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(self, info, action_sequence, history_size: int = None):
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
          - S is the number of action plan samples
          - T is the time horizon
         """
+        if history_size is None:
+            history_size = getattr(self.predictor, 'num_frames', 3)
 
         assert 'pixels' in info, 'pixels not in info_dict'
         H = info['pixels'].size(2)
@@ -69,11 +72,14 @@ class LeWM(nn.Module):
         info['action'] = act_0
         n_steps = T - H
 
-        # encode initial state, or reuse cached embedding from a prior rollout
+        # encode initial state, or reuse cached embedding from a prior rollout.
+        # detach: to avoid backprop in encoder
         if 'emb' not in info:
             _init = {k: v[:, 0] for k, v in info.items() if torch.is_tensor(v)}
             _init = self.encode(_init)
-            info['emb'] = _init['emb'].unsqueeze(1).expand(B, S, -1, -1)
+            info['emb'] = (
+                _init['emb'].detach().unsqueeze(1).expand(B, S, -1, -1)
+            )
 
         # flatten batch and sample dimensions for rollout
         emb_init = rearrange(info['emb'], 'b s ... -> (b s) ...')

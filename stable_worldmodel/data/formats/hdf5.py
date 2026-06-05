@@ -21,8 +21,16 @@ from stable_worldmodel.data.format import (
 from stable_worldmodel.data.utils import get_cache_dir
 
 
+_REMOTE_SCHEMES = ('s3', 'gs', 'gcs', 'azure', 'abfs', 'http', 'https')
+
+
 class HDF5Dataset(Dataset):
-    """Dataset loading from a single HDF5 file (SWMR mode for safe reads)."""
+    """Dataset loading from a single HDF5 file (SWMR mode for safe reads).
+
+    For remote paths (``s3://``, ``gs://``, etc.), pass ``storage_options``
+    that fsspec recognises for the chosen scheme. The file handle is opened
+    lazily per-worker, so DataLoader multiprocessing is supported.
+    """
 
     def __init__(
         self,
@@ -35,19 +43,22 @@ class HDF5Dataset(Dataset):
         keys_to_merge: dict[str, list[str] | str] | None = None,
         cache_dir: str | Path | None = None,
         path: str | Path | None = None,
+        storage_options: dict | None = None,
     ) -> None:
         if path is not None:
-            self.h5_path = Path(path)
+            raw = str(path)
+            self.h5_path = raw if self._looks_remote(raw) else Path(raw)
         else:
             if name is None:
                 raise TypeError('HDF5Dataset requires either `name` or `path`')
             datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
             self.h5_path = Path(datasets_dir, f'{name}.h5')
 
+        self.storage_options = storage_options or {}
         self.h5_file: h5py.File | None = None
         self._cache: dict[str, np.ndarray] = {}
 
-        with h5py.File(self.h5_path, 'r') as f:
+        with self._open_h5() as f:
             lengths, offsets = f['ep_len'][:], f['ep_offset'][:]
             self._keys = keys_to_load or [
                 k for k in f.keys() if k not in ('ep_len', 'ep_offset')
@@ -67,11 +78,35 @@ class HDF5Dataset(Dataset):
     def column_names(self) -> list[str]:
         return self._keys
 
+    @staticmethod
+    def _looks_remote(path: str) -> bool:
+        return any(path.startswith(s + '://') for s in _REMOTE_SCHEMES)
+
+    @property
+    def is_remote(self) -> bool:
+        return isinstance(self.h5_path, str) and self._looks_remote(
+            self.h5_path
+        )
+
+    def _open_h5(self) -> h5py.File:
+        if self.is_remote:
+            import fsspec
+
+            scheme = self.h5_path.split('://', 1)[0]
+            fs = fsspec.filesystem(scheme, **self.storage_options)
+            return h5py.File(fs.open(self.h5_path, 'rb'), 'r')
+        return h5py.File(
+            self.h5_path, 'r', swmr=True, rdcc_nbytes=256 * 1024 * 1024
+        )
+
     def _open(self) -> None:
         if self.h5_file is None:
-            self.h5_file = h5py.File(
-                self.h5_path, 'r', swmr=True, rdcc_nbytes=256 * 1024 * 1024
-            )
+            self.h5_file = self._open_h5()
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state['h5_file'] = None
+        return state
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         self._open()
@@ -268,6 +303,18 @@ class HDF5(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> HDF5Dataset:
+        s = str(path)
+        # Remote URI (s3://, gs://, ...) — pass through; HDF5Dataset uses
+        # fsspec to read. Auto-inject region from env if caller didn't.
+        if '://' in s:
+            if 'storage_options' not in kwargs:
+                import os
+
+                region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+                kwargs['storage_options'] = {
+                    'client_kwargs': {'region_name': region}
+                }
+            return HDF5Dataset(path=s, **kwargs)
         p = Path(path)
         if p.is_dir():
             files = sorted(p.glob('*.h5')) + sorted(p.glob('*.hdf5'))

@@ -5,6 +5,77 @@ from torch.nn import functional as F
 from einops import rearrange
 
 
+# fmt: off
+BACKBONE_ALIASES = {
+    # DINOv2
+    "dinov2_small":        "facebook/dinov2-small",
+    "dinov2_base":         "facebook/dinov2-base",
+    "dinov2_large":        "facebook/dinov2-large",
+    "dinov2_giant":        "facebook/dinov2-giant",
+    # DINOv3
+    "dinov3_small":        "facebook/dinov3-vits16-pretrain-lvd1689m",
+    # DINO (v1)
+    "dino_vits16":         "facebook/dino-vits16",
+    "dino_vits8":          "facebook/dino-vits8",
+    "dino_vitb16":         "facebook/dino-vitb16",
+    "dino_vitb8":          "facebook/dino-vitb8",
+    # MAE
+    "mae_base":            "facebook/vit-mae-base",
+    "mae_large":           "facebook/vit-mae-large",
+    "mae_huge":            "facebook/vit-mae-huge",
+    # I-JEPA
+    "ijepa_huge":          "facebook/ijepa-huge-patch14-224",
+    # VJEPA2
+    "vjepa2_large":        "facebook/vjepa2-vit-l",
+    "vjepa2_huge":         "facebook/vjepa2-vit-h",
+    # WebSSL
+    "webssl_large":        "facebook/webssl-vith14-5b",
+    # ViT
+    "vit_base_patch16":    "google/vit-base-patch16-224",
+    "vit_large_patch16":   "google/vit-large-patch16-224",
+    # SigLIP2
+    "siglip2_base_224":    "google/siglip2-base-patch16-224",
+    "siglip2_large_256":   "google/siglip2-large-patch16-256",
+    # ResNet
+    "resnet_50":           "microsoft/resnet-50",
+    "resnet_101":          "microsoft/resnet-101",
+}
+# fmt: on
+
+
+def create_backbone(name: str) -> nn.Module:
+    """Load a pretrained HuggingFace vision encoder.
+
+    ``name`` can be either a short alias from ``BACKBONE_ALIASES``
+    (e.g. ``dinov2_small``) or a full HuggingFace model id.
+    """
+    from transformers import AutoModel, AutoModelForImageClassification
+
+    name = BACKBONE_ALIASES.get(name, name)
+
+    _SPECIAL_CASES = {
+        'microsoft/resnet-': {
+            'model_class': AutoModelForImageClassification,
+            'post_init': lambda m: setattr(
+                m.classifier, '1', nn.LayerNorm(m.config.hidden_sizes[-1])
+            ),
+        },
+    }
+
+    case = next(
+        (v for prefix, v in _SPECIAL_CASES.items() if name.startswith(prefix)),
+        {},
+    )
+    backbone = case.get('model_class', AutoModel).from_pretrained(name)
+
+    if hasattr(backbone, 'vision_model'):
+        backbone = backbone.vision_model
+    if 'post_init' in case:
+        case['post_init'](backbone)
+
+    return backbone
+
+
 class Embedder(torch.nn.Module):
     def __init__(
         self,

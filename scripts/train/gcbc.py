@@ -6,6 +6,7 @@ import lightning as pl
 import stable_pretraining as spt
 import torch
 from lightning.pytorch.callbacks import Callback
+from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
@@ -33,25 +34,10 @@ def get_data(cfg):
             spt.data.transforms.Resize(img_size, source=key, target=target),
         )
 
-    def get_column_normalizer(dataset, source: str, target: str):
-        """Get normalizer for a specific column in the dataset."""
-        data = torch.from_numpy(dataset.get_col_data(source)[:])
-        data = data[~torch.isnan(data).any(dim=1)]
-        mean = data.mean(0, keepdim=True).clone()
-        std = data.std(0, keepdim=True).clone()
-
-        def norm_fn(x):
-            return ((x - mean) / std).float()
-
-        normalizer = spt.data.transforms.WrapTorchTransform(
-            norm_fn, source=source, target=target
-        )
-
-        return normalizer
-
-    cache_dir = None
-    if not hasattr(cfg, 'local_cache_dir'):
-        cache_dir = os.environ.get('SLURM_TMPDIR', None)
+    cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
+    print(
+        f'Loading dataset "{cfg.dataset_name}" from {"local cache: " + cache_dir if cache_dir else "default location"}'
+    )
 
     use_proprio = cfg.dinowm.get('use_proprio_encoder', True)
     keys_to_load = ['pixels', 'action']

@@ -177,19 +177,24 @@ class PGDSolver(torch.nn.Module):
             expanded_infos = {}
             for k, v in info_dict.items():
                 if torch.is_tensor(v):
-                    batch_v = (
-                        v[start_idx:end_idx]
-                        .unsqueeze(1)
-                        .expand(current_bs, self.num_samples, *v.shape[1:])
+                    v_batch = v[start_idx:end_idx]
+                    v_batch = (
+                        v_batch.unsqueeze(1)
+                        .expand(
+                            current_bs,
+                            self.num_samples,
+                            *v_batch.shape[1:],
+                        )
                         .to(self.device)
                     )
                 elif isinstance(v, np.ndarray):
-                    batch_v = np.repeat(
-                        v[start_idx:end_idx, None, ...],
-                        self.num_samples,
-                        axis=1,
+                    v_batch = v[start_idx:end_idx]
+                    v_batch = np.repeat(
+                        v_batch[:, None, ...], self.num_samples, axis=1
                     )
-                expanded_infos[k] = batch_v
+                else:
+                    v_batch = v
+                expanded_infos[k] = v_batch
 
             # Perform Gradient Descent for this batch
             batch_cost_history = []
