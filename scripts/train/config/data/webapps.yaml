@@ -1,9 +1,0 @@
-dataset:
-  num_steps: 8            # history window length; override with wm.num_steps if added
-  frameskip: 1
-  name: openapps.lance
-  keys_to_load:
-    - pixels
-    - action
-  keys_to_cache:
-    - action

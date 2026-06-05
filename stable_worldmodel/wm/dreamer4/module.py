@@ -1,12 +1,7 @@
 # Building blocks for the DreamerV4-style world model.
-# Architecture adapted from https://github.com/nicklashansen/dreamer4 (MIT License)
-# by Niklas Hansen, Haochen Shi, Jiuqi Wang (2025).
-#
-# Key idea: flow matching in latent space with shortcut forcing.
-# The dynamics model predicts the clean latent z1 directly from a
-# noisy interpolation z_tilde = (1-sigma)*noise + sigma*z1.
-# Shortcut forcing trains variable-step (K=1,2,4,...,k_max) consistency
-# so inference can run in as few as 1 function evaluation.
+# Flow matching in latent space with shortcut forcing.
+# The dynamics model predicts the clean latent z1 from a noisy interpolation
+# z_tilde = (1-sigma)*noise + sigma*z1, enabling K=1 single-step inference.
 
 import math
 from dataclasses import dataclass
