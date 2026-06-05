@@ -67,11 +67,9 @@ The `info` dict returned by `step()` and `reset()` contains:
 
 ## Variation Space
 
-<div style="display: flex; gap: 10px; margin-bottom: 20px;">
-  <img src="../../assets/tworoom_horizontal_wall.gif" alt="horizontal wall" style="width: 32%; object-fit: contain;">
-  <img src="../../assets/tworoom_three_doors.gif" alt="three doors" style="width: 32%; object-fit: contain;">
-  <img src="../../assets/tworoom_recolored.gif" alt="recolored" style="width: 32%; object-fit: contain;">
-</div>
+| horizontal wall | three doors | recolored |
+|:---:|:---:|:---:|
+| ![horizontal wall](../assets/tworoom_horizontal_wall.gif) | ![three doors](../assets/tworoom_three_doors.gif) | ![recolored](../assets/tworoom_recolored.gif) |
 
 
 The environment supports extensive customization through the variation space:
@@ -147,11 +145,9 @@ import stable_worldmodel as swm
 world = swm.World('swm/TwoRoomDoorKey-v1', num_envs=4, image_shape=(128, 128))
 ```
 
-<div style="display: flex; gap: 10px; margin-bottom: 20px;">
-  <img src="../../assets/doorkey_horizontal_wall.gif" alt="horizontal wall" style="width: 32%; object-fit: contain;">
-  <img src="../../assets/doorkey_three_doors.gif" alt="three doors" style="width: 32%; object-fit: contain;">
-  <img src="../../assets/doorkey_recolored.gif" alt="recolored" style="width: 32%; object-fit: contain;">
-</div>
+| horizontal wall | three doors | recolored |
+|:---:|:---:|:---:|
+| ![horizontal wall](../assets/doorkey_horizontal_wall.gif) | ![three doors](../assets/doorkey_three_doors.gif) | ![recolored](../assets/doorkey_recolored.gif) |
 
 ### Differences from Two-Room
 
