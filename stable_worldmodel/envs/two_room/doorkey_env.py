@@ -15,7 +15,8 @@ Continuous analog of MiniGrid's DoorKey, implemented as a thin subclass of
 All collision physics, wall/door rendering, and the variation-space scaffolding
 come from the parent. DoorKey only overrides what genuinely differs:
 variation space (adds ``key.*``, splits ``door.color`` into locked/unlocked,
-drops ``task.min_steps``, adds a constraint on ``target.position``); the four
+drops ``task.min_steps``; the opposite-room ``target.position`` constraint is
+inherited from the parent); the four
 subclass hooks (``_door_is_passable``, ``_door_color_for_index``,
 ``_render_extras``, ``_after_step_state_update``); and observation/info to
 expose key state.
@@ -134,32 +135,14 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
             ],
         )
 
-        # Target: parent has no active constrain_fn; DoorKey requires the
-        # target to be in the opposite room from the agent. Use the parent's
-        # scaled default position so the geometry stays scale-invariant.
-        parent_target = parent['target']
-        parent_target_init = parent_target['position'].init_value
-        target_dict = swm_spaces.Dict(
-            {
-                'color': parent_target['color'],
-                'radius': parent_target['radius'],
-                'position': swm_spaces.Box(
-                    low=np.array([pos_min, pos_min], dtype=np.float32),
-                    high=np.array([pos_max, pos_max], dtype=np.float32),
-                    shape=(2,),
-                    dtype=np.float32,
-                    init_value=np.array(parent_target_init, dtype=np.float32),
-                    constrain_fn=self._constrain_target_in_other_room,
-                ),
-            },
-            sampling_order=['color', 'radius', 'position'],
-        )
-
+        # Target: the parent already constrains the target to the room opposite
+        # the agent (_constrain_target_in_other_room), which is exactly what
+        # DoorKey needs, so reuse the parent's target space as-is.
         return swm_spaces.Dict(
             {
                 'agent': parent['agent'],
                 'key': key_dict,
-                'target': target_dict,
+                'target': parent['target'],
                 'wall': parent['wall'],
                 'door': door_dict,
                 'background': parent['background'],
@@ -311,34 +294,7 @@ class TwoRoomDoorKeyEnv(TwoRoomEnv):
                 return False
         return True
 
-    def _constrain_target_in_other_room(self, target_pos):
-        """Target must be in the room opposite the agent and outside the
-        wall zone. DoorKey only makes sense as a cross-room task."""
-        agent_pos = self.variation_space['agent']['position'].value
-        wall_axis = int(self.variation_space['wall']['axis'].value)
-        wall_thickness = int(self.variation_space['wall']['thickness'].value)
-        half_thickness = wall_thickness // 2
-
-        # Target is a point (success is a center-distance test): exclude only
-        # the actual wall slab, no radius padding.
-        wall_min = self.WALL_CENTER - half_thickness
-        wall_max = self.WALL_CENTER + half_thickness
-
-        if wall_axis == 1:  # vertical wall
-            agent_side = agent_pos[0] < self.WALL_CENTER
-            target_side = target_pos[0] < self.WALL_CENTER
-            if agent_side == target_side:
-                return False
-            if wall_min <= target_pos[0] <= wall_max:
-                return False
-        else:  # horizontal wall
-            agent_side = agent_pos[1] < self.WALL_CENTER
-            target_side = target_pos[1] < self.WALL_CENTER
-            if agent_side == target_side:
-                return False
-            if wall_min <= target_pos[1] <= wall_max:
-                return False
-        return True
+    # _constrain_target_in_other_room is inherited from TwoRoomEnv.
 
     # Convenience setters
 

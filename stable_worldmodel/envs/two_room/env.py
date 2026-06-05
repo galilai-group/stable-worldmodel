@@ -421,6 +421,7 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array(
                                 [target_def_v, target_def_v], dtype=np.float32
                             ),
+                            constrain_fn=self._constrain_target_in_other_room,
                         ),
                     },
                     sampling_order=['color', 'radius', 'position'],
@@ -843,6 +844,38 @@ class TwoRoomEnv(gym.Env):
             c = float(positions[i])
             s = float(sizes[i])
             if (c - s) < low or (c + s) > high:
+                return False
+        return True
+
+    def _constrain_target_in_other_room(self, target_pos):
+        """Target must be in the room opposite the agent and outside the wall
+        zone, so every episode requires a door traversal rather than degenerating
+        into same-room point-to-point navigation. Agent position is sampled
+        before the target (see top-level ``sampling_order``), so it is known here.
+        """
+        agent_pos = self.variation_space['agent']['position'].value
+        wall_axis = int(self.variation_space['wall']['axis'].value)
+        wall_thickness = int(self.variation_space['wall']['thickness'].value)
+        half_thickness = wall_thickness // 2
+
+        # Target is a point (success is a center-distance test): exclude only
+        # the actual wall slab, no radius padding.
+        wall_min = self.WALL_CENTER - half_thickness
+        wall_max = self.WALL_CENTER + half_thickness
+
+        if wall_axis == 1:  # vertical wall
+            agent_side = agent_pos[0] < self.WALL_CENTER
+            target_side = target_pos[0] < self.WALL_CENTER
+            if agent_side == target_side:
+                return False
+            if wall_min <= target_pos[0] <= wall_max:
+                return False
+        else:  # horizontal wall
+            agent_side = agent_pos[1] < self.WALL_CENTER
+            target_side = target_pos[1] < self.WALL_CENTER
+            if agent_side == target_side:
+                return False
+            if wall_min <= target_pos[1] <= wall_max:
                 return False
         return True
 
