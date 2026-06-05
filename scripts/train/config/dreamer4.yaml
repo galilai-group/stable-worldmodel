@@ -1,0 +1,78 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: pusht
+
+output_model_name: dreamer4
+subdir: ${hydra:job.id}
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+patch_size: 14
+encoder_scale: tiny
+
+trainer:
+  max_epochs: 100
+  devices: auto
+  accelerator: gpu
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 32
+  num_workers: ${num_workers}
+  drop_last: True
+  persistent_workers: True
+  prefetch_factor: 3
+  pin_memory: True
+  shuffle: True
+
+optimizer:
+  type: AdamW
+  lr: 1e-4
+  weight_decay: 1e-2
+
+wandb:
+  enabled: false
+  config:
+    project: dreamer4-swm
+    name: ${output_model_name}
+
+wm:
+  embed_dim: 192        # ViT-tiny CLS output dim
+  d_spatial: 64         # bottleneck dim (projector output)
+  n_spatial: 1          # number of spatial tokens (1 = CLS only)
+  k_max: 8              # max flow integration steps (power of 2)
+  self_fraction: 0.25   # fraction of batch used for bootstrap consistency
+  bootstrap_start: 5000 # step to start shortcut bootstrap loss
+
+model:
+  _target_: stable_worldmodel.wm.dreamer4.DreamerV4WM
+  k_max: ${wm.k_max}
+  eval_K: 1             # K=1 shortcut at MPC rollout time
+  encoder:
+    _target_: stable_pretraining.backbone.utils.vit_hf
+    size: ${encoder_scale}
+    patch_size: ${patch_size}
+    image_size: ${img_size}
+    pretrained: false
+    use_mask_token: false
+  projector:
+    _target_: torch.nn.Linear
+    in_features: ${wm.embed_dim}
+    out_features: ${wm.d_spatial}
+  dynamics:
+    _target_: stable_worldmodel.wm.dreamer4.module.Dynamics
+    d_model: 256
+    d_spatial: ${wm.d_spatial}
+    n_spatial: ${wm.n_spatial}
+    n_register: 4
+    n_heads: 4
+    depth: 6
+    k_max: ${wm.k_max}
+    action_dim: ???     # filled from dataset at runtime
+    dropout: 0.1
+    mlp_ratio: 4.0
+    time_every: 1
