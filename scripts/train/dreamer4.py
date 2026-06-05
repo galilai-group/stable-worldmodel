@@ -23,7 +23,6 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf, open_dict
-from torch import nn
 from torch.utils.data import DataLoader
 
 from stable_pretraining import data as dt
@@ -35,16 +34,18 @@ from lightning.pytorch.callbacks import Callback
 
 def get_img_preprocessor(source: str, target: str, img_size: int = 224):
     imagenet_stats = dt.dataset_stats.ImageNet
-    to_image = dt.transforms.ToImage(**imagenet_stats, source=source, target=target)
-    resize   = dt.transforms.Resize(img_size, source=source, target=target)
+    to_image = dt.transforms.ToImage(
+        **imagenet_stats, source=source, target=target
+    )
+    resize = dt.transforms.Resize(img_size, source=source, target=target)
     return dt.transforms.Compose(to_image, resize)
 
 
 class SaveCkptCallback(Callback):
     def __init__(self, run_name, cfg, epoch_interval: int = 5):
         super().__init__()
-        self.run_name       = run_name
-        self.cfg            = cfg
+        self.run_name = run_name
+        self.cfg = cfg
         self.epoch_interval = epoch_interval
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -68,14 +69,14 @@ def dreamer4_forward(self, batch, stage, cfg):
     batch['action'] = torch.nan_to_num(batch['action'], 0.0)
 
     # encode pixels -> packed_z (B, T, 1, d_spatial)
-    output   = self.model.encode(batch)
-    packed_z = output['packed_z']                  # (B, T, 1, d_spatial)
-    actions  = batch.get('action', None)
+    output = self.model.encode(batch)
+    packed_z = output['packed_z']  # (B, T, 1, d_spatial)
+    actions = batch.get('action', None)
 
     # dynamics loss (flow matching + shortcut bootstrap)
     loss, aux = dynamics_loss(
         self.model.dynamics,
-        z1=packed_z.detach(),                      # encoder is frozen
+        z1=packed_z.detach(),  # encoder is frozen
         actions=actions,
         k_max=cfg.wm.k_max,
         self_fraction=cfg.wm.self_fraction,
@@ -93,12 +94,16 @@ def dreamer4_forward(self, batch, stage, cfg):
 
 @hydra.main(version_base=None, config_path='./config', config_name='dreamer4')
 def run(cfg):
-    dataset_cfg  = OmegaConf.to_container(cfg.data.dataset, resolve=True)
+    dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop('name')
-    cache_dir    = os.environ.get('LOCAL_DATASET_DIR', None)
-    logging.info(f'Loading "{dataset_name}" from {"local: " + cache_dir if cache_dir else "default"}')
+    cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
+    logging.info(
+        f'Loading "{dataset_name}" from {"local: " + cache_dir if cache_dir else "default"}'
+    )
 
-    dataset       = swm.data.load_dataset(dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg)
+    dataset = swm.data.load_dataset(
+        dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg
+    )
     img_processor = get_img_preprocessor('pixels', 'pixels', cfg.img_size)
 
     extra_transforms = []
@@ -135,22 +140,26 @@ def run(cfg):
             'optimizer': dict(cfg.optimizer),
             'scheduler': {
                 'type': 'LinearWarmupCosineAnnealingLR',
-                'warmup_steps': max(1, int(0.01 * cfg.trainer.max_epochs * len(train))),
+                'warmup_steps': max(
+                    1, int(0.01 * cfg.trainer.max_epochs * len(train))
+                ),
                 'max_steps': cfg.trainer.max_epochs * len(train),
             },
             'interval': 'epoch',
         }
     }
 
-    data_module  = spt.data.DataModule(train=train, val=val)
-    pl_module    = spt.Module(
+    data_module = spt.data.DataModule(train=train, val=val)
+    pl_module = spt.Module(
         model=world_model,
         forward=partial(dreamer4_forward, cfg=cfg),
         optim=optimizers,
     )
 
-    run_id  = cfg.get('subdir') or ''
-    run_dir = Path(swm.data.utils.get_cache_dir(sub_folder='checkpoints'), run_id)
+    run_id = cfg.get('subdir') or ''
+    run_dir = Path(
+        swm.data.utils.get_cache_dir(sub_folder='checkpoints'), run_id
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
@@ -169,7 +178,7 @@ def run(cfg):
     )
 
     ckpt_path = run_dir / f'{cfg.output_model_name}_weights.ckpt'
-    manager   = spt.Manager(
+    manager = spt.Manager(
         trainer=trainer,
         module=pl_module,
         data=data_module,
