@@ -57,7 +57,7 @@ model:
     _target_: stable_worldmodel.wm.prejepa.module.create_backbone
     name: ${backbone.name}
   predictor:
-    _target_: stable_worldmodel.wm.prejepa.CausalPredictor
+    _target_: stable_worldmodel.wm.prejepa.module.CausalPredictor
     num_patches: ???
     num_frames: ${wm.history_size}
     dim: ???
