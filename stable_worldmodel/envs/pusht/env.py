@@ -378,7 +378,7 @@ class PushT(gym.Env):
         return body
 
     def _get_info(self):
-        n_steps = int(1 / self.dt * self.control_hz)
+        n_steps = int(1 / (self.dt * self.control_hz))
         n_contact_points_per_step = int(
             np.ceil(self.n_contact_points / n_steps)
         )
