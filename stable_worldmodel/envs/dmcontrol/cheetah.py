@@ -76,7 +76,7 @@ class CheetahDMControlWrapper(DMControlWrapper):
                             shape=(3,),
                             dtype=np.float64,
                             init_value=np.array(
-                                [0.6, 0.3, 0.3], dtype=np.float64
+                                [0.7, 0.5, 0.3], dtype=np.float64
                             ),
                         ),
                         'torso_density': swm_space.Box(
