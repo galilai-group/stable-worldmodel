@@ -31,7 +31,9 @@ class VLMPolicy(BasePolicy):
         history_len: Number of past screenshots to include in the prompt.
     """
 
-    def __init__(self, agent, task_description: str, history_len: int = 4, **kwargs):
+    def __init__(
+        self, agent, task_description: str, history_len: int = 4, **kwargs
+    ):
         super().__init__(**kwargs)
         self.type = 'vlm'
         self.agent = agent
@@ -51,7 +53,9 @@ class VLMPolicy(BasePolicy):
             task=self.task,
             history=list(self.history),
         )
-        action = uitars_parser({'action': raw})['action'] if uitars_parser else raw
+        action = (
+            uitars_parser({'action': raw})['action'] if uitars_parser else raw
+        )
         logger.debug(f'VLM action: {raw!r} -> {action!r}')
         return action
 

@@ -67,16 +67,6 @@ lerobot = [
     "lerobot>=0.5.0; python_version >= '3.12'",
 ]
 
-# OpenApps browser-app envs (swm/OpenApps-*). Kept separate so a plain
-# ``stable-worldmodel`` install stays lean; opt in with
-# ``stable-worldmodel[openapps]``. ``open-apps`` is sourced from git (see
-# [tool.uv.sources]) and pulls in browsergym/fasthtml/mcp itself.
-#
-# NOTE: OpenApps' Hydra config and app routes only resolve from a *source
-# checkout* (its wheel ships neither the config tree nor a working ``src``
-# import path), so install open-apps **editable** for a runnable MCP server
-# — this clones into the venv (not your project), config + routes included:
-#   pip install -e "git+https://github.com/facebookresearch/OpenApps.git"
 openapps = [
     "open-apps",
     "playwright",
@@ -108,10 +98,6 @@ requires = ["uv_build>=0.9.21,<0.10.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-# open-apps is not published to PyPI; install it from the OpenApps repo.
-# uv strips this from published metadata, so it only applies to git/dev installs.
-# NB: a non-editable `uv sync --extra openapps` resolves the code but not a
-# runnable server — install open-apps editable (see the [openapps] note above).
 open-apps = { git = "https://github.com/facebookresearch/OpenApps.git" }
 
 [tool.uv.build-backend]

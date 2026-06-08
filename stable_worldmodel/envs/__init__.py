@@ -184,25 +184,12 @@ for _swm_id, _gym_id in [
 # OPENAPPS #
 ############
 
-_OPENAPPS_ENTRY = 'stable_worldmodel.envs.openapps.env:OpenAppsEnv'
-
-try:
-    # ``open_apps``, ``playwright`` and ``mcp`` ride in the swm[openapps]
-    # extra. Guard the registration so a user without the extra still gets a
-    # usable ``stable_worldmodel.envs`` module. The env talks to an
-    # ``open_apps`` MCP server subprocess (which uses playwright).
-    import mcp  # noqa: F401
-    import open_apps  # noqa: F401
-    import playwright  # noqa: F401
-
-    for _app in ('todo', 'calendar', 'messages', 'codeeditor', 'map'):
-        register(
-            id=f'swm/OpenApps-{_app.capitalize()}-v0',
-            entry_point=_OPENAPPS_ENTRY,
-            kwargs={'app_name': _app},
-        )
-except ImportError:
-    pass
+for _app in ('todo', 'calendar', 'messages', 'codeeditor', 'map'):
+    register(
+        id=f'swm/OpenApps-{_app.capitalize()}-v0',
+        entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+        kwargs={'app_name': _app},
+    )
 
 
 ############
