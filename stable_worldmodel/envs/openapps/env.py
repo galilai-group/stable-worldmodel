@@ -60,14 +60,19 @@ def _i(value):
 
 
 def make_action_space():
-    """Pixel-native Dict action space; samples map to BrowserGym strings."""
+    """Mixed action space: discrete action ``type`` + continuous pixel coords.
+
+    ``type`` is discrete; the pixel coordinates (``x``/``y`` and the drag
+    target ``to_x``/``to_y``) are continuous ``Box`` floats so continuous
+    solvers can emit real-valued positions (rounded to pixels on dispatch).
+    """
     return spaces.Dict(
         {
             'type': spaces.Discrete(len(ACTION_TYPES)),
-            'x': spaces.Box(0, VIEWPORT_WIDTH - 1, (), dtype=np.int32),
-            'y': spaces.Box(0, VIEWPORT_HEIGHT - 1, (), dtype=np.int32),
-            'to_x': spaces.Box(0, VIEWPORT_WIDTH - 1, (), dtype=np.int32),
-            'to_y': spaces.Box(0, VIEWPORT_HEIGHT - 1, (), dtype=np.int32),
+            'x': spaces.Box(0, VIEWPORT_WIDTH - 1, (), dtype=np.float32),
+            'y': spaces.Box(0, VIEWPORT_HEIGHT - 1, (), dtype=np.float32),
+            'to_x': spaces.Box(0, VIEWPORT_WIDTH - 1, (), dtype=np.float32),
+            'to_y': spaces.Box(0, VIEWPORT_HEIGHT - 1, (), dtype=np.float32),
             'button': spaces.Discrete(len(BUTTONS)),
             'scroll': spaces.Discrete(len(SCROLL_CHOICES)),
             'text': spaces.Text(max_length=64),
