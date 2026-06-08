@@ -68,13 +68,13 @@ lerobot = [
 ]
 
 openapps = [
-    "open-apps",
-    "playwright",
-    "mcp>=1.9.0",
+    "open-apps; python_version >= '3.11'",
+    "playwright; python_version >= '3.11'",
+    "mcp>=1.9.0; python_version >= '3.11'",
 ]
 
 all = [
-    "stable-worldmodel[train,env,format,openapps]",
+    "stable-worldmodel[train,env,format]",
 ]
 
 [dependency-groups]
@@ -96,6 +96,13 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+# open-apps pins transformers==4.52.2 (huggingface-hub<1.0), which is
+# incompatible with lerobot (huggingface-hub>=1.0); they can't co-resolve.
+conflicts = [
+    [{ extra = "openapps" }, { extra = "lerobot" }],
+]
 
 [tool.uv.sources]
 open-apps = { git = "https://github.com/facebookresearch/OpenApps.git" }
