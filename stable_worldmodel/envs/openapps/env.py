@@ -2,8 +2,9 @@
 
 Each env spawns its own ``python -m open_apps.mcp`` subprocess (process =
 session), so N envs run independently in one process. Observations are
-1024x640 RGB screenshots; actions are BrowserGym action strings or samples
-of a pixel-native Dict action space; reward is scored server-side.
+1024x640 RGB screenshots; the action is a continuous normalized click
+position (``Box(-1, 1, (2,))``), or a raw BrowserGym action string passed
+straight through; reward is scored server-side.
 """
 
 import asyncio
@@ -28,20 +29,6 @@ from stable_worldmodel import spaces as swm_spaces
 VIEWPORT_WIDTH = 1024
 VIEWPORT_HEIGHT = 640
 
-ACTION_TYPES = [
-    'click',
-    'double_click',
-    'move',
-    'scroll',
-    'type',
-    'press',
-    'drag',
-    'wait',
-]
-SCROLL_CHOICES = [-600, -300, -100, 0, 100, 300, 600]
-SAFE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp']
-BUTTONS = ['left', 'right', 'middle']
-
 SCROLL_Y_CHOICES = [0, 100, 300, 600]
 MAP_CITY_CHOICES = [
     ('NYC', [40.7831, -73.9712]),
@@ -60,55 +47,25 @@ def _i(value):
 
 
 def make_action_space():
-    """Mixed action space: discrete action ``type`` + continuous pixel coords.
+    """Continuous, normalized click position in ``[-1, 1]**2``.
 
-    ``type`` is discrete; the pixel coordinates (``x``/``y`` and the drag
-    target ``to_x``/``to_y``) are continuous ``Box`` floats so continuous
-    solvers can emit real-valued positions (rounded to pixels on dispatch).
+    A single click is the controllable action — kept low-dimensional and
+    continuous so it trains/plans cleanly with swm's world models and
+    solvers. Samples map to a ``mouse_click`` at the de-normalized pixel
+    position. Richer actions (type/scroll/drag) remain reachable via raw
+    BrowserGym action strings passed straight through (e.g. a VLM policy).
     """
-    return spaces.Dict(
-        {
-            'type': spaces.Discrete(len(ACTION_TYPES)),
-            'x': spaces.Box(0, VIEWPORT_WIDTH - 1, (), dtype=np.float32),
-            'y': spaces.Box(0, VIEWPORT_HEIGHT - 1, (), dtype=np.float32),
-            'to_x': spaces.Box(0, VIEWPORT_WIDTH - 1, (), dtype=np.float32),
-            'to_y': spaces.Box(0, VIEWPORT_HEIGHT - 1, (), dtype=np.float32),
-            'button': spaces.Discrete(len(BUTTONS)),
-            'scroll': spaces.Discrete(len(SCROLL_CHOICES)),
-            'text': spaces.Text(max_length=64),
-            'key': spaces.Discrete(len(SAFE_KEYS)),
-        }
-    )
+    return spaces.Box(-1.0, 1.0, (2,), dtype=np.float32)
 
 
 def to_browsergym_action(action):
-    """Map a Dict-space sample (or passthrough string) to a BrowserGym action."""
+    """Map a ``[-1, 1]**2`` click (or a passthrough string) to BrowserGym."""
     if isinstance(action, str):
         return action
-
-    a = action
-    kind = ACTION_TYPES[_i(a['type'])]
-    x, y = _i(a['x']), _i(a['y'])
-
-    if kind == 'click':
-        button = BUTTONS[_i(a['button'])]
-        if button == 'left':
-            return f'mouse_click({x}, {y})'
-        return f'mouse_click({x}, {y}, button={button!r})'
-    if kind == 'double_click':
-        return f'mouse_dblclick({x}, {y})'
-    if kind == 'move':
-        return f'mouse_move({x}, {y})'
-    if kind == 'scroll':
-        return f'scroll(0, {SCROLL_CHOICES[_i(a["scroll"])]})'
-    if kind == 'type':
-        return f'keyboard_type({str(a.get("text", ""))!r})'
-    if kind == 'press':
-        return f'keyboard_press({SAFE_KEYS[_i(a["key"])]!r})'
-    if kind == 'drag':
-        to_x, to_y = _i(a['to_x']), _i(a['to_y'])
-        return f'mouse_drag_and_drop({x}, {y}, {to_x}, {to_y})'
-    return 'noop(300)'
+    a = np.clip(np.asarray(action, dtype=np.float32).reshape(-1), -1.0, 1.0)
+    x = int(round((a[0] + 1.0) / 2.0 * (VIEWPORT_WIDTH - 1)))
+    y = int(round((a[1] + 1.0) / 2.0 * (VIEWPORT_HEIGHT - 1)))
+    return f'mouse_click({x}, {y})'
 
 
 def _unwrap_result(res):
