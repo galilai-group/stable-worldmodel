@@ -21,6 +21,13 @@ pip install 'stable-worldmodel[all]'
 export STABLEWM_HOME=$PWD/.stablewm
 ```
 
+On macOS arm64, `decord` may not provide a compatible wheel for the `all`
+extra. For the CPU smoke path below, install the narrower runtime set:
+
+```bash
+pip install 'stable-worldmodel[train]' pygame pymunk shapely opencv-python-headless
+```
+
 This tutorial assumes the dataset exists at:
 
 ```text
@@ -98,6 +105,11 @@ print(batch['pixels'].shape)  # (B, T, C, H, W)
 print(batch['action'].shape)  # (B, T, action_dim)
 ```
 
+Lance datasets switch multiprocessing to the `spawn` start method for
+fork-safety. If you use `num_workers > 0`, run the `DataLoader` code from a
+normal Python file under an `if __name__ == '__main__':` guard. For notebooks,
+REPLs, or heredoc snippets, set `num_workers=0`.
+
 The first action in an episode may be `NaN` because there is no previous
 environment action at reset. Training code should replace it before computing
 losses:
@@ -133,6 +145,8 @@ python scripts/train/lewm.py \
   trainer.devices=1 \
   trainer.precision=32 \
   loader.batch_size=8 \
+  loader.prefetch_factor=null \
+  loader.persistent_workers=false \
   num_workers=0 \
   output_model_name=tutorial_lewm_cpu
 ```

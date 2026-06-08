@@ -25,6 +25,14 @@ format dependencies:
 pip install 'stable-worldmodel[all]'
 ```
 
+On macOS arm64, `decord` may not provide a compatible wheel for the `all`
+extra. The PushT collection path below can be run with the narrower runtime
+set instead:
+
+```bash
+pip install stable-worldmodel pygame pymunk shapely opencv-python-headless
+```
+
 Datasets are stored under `$STABLEWM_HOME/datasets`. If the variable is not
 set, the default root is `~/.stable_worldmodel`.
 
@@ -174,6 +182,11 @@ loader = DataLoader(
 batch = next(iter(loader))
 print(batch['pixels'].shape)  # (B, T, C, H, W)
 ```
+
+Lance datasets switch multiprocessing to the `spawn` start method for
+fork-safety. If you use `num_workers > 0`, run the `DataLoader` code from a
+normal Python file under an `if __name__ == '__main__':` guard. For notebooks,
+REPLs, or heredoc snippets, set `num_workers=0`.
 
 `num_steps` is the temporal window returned by `__getitem__`. `frameskip`
 controls the stride between observation frames while keeping action sequences
