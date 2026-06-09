@@ -55,13 +55,15 @@ class LeWM(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(self, info, action_sequence, history_size: int = None):
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
          - S is the number of action plan samples
          - T is the time horizon
         """
+        if history_size is None:
+            history_size = getattr(self.predictor, 'num_frames', 3)
 
         assert 'pixels' in info, 'pixels not in info_dict'
         H = info['pixels'].size(2)
@@ -108,9 +110,9 @@ class LeWM(nn.Module):
     def criterion(self, info_dict: dict):
         """Compute the cost between predicted embeddings and goal embeddings."""
         pred_emb = info_dict['predicted_emb']  # (B,S, T-1, dim)
-        goal_emb = info_dict['goal_emb']  # (B, S, T, dim)
+        goal_emb = info_dict['goal_emb']  # (B, T, dim)
 
-        goal_emb = goal_emb[..., -1:, :].expand_as(pred_emb)
+        goal_emb = goal_emb[:, None, -1:, :].expand_as(pred_emb)
 
         # return last-step cost per action candidate
         cost = F.mse_loss(
