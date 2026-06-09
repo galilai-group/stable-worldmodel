@@ -29,20 +29,26 @@ TASK_SPECS = [
     dict(id='swm/MSPickSingleYCB-v0', task_id='PickSingleYCB-v1'),
     dict(id='swm/MSRollBall-v0', task_id='RollBall-v1'),
     # --- SIMPLER / real2sim Bridge digital twins (WidowX is the task default) ---
+    # These tasks only support obs_mode='rgb+segmentation' (not plain 'rgb').
     dict(
-        id='swm/SimplerCarrotOnPlate-v0', task_id='PutCarrotOnPlateInScene-v1'
+        id='swm/SimplerCarrotOnPlate-v0',
+        task_id='PutCarrotOnPlateInScene-v1',
+        obs_mode='rgb+segmentation',
     ),
     dict(
         id='swm/SimplerSpoonOnTowel-v0',
         task_id='PutSpoonOnTableClothInScene-v1',
+        obs_mode='rgb+segmentation',
     ),
     dict(
         id='swm/SimplerStackCube-v0',
         task_id='StackGreenCubeOnYellowCubeBakedTexInScene-v1',
+        obs_mode='rgb+segmentation',
     ),
     dict(
         id='swm/SimplerEggplantInBasket-v0',
         task_id='PutEggplantInBasketScene-v1',
+        obs_mode='rgb+segmentation',
     ),
     # --- Examples of extending to other robots (uncomment / copy a line) ---
     # dict(id='swm/MSPickCubeWidowX-v0', task_id='PickCube-v1', robot_uids='widowx'),

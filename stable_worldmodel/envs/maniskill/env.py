@@ -75,6 +75,7 @@ class ManiSkillWrapper(gym.Wrapper):
             'num_envs': 1,
             'obs_mode': obs_mode,
             'sim_backend': sim_backend,
+            'render_mode': render_mode,
         }
         if robot_uids is not None:
             make_kwargs['robot_uids'] = robot_uids
@@ -86,7 +87,8 @@ class ManiSkillWrapper(gym.Wrapper):
         super().__init__(env)
 
         self.env_name = task_id
-        self.render_mode = render_mode
+        # render_mode is a read-only property on gym.Wrapper (proxied from the
+        # wrapped env); it's passed to gym.make above rather than assigned here.
         self.render_size = resolution
         self.camera_name = camera_name
         self._camera = None
