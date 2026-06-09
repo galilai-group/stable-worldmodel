@@ -13,7 +13,7 @@ from omegaconf import OmegaConf, open_dict
 from functools import partial
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
 from stable_worldmodel.wm.utils import save_pretrained
-from stable_worldmodel.wm.diamond.edm_train import edm_loss_step
+from stable_worldmodel.wm.diamond.module import edm_loss_step
 
 
 def get_img_preprocessor(source: str, target: str, img_size: int = 64):

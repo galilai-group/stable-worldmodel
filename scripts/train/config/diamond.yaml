@@ -35,14 +35,14 @@ wm:
   history_size: 4
 
 model:
-  _target_: stable_worldmodel.wm.diamond.edm.EDMModel
+  _target_: stable_worldmodel.wm.diamond.module.EDMModel
   in_ch: 3
   base_ch: 64
   cond_dim: 256
   history_frames: 4
 
 action_encoder:
-  _target_: stable_worldmodel.wm.diamond.diffusion.DiscreteActionEncoder
+  _target_: stable_worldmodel.wm.diamond.module.DiscreteActionEncoder
   num_actions: 18
   emb_dim: 256
 

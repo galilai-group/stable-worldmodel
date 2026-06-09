@@ -3,14 +3,17 @@
 import pytest
 import torch
 
-from stable_worldmodel.wm.diamond.agent import ActorCritic, RewardTermModel
-from stable_worldmodel.wm.diamond.diamond_agent import (
+from stable_worldmodel.wm.diamond.module import (
+    ActorCritic,
+    RewardTermModel,
+    DiscreteActionEncoder,
+    EDMModel,
+)
+from stable_worldmodel.wm.diamond.diamond import (
     DiamondAgent,
     compute_lambda_returns,
     compute_rl_losses,
 )
-from stable_worldmodel.wm.diamond.diffusion import DiscreteActionEncoder
-from stable_worldmodel.wm.diamond.edm import EDMModel
 
 
 def make_agent(

@@ -1,15 +1,13 @@
 import torch
-from stable_worldmodel.wm.diamond.edm import (
+from stable_worldmodel.wm.diamond.module import (
     c_preconditioners,
     sigma_sampling,
     EDMModel,
-)
-from stable_worldmodel.wm.diamond.edm_sampling import (
     sample_euler,
     sample_heun,
     make_sigma_schedule,
+    edm_loss_step,
 )
-from stable_worldmodel.wm.diamond.edm_train import edm_loss_step
 
 
 def test_preconditioners_shapes():

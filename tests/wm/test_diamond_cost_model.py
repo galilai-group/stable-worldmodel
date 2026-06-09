@@ -3,10 +3,12 @@
 import pytest
 import torch
 
-from stable_worldmodel.wm.diamond.agent import RewardTermModel
-from stable_worldmodel.wm.diamond.cost_model import DiamondCostModel
-from stable_worldmodel.wm.diamond.diffusion import DiscreteActionEncoder
-from stable_worldmodel.wm.diamond.edm import EDMModel
+from stable_worldmodel.wm.diamond.module import (
+    RewardTermModel,
+    DiscreteActionEncoder,
+    EDMModel,
+)
+from stable_worldmodel.wm.diamond.diamond import DiamondCostModel
 
 
 def make_models(

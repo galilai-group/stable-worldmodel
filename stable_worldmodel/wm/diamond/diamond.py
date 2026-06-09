@@ -1,8 +1,23 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from .edm_sampling import sample_euler
-from .edm_train import edm_loss_step
+
+from .module import (
+    EDMModel,
+    sample_euler,
+    edm_loss_step,
+    RewardTermModel,
+    ActorCritic,
+    DiscreteActionEncoder,
+)
+
+
+__all__ = [
+    'DiamondCostModel',
+    'DiamondAgent',
+    'compute_lambda_returns',
+    'compute_rl_losses',
+]
 
 
 def compute_lambda_returns(rewards, values, terminated, gamma=0.985, lam=0.95):
@@ -21,11 +36,11 @@ def compute_lambda_returns(rewards, values, terminated, gamma=0.985, lam=0.95):
 
 
 def compute_rl_losses(trajectory, gamma=0.985, lam=0.95, eta=0.001):
-    rewards = trajectory['rewards']  # (B, H)
-    values = trajectory['values']  # (B, H+1)
-    terminated = trajectory['terminals']  # (B, H)
-    log_probs = trajectory['log_probs']  # (B, H)
-    entropies = trajectory['entropies']  # (B, H)
+    rewards = trajectory['rewards']
+    values = trajectory['values']
+    terminated = trajectory['terminals']
+    log_probs = trajectory['log_probs']
+    entropies = trajectory['entropies']
 
     lambda_returns = compute_lambda_returns(
         rewards, values, terminated, gamma, lam
@@ -49,6 +64,98 @@ def compute_rl_losses(trajectory, gamma=0.985, lam=0.95, eta=0.001):
         'rl_loss': total_loss,
     }
     return losses
+
+
+class DiamondCostModel(nn.Module):
+    def __init__(
+        self,
+        diffusion,
+        reward_term,
+        action_encoder,
+        history_size=4,
+        n_denoise=3,
+        device='cpu',
+    ):
+        super().__init__()
+        self.diffusion = diffusion
+        self.reward_term = reward_term
+        self.action_encoder = action_encoder
+        self.history_size = history_size
+        self.n_denoise = n_denoise
+        self.device = device
+
+    @torch.no_grad()
+    def warmup(self, obs_buf, act_buf):
+        L = self.history_size
+        B = obs_buf.shape[0]
+        hx = torch.zeros(
+            B, self.reward_term.lstm.hidden_size, device=self.device
+        )
+        cx = torch.zeros(
+            B, self.reward_term.lstm.hidden_size, device=self.device
+        )
+        for t in range(L):
+            frame = obs_buf[:, t]
+            act = act_buf[:, t]
+            act_emb = self.reward_term.action_embed(act.long())
+            vis_emb = self.reward_term.encoder(frame, act_emb)
+            inp = torch.cat([vis_emb, act_emb], dim=-1)
+            hx, cx = self.reward_term.lstm(inp, (hx, cx))
+        return hx, cx
+
+    @torch.no_grad()
+    def get_cost(self, info_dict, action_candidates):
+        pixels = info_dict['pixels']
+        hx_rw = info_dict['hx_rw']
+        cx_rw = info_dict['cx_rw']
+        B, N, L, C, H_im, W_im = pixels.shape
+        H_plan = action_candidates.shape[2]
+        K = action_candidates.shape[-1]
+
+        BN = B * N
+
+        obs = pixels.reshape(BN, L, C, H_im, W_im)
+        hx = hx_rw.reshape(BN, -1)
+        cx = cx_rw.reshape(BN, -1)
+
+        act = torch.zeros(BN, L, dtype=torch.long, device=self.device)
+
+        total_rewards = torch.zeros(BN, device=self.device)
+
+        for t in range(H_plan):
+            a_onehot = action_candidates[:, :, t]
+            a_idx = a_onehot.argmax(dim=-1)
+            a_t = a_idx.reshape(BN)
+
+            new_act = torch.cat([act[:, 1:], a_t.unsqueeze(-1)], dim=1)
+            act_emb = self.action_encoder(new_act)
+            cond_vec = act_emb.mean(dim=1)
+
+            history_flat = obs.reshape(BN, C * L, H_im, W_im)
+            cond = {'history': history_flat, 'cond_vec': cond_vec}
+            frame = sample_euler(
+                self.diffusion,
+                cond,
+                (BN, C, H_im, W_im),
+                self.device,
+                n_steps=self.n_denoise,
+            )
+
+            a_emb = self.reward_term.action_embed(a_t)
+            vis_emb = self.reward_term.encoder(frame, a_emb)
+            inp = torch.cat([vis_emb, a_emb], dim=-1)
+            hx, cx = self.reward_term.lstm(inp, (hx, cx))
+            reward = self.reward_term.reward_head(hx).squeeze(-1)
+            total_rewards += reward
+
+            obs = torch.cat([obs[:, 1:], frame.unsqueeze(1)], dim=1)
+            act = new_act
+
+        cost = -total_rewards.view(B, N)
+        return cost
+
+    def criterion(self, info_dict, action_candidates):
+        return self.get_cost(info_dict, action_candidates)
 
 
 class DiamondAgent(nn.Module):
@@ -226,6 +333,3 @@ class DiamondAgent(nn.Module):
             'rewards': torch.stack(rew_buf),
             'terminals': torch.stack(term_buf),
         }
-
-
-__all__ = ['DiamondAgent', 'compute_lambda_returns', 'compute_rl_losses']

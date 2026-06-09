@@ -27,15 +27,18 @@ from torch import optim
 from stable_worldmodel.data.buffer import ReplayBuffer, classic_filter
 from stable_worldmodel.policy import PlanConfig
 from stable_worldmodel.solver import CategoricalCEMSolver
-from stable_worldmodel.wm.diamond.agent import ActorCritic, RewardTermModel
-from stable_worldmodel.wm.diamond.cost_model import DiamondCostModel
-from stable_worldmodel.wm.diamond.diamond_agent import (
+from stable_worldmodel.wm.diamond.module import (
+    ActorCritic,
+    RewardTermModel,
+    DiscreteActionEncoder,
+    EDMModel,
+    sample_euler,
+)
+from stable_worldmodel.wm.diamond.diamond import (
     DiamondAgent,
+    DiamondCostModel,
     compute_rl_losses,
 )
-from stable_worldmodel.wm.diamond.diffusion import DiscreteActionEncoder
-from stable_worldmodel.wm.diamond.edm import EDMModel
-from stable_worldmodel.wm.diamond.edm_sampling import sample_euler
 from stable_worldmodel.envs.ale import make_atari_env
 
 
