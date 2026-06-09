@@ -67,6 +67,12 @@ lerobot = [
     "lerobot>=0.5.0; python_version >= '3.12'",
 ]
 
+# ManiSkill3 (SAPIEN) — Franka Panda manipulation + SIMPLER/real2sim Bridge
+# tasks. GPU-only (needs CUDA + Vulkan); kept out of `all` deliberately.
+maniskill = [
+    "mani-skill",
+]
+
 all = [
     "stable-worldmodel[train,env,format]",
 ]
