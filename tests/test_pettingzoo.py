@@ -178,6 +178,25 @@ class TinyAECEnv:
         pass
 
 
+class DeadTurnAECEnv(TinyAECEnv):
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed, options=options)
+        self.terminations['player_0'] = True
+
+    def step(self, action):
+        agent = self.agent_selection
+        self.action_log.append((agent, action))
+        assert action is None
+        self.agents = ['player_1']
+        self.agent_selection = 'player_1'
+        self.rewards = {a: 0.0 for a in self.possible_agents}
+        self.terminations = {'player_0': True, 'player_1': False}
+        self.truncations = {a: False for a in self.possible_agents}
+        self.infos['player_1'] = {
+            'turns': np.array([self.turns], dtype=np.float32)
+        }
+
+
 class MemoryWriter:
     def __init__(self):
         self.episodes = []
@@ -200,6 +219,8 @@ def test_parallel_wrapper_flattens_agent_columns():
 
     _, info = env.reset(seed=123)
 
+    assert env.action_space.shape == (2,)
+    assert isinstance(env.action_space.sample(), np.ndarray)
     np.testing.assert_array_equal(info['agent_mask'], [True, True])
     np.testing.assert_array_equal(info['observation.player_0.obs'], [0.0])
     np.testing.assert_array_equal(
@@ -210,7 +231,7 @@ def test_parallel_wrapper_flattens_agent_columns():
     assert not info['terminated']
 
     _, reward, terminated, truncated, info = env.step(
-        {'player_0': 1, 'player_1': 0}
+        np.array([1, 0], dtype=np.int64)
     )
 
     assert reward == 1.0
@@ -222,7 +243,7 @@ def test_parallel_wrapper_flattens_agent_columns():
     env.close()
 
 
-def test_env_pool_slices_batched_dict_actions():
+def test_env_pool_steps_batched_pettingzoo_ndarray_actions():
     pool = EnvPool(
         [
             lambda: PettingZooParallelWrapper(TinyParallelEnv(max_cycles=2))
@@ -231,10 +252,7 @@ def test_env_pool_slices_batched_dict_actions():
     )
     pool.reset(seed=0)
 
-    actions = {
-        'player_0': np.array([1, 0], dtype=np.int64),
-        'player_1': np.array([0, 1], dtype=np.int64),
-    }
+    actions = np.array([[1, 0], [0, 1]], dtype=np.int64)
     _, rewards, terminateds, truncateds, infos = pool.step(actions)
 
     np.testing.assert_array_equal(rewards, [1.0, 1.0])
@@ -288,7 +306,7 @@ def test_aec_wrapper_advances_one_agent_turn_per_step():
     assert info['action.player_0'] == -1
 
     _, reward, terminated, truncated, info = env.step(
-        {'player_0': 1, 'player_1': 0}
+        np.array([1, 0], dtype=np.int64)
     )
 
     assert reward == 1.0
@@ -298,6 +316,25 @@ def test_aec_wrapper_advances_one_agent_turn_per_step():
     assert info['current_agent'] == 'player_1'
     assert info['action.player_0'] == 1
     np.testing.assert_array_equal(info['observation.player_1'], [1.0])
+    env.close()
+
+
+def test_aec_wrapper_passes_none_for_dead_agent_turn():
+    env = PettingZooAECWrapper(DeadTurnAECEnv())
+
+    _, info = env.reset(seed=123)
+
+    assert info['current_agent'] == 'player_0'
+    assert info['terminated.player_0']
+
+    _, _, terminated, truncated, info = env.step(
+        np.array([1, 0], dtype=np.int64)
+    )
+
+    assert not terminated
+    assert not truncated
+    assert env.env.action_log[-1] == ('player_0', None)
+    assert info['current_agent'] == 'player_1'
     env.close()
 
 

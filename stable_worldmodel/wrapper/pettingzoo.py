@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import gymnasium as gym
@@ -45,13 +46,11 @@ class PettingZooParallelWrapper(gym.Env):
             agent: _empty_action(env.action_space(agent))
             for agent in self.possible_agents
         }
-
-        self.action_space = gym.spaces.Dict(
-            {
-                self._agent_to_key[agent]: env.action_space(agent)
-                for agent in self.possible_agents
-            }
+        self._action_adapter = _FlatPettingZooActionAdapter(
+            {agent: env.action_space(agent) for agent in self.possible_agents}
         )
+
+        self.action_space = self._action_adapter.space
         self.observation_space = gym.spaces.Dict(
             {
                 self._agent_to_key[agent]: env.observation_space(agent)
@@ -128,9 +127,7 @@ class PettingZooParallelWrapper(gym.Env):
 
     def _to_pettingzoo_actions(self, action) -> dict[Any, Any]:
         if not isinstance(action, dict):
-            raise TypeError(
-                'PettingZooParallelWrapper.step expects a dict keyed by agent.'
-            )
+            action = self._action_adapter.to_agent_actions(action)
         actions = {}
         live_agents = set(self.agents)
         for key, value in action.items():
@@ -249,6 +246,9 @@ class PettingZooAECWrapper(gym.Env):
         self._step_counter = 0
         self._id = 0
         self._current_agent = self.possible_agents[0]
+        self._current_reward = 0.0
+        self._current_termination = False
+        self._current_truncation = False
         self._last_actions = {
             agent: _empty_action(env.action_space(agent))
             for agent in self.possible_agents
@@ -258,13 +258,11 @@ class PettingZooAECWrapper(gym.Env):
             for agent in self.possible_agents
         }
         self._last_infos = {agent: {} for agent in self.possible_agents}
-
-        self.action_space = gym.spaces.Dict(
-            {
-                self._agent_to_key[agent]: env.action_space(agent)
-                for agent in self.possible_agents
-            }
+        self._action_adapter = _FlatPettingZooActionAdapter(
+            {agent: env.action_space(agent) for agent in self.possible_agents}
         )
+
+        self.action_space = self._action_adapter.space
         self.observation_space = gym.spaces.Dict(
             {
                 self._agent_to_key[agent]: env.observation_space(agent)
@@ -294,11 +292,18 @@ class PettingZooAECWrapper(gym.Env):
             for agent in self.possible_agents
         }
         self._last_infos = {agent: {} for agent in self.possible_agents}
+        self._current_reward = 0.0
+        self._current_termination = False
+        self._current_truncation = False
         self._capture_current_agent()
 
         rewards = _agent_attr_dict(self.env, 'rewards')
         terminations = _agent_attr_dict(self.env, 'terminations')
         truncations = _agent_attr_dict(self.env, 'truncations')
+        if self.agents:
+            rewards[self._current_agent] = self._current_reward
+            terminations[self._current_agent] = self._current_termination
+            truncations[self._current_agent] = self._current_truncation
         info = self._build_info(
             rewards=rewards,
             terminations=terminations,
@@ -322,13 +327,19 @@ class PettingZooAECWrapper(gym.Env):
             return self._last_observations, 0.0, True, False, info
 
         agent = self._current_agent
-        actions = self._to_agent_actions(action)
-        agent_action = actions.get(agent)
-        if agent_action is None:
-            agent_action = _empty_action(self.env.action_space(agent))
+        if self._current_termination or self._current_truncation:
+            agent_action = None
+        else:
+            actions = self._to_agent_actions(action)
+            if agent not in actions:
+                raise KeyError(
+                    f'Missing action for current PettingZoo agent {agent!r}.'
+                )
+            agent_action = actions[agent]
         self.env.step(agent_action)
         self._step_counter += 1
-        self._last_actions[agent] = agent_action
+        if agent_action is not None:
+            self._last_actions[agent] = agent_action
 
         rewards = _agent_attr_dict(self.env, 'rewards')
         terminations = _agent_attr_dict(self.env, 'terminations')
@@ -372,14 +383,11 @@ class PettingZooAECWrapper(gym.Env):
         agent = getattr(self.env, 'agent_selection', self.agents[0])
         observation, reward, termination, truncation, info = self.env.last()
         self._current_agent = agent
+        self._current_reward = float(reward)
+        self._current_termination = bool(termination)
+        self._current_truncation = bool(truncation)
         self._last_observations[agent] = observation
         self._last_infos[agent] = info or {}
-        rewards = _agent_attr_dict(self.env, 'rewards')
-        rewards[agent] = reward
-        terminations = _agent_attr_dict(self.env, 'terminations')
-        terminations[agent] = termination
-        truncations = _agent_attr_dict(self.env, 'truncations')
-        truncations[agent] = truncation
 
     def _to_agent_actions(self, action) -> dict[Any, Any]:
         if isinstance(action, dict):
@@ -387,7 +395,7 @@ class PettingZooAECWrapper(gym.Env):
                 self._key_to_agent.get(key, key): value
                 for key, value in action.items()
             }
-        return {self._current_agent: action}
+        return self._action_adapter.to_agent_actions(action)
 
     def _aggregate_reward(self, rewards: dict[Any, float]) -> float:
         if callable(self.reward_aggregation):
@@ -475,6 +483,198 @@ def _episode_id(env: Any) -> int:
         if hasattr(rng, 'randint'):
             return int(rng.randint(0, max_int))
     return int(np.random.default_rng().integers(0, np.iinfo(np.int64).max))
+
+
+@dataclass(frozen=True)
+class _ActionSpec:
+    space: gym.Space
+    start: int
+    stop: int
+
+
+class _FlatPettingZooActionAdapter:
+    """Expose per-agent PettingZoo actions as one flat ndarray action."""
+
+    def __init__(self, agent_spaces: dict[Any, gym.Space]) -> None:
+        self.agent_spaces = agent_spaces
+        self._specs: dict[Any, _ActionSpec] = {}
+        lows = []
+        highs = []
+        cursor = 0
+
+        for agent, space in agent_spaces.items():
+            low, high = _flat_action_bounds(space)
+            size = int(low.size)
+            self._specs[agent] = _ActionSpec(
+                space=space,
+                start=cursor,
+                stop=cursor + size,
+            )
+            cursor += size
+            lows.append(low)
+            highs.append(high)
+
+        self.low = np.concatenate(lows).astype(np.float64)
+        self.high = np.concatenate(highs).astype(np.float64)
+        self.size = int(self.low.size)
+        self.space = self._build_space()
+
+    def to_agent_actions(self, action: Any) -> dict[Any, Any]:
+        values = np.asarray(action)
+        if values.shape == ():
+            values = values.reshape(1)
+        values = values.reshape(-1)
+        if values.size != self.size:
+            raise ValueError(
+                f'Expected flat PettingZoo action with {self.size} values, '
+                f'got shape {np.asarray(action).shape}.'
+            )
+        return {
+            agent: _unflatten_space_action(
+                spec.space, values[spec.start : spec.stop]
+            )
+            for agent, spec in self._specs.items()
+        }
+
+    def _build_space(self) -> gym.Space:
+        if np.all(np.isfinite(self.low)) and _all_integer_action_spaces(
+            self.agent_spaces.values()
+        ):
+            starts = self.low.astype(np.int64)
+            nvec = (self.high - self.low + 1).astype(np.int64)
+            return gym.spaces.MultiDiscrete(nvec=nvec, start=starts)
+
+        dtype = np.result_type(
+            *[
+                np.dtype(getattr(space, 'dtype', np.float32))
+                for space in self.agent_spaces.values()
+            ]
+        )
+        if not np.issubdtype(dtype, np.floating):
+            dtype = np.float32
+        return gym.spaces.Box(
+            low=self.low.astype(dtype),
+            high=self.high.astype(dtype),
+            dtype=dtype,
+        )
+
+
+def _flat_action_bounds(space: gym.Space) -> tuple[np.ndarray, np.ndarray]:
+    if isinstance(space, gym.spaces.Discrete):
+        start = int(getattr(space, 'start', 0))
+        return (
+            np.array([start], dtype=np.float64),
+            np.array([start + int(space.n) - 1], dtype=np.float64),
+        )
+    if isinstance(space, gym.spaces.MultiDiscrete):
+        start = np.asarray(
+            getattr(space, 'start', np.zeros_like(space.nvec)),
+            dtype=np.float64,
+        )
+        nvec = np.asarray(space.nvec, dtype=np.float64)
+        return start.reshape(-1), (start + nvec - 1).reshape(-1)
+    if isinstance(space, gym.spaces.MultiBinary):
+        size = int(np.prod(space.shape))
+        return np.zeros(size, dtype=np.float64), np.ones(
+            size, dtype=np.float64
+        )
+    if isinstance(space, gym.spaces.Box):
+        return (
+            np.asarray(space.low, dtype=np.float64).reshape(-1),
+            np.asarray(space.high, dtype=np.float64).reshape(-1),
+        )
+    if isinstance(space, gym.spaces.Tuple):
+        bounds = [_flat_action_bounds(subspace) for subspace in space.spaces]
+        return _concat_bounds(bounds)
+    if isinstance(space, gym.spaces.Dict):
+        bounds = [
+            _flat_action_bounds(subspace) for subspace in space.spaces.values()
+        ]
+        return _concat_bounds(bounds)
+    raise TypeError(
+        f'Unsupported PettingZoo action space {type(space).__name__}.'
+    )
+
+
+def _concat_bounds(
+    bounds: list[tuple[np.ndarray, np.ndarray]],
+) -> tuple[np.ndarray, np.ndarray]:
+    lows = [low for low, _ in bounds]
+    highs = [high for _, high in bounds]
+    return np.concatenate(lows), np.concatenate(highs)
+
+
+def _unflatten_space_action(space: gym.Space, values: np.ndarray) -> Any:
+    if isinstance(space, gym.spaces.Discrete):
+        start = int(getattr(space, 'start', 0))
+        value = int(np.rint(values[0]))
+        return int(np.clip(value, start, start + int(space.n) - 1))
+    if isinstance(space, gym.spaces.MultiDiscrete):
+        start = np.asarray(
+            getattr(space, 'start', np.zeros_like(space.nvec)),
+            dtype=np.int64,
+        )
+        high = start + np.asarray(space.nvec, dtype=np.int64) - 1
+        action = np.asarray(np.rint(values), dtype=np.int64).reshape(
+            space.nvec.shape
+        )
+        return np.clip(action, start, high).astype(space.dtype)
+    if isinstance(space, gym.spaces.MultiBinary):
+        action = np.asarray(np.rint(values), dtype=space.dtype).reshape(
+            space.shape
+        )
+        return np.clip(action, 0, 1).astype(space.dtype)
+    if isinstance(space, gym.spaces.Box):
+        action = np.asarray(values, dtype=space.dtype).reshape(space.shape)
+        return np.clip(action, space.low, space.high).astype(space.dtype)
+    if isinstance(space, gym.spaces.Tuple):
+        items = []
+        cursor = 0
+        for subspace in space.spaces:
+            low, _ = _flat_action_bounds(subspace)
+            next_cursor = cursor + int(low.size)
+            items.append(
+                _unflatten_space_action(subspace, values[cursor:next_cursor])
+            )
+            cursor = next_cursor
+        return tuple(items)
+    if isinstance(space, gym.spaces.Dict):
+        items = {}
+        cursor = 0
+        for key, subspace in space.spaces.items():
+            low, _ = _flat_action_bounds(subspace)
+            next_cursor = cursor + int(low.size)
+            items[key] = _unflatten_space_action(
+                subspace, values[cursor:next_cursor]
+            )
+            cursor = next_cursor
+        return items
+    raise TypeError(
+        f'Unsupported PettingZoo action space {type(space).__name__}.'
+    )
+
+
+def _all_integer_action_spaces(spaces) -> bool:
+    for space in spaces:
+        if isinstance(
+            space,
+            (
+                gym.spaces.Discrete,
+                gym.spaces.MultiDiscrete,
+                gym.spaces.MultiBinary,
+            ),
+        ):
+            continue
+        if isinstance(space, gym.spaces.Tuple):
+            if _all_integer_action_spaces(space.spaces):
+                continue
+            return False
+        if isinstance(space, gym.spaces.Dict):
+            if _all_integer_action_spaces(space.spaces.values()):
+                continue
+            return False
+        return False
+    return True
 
 
 def _empty_observation(space: gym.Space) -> np.ndarray:

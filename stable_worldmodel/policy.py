@@ -185,7 +185,7 @@ class RandomPolicy(BasePolicy):
 
 
 class MultiAgentRandomPolicy(RandomPolicy):
-    """Random policy for worlds whose action space is keyed by agent."""
+    """Random policy alias for PettingZoo-backed worlds."""
 
     def __init__(self, seed: int | None = None, **kwargs: Any) -> None:
         super().__init__(seed=seed, **kwargs)

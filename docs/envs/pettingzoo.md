@@ -10,6 +10,10 @@ Stable World-Model can run PettingZoo Parallel and AEC environments through
 SWM environment, and agents are represented as per-agent columns in
 `world.infos`.
 
+PettingZoo's per-agent action spaces are exposed to SWM as one flat ndarray
+action per environment. The wrapper reconstructs the PettingZoo agent-action
+mapping internally before stepping the underlying env.
+
 ## Parallel API
 
 ```python
