@@ -58,20 +58,6 @@ world = swm.World('swm/SimplerCarrotOnPlate-v0', num_envs=4, image_shape=(224, 2
     The Bridge tasks only support `obs_mode='rgb+segmentation'`, already set per-task
     in `TASK_SPECS`.
 
-!!! warning "Known limitation: ManiSkill motion-planning solvers vs. NumPy 2"
-    ManiSkill's *motion-planning* examples/solvers
-    (`mani_skill.examples.motionplanning.*`) **segfault under NumPy 2**. They depend on
-    `mplib==0.1.1` (pinned by `mani-skill` on Linux), whose compiled extension was built
-    against the NumPy 1.x ABI; passing NumPy-2 arrays into it crashes when the planner
-    builds its articulation model.
-
-    This does **not** affect this integration: the simulator, our `ManiSkillWrapper`,
-    rendering, and `World.evaluate` all run fine on NumPy 2 — only the optional
-    motion-planning trajectory generators are impacted. If you specifically need those
-    solvers, run them in a separate `numpy<2` environment, or replay ManiSkill's
-    pre-recorded demonstration datasets (`mani_skill.utils.download_demo`) instead, which
-    need no motion planning.
-
 ### Available Environments
 
 **Franka Panda table-top manipulation**
