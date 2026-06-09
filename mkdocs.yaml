@@ -28,6 +28,7 @@ nav:
       - envs/gymnasium_control.md
       - envs/craftax.md
       - envs/ale.md
+      - envs/pettingzoo.md
   - Guides:
       - guides/checkpoints.md
       - guides/online_learning.md

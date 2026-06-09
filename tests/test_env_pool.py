@@ -54,6 +54,40 @@ class CounterEnv(gym.Env):
         }
 
 
+class TupleActionEnv(gym.Env):
+    def __init__(self):
+        super().__init__()
+        self.observation_space = gym.spaces.Box(0, 1, shape=(1,))
+        self.action_space = gym.spaces.Tuple(
+            (
+                gym.spaces.Discrete(3),
+                gym.spaces.Box(-1, 1, shape=(1,), dtype=np.float32),
+            )
+        )
+        self.last_action = None
+
+    def reset(self, *, seed=None, options=None):
+        self.last_action = None
+        return np.zeros(1, dtype=np.float32), self._make_info(-1, [-1.0])
+
+    def step(self, action):
+        self.last_action = action
+        discrete, continuous = action
+        return (
+            np.zeros(1, dtype=np.float32),
+            0.0,
+            False,
+            False,
+            self._make_info(discrete, continuous),
+        )
+
+    def _make_info(self, discrete, continuous):
+        return {
+            'discrete_action': np.array([discrete], dtype=np.int64),
+            'continuous_action': np.asarray(continuous, dtype=np.float32),
+        }
+
+
 def _make_pool(n: int = 3, max_steps: int = 5) -> EnvPool:
     return EnvPool([lambda ms=max_steps: CounterEnv(ms) for _ in range(n)])
 
@@ -175,6 +209,25 @@ def test_step_all():
     assert not np.any(truncs)
     # all envs at step 1
     np.testing.assert_array_equal(infos['state'], [[[1.0]], [[1.0]], [[1.0]]])
+    pool.close()
+
+
+def test_step_slices_tuple_action_space_components():
+    pool = EnvPool([lambda: TupleActionEnv() for _ in range(2)])
+    pool.reset()
+
+    actions = (
+        np.array([1, 2], dtype=np.int64),
+        np.array([[0.5], [0.75]], dtype=np.float32),
+    )
+    _, _, _, _, infos = pool.step(actions)
+
+    assert pool.envs[0].last_action[0] == 1
+    assert pool.envs[1].last_action[0] == 2
+    np.testing.assert_array_equal(infos['discrete_action'][:, 0, 0], [1, 2])
+    np.testing.assert_allclose(
+        infos['continuous_action'][:, 0, 0], [0.5, 0.75]
+    )
     pool.close()
 
 

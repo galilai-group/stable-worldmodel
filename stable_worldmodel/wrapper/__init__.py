@@ -8,6 +8,10 @@ from stable_worldmodel.wrapper.default import (
     MegaWrapper,
     ResizeGoalWrapper,
 )
+from stable_worldmodel.wrapper.pettingzoo import (
+    PettingZooAECWrapper,
+    PettingZooParallelWrapper,
+)
 from stable_worldmodel.wrapper.visual import (
     BlurWrapper,
     ChromaKeyWrapper,
@@ -44,6 +48,8 @@ __all__ = [
     'MovingPatchWrapper',
     'NoiseWrapper',
     'OcclusionWrapper',
+    'PettingZooAECWrapper',
+    'PettingZooParallelWrapper',
     'RandomConvWrapper',
     'RandomShiftWrapper',
     'ResizeGoalWrapper',

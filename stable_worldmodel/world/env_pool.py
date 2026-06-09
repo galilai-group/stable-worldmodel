@@ -116,12 +116,14 @@ class EnvPool:
         return None, self._stacked_infos
 
     def step(
-        self, actions: np.ndarray, mask: np.ndarray | None = None
+        self, actions: Any, mask: np.ndarray | None = None
     ) -> tuple[None, np.ndarray, np.ndarray, np.ndarray, dict]:
         """Step envs and return ``(None, rewards, terminateds, truncateds, infos)``.
 
         Args:
-            actions: Array of shape ``(num_envs, ...)`` — one action per env.
+            actions: Batched action container with one action per env. Arrays
+                use shape ``(num_envs, ...)``. Nested dict/list containers are
+                sliced recursively, which supports batched Dict action spaces.
             mask: If provided, only envs where ``mask[i]`` is truthy are
                 stepped. Masked envs contribute zero reward and ``False``
                 termination/truncation, and their slot in the stacked
@@ -135,7 +137,7 @@ class EnvPool:
             if mask is not None and not mask[i]:
                 continue
             _, rewards[i], terminateds[i], truncateds[i], info = env.step(
-                actions[i]
+                _slice_action(actions, i)
             )
             _write_env_info(self._stacked_infos, i, info)
 
@@ -196,3 +198,17 @@ def _write_env_info(stacked: dict, idx: int, info: dict) -> None:
             buf[idx, 0] = v
         elif isinstance(buf, list):
             buf[idx][0] = v
+
+
+def _slice_action(actions: Any, idx: int) -> Any:
+    if isinstance(actions, dict):
+        return {k: _slice_action(v, idx) for k, v in actions.items()}
+    if isinstance(actions, tuple):
+        return tuple(_slice_action(v, idx) for v in actions)
+    if isinstance(actions, np.ndarray):
+        return actions[idx]
+    if torch.is_tensor(actions):
+        return actions[idx]
+    if isinstance(actions, list):
+        return actions[idx]
+    return actions

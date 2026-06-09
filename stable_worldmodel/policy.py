@@ -184,6 +184,14 @@ class RandomPolicy(BasePolicy):
             self.env.action_space.seed(seed)
 
 
+class MultiAgentRandomPolicy(RandomPolicy):
+    """Random policy for worlds whose action space is keyed by agent."""
+
+    def __init__(self, seed: int | None = None, **kwargs: Any) -> None:
+        super().__init__(seed=seed, **kwargs)
+        self.type = 'multi_agent_random'
+
+
 class ExpertPolicy(BasePolicy):
     """Policy using expert demonstrations or heuristics."""
 
