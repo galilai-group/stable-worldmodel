@@ -275,16 +275,14 @@ def test_world_from_pettingzoo_collects_parallel_episodes():
 
     assert len(writer.episodes) == 3
     for episode in writer.episodes:
-        assert set(
-            [
-                'agent_mask',
-                'observation.player_0.obs',
-                'observation.player_0.action_mask',
-                'action.player_0',
-                'reward.player_0',
-                'terminated.player_0',
-            ]
-        ) <= set(episode)
+        assert {
+            'agent_mask',
+            'observation.player_0.obs',
+            'observation.player_0.action_mask',
+            'action.player_0',
+            'reward.player_0',
+            'terminated.player_0',
+        } <= set(episode)
         assert len(episode['reward.player_0']) == 2
         assert all(
             not isinstance(value, dict)
@@ -349,16 +347,14 @@ def test_world_from_pettingzoo_collects_aec_episodes():
 
     assert len(writer.episodes) == 3
     for episode in writer.episodes:
-        assert set(
-            [
-                'agent_mask',
-                'current_agent_idx',
-                'observation.player_0',
-                'action.player_0',
-                'reward.player_0',
-                'terminated.player_0',
-            ]
-        ) <= set(episode)
+        assert {
+            'agent_mask',
+            'current_agent_idx',
+            'observation.player_0',
+            'action.player_0',
+            'reward.player_0',
+            'terminated.player_0',
+        } <= set(episode)
         assert len(episode['reward.player_0']) == 4
     world.close()
 
