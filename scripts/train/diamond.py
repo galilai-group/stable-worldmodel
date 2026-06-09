@@ -8,7 +8,7 @@ from stable_pretraining import data as dt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.loggers import WandbLogger
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 
 from functools import partial
 from stable_worldmodel.data import column_normalizer as get_column_normalizer
@@ -48,39 +48,29 @@ class SaveCkptCallback(pl.callbacks.Callback):
 
 def diamond_forward(self, batch, stage, cfg):
     """Forward used by the training harness to compute EDM loss + optional reward/term."""
-    # batch['pixels']: (B, T, C, H, W) or (B, T, H, W, C) depending on dataset
+    device = next(self.model.parameters()).device
     pixels = batch['pixels']
-    # ensure channel-first
+    # ensure channel-first (B, T, C, H, W)
     if pixels.ndim == 5 and pixels.shape[-1] == 3:
         pixels = pixels.permute(0, 1, 4, 2, 3).contiguous()
 
     B, T, C, H, W = pixels.shape
     L = cfg.wm.get('history_size', 4)
 
-    # construct next_frame and history
-    next_frame = pixels[:, L].to(next(self.model.parameters()).device)
-    history = (
-        pixels[:, :L]
-        .reshape(B, C * L, H, W)
-        .to(next(self.model.parameters()).device)
-    )
+    next_frame = pixels[:, L].to(device)
+    history = pixels[:, :L].reshape(B, C * L, H, W).to(device)
 
     cond_vec = None
     if 'action' in batch:
-        actions = batch['action'][:, :L].to(
-            next(self.model.parameters()).device
-        )
+        actions = batch['action'][:, :L].to(device)
         if (
             hasattr(self.model, 'action_encoder')
             and self.model.action_encoder is not None
         ):
-            # action_encoder: expects (B, T, action_dim) -> (B, T, emb_dim)
             act_emb = self.model.action_encoder(actions)
-            # aggregate across time (mean pooling) to produce a single cond vector
             cond_vec = act_emb.mean(dim=1)
         else:
-            # fallback: simple flatten
-            cond_vec = actions.reshape(B, -1)
+            cond_vec = actions.reshape(B, -1).float()
 
     train_batch = {
         'next_frame': next_frame.float(),
@@ -88,7 +78,15 @@ def diamond_forward(self, batch, stage, cfg):
         'cond_vec': cond_vec,
     }
 
-    device = next(self.model.parameters()).device
+    if 'reward' in batch:
+        train_batch['reward'] = (
+            batch['reward'][:, L].to(device).float().unsqueeze(-1)
+        )
+    if 'terminal' in batch:
+        train_batch['terminal'] = (
+            batch['terminal'][:, L].to(device).float().unsqueeze(-1)
+        )
+
     loss = edm_loss_step(self.model, train_batch, device)
 
     out = {'loss': loss}

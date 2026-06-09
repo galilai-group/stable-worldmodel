@@ -51,6 +51,22 @@ class DiffusionPredictor(nn.Module):
         return out
 
 
+class DiscreteActionEncoder(nn.Module):
+    """Action encoder for discrete action spaces using embedding lookup.
+
+    Maps integer action indices to dense embeddings for conditioning
+    the diffusion model. Compatible with Atari-style discrete actions.
+    """
+
+    def __init__(self, num_actions, emb_dim=64):
+        super().__init__()
+        self.embed = nn.Embedding(num_actions, emb_dim)
+
+    def forward(self, x):
+        # x: (B, T, 1) integer actions
+        return self.embed(x.squeeze(-1).long())
+
+
 class RewardTerminationHead(nn.Module):
     """A small model to predict scalar reward and binary termination from an embedding."""
 
@@ -75,7 +91,8 @@ class RewardTerminationHead(nn.Module):
         return reward, terminal_logits
 
 
-__all__ = ['DiffusionPredictor', 'RewardTerminationHead']
-
-
-__all__ = ['DiffusionPredictor']
+__all__ = [
+    'DiffusionPredictor',
+    'DiscreteActionEncoder',
+    'RewardTerminationHead',
+]

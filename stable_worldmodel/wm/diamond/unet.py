@@ -55,14 +55,25 @@ class SimpleUNet(nn.Module):
     """A U-Net for 2D images with conditioning vector and AdaptiveGroupNorm.
 
     Parameters:
-    - in_channels: input image channels (per frame)
+    - in_channels: input image channels
+    - out_channels: output image channels (defaults to in_channels)
     - base_ch: base number of channels
     - cond_dim: conditioning vector dimension
     - num_groups: number of groups for AdaptiveGroupNorm
     """
 
-    def __init__(self, in_channels=3, base_ch=96, cond_dim=256, num_groups=8):
+    def __init__(
+        self,
+        in_channels=3,
+        out_channels=None,
+        base_ch=96,
+        cond_dim=256,
+        num_groups=8,
+    ):
         super().__init__()
+        out_channels = (
+            out_channels if out_channels is not None else in_channels
+        )
         self.inc = nn.Conv2d(in_channels, base_ch, 3, padding=1)
 
         self.down1 = ResidualBlock(
@@ -89,7 +100,7 @@ class SimpleUNet(nn.Module):
             base_ch * 2, base_ch, cond_dim, num_groups=num_groups
         )
 
-        self.outc = nn.Conv2d(base_ch, in_channels, 1)
+        self.outc = nn.Conv2d(base_ch, out_channels, 1)
 
         self.pool = nn.AvgPool2d(2)
         self.upsample = nn.Upsample(scale_factor=2, mode='nearest')

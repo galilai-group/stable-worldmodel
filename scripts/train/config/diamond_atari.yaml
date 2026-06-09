@@ -1,10 +1,10 @@
 defaults:
   - _self_
   - launcher: local
-  - data: pusht
+  - data: atari
 
-output_model_name: diamond
-subdir: diamond_run
+output_model_name: diamond_atari
+subdir: diamond_atari_run
 
 seed: 42
 train_split: 0.95
@@ -12,7 +12,7 @@ train_split: 0.95
 img_size: 64
 
 trainer:
-  max_epochs: 1
+  max_epochs: 100
   devices: auto
   accelerator: auto
   precision: bf16
@@ -48,7 +48,7 @@ action_encoder:
 
 data:
   dataset:
-    name: pusht
+    name: atari_breakout.lance
     keys_to_load:
       - pixels
       - action

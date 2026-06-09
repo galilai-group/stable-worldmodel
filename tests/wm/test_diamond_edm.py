@@ -25,7 +25,7 @@ def test_sigma_sampling():
 
 
 def test_unet_forward_and_predict():
-    model = EDMModel(in_ch=3, base_ch=16, cond_dim=32, emb_dim=64)
+    model = EDMModel(in_ch=3, base_ch=16, cond_dim=32)
     B, C, H, W = 2, 3, 32, 32
     x = torch.randn(B, C, H, W)
     history = torch.randn(B, C * 4, H, W)
@@ -39,7 +39,7 @@ def test_unet_forward_and_predict():
 
 
 def test_edm_loss_step_basic():
-    model = EDMModel(in_ch=3, base_ch=16, cond_dim=32, emb_dim=64)
+    model = EDMModel(in_ch=3, base_ch=16, cond_dim=32)
     B, C, H, W = 2, 3, 32, 32
     next_frame = torch.randn(B, C, H, W)
     history = torch.randn(B, C * 4, H, W)
@@ -54,7 +54,7 @@ def test_edm_loss_step_basic():
 
 
 def test_samplers_shapes():
-    model = EDMModel(in_ch=3, base_ch=16, cond_dim=32, emb_dim=64)
+    model = EDMModel(in_ch=3, base_ch=16, cond_dim=32)
     B, C, H, W = 1, 3, 32, 32
     history = torch.randn(B, C * 4, H, W)
     cond_vec = torch.randn(B, 32)
