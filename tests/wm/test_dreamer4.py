@@ -247,3 +247,36 @@ def test_no_nan_in_rollout():
     assert not torch.isnan(info['predicted_emb']).any(), (
         'NaN in rollout output'
     )
+
+
+def test_rollout_accepts_preencoded_info():
+    """encode() -> rollout() must work without re-encoding (MPC cache path)."""
+    model = make_model()
+    model.eval()
+    H, S, n_future = 3, 2, 4
+    info = {'pixels': torch.randn(B, H, 3, 16, 16)}
+    action_candidates = torch.randn(B, S, H + n_future + 1, ACTION_DIM)
+    with torch.no_grad():
+        info = model.encode(info)
+        assert info['packed_z'].shape == (B, H, 1, D_SPATIAL)
+        info = model.rollout(info, action_candidates, history_size=H)
+    pred = info['predicted_emb']
+    assert pred.shape[0] == B
+    assert pred.shape[1] == S
+    assert pred.shape[3] == D_SPATIAL
+
+
+def test_get_cost_accepts_goal_pixel_sequence():
+    """get_cost() with goal pixels must encode correctly and return (B, S) cost."""
+    model = make_model()
+    model.eval()
+    H, S, n_future = 3, 2, 4
+    info = {
+        'pixels': torch.randn(B, H, 3, 16, 16),
+        'goal': torch.randn(B, H, 3, 16, 16),
+    }
+    action_candidates = torch.randn(B, S, H + n_future + 1, ACTION_DIM)
+    with torch.no_grad():
+        cost = model.get_cost(info, action_candidates)
+    assert cost.shape == (B, S)
+    assert torch.isfinite(cost).all()

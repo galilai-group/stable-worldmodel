@@ -110,17 +110,26 @@ class DreamerV4WM(nn.Module):
         act_hist = action_sequence[:, :, :H]
         act_future = action_sequence[:, :, H:]
 
-        # encode history (reuse cached if present)
-        # info['pixels'] is (B, H, C, h, w) — encode the full history sequence
+        # encode history, then expand over S candidates.
+        # Handles three cases:
+        #   1. cold: packed_z absent — encode then expand
+        #   2. pre-encoded: packed_z is (B,H,n,d) from encode() — expand
+        #   3. already expanded: packed_z is (B,S,H,n,d) — use as-is
         if 'packed_z' not in info:
             _init = self.encode(
                 {k: v for k, v in info.items() if torch.is_tensor(v)}
             )
-            # _init['packed_z']: (B, H, 1, d_spatial) — expand over S
             info['packed_z'] = (
                 _init['packed_z'].unsqueeze(1).expand(B, S, -1, -1, -1)
             )
             info['emb'] = _init['emb'].unsqueeze(1).expand(B, S, -1, -1)
+        elif info['packed_z'].ndim == 4:
+            # came from encode() — not yet candidate-expanded
+            info['packed_z'] = (
+                info['packed_z'].unsqueeze(1).expand(B, S, -1, -1, -1)
+            )
+            if 'emb' in info and info['emb'].ndim == 3:
+                info['emb'] = info['emb'].unsqueeze(1).expand(B, S, -1, -1)
 
         sched = make_schedule(self.k_max, self.eval_K)
 
@@ -162,15 +171,14 @@ class DreamerV4WM(nn.Module):
     # ------------------------------------------------------------------
 
     def criterion(self, info_dict: dict) -> torch.Tensor:
-        pred_emb = info_dict['predicted_emb']  # (B, S, T, d_spatial)
-        goal_emb = info_dict['goal_emb']  # (B, ..., d_spatial)
-        goal_emb = goal_emb[..., -1:, :].expand_as(pred_emb)
-        cost = F.mse_loss(
-            pred_emb[..., -1:, :],
-            goal_emb[..., -1:, :].detach(),
-            reduction='none',
-        ).sum(dim=tuple(range(2, pred_emb.ndim)))  # (B, S)
-        return cost
+        pred_emb = info_dict['predicted_emb']   # (B, S, T, d_spatial)
+        goal_emb = info_dict['goal_emb']        # (B, [S,] T, d_spatial)
+        if goal_emb.ndim == 3:
+            goal_emb = goal_emb.unsqueeze(1)    # (B, 1, T, d_spatial)
+        pred_last = pred_emb[..., -1:, :]                                # (B, S, 1, d)
+        goal_last = goal_emb[..., -1:, :].detach().expand_as(pred_last)
+        cost = F.mse_loss(pred_last, goal_last, reduction='none')
+        return cost.sum(dim=tuple(range(2, cost.ndim)))                  # (B, S)
 
     def get_cost(
         self, info_dict: dict, action_candidates: torch.Tensor
@@ -178,8 +186,9 @@ class DreamerV4WM(nn.Module):
         assert 'goal' in info_dict
 
         if 'goal_emb' not in info_dict:
+            # keep T=1 dim so encode() receives (B, 1, C, H, W)
             goal = {
-                k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)
+                k: v[:, -1:] for k, v in info_dict.items() if torch.is_tensor(v)
             }
             goal['pixels'] = goal['goal']
             for k in list(goal.keys()):
