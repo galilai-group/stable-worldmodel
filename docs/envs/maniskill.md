@@ -47,15 +47,16 @@ world = swm.World('swm/MSPickCube-v0', num_envs=4, image_shape=(224, 224))
 world = swm.World('swm/SimplerCarrotOnPlate-v0', num_envs=4, image_shape=(224, 224))
 ```
 
-!!! note "First run downloads assets"
+!!! note "Assets download automatically on first use"
     The Panda cube tasks need no extra assets. The Bridge tasks pull scene + WidowX
-    robot assets on first use (public Hugging Face / GitHub downloads, no token):
-    ```bash
-    uv run python -m mani_skill.utils.download_asset bridge_v2_real2sim -y
-    ```
-    The WidowX robot URDF downloads on first `gym.make` (auto-prompts; pre-fetch by
-    answering `y`). The Bridge tasks only support `obs_mode='rgb+segmentation'`, which
-    is already set per-task in `TASK_SPECS`.
+    robot assets the first time you make them (public Hugging Face / GitHub downloads,
+    no token). The wrapper sets `MS_SKIP_ASSET_DOWNLOAD_PROMPT=1` so this happens
+    automatically — no separate command, and it works headless/non-interactively. To
+    be prompted instead, set `MS_SKIP_ASSET_DOWNLOAD_PROMPT=0`. To pre-fetch
+    explicitly: `python -m mani_skill.utils.download_asset bridge_v2_real2sim -y`.
+
+    The Bridge tasks only support `obs_mode='rgb+segmentation'`, already set per-task
+    in `TASK_SPECS`.
 
 ### Available Environments
 

@@ -15,6 +15,7 @@ not as code here.
 """
 
 import logging
+import os
 
 import gymnasium as gym
 import numpy as np
@@ -66,6 +67,12 @@ class ManiSkillWrapper(gym.Wrapper):
         sim_backend='auto',
         **kwargs,
     ):
+        # Auto-download missing scene/robot assets on first use instead of
+        # prompting (the interactive prompt raises EOFError under a headless /
+        # non-interactive stdin). setdefault keeps it overridable: set
+        # MS_SKIP_ASSET_DOWNLOAD_PROMPT=0 to be prompted instead.
+        os.environ.setdefault('MS_SKIP_ASSET_DOWNLOAD_PROMPT', '1')
+
         # Lazy import: mani_skill needs a CUDA+Vulkan GPU, so it must not be
         # imported on `import stable_worldmodel`. Importing it here registers
         # the ManiSkill task ids as a side effect.
