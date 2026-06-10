@@ -1,15 +1,12 @@
 """Register all Atari Learning Environment games as gymnasium envs
-and expose Atari 100k protocol wrappers.
+and expose ``make_atari_env`` using ``ale_py.vector_env.AtariVectorEnv``.
 
-Importing this subpackage exposes the standard ``ALE/<Game>-v5`` ids via
-``gym.make`` and the Atari 100k wrappers (``NoopResetEnv``,
-``EpisodicLifeEnv``, ``FireResetEnv``, ``ClipRewardEnv``) together with
-the ``make_atari_env`` factory.  Emits a warning if ``ale-py`` is not
-installed.
+All standard Atari preprocessing (noop reset, fire reset, episodic life,
+reward clipping, frame skip, resize) is handled natively by the ALE C++
+vector environment.  Emits a warning if ``ale-py`` is not installed.
 """
 
 import warnings
-
 
 try:
     import ale_py
@@ -25,17 +22,11 @@ except ImportError:
     )
 
 from stable_worldmodel.envs.ale.atari_wrappers import (
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    NoopResetEnv,
+    AtariEnvAdapter,
     make_atari_env,
 )
 
 __all__ = [
-    'ClipRewardEnv',
-    'EpisodicLifeEnv',
-    'FireResetEnv',
-    'NoopResetEnv',
+    'AtariEnvAdapter',
     'make_atari_env',
 ]

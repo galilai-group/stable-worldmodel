@@ -4,7 +4,7 @@ Implements Algorithm 1 from "Diffusion for World Modeling: Visual Details
 Matter in Atari" (Alonso et al., 2024).
 
 Features:
-  - Atari 100k protocol wrappers (NoopReset, EpisodicLife, ClipReward)
+  - AtariPreprocessing for noop reset & episodic life, plus ClipReward
   - CategoricalCEMSolver for MPC evaluation (random-shooting / CEM)
   - ReplayBuffer from repo infrastructure (ring buffer, episode-aware)
   - Hydra/OmegaConf config system
@@ -43,9 +43,7 @@ from stable_worldmodel.envs.ale import make_atari_env
 
 
 def preprocess_obs(obs):
-    obs = obs[34:194, :, :]
     obs = torch.tensor(obs, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
-    obs = nn.functional.interpolate(obs, size=(64, 64), mode='area')
     obs = obs / 255.0
     return obs
 
@@ -57,7 +55,6 @@ def clip_grad_norm(model, max_norm=1.0):
 def build_imagination_batch_from_clip(clip, L, device):
     pixels = torch.as_tensor(clip['pixels'], device=device).float()
     actions = torch.as_tensor(clip['action'], device=device).float()
-    B = pixels.shape[0]
     pixels = pixels[:, :L]  # (B, L, C, H, W)
     actions = actions[:, :L].squeeze(-1)  # (B, L)
     return {'init_obs': pixels, 'init_actions': actions}
@@ -88,7 +85,6 @@ def build_rterm_batch_from_clip(clip, L, H, device):
     pixels = torch.as_tensor(clip['pixels'], device=device).float()
     actions = torch.as_tensor(clip['action'], device=device).float()
 
-    B = pixels.shape[0]
     frames = pixels[:, :seq_len]  # (B, seq_len, C, H, W)
     actions = actions[:, :seq_len]  # (B, seq_len)
     batch = {'frames': frames, 'actions': actions}
@@ -194,7 +190,6 @@ def run(cfg: DictConfig):
 
     L = cfg.wm.history_size
     H = cfg.wm.imagination_horizon
-    action_dim = cfg.action_dim
     cond_dim = cfg.model.cond_dim
 
     env = make_atari_env(
@@ -286,7 +281,6 @@ def run(cfg: DictConfig):
     )
     opt_ac = optim.AdamW(actor_critic.parameters(), lr=cfg.lr, weight_decay=0)
 
-    # ── Initial random data ──────────────────────────────────────────────
     print('Collecting initial random data...')
     n_init_episodes = 20
     collected = 0
@@ -328,7 +322,6 @@ def run(cfg: DictConfig):
     for epoch in range(1, cfg.epochs + 1):
         epoch_start = time.time()
 
-        # ── Collect experience ──────────────────────────────────────────
         diffusion_model.eval()
         actor_critic.eval()
         ep = {
@@ -374,7 +367,6 @@ def run(cfg: DictConfig):
         if len(ep['pixels']) > 0:
             buffer.write_episode(ep)
 
-        # ── Train diffusion model ──────────────────────────────────────
         diffusion_model.train()
         diff_loss = 0.0
         for _ in range(cfg.train_steps):
@@ -390,7 +382,6 @@ def run(cfg: DictConfig):
             diff_loss += loss.item()
         diff_loss = diff_loss / max(1, cfg.train_steps)
 
-        # ── Train reward/termination model ─────────────────────────────
         reward_term_model.train()
         rterm_loss = 0.0
         for _ in range(cfg.train_steps):
@@ -404,7 +395,6 @@ def run(cfg: DictConfig):
             rterm_loss += loss.item()
         rterm_loss = rterm_loss / max(1, cfg.train_steps)
 
-        # ── Train actor-critic in imagination ──────────────────────────
         actor_critic.train()
         total_rl_loss = 0.0
         last_traj = None

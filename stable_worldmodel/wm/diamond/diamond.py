@@ -110,7 +110,6 @@ class DiamondCostModel(nn.Module):
         cx_rw = info_dict['cx_rw']
         B, N, L, C, H_im, W_im = pixels.shape
         H_plan = action_candidates.shape[2]
-        K = action_candidates.shape[-1]
 
         BN = B * N
 

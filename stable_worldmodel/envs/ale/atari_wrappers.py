@@ -1,76 +1,67 @@
-"""Atari 100k protocol wrappers.
+"""Atari wrappers using ``ale_py.vector_env.AtariVectorEnv``.
 
-These follow the standard protocol from "Leveraging Procedural Generation to
-Benchmark Reinforcement Learning" (PLANet, 2020) used by the DIAMOND paper.
+All standard Atari preprocessing (noop reset, fire reset, episodic life,
+reward clipping, frame skip, resize) is handled natively by the ALE C++
+vector environment.
 """
+
+from __future__ import annotations
 
 import gymnasium as gym
 import numpy as np
 
 
-class NoopResetEnv(gym.Wrapper):
-    """Perform a random number of no-op actions at reset to add stochasticity."""
+def _parse_game(env_name: str) -> str:
+    """Convert e.g. ``ALE/Breakout-v5`` or ``Breakout`` to ``breakout``."""
+    name = env_name.split('/')[-1].split('-')[0]
+    # Insert underscores before uppercase letters and lowercase
+    chars = []
+    for i, c in enumerate(name):
+        if i > 0 and c.isupper() and name[i - 1].islower():
+            chars.append('_')
+        chars.append(c.lower())
+    return ''.join(chars)
 
-    def __init__(self, env, max_noop=30):
-        super().__init__(env)
-        self.max_noop = max_noop
-        assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
+
+class AtariEnvAdapter:
+    """Wraps ``AtariVectorEnv(num_envs=1)`` with a single-env interface."""
+
+    def __init__(self, vector_env):
+        self._venv = vector_env
+
+    @property
+    def unwrapped(self):
+        return self._venv
+
+    @property
+    def action_space(self):
+        return self._venv.single_action_space
+
+    @property
+    def observation_space(self):
+        return self._venv.single_observation_space
 
     def reset(self, **kwargs):
-        _, info = self.env.reset(**kwargs)
-        noops = np.random.randint(1, self.max_noop + 1)
-        for _ in range(noops):
-            obs, _, terminated, truncated, _ = self.env.step(0)
-            if terminated or truncated:
-                obs, _ = self.env.reset(**kwargs)
-                break
-        return obs, info
-
-
-class EpisodicLifeEnv(gym.Wrapper):
-    """Make terminal when a life is lost, so the agent learns to survive."""
-
-    def __init__(self, env):
-        super().__init__(env)
-        self.lives = 0
+        obs, info = self._venv.reset(**kwargs)
+        return obs[0, 0], info
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        new_lives = self.env.unwrapped.ale.lives()
-        if 0 < new_lives < self.lives:
-            terminated = True
-        self.lives = new_lives
-        return obs, reward, terminated, truncated, info
+        obs, reward, terminated, truncated, info = self._venv.step(
+            np.asarray([action])
+        )
+        return (
+            obs[0, 0],
+            float(reward[0]),
+            bool(terminated[0]),
+            bool(truncated[0]),
+            info,
+        )
 
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        self.lives = self.env.unwrapped.ale.lives()
-        return obs, info
+    def close(self):
+        self._venv.close()
 
-
-class FireResetEnv(gym.Wrapper):
-    """Press FIRE on reset for games that require it (e.g. Breakout, Space Invaders)."""
-
-    def __init__(self, env):
-        super().__init__(env)
-        assert env.unwrapped.get_action_meanings()[1] == 'FIRE'
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        obs, _, terminated, truncated, _ = self.env.step(1)
-        if terminated or truncated:
-            obs, _ = self.env.reset(**kwargs)
-        return obs, info
-
-
-class ClipRewardEnv(gym.RewardWrapper):
-    """Clip rewards to {-1, 0, 1}."""
-
-    def __init__(self, env):
-        super().__init__(env)
-
-    def reward(self, reward):
-        return np.sign(reward)
+    def seed(self, seed=None):
+        self._venv.reset(seed=seed)
 
 
 def make_atari_env(
@@ -83,47 +74,41 @@ def make_atari_env(
     noop_max=30,
     fire_reset=True,
     repeat_action_probability=0.25,
+    img_size=64,
 ):
-    """Create an Atari 100k protocol environment.
+    """Create an Atari environment via ``ale_py.vector_env.AtariVectorEnv``.
 
-    Applies the standard wrappers used by the DIAMOND paper for evaluation
-    on the Atari 100k benchmark.
+    All preprocessing (noop reset, fire reset, episodic life, reward clipping,
+    frame skip, resize) is handled natively by the ALE C++ implementation.
+    Returns a single-env adapter (not a raw ``VectorEnv``).
     """
-    import ale_py
+    from ale_py.vector_env import AtariVectorEnv
 
-    gym.register_envs(ale_py)
+    game = _parse_game(env_name)
 
-    env = gym.make(
-        env_name,
-        obs_type='rgb',
+    venv = AtariVectorEnv(
+        game=game,
+        num_envs=1,
         frameskip=frameskip,
-        mode=0,
-        difficulty=0,
+        grayscale=False,
+        stack_num=1,
+        img_height=img_size,
+        img_width=img_size,
+        maxpool=False,
+        noop_max=noop_max,
+        use_fire_reset=fire_reset,
+        episodic_life=episodic_life,
+        reward_clipping=clip_reward,
+        max_num_frames_per_episode=max_episode_steps * frameskip,
         repeat_action_probability=repeat_action_probability,
         full_action_space=True,
-        max_episode_steps=max_episode_steps,
     )
-
-    if noop_max > 0:
-        env = NoopResetEnv(env, max_noop=noop_max)
-
-    if fire_reset:
-        env = FireResetEnv(env)
-
-    if episodic_life:
-        env = EpisodicLifeEnv(env)
-
-    if clip_reward:
-        env = ClipRewardEnv(env)
-
+    env = AtariEnvAdapter(venv)
     env.reset(seed=seed)
     return env
 
 
 __all__ = [
-    'NoopResetEnv',
-    'EpisodicLifeEnv',
-    'FireResetEnv',
-    'ClipRewardEnv',
+    'AtariEnvAdapter',
     'make_atari_env',
 ]

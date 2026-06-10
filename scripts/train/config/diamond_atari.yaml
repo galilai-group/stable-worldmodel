@@ -7,6 +7,9 @@ output_model_name: diamond_atari
 subdir: diamond_atari_run
 
 seed: 42
+env_name: ALE/Breakout-v5
+episodes: 500
+num_envs: 4
 train_split: 0.95
 
 img_size: 64

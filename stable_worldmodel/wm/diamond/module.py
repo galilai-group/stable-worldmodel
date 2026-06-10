@@ -27,9 +27,6 @@ __all__ = [
 ]
 
 
-# ── U-Net components ─────────────────────────────────────────────────────────
-
-
 class AdaptiveGroupNorm(nn.Module):
     def __init__(self, num_groups, num_channels, cond_dim=None):
         super().__init__()
@@ -141,9 +138,6 @@ class SimpleUNet(nn.Module):
         return out
 
 
-# ── EDM preconditioning ──────────────────────────────────────────────────────
-
-
 def sigma_sampling(batch_size, device, mean=-0.4, std=1.2):
     return torch.exp(torch.randn(batch_size, device=device) * std + mean)
 
@@ -212,9 +206,6 @@ class EDMModel(nn.Module):
         return score
 
 
-# ── EDM sampling ─────────────────────────────────────────────────────────────
-
-
 def make_sigma_schedule(sigma_max, sigma_min, n_steps):
     if n_steps == 1:
         return [sigma_min]
@@ -262,9 +253,6 @@ def sample_heun(
     return x_final
 
 
-# ── EDM training loss ────────────────────────────────────────────────────────
-
-
 def edm_loss_step(model, batch, device):
     B = batch['next_frame'].shape[0]
     sigma = sigma_sampling(B, device)
@@ -297,9 +285,6 @@ def example_train_step(model, optimizer, batch, device):
     loss.backward()
     optimizer.step()
     return loss.item()
-
-
-# ── Diffusion / action encoders ──────────────────────────────────────────────
 
 
 class DiffusionPredictor(nn.Module):
@@ -357,9 +342,6 @@ class RewardTerminationHead(nn.Module):
         reward = self.reward_head(h).view(B, T, 1)
         terminal_logits = self.terminal_head(h).view(B, T, 1)
         return reward, terminal_logits
-
-
-# ── ConvEncoder, RewardTermModel, ActorCritic ────────────────────────────────
 
 
 class ConvEncoder(nn.Module):
@@ -491,9 +473,6 @@ class ActorCritic(nn.Module):
             dist = torch.distributions.Categorical(logits=logits)
             action = dist.sample()
         return action, value, state, logits
-
-
-# ── Example helpers ──────────────────────────────────────────────────────────
 
 
 def example_infer(

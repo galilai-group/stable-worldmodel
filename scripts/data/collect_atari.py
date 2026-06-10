@@ -57,32 +57,23 @@ def collect_atari(
 
 
 if __name__ == '__main__':
-    import argparse
+    import hydra
+    from omegaconf import DictConfig, OmegaConf
 
-    parser = argparse.ArgumentParser(description='Collect Atari trajectories')
-    parser.add_argument(
-        '--env', type=str, default='ALE/Breakout-v5', help='Atari env name'
+    @hydra.main(
+        version_base=None,
+        config_path='config',
+        config_name='collect_atari',
     )
-    parser.add_argument(
-        '--episodes', type=int, default=500, help='Number of episodes'
-    )
-    parser.add_argument(
-        '--num-envs', type=int, default=4, help='Parallel environments'
-    )
-    parser.add_argument(
-        '--max-steps', type=int, default=27000, help='Max steps per episode'
-    )
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument(
-        '--cache-dir', type=str, default=None, help='Output cache directory'
-    )
+    def main(cfg: DictConfig):
+        OmegaConf.resolve(cfg)
+        collect_atari(
+            env_name=cfg.env_name,
+            num_envs=cfg.num_envs,
+            episodes=cfg.episodes,
+            max_episode_steps=cfg.max_episode_steps,
+            seed=cfg.seed,
+            cache_dir=cfg.get('cache_dir', None),
+        )
 
-    args = parser.parse_args()
-    collect_atari(
-        env_name=args.env,
-        num_envs=args.num_envs,
-        episodes=args.episodes,
-        max_episode_steps=args.max_steps,
-        seed=args.seed,
-        cache_dir=args.cache_dir,
-    )
+    main()
