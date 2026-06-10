@@ -146,6 +146,27 @@ The script restores each demo's recorded initial `env_state` and replays its act
 wrapper, reporting `success_rate`. (Reproduction uses the initial state, not the seed — batched-GPU
 demos aren't seed-reproducible in a single env.)
 
+### World-model (MPC) evaluation — follow-up
+
+Running a trained world model via `scripts/plan/eval_wm.py` (goal-conditioned MPC, like PushT) is a
+**planned follow-up**, not part of this integration. We validated the full path once on an H100 (a
+LeWM model trained on a small PickCube dataset reached a **2% (1/50)** goal-reaching success rate),
+which surfaced what the follow-up needs:
+
+- **A sim-collected eval dataset in the benchmark format.** `eval_wm.py` reads `episode_idx`/`step_idx`
+  per row plus `ep_len`/`ep_offset`, with `pixels` (HWC), `action`, `proprio`, and `state` — the same
+  layout as the provided `pusht_expert_train.h5`. `World.collect` output isn't natively in this format
+  (Lance hides the index columns; HDF5 omits them), so the dataset is produced/hosted separately —
+  exactly as PushT's eval dataset is a provided/hosted artifact, not collect output.
+- **Goal-conditioning callables.** The env needs `_set_state`/`_set_goal_state` (to set the start state
+  and a sim-state goal); a validated implementation lives on the `maniskill-wm-eval` branch.
+- **A model-block checkpoint config.** `load_pretrained` instantiates `config.json` as the model block;
+  save with `save_pretrained(config_key='model')` (`lewm.py` otherwise saves the full cfg).
+- **Real-robot datasets don't apply here.** DROID (Franka) and BridgeData V2 / Open-X (WidowX) are for
+  *training policies*, not as MPC-eval datasets — they carry no ManiSkill sim state to restore. The
+  SIMPLER-style real2sim *policy* eval (run a trained policy in the sim, score native success via
+  `World.evaluate`) is a separate path that needs a trained policy, not a goal dataset.
+
 ## Adding a robot or task
 
 Environments are declared in `stable_worldmodel/envs/maniskill/tasks.py` as `TASK_SPECS` — a flat
