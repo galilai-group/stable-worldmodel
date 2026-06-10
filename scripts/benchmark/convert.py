@@ -1,4 +1,4 @@
-"""Convert + upload tworoom + pusht across HDF5/Lance/Video formats.
+"""Convert + upload tworoom + pusht across HDF5/Lance/LanceVideo/Video formats.
 
 Both datasets are 224x224 LeWorldModel sources. Idempotent: skips
 conversion if the local output already exists; skips upload by checking
@@ -48,11 +48,13 @@ PLAN = {
     'tworoom': {
         'hdf5': ('tworoom.h5', 'tworoom/tworoom.h5'),
         'lance': ('tworoom.lance', 'tworoom/tworoom.lance/'),
+        'lance_video': ('tworoom_lance_video', 'tworoom/tworoom_lance_video/'),
         'video': ('tworoom.video', 'tworoom/tworoom.video/'),
     },
     'pusht': {
         'hdf5': ('pusht.h5', 'pusht/pusht.h5'),
         'lance': ('pusht.lance', 'pusht/pusht.lance/'),
+        'lance_video': ('pusht_lance_video', 'pusht/pusht_lance_video/'),
         'video': ('pusht.video', 'pusht/pusht.video/'),
     },
 }
@@ -143,7 +145,7 @@ def _derive_lance_video(name: str, h5_p: Path, force: bool) -> None:
     """From a local source .h5, derive lance + video outputs in PLAN[name]."""
     plan = PLAN[name]
     targets: list[tuple[str, str]] = []
-    for fmt in ('lance', 'video'):
+    for fmt in ('lance', 'lance_video', 'video'):
         dest = plan[fmt][0]
         dest_p = Path(dest)
         if force and dest_p.exists():
