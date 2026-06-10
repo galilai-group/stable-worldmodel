@@ -10,7 +10,7 @@ from stable_worldmodel.envs.maniskill.env import (
 )
 
 
-# --- CPU-safe: registry sanity (no mani_skill / GPU needed) ---------------
+# CPU-safe: registry sanity (no mani_skill / GPU needed)
 
 
 def test_maniskill_specs_are_registered():
@@ -38,7 +38,7 @@ def test_maniskill_variation_space_factors():
         assert key in names, f'{key} missing from variation_space ({names})'
 
 
-# --- GPU + Vulkan required: skipped cleanly without mani_skill installed ---
+# GPU + Vulkan required: skipped cleanly without mani_skill installed
 
 
 @pytest.mark.parametrize(
