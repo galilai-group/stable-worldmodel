@@ -1,3 +1,10 @@
+# TEMPLATE — world-model MPC eval on ManiSkill (goal-reaching, like PushT).
+# This does NOT run on raw `collect_maniskill.py` output. To use it, supply:
+#   1. eval.dataset_name: a dataset in the benchmark layout (episode_idx/step_idx/
+#      ep_len/ep_offset + pixels HWC + action/proprio/state=flat sim state) — the
+#      same format as PushT's provided pusht_expert_train.h5. See docs/envs/maniskill.md.
+#   2. policy: a LeWM checkpoint whose config.json is the model block
+#      (save_pretrained(config_key='model'); lewm.py otherwise saves the full cfg).
 defaults:
   - launcher: local
   - solver: cem
@@ -18,7 +25,9 @@ dataset:
     - state
 
 seed: 42
-policy: lewm_mspickcube # ckpt name (trained on the collected dataset) or random
+# Concrete checkpoint file (a bare run name is ambiguous when several epochs exist).
+# Its config.json must be the model block — see the header note.
+policy: lewm_mspickcube/weights_epoch_30.pt
 
 plan_config:
   horizon: 5
@@ -31,7 +40,8 @@ eval:
   goal_offset_steps: 25
   eval_budget: 50
   img_size: 224
-  dataset_name: maniskill/mspickcube_random.lance
+  # Benchmark-format dataset you provide (see header note) — NOT raw collect output.
+  dataset_name: maniskill/mspickcube_eval.h5
   callables:
     # -- set start state (flat ManiSkill sim state)
     - method: _set_state

@@ -158,10 +158,12 @@ python scripts/train/lewm.py data=maniskill \             # 2. train LeWM
 python scripts/plan/eval_wm.py --config-name maniskill    # 3. goal-conditioned MPC eval
 ```
 
-The MPC eval consumes a dataset in the benchmark layout (`episode_idx`/`step_idx`/`ep_len`/`ep_offset`
-+ `pixels` HWC + `action`/`proprio`/`state` = flat sim state) — the same format as PushT's provided
-`pusht_expert_train.h5`, supplied separately rather than read straight from `World.collect` output. The
-checkpoint's `config.json` must be the model block (`save_pretrained(config_key='model')`).
+Step 3 does not run on raw `collect_maniskill.py` output: `scripts/plan/config/maniskill.yaml` is a
+**template** you point at a prepared dataset in the benchmark layout (`episode_idx`/`step_idx`/`ep_len`/
+`ep_offset` + `pixels` HWC + `action`/`proprio`/`state` = flat sim state) — the same format as PushT's
+provided `pusht_expert_train.h5`, supplied separately rather than read straight from `World.collect`.
+The checkpoint's `config.json` must also be the model block (`save_pretrained(config_key='model')`;
+`lewm.py` otherwise saves the full cfg).
 
 ## Adding a robot or task
 
