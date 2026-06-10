@@ -125,6 +125,7 @@ class ManiSkillWrapper(gym.Wrapper):
         resolution=224,
         render_mode='rgb_array',
         sim_backend='auto',
+        goal_threshold=2.0,
         **kwargs,
     ):
         # Auto-download missing scene/robot assets on first use instead of
@@ -161,6 +162,10 @@ class ManiSkillWrapper(gym.Wrapper):
         self._camera = None
         self._render_frame = None
         self._cam_default_pose = None  # (pos, quat) cached on first FoV apply
+        # Goal-conditioned eval (PushT-style): set via _set_goal_state; when set,
+        # step() terminates on flat-state distance < goal_threshold.
+        self._goal_state = None
+        self._goal_threshold = goal_threshold
 
         # Expose single-env, numpy spaces (ManiSkill's own spaces are batched).
         single_action = getattr(
@@ -219,11 +224,18 @@ class ManiSkillWrapper(gym.Wrapper):
         """Flatten ``obs['agent']`` (qpos/qvel/...) — works for any robot."""
         return self._flatten(obs.get('agent', {}))
 
-    def _extract_state(self, obs):
-        """Proprio plus task ``extra`` (tcp/object poses) where present."""
-        return np.concatenate(
-            [self._extract_proprio(obs), self._flatten(obs.get('extra', {}))]
-        ).astype(np.float32)
+    def _flat_state(self):
+        """Full flat simulator state (ManiSkill ``get_state``) — recorded in
+        info['state'] so the eval harness can restore it via ``_set_state`` and
+        use it as the goal-reaching target. Falls back to a flattened
+        ``get_state_dict`` if a flat ``get_state`` isn't available."""
+        u = self.env.unwrapped
+        get_state = getattr(u, 'get_state', None)
+        if callable(get_state):
+            return np.asarray(
+                self._debatch(get_state()), dtype=np.float32
+            ).reshape(-1)
+        return self._flatten(u.get_state_dict())
 
     def _pick_camera(self, obs):
         if self._camera is None:
@@ -249,7 +261,7 @@ class ManiSkillWrapper(gym.Wrapper):
         info['success'] = bool(np.asarray(success).reshape(-1)[0])
         info['env_name'] = self.env_name
         info['proprio'] = self._extract_proprio(obs)
-        info['state'] = self._extract_state(obs)
+        info['state'] = self._flat_state()
         get_instr = getattr(
             self.env.unwrapped, 'get_language_instruction', None
         )
@@ -394,6 +406,24 @@ class ManiSkillWrapper(gym.Wrapper):
                 logger.warning('FoV render refresh failed: %s', e)
         return obs
 
+    def _set_state(self, state):
+        """Restore the simulator to a recorded flat state (eval start state).
+        Mirrors PushT's ``_set_state`` for ManiSkill's flat get/set_state."""
+        u = self.env.unwrapped
+        t = torch.as_tensor(np.asarray(state, dtype=np.float32)).reshape(1, -1)
+        t = t.to(getattr(u, 'device', 'cpu'))
+        set_state = getattr(u, 'set_state', None)
+        if callable(set_state):
+            set_state(t)
+        else:
+            u.set_state_dict(t)
+        if getattr(u, 'scene', None) is not None:
+            u.scene.update_render()
+
+    def _set_goal_state(self, goal_state):
+        """Store the goal state; enables goal-reaching termination in step()."""
+        self._goal_state = np.asarray(goal_state, dtype=np.float32).reshape(-1)
+
     def step(self, action):
         action = np.asarray(action, dtype=np.float32).reshape(1, -1)
         obs, reward, terminated, truncated, info = self.env.step(action)
@@ -402,12 +432,20 @@ class ManiSkillWrapper(gym.Wrapper):
         truncated = bool(np.asarray(self._debatch(truncated)).reshape(-1)[0])
         self._render_frame = self._extract_rgb(obs)
         info, success = self._build_info(obs, info)
-        # World.evaluate scores success off `terminated`, so map task success
-        # onto it (taking either the native terminated flag or the detector).
-        terminated = (
+        native = (
             bool(np.asarray(self._debatch(terminated)).reshape(-1)[0])
             or success
         )
+        if self._goal_state is not None:
+            # Goal-conditioned eval: terminate on flat-state distance (PushT-style).
+            cur = info['state']
+            n = min(cur.shape[0], self._goal_state.shape[0])
+            dist = float(np.linalg.norm(cur[:n] - self._goal_state[:n]))
+            info['goal_distance'] = dist
+            terminated = dist < self._goal_threshold
+        else:
+            # World.evaluate scores success off `terminated`; map task success.
+            terminated = native
 
         return info['proprio'], reward, terminated, truncated, info
 

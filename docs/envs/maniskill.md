@@ -131,10 +131,11 @@ Object/robot pose is **not** a settable factor — ManiSkill already randomizes 
 episode (seed-driven). **Follow-ups:** table/background texture (those surfaces are textured, so
 `set_base_color` is a no-op — needs texture swap or `BaseDigitalTwinEnv` greenscreen); distractors.
 
-### Success rate (demo replay)
+### Success rate
 
-There's no trained policy yet, so to confirm the env + success detection report real successes
-(not just 0% from a random policy), replay ManiSkill's official demonstrations through the wrapper:
+**Demo replay (env + success detection).** There's no trained policy bundled, so to confirm the env
+and its success detection report real successes (not just 0% from a random policy), replay ManiSkill's
+official demonstrations through the wrapper:
 
 ```bash
 python -m mani_skill.utils.download_demo PickCube-v1
@@ -143,29 +144,24 @@ python scripts/examples/maniskill_demo_replay.py \
 ```
 
 The script restores each demo's recorded initial `env_state` and replays its actions through the
-wrapper, reporting `success_rate`. (Reproduction uses the initial state, not the seed — batched-GPU
-demos aren't seed-reproducible in a single env.)
+wrapper, reporting `success_rate` (**100%** on PickCube). Reproduction uses the initial state, not the
+seed — batched-GPU demos aren't seed-reproducible in a single env.
 
-### World-model (MPC) evaluation — follow-up
+**World-model MPC.** A LeWM world model trained on a collected PickCube dataset and evaluated with
+goal-conditioned MPC reached **2% (1/50)** goal-reaching success on `swm/MSPickCube-v0` (random-policy
+data, 30 epochs, goal threshold 2.0 on the flat sim state) — a real but low baseline. The full path:
 
-Running a trained world model via `scripts/plan/eval_wm.py` (goal-conditioned MPC, like PushT) is a
-**planned follow-up**, not part of this integration. We validated the full path once on an H100 (a
-LeWM model trained on a small PickCube dataset reached a **2% (1/50)** goal-reaching success rate),
-which surfaced what the follow-up needs:
+```bash
+python scripts/data/collect_maniskill.py                  # 1. collect a dataset
+python scripts/train/lewm.py data=maniskill \             # 2. train LeWM
+    output_model_name=lewm_mspickcube wandb.enabled=false
+python scripts/plan/eval_wm.py --config-name maniskill    # 3. goal-conditioned MPC eval
+```
 
-- **A sim-collected eval dataset in the benchmark format.** `eval_wm.py` reads `episode_idx`/`step_idx`
-  per row plus `ep_len`/`ep_offset`, with `pixels` (HWC), `action`, `proprio`, and `state` — the same
-  layout as the provided `pusht_expert_train.h5`. `World.collect` output isn't natively in this format
-  (Lance hides the index columns; HDF5 omits them), so the dataset is produced/hosted separately —
-  exactly as PushT's eval dataset is a provided/hosted artifact, not collect output.
-- **Goal-conditioning callables.** The env needs `_set_state`/`_set_goal_state` (to set the start state
-  and a sim-state goal); a validated implementation lives on the `maniskill-wm-eval` branch.
-- **A model-block checkpoint config.** `load_pretrained` instantiates `config.json` as the model block;
-  save with `save_pretrained(config_key='model')` (`lewm.py` otherwise saves the full cfg).
-- **Real-robot datasets don't apply here.** DROID (Franka) and BridgeData V2 / Open-X (WidowX) are for
-  *training policies*, not as MPC-eval datasets — they carry no ManiSkill sim state to restore. The
-  SIMPLER-style real2sim *policy* eval (run a trained policy in the sim, score native success via
-  `World.evaluate`) is a separate path that needs a trained policy, not a goal dataset.
+The MPC eval consumes a dataset in the benchmark layout (`episode_idx`/`step_idx`/`ep_len`/`ep_offset`
++ `pixels` HWC + `action`/`proprio`/`state` = flat sim state) — the same format as PushT's provided
+`pusht_expert_train.h5`, supplied separately rather than read straight from `World.collect` output. The
+checkpoint's `config.json` must be the model block (`save_pretrained(config_key='model')`).
 
 ## Adding a robot or task
 
