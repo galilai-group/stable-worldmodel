@@ -4,6 +4,10 @@ import pytest
 
 import stable_worldmodel as swm
 from stable_worldmodel.envs.maniskill import TASK_SPECS
+from stable_worldmodel.envs.maniskill.env import (
+    DEFAULT_VARIATIONS,
+    build_variation_space,
+)
 
 
 # --- CPU-safe: registry sanity (no mani_skill / GPU needed) ---------------
@@ -21,6 +25,17 @@ def test_maniskill_specs_have_task_id():
         assert 'id' in spec and 'task_id' in spec, (
             f'spec missing id/task_id: {spec}'
         )
+
+
+def test_maniskill_variation_space_factors():
+    """The env exposes real (verified-applied) Factors of Variation."""
+    vs = build_variation_space()
+    top_level = set(vs.spaces.keys())
+    assert {'light', 'camera', 'object', 'rendering'} <= top_level, top_level
+    names = set(vs.names())
+    assert 'rendering.transparent_arm' in names
+    for key in DEFAULT_VARIATIONS:
+        assert key in names, f'{key} missing from variation_space ({names})'
 
 
 # --- GPU + Vulkan required: skipped cleanly without mani_skill installed ---

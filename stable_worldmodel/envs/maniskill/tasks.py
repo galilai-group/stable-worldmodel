@@ -17,7 +17,7 @@ Adding a robot or task is a one-line entry here — no wrapper code changes:
 """
 
 TASK_SPECS = [
-    # --- Franka Panda table-top manipulation (Panda is the task default) ---
+    # Franka Panda table-top manipulation (Panda is the task default)
     dict(id='swm/MSPickCube-v0', task_id='PickCube-v1'),
     dict(id='swm/MSPushCube-v0', task_id='PushCube-v1'),
     dict(id='swm/MSPullCube-v0', task_id='PullCube-v1'),
@@ -28,7 +28,7 @@ TASK_SPECS = [
     dict(id='swm/MSPlugCharger-v0', task_id='PlugCharger-v1'),
     dict(id='swm/MSPickSingleYCB-v0', task_id='PickSingleYCB-v1'),
     dict(id='swm/MSRollBall-v0', task_id='RollBall-v1'),
-    # --- SIMPLER / real2sim Bridge digital twins (WidowX is the task default) ---
+    # SIMPLER / real2sim Bridge digital twins (WidowX is the task default).
     # These tasks only support obs_mode='rgb+segmentation' (not plain 'rgb').
     dict(
         id='swm/SimplerCarrotOnPlate-v0',
@@ -50,7 +50,7 @@ TASK_SPECS = [
         task_id='PutEggplantInBasketScene-v1',
         obs_mode='rgb+segmentation',
     ),
-    # --- Examples of extending to other robots (uncomment / copy a line) ---
+    # Examples of extending to other robots (uncomment / copy a line):
     # dict(id='swm/MSPickCubeWidowX-v0', task_id='PickCube-v1', robot_uids='widowx'),
     # dict(id='swm/MSPickCubeSO100-v0', task_id='PickCubeSO100-v1'),
     # dict(id='swm/MSPickCubeEE-v0', task_id='PickCube-v1', control_mode='pd_ee_delta_pose'),

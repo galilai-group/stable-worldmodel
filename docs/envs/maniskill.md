@@ -111,8 +111,40 @@ The `info` dict returned by `reset()` and `step()` follows the standard SWM conv
 
 ### Variation Space
 
-The variation space is currently empty (`swm_spaces.Dict({})`). SIMPLER's distribution-shift knobs
-(lighting, camera, background, distractors, textures) are a planned follow-up.
+The env exposes a `variation_space` of visual Factors of Variation, aligned with SIMPLER's
+distribution-shift axes. These are sampled each reset (or set explicitly via
+`reset(options={'variation': [...]})` / `options={'variation_values': {...}}`) and recorded in
+`info['variation.<key>']`. The set is restricted to factors **verified to change the rendered
+frame** through the wrapper (applied by `_apply_variations` using ManiSkill's own SAPIEN APIs):
+
+| Factor | Type | Default | SIMPLER axis |
+|--------|------|---------|--------------|
+| `light.intensity` | `Box(0.3, 1.0, (1,))` | `0.7` | lighting (scene ambient) |
+| `camera.angle_delta` | `Box(-10, 10, (1, 2))` | `[[0, 0]]` (azimuth/elevation°) | camera poses |
+| `object.color` | `Box(0, 1, (3,))` | `[0.8, 0.1, 0.1]` | object appearance |
+| `rendering.transparent_arm` | `Discrete(2)` | `0` | arm texture |
+
+`DEFAULT_VARIATIONS` (resampled each reset) = `light.intensity`, `camera.angle_delta`,
+`object.color`.
+
+Object/robot pose is **not** a settable factor — ManiSkill already randomizes object placement per
+episode (seed-driven). **Follow-ups:** table/background texture (those surfaces are textured, so
+`set_base_color` is a no-op — needs texture swap or `BaseDigitalTwinEnv` greenscreen); distractors.
+
+### Success rate (demo replay)
+
+There's no trained policy yet, so to confirm the env + success detection report real successes
+(not just 0% from a random policy), replay ManiSkill's official demonstrations through the wrapper:
+
+```bash
+python -m mani_skill.utils.download_demo PickCube-v1
+python scripts/examples/maniskill_demo_replay.py \
+    --swm-id swm/MSPickCube-v0 --task PickCube-v1 --episodes 20
+```
+
+The script restores each demo's recorded initial `env_state` and replays its actions through the
+wrapper, reporting `success_rate`. (Reproduction uses the initial state, not the seed — batched-GPU
+demos aren't seed-reproducible in a single env.)
 
 ## Adding a robot or task
 

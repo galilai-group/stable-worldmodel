@@ -25,10 +25,70 @@ from stable_worldmodel import spaces as swm_spaces
 
 logger = logging.getLogger(__name__)
 
-# Sampled-at-reset variations. Empty for now — the distribution-shift knobs
-# (lighting / camera / background / distractors) are a follow-up; an empty
-# tuple keeps reset() a no-op over the (currently empty) variation_space.
-DEFAULT_VARIATIONS = ()
+# Visual factors resampled at every reset unless reset() is given an explicit
+# 'variation' / 'variation_values' option. Aligned with SIMPLER's
+# distribution-shift axes (lighting, camera pose, object appearance).
+DEFAULT_VARIATIONS = (
+    'light.intensity',
+    'camera.angle_delta',
+    'object.color',
+)
+
+
+def build_variation_space():
+    """Build the ManiSkill variation_space (Factors of Variation).
+
+    Visual distribution-shift knobs aligned with SIMPLER's axes, restricted to
+    the ones verified to actually change the rendered frame through the wrapper:
+    scene lighting, camera pose, manipulated-object color, and arm transparency
+    (≈ SIMPLER's "arm texture" shift). Pure (no ``mani_skill`` dependency) so it
+    can be unit-tested on CPU; the sampled values are applied to the live SAPIEN
+    scene in ``ManiSkillWrapper._apply_variations``.
+
+    Follow-ups: table/background texture (those surfaces are textured, so
+    ``set_base_color`` is a no-op — needs a texture swap or ``BaseDigitalTwinEnv``
+    greenscreen), and distractor objects.
+    """
+    return swm_spaces.Dict(
+        {
+            'light': swm_spaces.Dict(
+                {
+                    'intensity': swm_spaces.Box(
+                        low=0.3,
+                        high=1.0,
+                        shape=(1,),
+                        dtype=np.float64,
+                        init_value=np.array([0.7]),
+                    )
+                }
+            ),
+            'camera': swm_spaces.Dict(
+                {
+                    'angle_delta': swm_spaces.Box(
+                        low=-10.0,
+                        high=10.0,
+                        shape=(1, 2),
+                        dtype=np.float64,
+                        init_value=np.array([[0.0, 0.0]]),
+                    )
+                }
+            ),
+            'object': swm_spaces.Dict(
+                {
+                    'color': swm_spaces.Box(
+                        low=0.0,
+                        high=1.0,
+                        shape=(3,),
+                        dtype=np.float64,
+                        init_value=np.array([0.8, 0.1, 0.1]),
+                    )
+                }
+            ),
+            'rendering': swm_spaces.Dict(
+                {'transparent_arm': swm_spaces.Discrete(2, init_value=0)}
+            ),
+        }
+    )
 
 
 class ManiSkillWrapper(gym.Wrapper):
@@ -100,6 +160,7 @@ class ManiSkillWrapper(gym.Wrapper):
         self.camera_name = camera_name
         self._camera = None
         self._render_frame = None
+        self._cam_default_pose = None  # (pos, quat) cached on first FoV apply
 
         # Expose single-env, numpy spaces (ManiSkill's own spaces are batched).
         single_action = getattr(
@@ -116,11 +177,9 @@ class ManiSkillWrapper(gym.Wrapper):
             low=-np.inf, high=np.inf, shape=proprio.shape, dtype=np.float32
         )
 
-        # No distribution-shift knobs yet; an empty Dict keeps EnvPool's
-        # variation_space wiring happy.
-        self.variation_space = swm_spaces.Dict({})
-
-    # ----- conversion helpers (embodiment-independent) ---------------------
+        # Factors of Variation (lighting / camera / colors / arm). Declared and
+        # sampled here; applied to the live SAPIEN scene in _apply_variations.
+        self.variation_space = build_variation_space()
 
     @staticmethod
     def _to_numpy(x):
@@ -201,13 +260,139 @@ class ManiSkillWrapper(gym.Wrapper):
             )
         return info, info['success']
 
-    # ----- gym interface ---------------------------------------------------
-
     def reset(self, seed=None, options=None):
-        obs, info = self.env.reset(seed=seed, options=options)
+        options = options or {}
+        # Sample the factors of variation for this episode (or set explicit
+        # values via options['variation'] / options['variation_values']).
+        swm_spaces.reset_variation_space(
+            self.variation_space,
+            seed=seed,
+            options=options,
+            default_variations=DEFAULT_VARIATIONS,
+        )
+        # swm variation keys aren't ManiSkill reset options; don't forward them.
+        inner = {
+            k: v
+            for k, v in options.items()
+            if k not in ('variation', 'variation_values')
+        }
+        obs, info = self.env.reset(seed=seed, options=inner or None)
+        obs = self._apply_variations(obs)
         self._render_frame = self._extract_rgb(obs)
         info, _ = self._build_info(obs, info)
         return info['proprio'], info
+
+    @staticmethod
+    def _iter_materials(struct, render_body_cls):
+        """Yield render materials of a ManiSkill Actor/Link (grasp_cube idiom)."""
+        for o in getattr(struct, '_objs', []):
+            entity = getattr(o, 'entity', o)
+            rbc = entity.find_component_by_type(render_body_cls)
+            if rbc is None:
+                continue
+            for shape in rbc.render_shapes:
+                for part in shape.parts:
+                    yield part.material
+
+    def _apply_camera_angle(self, u, az, el):
+        """Perturb the render camera's view by (azimuth, elevation) radians,
+        relative to its default pose (cached once)."""
+        import sapien
+        from transforms3d.euler import euler2quat
+        from transforms3d.quaternions import qmult
+
+        sensors = getattr(u, '_sensors', {}) or {}
+        cam = sensors.get(self._camera) or (
+            next(iter(sensors.values())) if sensors else None
+        )
+        rc = getattr(cam, 'camera', None) if cam is not None else None
+        if rc is None:
+            return
+        if self._cam_default_pose is None:
+            p0 = rc.get_local_pose()
+            pos = self._to_numpy(p0.p).reshape(-1)[:3].copy()
+            quat = self._to_numpy(p0.q).reshape(-1)[:4].copy()
+            self._cam_default_pose = (pos, quat)
+        pos, quat = self._cam_default_pose
+        rc.set_local_pose(
+            sapien.Pose(p=pos, q=qmult(euler2quat(0.0, el, az), quat))
+        )
+
+    def _apply_variations(self, obs):
+        """Apply the sampled variation_space values to the live SAPIEN scene.
+
+        Visual-only (lighting / material colors / arm alpha) so physics is
+        untouched. Uses the same SAPIEN APIs as ManiSkill's reference DR env
+        ``digital_twins/so100_arm/grasp_cube.py``. After mutating the scene we
+        ``update_render()`` and re-fetch the observation so the returned frame
+        reflects the change (our render frame is sourced from the obs).
+        """
+        u = self.env.unwrapped
+        scene = getattr(u, 'scene', None)
+        if scene is None:
+            return obs
+        try:
+            from sapien.render import RenderBodyComponent
+        except Exception:  # pragma: no cover
+            return obs
+
+        vs = self.variation_space
+        changed = False
+
+        def _val(*keys):
+            node = vs
+            for k in keys:
+                node = node[k]
+            return np.asarray(node.value).reshape(-1)
+
+        try:
+            inten = float(_val('light', 'intensity')[0])
+            scene.set_ambient_light([inten, inten, inten])
+            changed = True
+        except Exception as e:
+            logger.warning('FoV lighting failed: %s', e)
+
+        # Manipulated-object color. The 'cube' actor is the PickCube target;
+        # textured surfaces (table/ground) ignore base_color, so they're not
+        # exposed as factors here (see build_variation_space docstring).
+        actor = (getattr(scene, 'actors', {}) or {}).get('cube')
+        if actor is not None:
+            try:
+                rgb = [float(c) for c in _val('object', 'color')[:3]]
+                for mat in self._iter_materials(actor, RenderBodyComponent):
+                    mat.set_base_color(rgb + [1.0])
+                changed = True
+            except Exception as e:
+                logger.warning('FoV object color failed: %s', e)
+
+        try:
+            if int(_val('rendering', 'transparent_arm')[0]) == 1:
+                for link in u.agent.robot.links:
+                    for mat in self._iter_materials(link, RenderBodyComponent):
+                        c = list(mat.base_color)
+                        mat.set_base_color([c[0], c[1], c[2], 0.3])
+                changed = True
+        except Exception as e:
+            logger.warning('FoV arm transparency failed: %s', e)
+
+        try:
+            # Always set the camera from default+delta so a prior episode's
+            # perturbation is reset (delta 0 -> default pose).
+            az, el = (
+                np.radians(float(x)) for x in _val('camera', 'angle_delta')[:2]
+            )
+            self._apply_camera_angle(u, az, el)
+            changed = True
+        except Exception as e:
+            logger.warning('FoV camera angle failed: %s', e)
+
+        if changed:
+            try:
+                scene.update_render()
+                obs = u.get_obs()
+            except Exception as e:
+                logger.warning('FoV render refresh failed: %s', e)
+        return obs
 
     def step(self, action):
         action = np.asarray(action, dtype=np.float32).reshape(1, -1)
