@@ -656,17 +656,16 @@ def test_video_dataset_load_file(sample_video_dataset):
     assert frame.shape == (64, 64, 3)
 
 
-def test_video_dataset_decord_import_error(sample_video_dataset):
-    """Test VideoDataset raises ImportError when decord is not available."""
+def test_video_dataset_backend_import_error(sample_video_dataset):
+    """VideoDataset raises ImportError when no decoder backend is installed."""
     cache_dir, name = sample_video_dataset
 
-    # Reset the class-level cached decord module
-    VideoDataset._decord = None
-
-    # Mock the import to raise ImportError
-    with patch.dict(sys.modules, {'decord': None}):
-        with pytest.raises(ImportError, match='VideoDataset requires decord'):
+    # Reset the cached factory and hide both backends.
+    VideoDataset._make_reader = None
+    with patch.dict(sys.modules, {'decord': None, 'av': None}):
+        with pytest.raises(ImportError, match='VideoDataset requires'):
             VideoDataset(name, cache_dir=str(cache_dir))
+    VideoDataset._make_reader = None  # re-resolve for later tests
 
 
 ##############################################################################
