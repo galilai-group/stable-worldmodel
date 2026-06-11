@@ -2,9 +2,11 @@
 
 Each env spawns its own ``python -m open_apps.mcp`` subprocess (process =
 session), so N envs run independently in one process. Observations are
-1024x640 RGB screenshots; the action is a continuous normalized click
-position (``Box(-1, 1, (2,))``), or a raw BrowserGym action string passed
-straight through; reward is scored server-side.
+1024x640 RGB screenshots; the action is a flat ``Box(-1, 1, (3,))`` =
+``[type, x, y]`` (a discrete action type bucketed from a continuous first
+dim — click / scroll-up / scroll-down — plus a continuous normalized
+position), or a raw BrowserGym action string passed straight through;
+reward is scored server-side.
 """
 
 import asyncio
@@ -29,6 +31,9 @@ from stable_worldmodel import spaces as swm_spaces
 VIEWPORT_WIDTH = 1024
 VIEWPORT_HEIGHT = 640
 
+# Pixels wheeled per scroll action (page-level vertical scroll).
+SCROLL_AMOUNT = 300
+
 SCROLL_Y_CHOICES = [0, 100, 300, 600]
 MAP_CITY_CHOICES = [
     ('NYC', [40.7831, -73.9712]),
@@ -47,24 +52,41 @@ def _i(value):
 
 
 def make_action_space():
-    """Continuous, normalized click position in ``[-1, 1]**2``.
+    """Flat ``Box(-1, 1, (3,))`` action ``[type, x, y]``.
 
-    A single click is the controllable action — kept low-dimensional and
-    continuous so it trains/plans cleanly with swm's world models and
-    solvers. Samples map to a ``mouse_click`` at the de-normalized pixel
-    position. Richer actions (type/scroll/drag) remain reachable via raw
-    BrowserGym action strings passed straight through (e.g. a VLM policy).
+    - ``type`` (dim 0) is a continuous value bucketed into three equal
+      bands — ``scroll-up`` / ``click`` / ``scroll-down`` — so the action
+      type is effectively discrete while staying a float dim that swm's
+      continuous solvers (CEM/MPPI/gradient) and the LeWM action encoder
+      can optimize over.
+    - ``x``/``y`` (dims 1-2) are the normalized click position in
+      ``[-1, 1]``, de-normalized to viewport pixels on dispatch.
+
+    Scroll is part of the action space because navigating most OpenApps
+    screens needs it (clicks alone can't reveal off-screen controls). A
+    raw BrowserGym action string is still passed straight through (e.g. a
+    VLM policy).
     """
-    return spaces.Box(-1.0, 1.0, (2,), dtype=np.float32)
+    return spaces.Box(-1.0, 1.0, (3,), dtype=np.float32)
 
 
 def to_browsergym_action(action):
-    """Map a ``[-1, 1]**2`` click (or a passthrough string) to BrowserGym."""
+    """Map a ``[type, x, y]`` sample (or passthrough string) to BrowserGym.
+
+    ``type < -1/3`` scrolls up, ``type > 1/3`` scrolls down, otherwise a
+    left click at the de-normalized ``(x, y)``. Scroll wheels the page by
+    ``SCROLL_AMOUNT`` and ignores ``x``/``y``.
+    """
     if isinstance(action, str):
         return action
     a = np.clip(np.asarray(action, dtype=np.float32).reshape(-1), -1.0, 1.0)
-    x = int(round((a[0] + 1.0) / 2.0 * (VIEWPORT_WIDTH - 1)))
-    y = int(round((a[1] + 1.0) / 2.0 * (VIEWPORT_HEIGHT - 1)))
+    kind = a[0]
+    if kind < -1.0 / 3.0:
+        return f'scroll(0, {-SCROLL_AMOUNT})'
+    if kind > 1.0 / 3.0:
+        return f'scroll(0, {SCROLL_AMOUNT})'
+    x = int(round((a[1] + 1.0) / 2.0 * (VIEWPORT_WIDTH - 1)))
+    y = int(round((a[2] + 1.0) / 2.0 * (VIEWPORT_HEIGHT - 1)))
     return f'mouse_click({x}, {y})'
 
 
