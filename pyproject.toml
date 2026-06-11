@@ -83,7 +83,9 @@ dev = [
   "pre-commit",
   "pytest",
   "pytest-cov>=7.0.0",
-  "ruff",
+  # 0.15.17 published s390x-only wheels (no x86_64 wheel or sdist), which
+  # breaks `uv sync` on the x86_64 CI runner; skip just that release.
+  "ruff!=0.15.17",
   "twine",
   "mkdocs-shadcn",
   "pymdown-extensions",
