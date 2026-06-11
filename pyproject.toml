@@ -67,6 +67,12 @@ lerobot = [
     "lerobot>=0.5.0; python_version >= '3.12'",
 ]
 
+openapps = [
+    "open-apps; python_version >= '3.11'",
+    "playwright; python_version >= '3.11'",
+    "mcp>=1.9.0; python_version >= '3.11'",
+]
+
 all = [
     "stable-worldmodel[train,env,format]",
 ]
@@ -77,7 +83,9 @@ dev = [
   "pre-commit",
   "pytest",
   "pytest-cov>=7.0.0",
-  "ruff",
+  # 0.15.17 published s390x-only wheels (no x86_64 wheel or sdist), which
+  # breaks `uv sync` on the x86_64 CI runner; skip just that release.
+  "ruff!=0.15.17",
   "twine",
   "mkdocs-shadcn",
   "pymdown-extensions",
@@ -90,6 +98,16 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+# open-apps pins transformers==4.52.2 (huggingface-hub<1.0), which is
+# incompatible with lerobot (huggingface-hub>=1.0); they can't co-resolve.
+conflicts = [
+    [{ extra = "openapps" }, { extra = "lerobot" }],
+]
+
+[tool.uv.sources]
+open-apps = { git = "https://github.com/facebookresearch/OpenApps.git" }
 
 [tool.uv.build-backend]
 module-root = "."

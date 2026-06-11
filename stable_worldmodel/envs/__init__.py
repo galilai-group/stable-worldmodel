@@ -181,6 +181,18 @@ for _swm_id, _gym_id in [
     )
 
 ############
+# OPENAPPS #
+############
+
+for _app in ('todo', 'calendar', 'messages', 'codeeditor', 'map'):
+    register(
+        id=f'swm/OpenApps-{_app.capitalize()}-v0',
+        entry_point='stable_worldmodel.envs.openapps.env:OpenAppsEnv',
+        kwargs={'app_name': _app},
+    )
+
+
+############
 # DISCRETE #
 ############
 

@@ -35,7 +35,10 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     - name: Dependencies
-      run: uv sync --all-extras
+      # openapps and lerobot have conflicting deps (huggingface-hub <1 vs >=1)
+      # and can't co-install. openapps is a heavy, browser-based opt-in extra
+      # (not in [all]), so exclude it here and keep lerobot coverage as before.
+      run: uv sync --all-extras --no-extra openapps
     - name: Tests
       run: uv run --group dev pytest
     - name: Build
