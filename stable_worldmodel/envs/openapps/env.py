@@ -2,11 +2,11 @@
 
 Each env spawns its own ``python -m open_apps.mcp`` subprocess (process =
 session), so N envs run independently in one process. Observations are
-1024x640 RGB screenshots; the action is a flat ``Box(-1, 1, (3,))`` =
-``[type, x, y]`` (a discrete action type bucketed from a continuous first
-dim — click / scroll-up / scroll-down — plus a continuous normalized
-position), or a raw BrowserGym action string passed straight through;
-reward is scored server-side.
+1024x640 RGB screenshots; the action is a discrete
+``MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])`` = ``[type, grid_x, grid_y]``
+(type selects click / scroll-down / scroll-up; the grid cell de-normalizes
+to a viewport pixel), or a raw BrowserGym action string passed straight
+through; reward is scored server-side.
 """
 
 import asyncio
@@ -31,6 +31,10 @@ from stable_worldmodel import spaces as swm_spaces
 VIEWPORT_WIDTH = 1024
 VIEWPORT_HEIGHT = 640
 
+# Discrete action space (matches the original pre-MCP OpenApps action space).
+NUM_ACTIONS = 3  # 0 = click, 1 = scroll down, 2 = scroll up
+GRID_X = 32
+GRID_Y = 20
 # Pixels wheeled per scroll action (page-level vertical scroll).
 SCROLL_AMOUNT = 300
 
@@ -52,41 +56,46 @@ def _i(value):
 
 
 def make_action_space():
-    """Flat ``Box(-1, 1, (3,))`` action ``[type, x, y]``.
+    """Discrete ``MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])`` action.
 
-    - ``type`` (dim 0) is a continuous value bucketed into three equal
-      bands — ``scroll-up`` / ``click`` / ``scroll-down`` — so the action
-      type is effectively discrete while staying a float dim that swm's
-      continuous solvers (CEM/MPPI/gradient) and the LeWM action encoder
-      can optimize over.
-    - ``x``/``y`` (dims 1-2) are the normalized click position in
-      ``[-1, 1]``, de-normalized to viewport pixels on dispatch.
+    Restores the original all-discrete OpenApps action space
+    ``[type, grid_x, grid_y]``:
 
-    Scroll is part of the action space because navigating most OpenApps
-    screens needs it (clicks alone can't reveal off-screen controls). A
-    raw BrowserGym action string is still passed straight through (e.g. a
-    VLM policy).
+    - ``type`` (dim 0) selects ``click`` (0) / ``scroll-down`` (1) /
+      ``scroll-up`` (2).
+    - ``grid_x``/``grid_y`` (dims 1-2) index a cell on a ``GRID_X x GRID_Y``
+      grid over the viewport; the cell centre de-normalizes to a viewport
+      pixel on dispatch.
+
+    All-discrete because swm's data pipeline and solvers need one
+    homogeneous space with a ``.shape`` — a mixed ``Discrete`` type +
+    ``Box`` position isn't supported (the recorder raises on dict actions
+    and the solvers require a flat array). Scroll is part of the space
+    because navigating most OpenApps screens needs it. A raw BrowserGym
+    action string is still passed straight through (e.g. a VLM policy).
     """
-    return spaces.Box(-1.0, 1.0, (3,), dtype=np.float32)
+    return spaces.MultiDiscrete([NUM_ACTIONS, GRID_X, GRID_Y])
 
 
 def to_browsergym_action(action):
-    """Map a ``[type, x, y]`` sample (or passthrough string) to BrowserGym.
+    """Map a ``[type, grid_x, grid_y]`` action (or passthrough string).
 
-    ``type < -1/3`` scrolls up, ``type > 1/3`` scrolls down, otherwise a
-    left click at the de-normalized ``(x, y)``. Scroll wheels the page by
-    ``SCROLL_AMOUNT`` and ignores ``x``/``y``.
+    ``type`` 1 scrolls down, 2 scrolls up, otherwise a left click at the
+    centre of grid cell ``(grid_x, grid_y)``. Scroll wheels the page by
+    ``SCROLL_AMOUNT`` and ignores the grid cell.
     """
     if isinstance(action, str):
         return action
-    a = np.clip(np.asarray(action, dtype=np.float32).reshape(-1), -1.0, 1.0)
-    kind = a[0]
-    if kind < -1.0 / 3.0:
-        return f'scroll(0, {-SCROLL_AMOUNT})'
-    if kind > 1.0 / 3.0:
+    a = np.asarray(action).reshape(-1)
+    action_type = int(a[0])
+    if action_type == 1:
         return f'scroll(0, {SCROLL_AMOUNT})'
-    x = int(round((a[1] + 1.0) / 2.0 * (VIEWPORT_WIDTH - 1)))
-    y = int(round((a[2] + 1.0) / 2.0 * (VIEWPORT_HEIGHT - 1)))
+    if action_type == 2:
+        return f'scroll(0, {-SCROLL_AMOUNT})'
+    gx = min(int(a[1]), GRID_X - 1)
+    gy = min(int(a[2]), GRID_Y - 1)
+    x = int((gx + 0.5) * VIEWPORT_WIDTH / GRID_X)
+    y = int((gy + 0.5) * VIEWPORT_HEIGHT / GRID_Y)
     return f'mouse_click({x}, {y})'
 
 
