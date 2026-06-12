@@ -87,28 +87,40 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
     return buf.getvalue()
 
 
-_SPAWN_FORCED = False
+_MP_START_FORCED = False
 
 
-def _force_spawn() -> None:
-    """Switch Linux multiprocessing to spawn — workaround for lancedb fork-unsafety."""
+def _force_forkserver() -> None:
+    """Switch Linux multiprocessing to a fork-safe start method for lancedb.
+
+    lance runs an internal async (Tokio) runtime; forking a process that has
+    already started it leaves the child with a half-initialized runtime that
+    can deadlock. ``forkserver`` launches a clean helper interpreter (with no
+    lance runtime) and forks DataLoader workers from *that*, so each worker
+    opens lance after the fork and gets its own runtime — the start method
+    lancedb itself recommends. Worker startup is also cheaper than ``spawn``
+    (a fork of the clean server vs a full re-exec + re-import per worker).
+    Falls back to ``spawn`` where forkserver is unavailable.
+    """
     import logging
     import multiprocessing as mp
     import sys
 
     import torch
 
-    global _SPAWN_FORCED
-    if _SPAWN_FORCED or sys.platform != 'linux':
-        _SPAWN_FORCED = True
+    global _MP_START_FORCED
+    if _MP_START_FORCED or sys.platform != 'linux':
+        _MP_START_FORCED = True
         return
-    _SPAWN_FORCED = True
+    _MP_START_FORCED = True
 
     if mp.get_start_method(allow_none=True) in (None, 'fork'):
+        methods = mp.get_all_start_methods()
+        target = 'forkserver' if 'forkserver' in methods else 'spawn'
         try:
-            mp.set_start_method('spawn', force=True)
+            mp.set_start_method(target, force=True)
         except RuntimeError as exc:
-            logging.warning('Could not switch to spawn (%s)', exc)
+            logging.warning('Could not switch to %s (%s)', target, exc)
     try:
         torch.multiprocessing.set_sharing_strategy('file_system')
     except RuntimeError:
@@ -163,7 +175,7 @@ class LanceDataset(Dataset):
         self._perm = None
         self._fetch_columns: list[str] | None = None
 
-        _force_spawn()
+        _force_forkserver()
         table = self._connect_table()
         self._schema_names = list(table.schema.names)
         available = [
@@ -224,8 +236,8 @@ class LanceDataset(Dataset):
         # inject `global_step` / `current_epoch` into samples. The trainer
         # transitively reaches `train_dataloader._iterator` (a
         # `_MultiProcessingDataLoaderIter`, which raises NotImplementedError
-        # on pickle). Drop the back-reference so worker spawn closures
-        # don't traverse into it; workers see a stale snapshot of trainer
+        # on pickle). Drop the back-reference so worker-process pickling
+        # doesn't traverse into it; workers see a stale snapshot of trainer
         # state anyway, so a missing trainer is fine.
         state['_trainer'] = None
         return state
