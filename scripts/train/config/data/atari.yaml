@@ -1,0 +1,13 @@
+dataset:
+  num_steps: ${eval:'${wm.history_size} + 1'}
+  frameskip: 1
+  name: atari_breakout.lance
+  keys_to_load:
+    - pixels
+    - action
+    - reward
+    - terminal
+  keys_to_cache:
+    - action
+    - reward
+    - terminal
