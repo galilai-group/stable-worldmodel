@@ -4,7 +4,6 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
 
 from stable_worldmodel.solver.callbacks import Callback
 from stable_worldmodel.solver.solver import Costable
