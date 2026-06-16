@@ -30,12 +30,14 @@ success detector (mapped onto `terminated`).
 ## Installation
 
 ```bash
-pip install "stable-worldmodel[maniskill]"   # or: uv sync --extra maniskill
+uv sync --group maniskill   # GPU box only; or: pip install mani-skill
 ```
 
-The dependency is GPU-only and is intentionally **not** part of `[all]`. The import is lazy, so
-`import stable_worldmodel` works (and the envs register) on machines without ManiSkill installed —
-they only fail when you actually instantiate one.
+ManiSkill is GPU-only (needs CUDA + Vulkan), so it's an opt-in **dependency group** rather than an
+extra — it is intentionally excluded from `uv sync --all-extras` / `[all]` (and has no clean wheel
+install on linux Python 3.11/3.12). The import is lazy, so `import stable_worldmodel` works (and the
+envs register) on machines without ManiSkill installed — they only fail when you actually instantiate
+one.
 
 ```python
 import stable_worldmodel as swm

@@ -48,6 +48,11 @@ def test_maniskill_variation_space_factors():
 def test_maniskill_environment_rollout(env_id):
     pytest.importorskip('mani_skill')
 
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip('ManiSkill rollout needs a CUDA + Vulkan GPU')
+
     env = gym.make(env_id)
     assert isinstance(env.observation_space, gym.spaces.Box)
     assert env.observation_space.shape[0] > 0

@@ -67,17 +67,20 @@ lerobot = [
     "lerobot>=0.5.0; python_version >= '3.12'",
 ]
 
-# ManiSkill3 (SAPIEN) — Franka Panda manipulation + SIMPLER/real2sim Bridge
-# tasks. GPU-only (needs CUDA + Vulkan); kept out of `all` deliberately.
-maniskill = [
-    "mani-skill",
-]
-
 all = [
     "stable-worldmodel[train,env,format]",
 ]
 
 [dependency-groups]
+# ManiSkill3 (SAPIEN) — Franka Panda manipulation + SIMPLER/real2sim Bridge tasks.
+# A dependency group (not an extra) because it is GPU-only (needs CUDA + Vulkan) and
+# has no clean wheel install on linux py3.11/3.12 (mani-skill -> mplib -> toppra, which
+# only ships cp310 wheels and builds from sdist otherwise). Keeping it a group excludes
+# it from `uv sync --all-extras` / `[all]`. Opt in with `uv sync --group maniskill`.
+maniskill = [
+    "mani-skill",
+]
+
 dev = [
   "ipdb",
   "pre-commit",
