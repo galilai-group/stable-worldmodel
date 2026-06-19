@@ -174,6 +174,11 @@ class RandomPolicy(BasePolicy):
         """
         return self.env.action_space.sample()
 
+    def set_env(self, env: Any) -> None:
+        super().set_env(env)
+        if self.seed is not None:
+            self.set_seed(self.seed)
+
     def set_seed(self, seed: int) -> None:
         """Set the random seed for action sampling.
 
