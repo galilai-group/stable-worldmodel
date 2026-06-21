@@ -25,6 +25,7 @@ nav:
       - envs/ogb.md
       - envs/tworoom.md
       - envs/gymnasium_robotics.md
+      - envs/metaworld.md
       - envs/gymnasium_control.md
       - envs/craftax.md
       - envs/ale.md
