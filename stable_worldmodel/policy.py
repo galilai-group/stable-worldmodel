@@ -424,14 +424,21 @@ class WorldModelPolicy(BasePolicy):
             for row, env_i in enumerate(replan_idx):
                 self._action_buffer[env_i].extend(plan[row])
 
-        action_dim = self.env.single_action_space.shape[-1]
-        action = torch.full((n_envs, action_dim), float('nan'))
+        single_shape = self.env.single_action_space.shape
+        is_discrete = 'Discrete' in type(self.env.single_action_space).__name__
+
+        action = torch.full(
+            (n_envs, *single_shape),
+            fill_value=0 if is_discrete else float('nan'),
+            dtype=torch.long if is_discrete else torch.float32,
+        )
+
         for i in range(n_envs):
             if not dead[i]:
                 action[i] = self._action_buffer[i].popleft()
 
         action = action.reshape(*self.env.action_space.shape)
-        action = action.float().numpy()
+        action = action.numpy()
 
         if 'action' in self.process:
             action = self.process['action'].inverse_transform(action)

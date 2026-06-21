@@ -1,15 +1,12 @@
-"""Categorical Cross Entropy Method solver for discrete action spaces."""
-
 import time
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
 
-from .callbacks import Callback
-from .solver import Costable
+from stable_worldmodel.solver.callbacks import Callback
+from stable_worldmodel.solver.solver import Costable
 
 
 class CategoricalCEMSolver:
@@ -64,18 +61,29 @@ class CategoricalCEMSolver:
         self, *, action_space: gym.Space, n_envs: int, config: Any
     ) -> None:
         """Configure the solver with environment specifications."""
-        assert isinstance(action_space, Discrete), (
-            f'Action space must be Discrete, got {type(action_space)}'
+
+        assert isinstance(
+            action_space, gym.spaces.MultiDiscrete
+        ) or isinstance(action_space, gym.spaces.Discrete), (
+            f'Action space must be MultiDiscrete or Discrete, got {type(action_space)}'
         )
         self._action_space = action_space
         self._n_envs = n_envs
         self._config = config
-        self._base_simplex_dim = int(action_space.n)
+        self._base_simplex_dim = (
+            int(action_space.nvec[0])
+            if isinstance(action_space, gym.spaces.MultiDiscrete)
+            else int(action_space.n)
+        )
         self._configured = True
 
     @property
     def n_envs(self) -> int:
         return self._n_envs
+
+    @property
+    def action_dim(self) -> int:
+        return self._base_simplex_dim
 
     @property
     def action_block(self) -> int:

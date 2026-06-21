@@ -51,6 +51,12 @@ class PushT(gym.Env):
         self.goal_state = None
 
         self.shapes = ['o', 'L', 'T', 'Z', 'square', 'I', 'small_tee', '+']
+        self.shape_symmetry_angles = {
+            'square': np.pi / 2,
+            '+': np.pi / 2,
+            'I': np.pi,
+            'Z': np.pi,
+        }
 
         # Velocities are last two components of proprio and state; they can be negative
         # (Pymunk). Declaring low=0 made passive_env_checker reject valid observations.
@@ -346,9 +352,20 @@ class PushT(gym.Env):
 
     def eval_state(self, goal_state, cur_state):
         # success if position difference is < 20, and angle difference < np.pi/9
+        goal_state = np.asarray(goal_state, dtype=np.float64)
+        cur_state = np.asarray(cur_state, dtype=np.float64)
         pos_diff = np.linalg.norm(goal_state[:4] - cur_state[:4])
-        angle_diff = np.abs(goal_state[4] - cur_state[4])
-        angle_diff = np.minimum(angle_diff, 2 * np.pi - angle_diff)
+
+        # Compare angles modulo the block's rotational symmetry: square/+ match
+        # every 90 degrees, and Z/I match every 180 degrees. Other shapes use
+        # a full rotation, preserving the original orientation check.
+        block_shape = self.shapes[
+            int(self.variation_space['block']['shape'].value)
+        ]
+        symmetry = self.shape_symmetry_angles.get(block_shape, 2 * np.pi)
+        angle_diff = np.abs(goal_state[4] - cur_state[4]) % symmetry
+        angle_diff = np.minimum(angle_diff, symmetry - angle_diff)
+
         success = pos_diff < 20 and angle_diff < np.pi / 9
         state_dist = np.linalg.norm(goal_state - cur_state)
 
@@ -803,19 +820,18 @@ class PushT(gym.Env):
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
         mass = 1
-        length = 2
         vertices1 = [
-            (0, 0),
-            (0, length * scale / 2),
-            (length * scale, length * scale / 2),
-            (length * scale, 0),
+            (-scale / 2, 0),
+            (-scale / 2, scale),
+            (3 * scale / 2, scale),
+            (3 * scale / 2, 0),
         ]
         inertia1 = pymunk.moment_for_poly(mass, vertices=vertices1)
         vertices2 = [
-            (-length * scale / 2, 0),
-            (length * scale / 2, 0),
-            (length * scale / 2, -length * scale / 2),
-            (-length * scale / 2, -length * scale / 2),
+            (-3 * scale / 2, 0),
+            (scale / 2, 0),
+            (scale / 2, -scale),
+            (-3 * scale / 2, -scale),
         ]
         inertia2 = pymunk.moment_for_poly(mass, vertices=vertices2)
         body = pymunk.Body(mass, inertia1 + inertia2)

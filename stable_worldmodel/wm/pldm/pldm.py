@@ -114,9 +114,9 @@ class PLDM(nn.Module):
     def criterion(self, info_dict: dict):
         """Compute the cost between predicted embeddings and goal embeddings."""
         pred_emb = info_dict['predicted_emb']  # (B,S, T-1, dim)
-        goal_emb = info_dict['goal_emb']  # (B, S, T, dim)
+        goal_emb = info_dict['goal_emb']  # (B, T, dim)
 
-        goal_emb = goal_emb[..., -1:, :].expand_as(pred_emb)
+        goal_emb = goal_emb[:, None, -1:, :].expand_as(pred_emb)
 
         # return last-step cost per action candidate
         cost = F.mse_loss(
@@ -132,17 +132,21 @@ class PLDM(nn.Module):
 
         assert 'goal' in info_dict, 'goal not in info_dict'
 
-        goal = {k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)}
-        goal['pixels'] = goal['goal']
+        if 'goal_emb' not in info_dict:
+            goal = {
+                k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)
+            }
+            goal['pixels'] = goal['goal']
 
-        for k in info_dict:
-            if k.startswith('goal_'):
-                goal[k[len('goal_') :]] = goal.pop(k)
+            for k in info_dict:
+                if k.startswith('goal_'):
+                    goal[k[len('goal_') :]] = goal.pop(k)
 
-        goal.pop('action')
-        goal = self.encode(goal)
+            goal.pop('action')
+            goal = self.encode(goal)
 
-        info_dict['goal_emb'] = goal['emb']
+            info_dict['goal_emb'] = goal['emb']
+
         info_dict = self.rollout(info_dict, action_candidates)
 
         cost = self.criterion(info_dict)
