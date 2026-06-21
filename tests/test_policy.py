@@ -114,19 +114,19 @@ def test_random_policy_get_action():
 
 
 def test_random_policy_set_seed():
-    """Test RandomPolicy.set_seed method."""
-    policy = RandomPolicy(seed=42)
+    """Test that set_env auto-applies the constructor seed to the action space."""
+    policy = RandomPolicy(seed=123)
     mock_env = MagicMock()
     policy.set_env(mock_env)
-    policy.set_seed(123)
     mock_env.action_space.seed.assert_called_once_with(123)
 
 
-def test_random_policy_set_seed_no_env():
-    """Test RandomPolicy.set_seed when env is None."""
-    policy = RandomPolicy(seed=42)
-    # Should not raise
-    policy.set_seed(123)
+def test_random_policy_set_env_no_seed_skips_seeding():
+    """Test that set_env does not seed the action space when seed is None."""
+    policy = RandomPolicy()
+    mock_env = MagicMock()
+    policy.set_env(mock_env)
+    mock_env.action_space.seed.assert_not_called()
 
 
 ###########################

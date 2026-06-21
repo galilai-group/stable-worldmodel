@@ -169,12 +169,12 @@ class World:
         """Attach a policy and configure it for this world's envs.
 
         Calls ``policy.set_env(self.envs)``. If the policy exposes a
-        ``seed`` attribute and ``set_seed`` method, the seed is applied.
+        ``seed`` attribute and ``_set_seed`` method, the seed is applied.
         """
         self.policy = policy
         self.policy.set_env(self.envs)
-        if hasattr(self.policy, 'seed') and self.policy.seed is not None:
-            self.policy.set_seed(self.policy.seed)
+        if hasattr(self.policy, '_set_seed') and self.policy.seed is not None:
+            self.policy._set_seed(self.policy.seed)
 
     def reset(self, seed=None, options=None) -> None:
         """Reset every env and refresh ``self.infos``.
