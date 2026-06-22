@@ -942,6 +942,27 @@ def test_everything_to_info_wrapper_variation_persists_in_step(minimal_env):
     assert result[4]['variation.color'] == 75
 
 
+def test_everything_to_info_wrapper_variation_none_raises(minimal_env):
+    """Requesting variations on an env with no variation_space (e.g. DMControl
+    sets ``variation_space = None``) raises a clear error rather than an opaque
+    ``'NoneType' has no attribute 'names'``."""
+    import numpy as np
+
+    # Fresh info dict per call (reset mutates it before the guard fires).
+    minimal_env.reset.side_effect = lambda *a, **k: (np.array([1, 2, 3]), {})
+    minimal_env.action_space = MagicMock()
+    minimal_env.action_space.sample = MagicMock(return_value=0.5)
+    # DMControl-style: get_wrapper_attr resolves variation_space to None.
+    minimal_env.get_wrapper_attr = MagicMock(return_value=None)
+
+    wrapped_env = wrapper.EverythingToInfoWrapper(minimal_env)
+
+    with pytest.raises(ValueError, match='no.*variation_space'):
+        wrapped_env.reset(options={'variation': ['all']})
+    with pytest.raises(ValueError, match='no.*variation_space'):
+        wrapped_env.reset(options={'variation': ['color']})
+
+
 #########################
 ## test MapKeysWrapper ##
 #########################
