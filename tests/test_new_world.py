@@ -450,7 +450,7 @@ class TestSetPolicy:
                 self.seed = 1234
                 self.seed_calls = []
 
-            def set_seed(self, seed):
+            def _set_seed(self, seed):
                 self.seed_calls.append(seed)
 
         world = _make_world(num_envs=2)
