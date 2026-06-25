@@ -174,6 +174,25 @@ def test_detect_format_recognizes_every_layout(cache_root):
         assert fmt.name == fmt_name
 
 
+@pytest.mark.parametrize('fmt_name', ['lance', 'lance_video'])
+def test_inspect_reports_column_shapes(fmt_name, cache_root):
+    """Lance inspect reports a per-column (n_steps, ...) shape and dtype, not
+    just the raw Arrow type — including decoded image/video frame dims."""
+    if fmt_name not in list_formats():
+        pytest.skip(f'format {fmt_name!r} not registered')
+    name = f'ds_{fmt_name}'
+    _BUILDERS[fmt_name](cache_root, name)  # 4 + 5 = 9 steps
+
+    result = runner.invoke(app, ['inspect', name])
+    assert result.exit_code == 0, result.output
+    # Tabular column: fixed_size_list<float32>[4] over 9 steps.
+    assert '(9, 4)' in result.output  # proprio
+    assert 'float32' in result.output
+    # Image/video column decoded to a uint8 frame shape (16x16x3 episodes).
+    assert 'uint8' in result.output
+    assert '16' in result.output
+
+
 def test_datasets_empty_cache_reports_none(cache_root):
     result = runner.invoke(app, ['datasets'])
     assert result.exit_code == 0, result.output

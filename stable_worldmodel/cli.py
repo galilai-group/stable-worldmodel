@@ -142,6 +142,72 @@ def _iter_datasets(cache_dir):
             yield entry, fmt
 
 
+def _arrow_scalar_dtype(t) -> str:
+    """Map a pyarrow scalar/value type to a numpy-style dtype label."""
+    import pyarrow as pa
+
+    _MAP = {
+        pa.float16(): 'float16',
+        pa.float32(): 'float32',
+        pa.float64(): 'float64',
+        pa.int8(): 'int8',
+        pa.int16(): 'int16',
+        pa.int32(): 'int32',
+        pa.int64(): 'int64',
+        pa.uint8(): 'uint8',
+        pa.uint16(): 'uint16',
+        pa.uint32(): 'uint32',
+        pa.uint64(): 'uint64',
+        pa.bool_(): 'bool',
+    }
+    return _MAP.get(t, str(t))
+
+
+def _sample_video_frame_shapes(videos_uri, video_keys) -> dict:
+    """Decode the first frame of one MP4 blob per video key to learn its
+    ``(C, H, W)`` shape — the shape the lance_video reader yields per step.
+
+    Best-effort: any key whose blob can't be read or decoded (e.g. torchcodec
+    missing) maps to ``None`` so the caller falls back to an ellipsis shape.
+    """
+    shapes = {k: None for k in video_keys}
+    try:
+        import lance
+        from torchcodec.decoders import VideoDecoder
+    except Exception:
+        return shapes
+
+    try:
+        vds = lance.dataset(videos_uri)
+        keys = vds.to_table(columns=['video_key']).column('video_key').to_pylist()
+    except Exception:
+        return shapes
+
+    # First physical row holding each key — matches how the reader maps
+    # (episode, key) to a blob row offset.
+    first_row: dict[str, int] = {}
+    for i, k in enumerate(keys):
+        first_row.setdefault(str(k), i)
+
+    for vkey in video_keys:
+        row = first_row.get(vkey)
+        if row is None:
+            continue
+        try:
+            blob = vds.take_blobs(blob_column='video_bytes', indices=[row])[0]
+            try:
+                data = blob.readall()
+            finally:
+                blob.close()
+            frames = VideoDecoder(data, seek_mode='approximate').get_frames_at(
+                indices=[0]
+            ).data  # (1, C, H, W)
+            shapes[vkey] = tuple(int(d) for d in frames.shape[1:])
+        except Exception:
+            shapes[vkey] = None
+    return shapes
+
+
 def _resolve_lance_table(path):
     """Return the ``.lance`` frames table for a lance/lance_video dataset.
 
@@ -168,9 +234,12 @@ def _resolve_lance_table(path):
 
 
 def _inspect_lance_dataset(path) -> None:
-    import lancedb
-
+    import io
     from pathlib import Path
+
+    import numpy as np
+    import pyarrow as pa
+    import lancedb
 
     path = Path(path)
     table_path = _resolve_lance_table(path)
@@ -178,40 +247,45 @@ def _inspect_lance_dataset(path) -> None:
     db = lancedb.connect(str(parent) or '.')
     table = db.open_table(stem)
     schema = table.schema
+    lance_tbl = table.to_lance()
     ep_arr = (
-        table.to_lance()
-        .to_table(columns=['episode_idx'])
-        .column('episode_idx')
+        lance_tbl.to_table(columns=['episode_idx']).column('episode_idx')
     ).to_numpy()
-    if len(ep_arr):
+    n_steps = len(ep_arr)
+    if n_steps:
         n_episodes = int(ep_arr[-1]) + 1
         ep_lengths = [int((ep_arr == i).sum()) for i in range(n_episodes)]
     else:
         n_episodes = 0
         ep_lengths = []
 
+    # Binary columns in the frames table hold one JPEG per frame (the plain
+    # `lance` format). Decode a single sample to recover the image shape.
+    binary_cols = [
+        f.name
+        for f in schema
+        if pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type)
+    ]
+    binary_shapes: dict[str, tuple | None] = {}
+    if binary_cols and n_steps > 0:
+        sample = lance_tbl.to_table(columns=binary_cols).slice(0, 1)
+        for col in binary_cols:
+            try:
+                from PIL import Image
+
+                raw = sample.column(col)[0].as_py()
+                binary_shapes[col] = np.array(
+                    Image.open(io.BytesIO(raw))
+                ).shape
+            except Exception:
+                binary_shapes[col] = None
+
     # A `_videos` sibling means this is the lance_video layout: image columns
-    # live there as MP4 blobs, not in the frames schema above.
+    # live there as MP4 blobs, not in the frames schema above. Decode a frame
+    # per key to report its (C, H, W) shape.
     videos_name = f'{stem}_videos'
     is_video = videos_name in db.list_tables().tables
-
-    size = _format_size(_entry_size(path))
-    print(f'[bold]Name:[/bold]     {path.stem}')
-    print(f'[bold]Format:[/bold]   {"Lance Video" if is_video else "Lance"}')
-    print(f'[bold]Path:[/bold]     {path}')
-    print(f'[bold]Size:[/bold]     {size}')
-    print(f'[bold]Episodes:[/bold] {n_episodes}')
-    print(f'[bold]Steps:[/bold]    {len(ep_arr)}')
-    if ep_lengths:
-        print(f'[bold]Ep length:[/bold] {min(ep_lengths)} – {max(ep_lengths)}')
-
-    cols = Table(title='Columns')
-    cols.add_column('Column', style='cyan', no_wrap=True)
-    cols.add_column('Type', style='yellow')
-    for f in schema:
-        if f.name in ('episode_idx', 'step_idx'):
-            continue
-        cols.add_row(f.name, str(f.type))
+    video_shapes: dict[str, tuple | None] = {}
     if is_video:
         vkeys = sorted(
             {
@@ -223,8 +297,59 @@ def _inspect_lance_dataset(path) -> None:
                 .to_pylist()
             }
         )
-        for k in vkeys:
-            cols.add_row(k, 'video (mp4 blob)')
+        video_shapes = _sample_video_frame_shapes(
+            f'{parent}/{videos_name}.lance', vkeys
+        )
+
+    size = _format_size(_entry_size(path))
+    print(f'[bold]Name:[/bold]     {path.stem}')
+    print(f'[bold]Format:[/bold]   {"Lance Video" if is_video else "Lance"}')
+    print(f'[bold]Path:[/bold]     {path}')
+    print(f'[bold]Size:[/bold]     {size}')
+    print(f'[bold]Episodes:[/bold] {n_episodes}')
+    print(f'[bold]Steps:[/bold]    {n_steps}')
+    if ep_lengths:
+        print(f'[bold]Ep length:[/bold] {min(ep_lengths)} – {max(ep_lengths)}')
+
+    cols = Table(title='Columns')
+    cols.add_column('Column', style='cyan', no_wrap=True)
+    cols.add_column('Shape', style='yellow')
+    cols.add_column('Dtype', style='magenta')
+
+    for f in schema:
+        if f.name in ('episode_idx', 'step_idx'):
+            continue
+        t = f.type
+        if pa.types.is_fixed_size_list(t):
+            list_size = t.list_size
+            dtype = _arrow_scalar_dtype(t.value_type)
+            shape = (
+                f'({n_steps},)'
+                if list_size == 1
+                else f'({n_steps}, {list_size})'
+            )
+        elif pa.types.is_binary(t) or pa.types.is_large_binary(t):
+            img_shape = binary_shapes.get(f.name)
+            if img_shape:
+                inner = ', '.join(str(d) for d in img_shape)
+                shape = f'({n_steps}, {inner})'
+            else:
+                shape = f'({n_steps}, ...)'
+            dtype = 'uint8'
+        else:
+            shape = f'({n_steps},)'
+            dtype = _arrow_scalar_dtype(t)
+        cols.add_row(f.name, shape, dtype)
+
+    for vkey in sorted(video_shapes):
+        frame_shape = video_shapes[vkey]
+        if frame_shape:
+            inner = ', '.join(str(d) for d in frame_shape)
+            shape = f'({n_steps}, {inner})'
+        else:
+            shape = f'({n_steps}, ...)'
+        cols.add_row(vkey, shape, 'uint8')
+
     print(cols)
 
 
