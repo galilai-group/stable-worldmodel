@@ -44,7 +44,7 @@ from stable_worldmodel.data.format import (
 )
 from stable_worldmodel.data.formats.lance import (
     LanceDataset,
-    _force_spawn,
+    _force_forkserver,
     _is_image_name,
     _to_lance_name,
 )
@@ -142,7 +142,7 @@ class LanceVideoDataset(LanceDataset):
         videos_name = f'{frames_name}_videos'
         connect_kwargs = kwargs.get('connect_kwargs') or {}
 
-        _force_spawn()
+        _force_forkserver()
         db = lancedb.connect(resolved_uri, **connect_kwargs)
         if videos_name not in db.list_tables().tables:
             raise FileNotFoundError(
