@@ -99,14 +99,82 @@ def _inspect_folder_dataset(path) -> None:
     print(table)
 
 
-def _lance_dir_size(path) -> int:
+def _entry_size(path) -> int:
+    """Bytes on disk for a dataset entry — a file's own size, or the recursive
+    sum of every file under a dataset directory (Lance tables, MP4 blobs, npz)."""
+    if path.is_file():
+        return path.stat().st_size
     return sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+
+
+# Pretty labels for the registry format keys. Anything not listed falls back to
+# the registry name itself, so a newly-registered format still lists cleanly.
+_FORMAT_LABELS = {
+    'lance': 'Lance',
+    'lance_video': 'Lance Video',
+    'hdf5': 'HDF5',
+    'video': 'Video',
+    'folder': 'Folder',
+    'lerobot': 'LeRobot',
+}
+
+
+def _format_label(path, fmt) -> str:
+    """Human-readable label for a detected format. The ``folder`` format keeps
+    its Image/Folder nuance (it has no separate registry entry)."""
+    if fmt.name == 'folder':
+        return _detect_folder_format(path)
+    return _FORMAT_LABELS.get(fmt.name, fmt.name)
+
+
+def _iter_datasets(cache_dir):
+    """Yield ``(path, format_cls)`` for every cache entry a registered format
+    recognizes. Detection is delegated to :func:`detect_format` so the listing
+    stays in lockstep with the format registry — every format, present and
+    future, is discovered the same way instead of via per-format globs here."""
+    from stable_worldmodel.data import detect_format
+
+    if not cache_dir.is_dir():
+        return
+    for entry in sorted(cache_dir.iterdir()):
+        fmt = detect_format(entry)
+        if fmt is not None:
+            yield entry, fmt
+
+
+def _resolve_lance_table(path):
+    """Return the ``.lance`` frames table for a lance/lance_video dataset.
+
+    ``path`` may be the ``.lance`` table itself (flat layout) or a dataset
+    directory holding one ``<name>.lance`` frames table (plus, for lance_video,
+    a ``<name>_videos.lance`` sibling which is excluded here). Mirrors the
+    readers' directory-based resolution.
+    """
+    from pathlib import Path
+
+    p = Path(path)
+    if p.suffix == '.lance':
+        return p
+    cands = [
+        t for t in sorted(p.glob('*.lance')) if not t.stem.endswith('_videos')
+    ]
+    if len(cands) == 1:
+        return cands[0]
+    if len(cands) > 1:
+        raise ValueError(
+            f'Ambiguous Lance dataset in {p}: {[c.name for c in cands]}.'
+        )
+    raise FileNotFoundError(f'No Lance frames table found in {p}.')
 
 
 def _inspect_lance_dataset(path) -> None:
     import lancedb
 
-    parent, stem = path.parent, path.stem
+    from pathlib import Path
+
+    path = Path(path)
+    table_path = _resolve_lance_table(path)
+    parent, stem = table_path.parent, table_path.stem
     db = lancedb.connect(str(parent) or '.')
     table = db.open_table(stem)
     schema = table.schema
@@ -122,9 +190,14 @@ def _inspect_lance_dataset(path) -> None:
         n_episodes = 0
         ep_lengths = []
 
-    size = _format_size(_lance_dir_size(path))
-    print(f'[bold]Name:[/bold]     {path.name}')
-    print('[bold]Format:[/bold]   Lance')
+    # A `_videos` sibling means this is the lance_video layout: image columns
+    # live there as MP4 blobs, not in the frames schema above.
+    videos_name = f'{stem}_videos'
+    is_video = videos_name in db.list_tables().tables
+
+    size = _format_size(_entry_size(path))
+    print(f'[bold]Name:[/bold]     {path.stem}')
+    print(f'[bold]Format:[/bold]   {"Lance Video" if is_video else "Lance"}')
     print(f'[bold]Path:[/bold]     {path}')
     print(f'[bold]Size:[/bold]     {size}')
     print(f'[bold]Episodes:[/bold] {n_episodes}')
@@ -139,6 +212,19 @@ def _inspect_lance_dataset(path) -> None:
         if f.name in ('episode_idx', 'step_idx'):
             continue
         cols.add_row(f.name, str(f.type))
+    if is_video:
+        vkeys = sorted(
+            {
+                str(v)
+                for v in db.open_table(videos_name)
+                .to_lance()
+                .to_table(columns=['video_key'])
+                .column('video_key')
+                .to_pylist()
+            }
+        )
+        for k in vkeys:
+            cols.add_row(k, 'video (mp4 blob)')
     print(cols)
 
 
@@ -182,36 +268,10 @@ def datasets():
     table.add_column('Format', justify='left', style='magenta')
     table.add_column('Size', justify='right', style='yellow')
 
-    rows = []
-
-    for lance_path in sorted(cache_dir.glob('*.lance')):
-        if not lance_path.is_dir():
-            continue
-        rows.append(
-            (
-                lance_path.stem,
-                'Lance',
-                _format_size(_lance_dir_size(lance_path)),
-            )
-        )
-
-    for h5_path in sorted(cache_dir.glob('*.h5')):
-        size = _format_size(h5_path.stat().st_size)
-        rows.append((h5_path.stem, 'HDF5', size))
-
-    for folder in sorted(cache_dir.iterdir()):
-        if not folder.is_dir() or folder.suffix == '.lance':
-            continue
-        if not (folder / 'ep_len.npz').exists():
-            continue
-        npz_size = sum(p.stat().st_size for p in folder.glob('*.npz'))
-        rows.append(
-            (
-                folder.name,
-                _detect_folder_format(folder),
-                _format_size(npz_size),
-            )
-        )
+    rows = [
+        (path.stem, _format_label(path, fmt), _format_size(_entry_size(path)))
+        for path, fmt in _iter_datasets(cache_dir)
+    ]
 
     if not rows:
         print(f'No datasets found in {cache_dir}')
@@ -226,23 +286,42 @@ def inspect(
     name: Annotated[str, typer.Argument(help='Dataset name to inspect.')],
 ):
     """Show detailed info for a dataset."""
+    from stable_worldmodel.data import detect_format
     from stable_worldmodel.data.utils import get_cache_dir
 
     cache_dir = get_cache_dir(sub_folder='datasets')
-    lance_path = cache_dir / f'{name}.lance'
-    h5_path = cache_dir / f'{name}.h5'
-    folder_path = cache_dir / name
+    # A dataset is addressed by name; its on-disk entry is either a directory
+    # (lance/lance_video/folder/video) or a file (hdf5). Try each candidate and
+    # let the registry say what it is, so inspect covers the same formats the
+    # listing does.
+    candidates = [
+        cache_dir / name,
+        cache_dir / f'{name}.lance',
+        cache_dir / f'{name}.h5',
+        cache_dir / f'{name}.hdf5',
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        fmt = detect_format(path)
+        if fmt is None:
+            continue
+        if fmt.name in ('lance', 'lance_video'):
+            _inspect_lance_dataset(path)
+        elif fmt.name == 'hdf5':
+            _inspect_hdf5_dataset(path)
+        elif fmt.name in ('folder', 'video'):
+            _inspect_folder_dataset(path)
+        else:
+            print(f'[bold]Name:[/bold]   {path.stem}')
+            print(f'[bold]Format:[/bold] {_format_label(path, fmt)}')
+            print(f'[bold]Path:[/bold]   {path}')
+            print(f'[bold]Size:[/bold]   {_format_size(_entry_size(path))}')
+        return
 
-    if lance_path.is_dir():
-        _inspect_lance_dataset(lance_path)
-    elif h5_path.exists():
-        _inspect_hdf5_dataset(h5_path)
-    elif folder_path.is_dir() and (folder_path / 'ep_len.npz').exists():
-        _inspect_folder_dataset(folder_path)
-    else:
-        print(f'[red]Dataset not found: {name}[/red]')
-        print('Run [cyan]swm datasets[/cyan] to see available datasets.')
-        raise typer.Exit(1)
+    print(f'[red]Dataset not found: {name}[/red]')
+    print('Run [cyan]swm datasets[/cyan] to see available datasets.')
+    raise typer.Exit(1)
 
 
 @app.command()
