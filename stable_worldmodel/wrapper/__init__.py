@@ -1,4 +1,3 @@
-from stable_worldmodel.wrapper.control import ActionRepeatWrapper
 from stable_worldmodel.wrapper.default import (
     AddPixelsWrapper,
     EnsureGoalInfoWrapper,
@@ -30,7 +29,6 @@ from stable_worldmodel.wrapper.visual import (
 
 
 __all__ = [
-    'ActionRepeatWrapper',
     'AddPixelsWrapper',
     'BlurWrapper',
     'ChromaKeyWrapper',
