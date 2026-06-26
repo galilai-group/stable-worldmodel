@@ -16,7 +16,7 @@ episode boundaries.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -51,8 +51,8 @@ class ReplayBuffer(Dataset):
         history_len: Steps per clip returned by ``__getitem__`` (the Dataset
             path) and the default for ``sample(...)``. Equivalent to
             Dataset's ``num_steps``.
-        frameskip: Stride between observation samples within a clip.
-            Action columns are kept dense and reshaped to
+        frameskip: Stride between samples for non-dense columns within a
+            clip. Actions remain dense and are reshaped to
             ``(history_len, frameskip * action_dim)``, matching
             :class:`FolderDataset`.
         sampler: ``fn(step, buffer, batch_size, history_len) -> indices``
@@ -63,6 +63,9 @@ class ReplayBuffer(Dataset):
         key_filter: Optional ``fn(ep_data) -> ep_data`` applied to each
             episode in ``write_episode``, returning the subset of columns to
             store. ``None`` (default) stores every column.
+        dense_columns: Additional columns to sample at every underlying row.
+            ``action`` is always dense and retains its existing flattened
+            representation.
     """
 
     def __init__(
@@ -73,6 +76,7 @@ class ReplayBuffer(Dataset):
         sampler: Sampler | None = None,
         transform: Callable[[dict], dict] | None = None,
         key_filter: Callable[[dict], dict] | None = None,
+        dense_columns: Collection[str] | None = None,
     ) -> None:
         if max_steps <= 0:
             raise ValueError(f'max_steps must be positive, got {max_steps}')
@@ -90,6 +94,13 @@ class ReplayBuffer(Dataset):
         self.span = self.num_steps * self.frameskip
         self.transform = transform
         self.key_filter = key_filter
+        self.dense_columns = {'action'}
+        if dense_columns is not None:
+            self.dense_columns.update(
+                (dense_columns,)
+                if isinstance(dense_columns, str)
+                else dense_columns
+            )
         self.sampler: Sampler = (
             sampler if sampler is not None else _uniform_sampler
         )
@@ -246,6 +257,33 @@ class ReplayBuffer(Dataset):
         positions = (ring_start + np.arange(start, end)) % self.max_steps
         return {col: arr[positions] for col, arr in self._cols.items()}
 
+    def load_chunk(
+        self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
+    ) -> list[dict]:
+        chunk = []
+        for ep, s, e in zip(episodes_idx, start, end):
+            ep = int(ep)
+            s = int(s)
+            e = int(e)
+            if not 0 <= ep < self.num_episodes:
+                raise IndexError(ep)
+            ring_start, ep_len = self._episodes[ep]
+            if not 0 <= s <= e <= ep_len:
+                raise IndexError(
+                    f'slice [{s}:{e}] out of episode of length {ep_len}'
+                )
+            length = e - s
+            if length % self.frameskip:
+                raise ValueError(
+                    'ReplayBuffer.load_chunk: chunk length must be divisible '
+                    'by frameskip '
+                    f'(length={length}, frameskip={self.frameskip})'
+                )
+            chunk.append(
+                self._gather_clip(ring_start, s, length // self.frameskip)
+            )
+        return chunk
+
     def episodes(self) -> Iterable[dict]:
         """Yield current episodes as ``{col: list[np.ndarray]}`` dicts —
         the per-step-list shape that ``World.collect`` produces and any
@@ -400,27 +438,20 @@ class ReplayBuffer(Dataset):
     def _gather_clip(
         self, ring_start: int, clip_local_start: int, history_len: int
     ) -> dict[str, np.ndarray]:
-        """Gather one clip. Observation columns are strided by frameskip;
-        ``'action'`` is kept dense and reshaped to
-        ``(history_len, frameskip * action_dim)``."""
+        """Gather one clip with sparse and dense columns."""
         base = ring_start + clip_local_start
-        obs_idx = (
+        sparse_idx = (
             base + np.arange(history_len) * self.frameskip
         ) % self.max_steps
-        if self.frameskip == 1:
-            action_idx = obs_idx
-        else:
-            action_idx = (
-                base + np.arange(history_len * self.frameskip)
-            ) % self.max_steps
+        dense_idx = (
+            base + np.arange(history_len * self.frameskip)
+        ) % self.max_steps
 
         clip: dict[str, np.ndarray] = {}
         for col, arr in self._cols.items():
-            positions = action_idx if col == 'action' else obs_idx
+            positions = dense_idx if col in self.dense_columns else sparse_idx
             clip[col] = arr[positions]
-        if 'action' in clip:
-            clip['action'] = clip['action'].reshape(history_len, -1)
-        return clip
+        return self._reshape_clip(clip, history_len)
 
 
 def classic_filter(ep_data: dict) -> dict:

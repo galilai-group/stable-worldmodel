@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -134,8 +134,8 @@ class LanceDataset(Dataset):
         path: Either a ``.lance`` directory path or a database URI.
         table_name: Table inside the database; inferred from a ``.lance``
             path when omitted.
-        frameskip, num_steps, transform, keys_to_load, keys_to_cache,
-            keys_to_merge: standard ``Dataset`` knobs.
+        frameskip, num_steps, transform, dense_columns, keys_to_load,
+            keys_to_cache, keys_to_merge: standard ``Dataset`` knobs.
         image_columns: override image-column auto-detection (any
             ``pa.binary`` column is treated as encoded image by default).
         episode_index_column, step_index_column: index column names.
@@ -158,6 +158,7 @@ class LanceDataset(Dataset):
         episode_index_column: str = 'episode_idx',
         step_index_column: str = 'step_idx',
         connect_kwargs: dict[str, Any] | None = None,
+        dense_columns: Collection[str] | None = None,
     ) -> None:
         # Accept either `path=` (preferred, matches other readers) or `uri=`.
         loc = path if path is not None else uri
@@ -219,7 +220,14 @@ class LanceDataset(Dataset):
 
         self._update_fetch_columns()
 
-        super().__init__(lengths, offsets, frameskip, num_steps, transform)
+        super().__init__(
+            lengths,
+            offsets,
+            frameskip,
+            num_steps,
+            transform,
+            dense_columns=dense_columns,
+        )
 
         if keys_to_merge:
             for target, source in keys_to_merge.items():
@@ -468,7 +476,11 @@ class LanceDataset(Dataset):
             values = self._extract_column(batch, col)
 
         if col in self.image_columns:
-            blobs = values[:: self.frameskip]
+            blobs = (
+                values
+                if col in self.dense_columns
+                else values[:: self.frameskip]
+            )
             if isinstance(blobs, np.ndarray):
                 blobs = blobs.tolist()
             return self._decode_images(blobs)
@@ -488,7 +500,9 @@ class LanceDataset(Dataset):
             if isinstance(first, str):
                 return str(first)
 
-        return self._prepare_numeric_tensor(data, downsample=col != 'action')
+        return self._prepare_numeric_tensor(
+            data, downsample=col not in self.dense_columns
+        )
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         g_start = int(self.offsets[ep_idx] + start)
@@ -545,26 +559,24 @@ class LanceDataset(Dataset):
                 else None
             )
             if decoded_images:
-                window_rows = range(
-                    g_start, g_start + self.span, self.frameskip
-                )
-                gather_idx = [unique_pos[r] for r in window_rows]
+                window_images = {}
+                for col, frames in decoded_images.items():
+                    step = 1 if col in self.dense_columns else self.frameskip
+                    rows = range(g_start, g_start + self.span, step)
+                    window_images[col] = frames[
+                        [unique_pos[row] for row in rows]
+                    ]
                 steps = self._process_batch(
                     ep_idx,
                     g_start,
                     sub_batch,
-                    decoded_images={
-                        col: frames[gather_idx]
-                        for col, frames in decoded_images.items()
-                    },
+                    decoded_images=window_images,
                 )
             else:
                 steps = self._process_batch(ep_idx, g_start, sub_batch)
             if self.transform:
                 steps = self.transform(steps)
-            if 'action' in steps:
-                steps['action'] = steps['action'].reshape(self.num_steps, -1)
-            results.append(steps)
+            results.append(self._reshape_clip(steps, self.num_steps))
         return results
 
     def get_col_data(self, col: str) -> np.ndarray:

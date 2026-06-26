@@ -141,13 +141,14 @@ class VideoDataset(FolderDataset):
         steps = {}
         for col in self._keys:
             if col in self.folder_keys:
+                step = 1 if col in self.dense_columns else self.frameskip
                 frames = self._reader(ep_idx, col).get_batch(
-                    list(range(start, end, self.frameskip))
+                    list(range(start, end, step))
                 )
                 steps[col] = frames.permute(0, 3, 1, 2)
             else:
                 data = self._cache[col][g_start:g_end]
-                if col != 'action':
+                if col not in self.dense_columns:
                     data = data[:: self.frameskip]
 
                 if data.dtype == np.object_ or data.dtype.kind in ('S', 'U'):

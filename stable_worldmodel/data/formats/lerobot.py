@@ -8,7 +8,7 @@ therefore not supported as a writer here.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +82,7 @@ class LeRobotAdapter(Dataset):
         keys_to_cache: list[str] | None = None,
         primary_camera_key: str | None = None,
         key_aliases: dict[str, str] | None = None,
+        dense_columns: Collection[str] | None = None,
         **lerobot_kwargs: Any,
     ) -> None:
         LerobotHubDataset = _import_lerobot_hub_dataset()
@@ -138,7 +139,14 @@ class LeRobotAdapter(Dataset):
         for key in keys_to_cache or []:
             self._cache[key] = self._materialize_column(key)
 
-        super().__init__(lengths, offsets, frameskip, num_steps, transform)
+        super().__init__(
+            lengths,
+            offsets,
+            frameskip,
+            num_steps,
+            transform,
+            dense_columns=dense_columns,
+        )
 
     @property
     def column_names(self) -> list[str]:
@@ -259,9 +267,9 @@ class LeRobotAdapter(Dataset):
     def _window_dataset(
         self,
         observation_indices: tuple[int, ...],
-        action_indices: tuple[int, ...],
+        dense_indices: tuple[int, ...],
     ) -> Any:
-        cache_key = (observation_indices, action_indices)
+        cache_key = (observation_indices, dense_indices)
         if cache_key not in self._window_datasets:
             delta_timestamps = {}
             for key in self._keys:
@@ -270,14 +278,12 @@ class LeRobotAdapter(Dataset):
                 native_key = self._alias_to_native.get(key)
                 if native_key is None:
                     continue
-                if key == 'action':
-                    delta_timestamps[native_key] = self._time_offsets(
-                        action_indices
-                    )
-                else:
-                    delta_timestamps[native_key] = self._time_offsets(
-                        observation_indices
-                    )
+                indices = (
+                    dense_indices
+                    if key in self.dense_columns
+                    else observation_indices
+                )
+                delta_timestamps[native_key] = self._time_offsets(indices)
 
             self._window_datasets[cache_key] = self._hub_dataset_cls(
                 repo_id=self.repo_id,
@@ -317,21 +323,24 @@ class LeRobotAdapter(Dataset):
         g_start = int(self.offsets[ep_idx] + start)
         length = int(end - start)
         obs_indices = tuple(range(0, length, self.frameskip))
-        action_indices = tuple(range(length))
-        row = dict(self._window_dataset(obs_indices, action_indices)[g_start])
+        dense_indices = tuple(range(length))
+        row = dict(self._window_dataset(obs_indices, dense_indices)[g_start])
         row['_row_idx'] = g_start
         steps: dict[str, Any] = {}
         for key in self._keys:
+            indices = (
+                dense_indices if key in self.dense_columns else obs_indices
+            )
             if key in self._SYNTHETIC_COLUMNS:
                 if key == 'ep_idx':
                     data = torch.full(
-                        (len(obs_indices),),
+                        (len(indices),),
                         int(self._cache['ep_idx'][g_start]),
                         dtype=torch.int64,
                     )
                 else:
                     data = torch.as_tensor(
-                        [start + idx for idx in obs_indices],
+                        [start + idx for idx in indices],
                         dtype=torch.int64,
                     )
             else:

@@ -179,6 +179,68 @@ def test_hdf5_dataset_frameskip(sample_h5_file):
     assert isinstance(item, dict)
 
 
+def test_hdf5_dataset_dense_columns(tmp_path):
+    path = tmp_path / 'dense.h5'
+    n = 12
+    observation = np.arange(n * 2, dtype=np.float32).reshape(n, 2)
+    action = np.arange(n * 2, dtype=np.float32).reshape(n, 2)
+    reward = np.arange(n, dtype=np.float32)
+    vector = np.arange(n * 3, dtype=np.float32).reshape(n, 3)
+    pixels = np.stack(
+        [np.full((4, 4, 3), i, dtype=np.uint8) for i in range(n)]
+    )
+
+    with h5py.File(path, 'w') as f:
+        f.create_dataset('ep_len', data=np.array([n]))
+        f.create_dataset('ep_offset', data=np.array([0]))
+        f.create_dataset('observation', data=observation)
+        f.create_dataset('action', data=action)
+        f.create_dataset('reward', data=reward)
+        f.create_dataset('vector', data=vector)
+        f.create_dataset('pixels', data=pixels)
+
+    dataset = HDF5Dataset(
+        path=path,
+        frameskip=3,
+        num_steps=2,
+        dense_columns=['reward', 'vector', 'pixels'],
+    )
+    item = dataset[0]
+
+    np.testing.assert_array_equal(
+        item['observation'].numpy(), observation[[0, 3]]
+    )
+    np.testing.assert_array_equal(
+        item['action'].numpy(), action[:6].reshape(2, 6)
+    )
+    np.testing.assert_array_equal(
+        item['reward'].numpy(), reward[:6].reshape(2, 3)
+    )
+    np.testing.assert_array_equal(
+        item['vector'].numpy(), vector[:6].reshape(2, 3, 3)
+    )
+    assert item['pixels'].shape == (2, 3, 3, 4, 4)
+    np.testing.assert_array_equal(
+        item['pixels'][:, :, 0, 0, 0].numpy(),
+        np.arange(6).reshape(2, 3),
+    )
+
+    chunk = dataset.load_chunk(np.array([0]), np.array([0]), np.array([6]))[0]
+    for key, expected in item.items():
+        torch.testing.assert_close(chunk[key], expected)
+
+    singleton = HDF5Dataset(
+        path=path,
+        frameskip=1,
+        num_steps=2,
+        dense_columns=['reward'],
+    )[0]
+    assert singleton['reward'].shape == (2, 1)
+
+    with pytest.raises(ValueError, match='divisible by frameskip'):
+        dataset.load_chunk(np.array([0]), np.array([0]), np.array([5]))
+
+
 def test_hdf5_dataset_keys_to_load(sample_h5_file):
     """Test HDF5Dataset with specific keys_to_load."""
     cache_dir, name = sample_h5_file

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ class FolderDataset(Dataset):
         folder_keys: list[str] | None = None,
         cache_dir: str | Path | None = None,
         path: str | Path | None = None,
+        dense_columns: Collection[str] | None = None,
     ) -> None:
         if path is not None:
             self.path = Path(path)
@@ -74,7 +75,14 @@ class FolderDataset(Dataset):
                     self._cache[key] = np.load(npz)['arr_0']
                     logging.info(f"Cached '{key}' from '{npz}'")
 
-        super().__init__(lengths, offsets, frameskip, num_steps, transform)
+        super().__init__(
+            lengths,
+            offsets,
+            frameskip,
+            num_steps,
+            transform,
+            dense_columns=dense_columns,
+        )
 
     @property
     def column_names(self) -> list[str]:
@@ -95,15 +103,16 @@ class FolderDataset(Dataset):
         steps = {}
         for col in self._keys:
             if col in self.folder_keys:
+                step = 1 if col in self.dense_columns else self.frameskip
                 data = np.stack(
                     [
                         self._load_file(ep_idx, s, col)
-                        for s in range(start, end, self.frameskip)
+                        for s in range(start, end, step)
                     ]
                 )
             else:
                 data = self._cache[col][g_start:g_end]
-                if col != 'action':
+                if col not in self.dense_columns:
                     data = data[:: self.frameskip]
 
             if data.dtype == np.object_ or data.dtype.kind in ('S', 'U'):

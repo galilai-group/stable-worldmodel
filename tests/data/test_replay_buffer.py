@@ -412,6 +412,55 @@ class TestFrameskip:
         expected = ep['action'][0:8].reshape(4, 4)
         np.testing.assert_array_equal(item['action'], expected)
 
+    def test_selected_column_kept_dense_and_grouped(self):
+        buf = ReplayBuffer(
+            max_steps=200,
+            history_len=4,
+            frameskip=2,
+            dense_columns='reward',
+        )
+        ep = _episode(20, seed=0)
+        ep['reward'] = np.arange(20, dtype=np.float32)
+        buf.write_episode(ep)
+
+        item = buf[0]
+        assert item['reward'].shape == (4, 2)
+        np.testing.assert_array_equal(
+            item['reward'], ep['reward'][:8].reshape(4, 2)
+        )
+        np.testing.assert_array_equal(
+            item['proprio'], ep['proprio'][[0, 2, 4, 6]]
+        )
+
+    def test_dense_column_keeps_block_axis_at_frameskip_one(self):
+        buf = ReplayBuffer(
+            max_steps=20,
+            history_len=3,
+            dense_columns=['reward'],
+        )
+        ep = _episode(10, seed=0)
+        buf.write_episode(ep)
+
+        assert buf[0]['reward'].shape == (3, 1)
+
+    def test_load_chunk_matches_clip_sampling(self):
+        buf = ReplayBuffer(
+            max_steps=200,
+            history_len=4,
+            frameskip=2,
+            dense_columns=['reward'],
+        )
+        ep = _episode(20, seed=0)
+        ep['reward'] = np.arange(20, dtype=np.float32)
+        buf.write_episode(ep)
+
+        chunk = buf.load_chunk(np.array([0]), np.array([0]), np.array([8]))[0]
+        for key, expected in buf[0].items():
+            np.testing.assert_array_equal(chunk[key], expected)
+
+        with pytest.raises(ValueError, match='divisible by frameskip'):
+            buf.load_chunk(np.array([0]), np.array([0]), np.array([7]))
+
     def test_sample_with_frameskip(self):
         buf = ReplayBuffer(max_steps=200, history_len=3, frameskip=4)
         for s in range(3):

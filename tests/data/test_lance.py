@@ -190,6 +190,34 @@ def test_getitems_batched(tmp_path):
         )
 
 
+def test_dense_columns(tmp_path):
+    out = tmp_path / 'dense.lance'
+    _write_demo(out, ep_lengths=(8,), extra_cols={'dense': (2,)})
+    ds = LanceDataset(
+        path=out,
+        num_steps=2,
+        frameskip=2,
+        dense_columns=['dense', 'pixels'],
+    )
+
+    dense = ds.get_col_data('dense')
+    proprio = ds.get_col_data('proprio')
+    item = ds[0]
+    assert item['dense'].shape == (2, 2, 2)
+    np.testing.assert_allclose(
+        item['dense'].numpy(), dense[:4].reshape(2, 2, 2)
+    )
+    np.testing.assert_allclose(item['proprio'].numpy(), proprio[[0, 2]])
+    assert item['pixels'].shape == (2, 2, 3, 8, 8)
+    assert item['action'].shape == (2, 4)
+
+    chunk = ds.load_chunk(np.array([0]), np.array([0]), np.array([4]))[0]
+    batched = ds.__getitems__([0])[0]
+    for key, expected in item.items():
+        np.testing.assert_array_equal(chunk[key].numpy(), expected.numpy())
+        np.testing.assert_array_equal(batched[key].numpy(), expected.numpy())
+
+
 def test_get_col_and_row(tmp_path):
     out = tmp_path / 'demo.lance'
     _write_demo(out)

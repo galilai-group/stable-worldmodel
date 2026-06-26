@@ -357,6 +357,32 @@ def test_image_dataset_frameskip(sample_image_dataset):
     assert isinstance(item, dict)
 
 
+def test_image_dataset_dense_columns(sample_image_dataset):
+    cache_dir, name = sample_image_dataset
+    dataset = ImageDataset(
+        name,
+        cache_dir=str(cache_dir),
+        frameskip=2,
+        num_steps=2,
+        dense_columns=['observation', 'pixels'],
+    )
+
+    item = dataset[0]
+    assert item['observation'].shape == (2, 2, 4)
+    np.testing.assert_array_equal(
+        item['observation'].numpy(),
+        dataset._cache['observation'][:4].reshape(2, 2, 4),
+    )
+    assert item['pixels'].shape == (2, 2, 3, 64, 64)
+    expected_pixels = torch.from_numpy(
+        np.stack([dataset._load_file(0, step, 'pixels') for step in range(4)])
+    ).permute(0, 3, 1, 2)
+    torch.testing.assert_close(
+        item['pixels'], expected_pixels.reshape(2, 2, 3, 64, 64)
+    )
+    assert item['action'].shape == (2, 4)
+
+
 def test_image_dataset_keys_to_load(sample_image_dataset):
     """Test ImageDataset with specific keys_to_load."""
     cache_dir, name = sample_image_dataset
@@ -561,6 +587,26 @@ def test_video_dataset_frameskip(sample_video_dataset):
     assert len(dataset) > 0
     item = dataset[0]
     assert isinstance(item, dict)
+
+
+def test_video_dataset_dense_columns(sample_video_dataset):
+    cache_dir, name = sample_video_dataset
+    dataset = VideoDataset(
+        name,
+        cache_dir=str(cache_dir),
+        frameskip=2,
+        num_steps=2,
+        dense_columns=['observation', 'video'],
+    )
+
+    item = dataset[0]
+    assert item['video'].shape == (2, 2, 3, 64, 64)
+    assert item['observation'].shape == (2, 2, 4)
+    np.testing.assert_array_equal(
+        item['observation'].numpy(),
+        dataset._cache['observation'][:4].reshape(2, 2, 4),
+    )
+    assert item['action'].shape == (2, 4)
 
 
 def test_video_dataset_keys_to_load(sample_video_dataset):

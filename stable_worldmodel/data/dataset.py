@@ -11,7 +11,7 @@ This module is the cross-cutting layer:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 import numpy as np
@@ -28,9 +28,13 @@ class Dataset:
     Args:
         lengths: Episode lengths.
         offsets: Episode start offsets in the underlying flat storage.
-        frameskip: Stride between observation samples.
+        frameskip: Stride between samples for non-dense columns.
         num_steps: Number of observation steps per sample.
         transform: Optional dict-in / dict-out transform applied per sample.
+        dense_columns: Additional columns to sample at every underlying row.
+            Dense columns are grouped into ``(num_steps, frameskip, ...)``;
+            ``action`` is always dense and retains its existing flattened
+            ``(num_steps, frameskip * action_dim)`` representation.
     """
 
     def __init__(
@@ -40,6 +44,7 @@ class Dataset:
         frameskip: int = 1,
         num_steps: int = 1,
         transform: Callable[[dict], dict] | None = None,
+        dense_columns: Collection[str] | None = None,
     ) -> None:
         self.lengths = lengths
         self.offsets = offsets
@@ -47,6 +52,13 @@ class Dataset:
         self.num_steps = num_steps
         self.span = num_steps * frameskip
         self.transform = transform
+        self.dense_columns = {'action'}
+        if dense_columns is not None:
+            self.dense_columns.update(
+                (dense_columns,)
+                if isinstance(dense_columns, str)
+                else dense_columns
+            )
         self.clip_indices = [
             (ep, start)
             for ep, length in enumerate(lengths)
@@ -67,22 +79,34 @@ class Dataset:
     def __getitem__(self, idx: int) -> dict:
         ep_idx, start = self.clip_indices[idx]
         steps = self._load_slice(ep_idx, start, start + self.span)
-        if 'action' in steps:
-            steps['action'] = steps['action'].reshape(self.num_steps, -1)
-        return steps
+        return self._reshape_clip(steps, self.num_steps)
 
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
     ) -> list[dict]:
         chunk = []
         for ep, s, e in zip(episodes_idx, start, end):
-            steps = self._load_slice(ep, s, e)
-            if 'action' in steps:
-                steps['action'] = steps['action'].reshape(
-                    (e - s) // self.frameskip, -1
+            length = int(e - s)
+            if length % self.frameskip:
+                raise ValueError(
+                    'Dataset.load_chunk: chunk length must be divisible by '
+                    f'frameskip (length={length}, frameskip={self.frameskip})'
                 )
-            chunk.append(steps)
+            steps = self._load_slice(ep, s, e)
+            chunk.append(self._reshape_clip(steps, length // self.frameskip))
         return chunk
+
+    def _reshape_clip(self, steps: dict, num_steps: int) -> dict:
+        for col, data in steps.items():
+            if col not in self.dense_columns:
+                continue
+            if col == 'action':
+                steps[col] = data.reshape(num_steps, -1)
+            else:
+                steps[col] = data.reshape(
+                    num_steps, self.frameskip, *data.shape[1:]
+                )
+        return steps
 
     def load_episode(self, episode_idx: int) -> dict:
         return self._load_slice(episode_idx, 0, self.lengths[episode_idx])

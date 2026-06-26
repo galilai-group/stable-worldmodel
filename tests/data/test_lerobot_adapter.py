@@ -76,6 +76,25 @@ def test_lerobot_adapter_item_and_chunk_behavior():
     assert dataset._window_datasets
 
 
+def test_lerobot_adapter_dense_columns():
+    dataset = _make_dataset(
+        num_steps=2,
+        frameskip=2,
+        dense_columns=['proprio', 'step_idx'],
+    )
+    if 'proprio' not in dataset.column_names:
+        pytest.skip('Dataset has no proprioceptive column.')
+
+    item = dataset[0]
+    assert item['proprio'].shape[:2] == (2, 2)
+    assert item['step_idx'].shape == (2, 2)
+    torch.testing.assert_close(
+        item['step_idx'], torch.tensor([[0, 1], [2, 3]])
+    )
+    assert item['pixels'].shape[0] == 2
+    assert item['action'].shape[0] == 2
+
+
 def test_lerobot_adapter_subset_localizes_episode_indices(pusht):
     if len(pusht.lengths) < 2:
         pytest.skip('Need at least two episodes to validate subset remapping.')
