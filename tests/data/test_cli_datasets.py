@@ -223,6 +223,14 @@ def test_inspect_reports_column_shapes(fmt_name, cache_root):
     assert 'float32' in result.output
     # Image/video column decoded to a uint8 frame shape (16x16x3 episodes).
     assert 'uint8' in result.output
+    # The lance_video layout stores frames as MP4 blobs, so recovering the
+    # decoded frame dims requires torchcodec; without it inspect falls back to
+    # an ellipsis shape. The plain lance layout decodes JPEGs via PIL instead.
+    if fmt_name == 'lance_video':
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:
+            pytest.skip(f'torchcodec unavailable ({exc})')
     assert '16' in result.output
 
 
