@@ -49,24 +49,8 @@ EP_LENGTHS = (6, 8)
 HW = 32
 COLUMNS = {IMG_KEY, 'action', 'proprio'}
 
-# Known bug: LanceVideoDataset._decode_video_window decodes `num_steps` frames
-# (default 1) instead of the full episode, so `load_episode` — the path
-# `convert` reads through — truncates the video column. Every pair that reads a
-# lance_video dataset (as source, or as the destination read back for the
-# parity check) therefore fails until that is fixed. Marked xfail(strict) so
-# the suite stays green and these flip to a visible XPASS once the reader is
-# corrected.
-_LANCE_VIDEO_BUG = pytest.mark.xfail(
-    reason='lance_video load_episode truncates the video column to num_steps '
-    'frames instead of the full episode (LanceVideoDataset._decode_video_'
-    'window uses self.num_steps); convert round-trips a 1-frame episode.',
-    strict=True,
-)
-
-
 def _pair(src: str, dst: str):
-    marks = [_LANCE_VIDEO_BUG] if 'lance_video' in (src, dst) else []
-    return pytest.param(src, dst, id=f'{src}->{dst}', marks=marks)
+    return pytest.param(src, dst, id=f'{src}->{dst}')
 
 
 # Every directed pair among the three compressed-image formats.

@@ -263,12 +263,12 @@ class LanceVideoDataset(LanceDataset):
         return dec
 
     def _decode_video_window(
-        self, ep_idx: int, vkey: str, local_start: int
+        self, ep_idx: int, vkey: str, local_start: int, num_steps: int
     ) -> torch.Tensor:
         self._ensure_videos_open()
         dec = self._decoder_for(ep_idx, vkey)
         indices = [
-            local_start + k * self.frameskip for k in range(self.num_steps)
+            local_start + k * self.frameskip for k in range(num_steps)
         ]
         return dec.get_frames_at(indices=indices).data  # (T, C, H, W) uint8
 
@@ -278,11 +278,16 @@ class LanceVideoDataset(LanceDataset):
         if g_end is None:
             g_end = g_start + self.span
         local_start = g_start - int(self.offsets[ep_idx])
+        # Number of frame-skipped frames spanning [g_start, g_end). For a
+        # fixed window this is `num_steps`, but `load_episode` passes a
+        # full-episode slice — decode every frame it covers, matching the
+        # frame-skipped tabular columns instead of truncating to one window.
+        num_steps = -(-(g_end - g_start) // self.frameskip)
         steps: dict[str, Any] = {}
         for col in self._keys:
             if col in self._video_keys:
                 steps[col] = self._decode_video_window(
-                    ep_idx, col, local_start
+                    ep_idx, col, local_start, num_steps
                 )
             else:
                 steps[col] = self._process_col(col, batch, g_start, g_end)
