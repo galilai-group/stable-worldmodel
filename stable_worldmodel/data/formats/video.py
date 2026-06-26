@@ -35,7 +35,11 @@ class VideoDataset(FolderDataset):
         # Import up-front so we fail fast if torchcodec is not installed.
         from torchcodec.decoders import VideoDecoder  # noqa: F401
 
-        super().__init__(name=name, folder_keys=video_keys or ['video'], **kw)
+        # video_keys=None lets FolderDataset auto-detect the video columns from
+        # the on-disk subdirectories (each holds one .mp4 per episode), so an
+        # image column named anything other than 'video' (e.g. 'pixels') is
+        # read back correctly instead of being mistaken for a tabular column.
+        super().__init__(name=name, folder_keys=video_keys, **kw)
 
     @lru_cache(maxsize=8)
     def _reader(self, ep_idx: int, key: str) -> Any:

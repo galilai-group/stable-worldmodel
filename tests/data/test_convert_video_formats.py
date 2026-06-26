@@ -11,22 +11,22 @@ writer. The three formats that store image columns as *compressed* media —
 exercise the trickiest part of the conversion adapter
 (:func:`stable_worldmodel.data.utils._episode_to_step_lists`): the
 ``(N, C, H, W) -> (N, H, W, C)`` transpose plus a full image encode/decode
-round-trip. This module covers every directed pair among the three; the
-simpler hdf5/folder pairs already live in ``test_format.py`` /
+round-trip. This module covers every directed pair among the three, *including*
+each format to itself (e.g. video -> video), since an identical-format
+round-trip is both a real use and where a reader/writer column-name mismatch
+surfaces. The simpler hdf5/folder pairs already live in ``test_format.py`` /
 ``test_lance.py``.
 
-The image column is named ``video`` rather than the more usual ``pixels``
-because ``convert`` cannot forward reader kwargs to the *source*: the
-``VideoDataset`` reader keys on ``video_keys=['video']`` by default, so that is
-the only image-column name a video source resolves without extra arguments.
-The other two formats detect images by dtype/shape, so the name is immaterial
-to them.
+The image column is named ``pixels`` (not ``video``) on purpose: ``convert``
+cannot forward reader kwargs to the *source*, so the ``VideoDataset`` reader
+must auto-detect its video column from the on-disk layout rather than assuming
+a fixed name. Using a non-default name here guards that — a reader that
+hardcoded ``video_keys=['video']`` would drop the column on read.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import itertools
 from pathlib import Path
 
 import numpy as np
@@ -44,7 +44,7 @@ from stable_worldmodel.data import (  # noqa: E402
     load_dataset,
 )
 
-IMG_KEY = 'video'
+IMG_KEY = 'pixels'
 EP_LENGTHS = (6, 8)
 HW = 32
 COLUMNS = {IMG_KEY, 'action', 'proprio'}
@@ -53,11 +53,12 @@ def _pair(src: str, dst: str):
     return pytest.param(src, dst, id=f'{src}->{dst}')
 
 
-# Every directed pair among the three compressed-image formats.
-PAIRS = [
-    _pair(src, dst)
-    for src, dst in itertools.permutations(('video', 'lance', 'lance_video'), 2)
-]
+# Every directed pair among the three compressed-image formats, including each
+# format to itself — an identical-format round-trip is a real use and is where
+# a reader/writer column-name mismatch (e.g. the video reader's old hardcoded
+# 'video' key) would bite.
+_IMG_FORMATS = ('video', 'lance', 'lance_video')
+PAIRS = [_pair(src, dst) for src in _IMG_FORMATS for dst in _IMG_FORMATS]
 
 
 def _episodes() -> list[dict]:
