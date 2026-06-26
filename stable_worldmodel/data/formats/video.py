@@ -18,94 +18,13 @@ from stable_worldmodel.data.formats.utils import is_image_column
 from stable_worldmodel.data.formats.folder import FolderDataset
 
 
-class _AvVideoReader:
-    """Minimal decord-compatible MP4 reader backed by PyAV (``av``).
-
-    Implements only the part of decord's ``VideoReader`` API that
-    :class:`VideoDataset` relies on (integer indexing and ``get_batch``),
-    returning ``uint8`` torch tensors laid out as ``(..., H, W, C)`` in RGB,
-    matching decord's torch bridge so the two backends are interchangeable.
-    """
-
-    def __init__(self, path: str) -> None:
-        import av
-
-        self._av = av
-        self.path = path
-
-    def __getitem__(self, index: int) -> torch.Tensor:
-        return self.get_batch([index])[0]
-
-    def get_batch(self, indices) -> torch.Tensor:
-        frames = self._decode(indices)
-        return torch.from_numpy(np.stack([frames[i] for i in indices]))
-
-    def _decode(self, indices) -> dict[int, np.ndarray]:
-        wanted = set(indices)
-        out: dict[int, np.ndarray] = {}
-        with self._av.open(self.path) as container:
-            stream = container.streams.video[0]
-            rate, time_base = stream.average_rate, stream.time_base
-            start = stream.start_time or 0
-            use_pts = bool(rate and time_base)
-            scale = float(time_base * rate) if use_pts else 0.0
-            if use_pts:
-                # Seek to the keyframe at or before the first wanted frame so
-                # reading a slice near the end doesn't decode the whole clip;
-                # frames are matched back to their index via pts.
-                offset = start + int(min(wanted) / rate / time_base)
-                container.seek(
-                    offset, stream=stream, backward=True, any_frame=False
-                )
-            counter = 0
-            for frame in container.decode(stream):
-                if use_pts:
-                    if frame.pts is None:
-                        continue
-                    idx = round((frame.pts - start) * scale)
-                else:
-                    idx, counter = counter, counter + 1
-                if idx in wanted:
-                    out[idx] = frame.to_ndarray(format='rgb24')
-                    if len(out) == len(wanted):
-                        break
-        return out
-
-
-def _make_video_reader():
-    """Return a ``path -> reader`` factory for the first available backend.
-
-    decord is preferred where it ships wheels (Linux, Windows); PyAV is the
-    fallback elsewhere, notably macOS arm64, which has no decord wheel.
-    """
-    try:
-        import decord
-
-        decord.bridge.set_bridge('torch')
-        return lambda path: decord.VideoReader(path, num_threads=1)
-    except ImportError:
-        pass
-
-    try:
-        import av  # noqa: F401
-
-        return _AvVideoReader
-    except ImportError:
-        pass
-
-    raise ImportError('VideoDataset requires decord or av')
-
-
 class VideoDataset(FolderDataset):
     """Loads frames from MP4 files (one per episode).
 
-    Frames are decoded with decord where it ships wheels (Linux, Windows)
-    and with PyAV (``av``) elsewhere, notably macOS arm64, where decord has
-    no wheel. Both backends share the same reader API, so only the backend
-    selection differs across platforms.
+    Frames are decoded with torchcodec's ``VideoDecoder``, which returns
+    ``uint8`` tensors laid out as ``(T, C, H, W)`` in RGB. This matches the
+    ``lance_video`` format so the two share a single decode backend.
     """
-
-    _make_reader: Any = None  # cached path -> reader factory
 
     def __init__(
         self,
@@ -113,25 +32,23 @@ class VideoDataset(FolderDataset):
         video_keys: list[str] | None = None,
         **kw: Any,
     ) -> None:
-        # Resolve the backend up-front so we fail fast if neither decord nor
-        # av is installed. The cached factory doesn't survive DataLoader
-        # worker spawn, so it is re-resolved lazily in each worker.
-        self._ensure_reader()
-        super().__init__(name=name, folder_keys=video_keys or ['video'], **kw)
+        # Import up-front so we fail fast if torchcodec is not installed.
+        from torchcodec.decoders import VideoDecoder  # noqa: F401
 
-    @classmethod
-    def _ensure_reader(cls):
-        if cls._make_reader is None:
-            cls._make_reader = _make_video_reader()
-        return cls._make_reader
+        super().__init__(name=name, folder_keys=video_keys or ['video'], **kw)
 
     @lru_cache(maxsize=8)
     def _reader(self, ep_idx: int, key: str) -> Any:
+        from torchcodec.decoders import VideoDecoder
+
         path = str(self.path / key / f'ep_{ep_idx}.mp4')
-        return self._ensure_reader()(path)
+        return VideoDecoder(path, seek_mode='approximate')
 
     def _load_file(self, ep_idx: int, step: int, key: str) -> np.ndarray:
-        return self._reader(ep_idx, key)[step].numpy()
+        # torchcodec yields (C, H, W); transpose to (H, W, C) to match the
+        # HWC numpy contract of the parent :class:`FolderDataset`.
+        frame = self._reader(ep_idx, key).get_frames_at(indices=[step]).data[0]
+        return frame.permute(1, 2, 0).numpy()
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         g_start, g_end = (
@@ -141,10 +58,11 @@ class VideoDataset(FolderDataset):
         steps = {}
         for col in self._keys:
             if col in self.folder_keys:
-                frames = self._reader(ep_idx, col).get_batch(
-                    list(range(start, end, self.frameskip))
-                )
-                steps[col] = frames.permute(0, 3, 1, 2)
+                indices = list(range(start, end, self.frameskip))
+                # torchcodec returns (T, C, H, W) uint8 directly.
+                steps[col] = self._reader(ep_idx, col).get_frames_at(
+                    indices=indices
+                ).data
             else:
                 data = self._cache[col][g_start:g_end]
                 if col != 'action':
