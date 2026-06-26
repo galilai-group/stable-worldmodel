@@ -98,7 +98,10 @@ def _copy(eps: list[dict]) -> list[dict]:
 
 def _require_backends(*fmts: str) -> None:
     """Skip when a format's optional decode backend is unavailable on CI."""
-    if 'lance_video' in fmts:
+    # Both the lance_video and video readers decode frames through torchcodec
+    # (VideoDataset / LanceVideoDataset import it up front), so either format
+    # needs it available.
+    if 'lance_video' in fmts or 'video' in fmts:
         try:
             import torchcodec.decoders  # noqa: F401
         except Exception as exc:  # noqa: BLE001
