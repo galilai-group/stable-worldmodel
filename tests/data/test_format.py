@@ -28,7 +28,6 @@ from stable_worldmodel.data.formats.lerobot import LeRobot
 from stable_worldmodel.data.formats.video import (
     Video,
     VideoWriter,
-    _AvVideoReader,
 )
 
 
@@ -511,9 +510,15 @@ class TestVideoWriter:
             np.load(out / 'ep_len.npz')['arr_0'], np.array([8, 10], np.int32)
         )
 
-    def test_decord_roundtrip(self, tmp_path):
-        if importlib.util.find_spec('decord') is None:
-            pytest.skip('decord not available')
+    def test_torchcodec_roundtrip(self, tmp_path):
+        # find_spec only checks the package is installed, not that
+        # libtorchcodec can load its FFmpeg shared libraries — that load
+        # raises (not ImportError) on environments without a matching FFmpeg,
+        # so guard the actual import and skip on any failure.
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f'torchcodec unavailable ({exc})')
 
         out = tmp_path / 'video_ds'
         eps = [self._video_episode(8), self._video_episode(10)]
@@ -526,28 +531,6 @@ class TestVideoWriter:
         ep0 = ds.load_episode(0)
         assert ep0['pixels'].shape[0] == 8
         assert ep0['pixels'].shape[1] == 3  # CHW after reader permute
-
-    def test_av_roundtrip(self, tmp_path):
-        if importlib.util.find_spec('av') is None:
-            pytest.skip('av not available')
-
-        out = tmp_path / 'video_ds'
-        eps = [self._video_episode(8), self._video_episode(10)]
-        with VideoWriter(out, fps=25) as w:
-            for ep in eps:
-                w.write_episode(ep)
-
-        # Force the PyAV backend so this exercises av even where decord
-        # is also installed.
-        VideoDataset._make_reader = _AvVideoReader
-        try:
-            ds = VideoDataset(path=out, video_keys=['pixels'])
-            assert list(ds.lengths) == [8, 10]
-            ep0 = ds.load_episode(0)
-            assert ep0['pixels'].shape[0] == 8
-            assert ep0['pixels'].shape[1] == 3  # CHW after reader permute
-        finally:
-            VideoDataset._make_reader = None
 
     def test_append_extends_existing_video_dir(self, tmp_path):
         out = tmp_path / 'video_ds'

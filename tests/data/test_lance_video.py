@@ -175,6 +175,25 @@ def test_batch_matches_per_item(tmp_path):
             ), k
 
 
+def test_load_episode_returns_full_video(tmp_path):
+    """`load_episode` must decode every frame of the episode, aligned with the
+    tabular columns. This is the path `convert`/`merge` rely on: opened with
+    default `num_steps=1`, a full-episode read must not truncate the video to a
+    single frame."""
+    out = tmp_path / 'set'
+    eps = _write(out)
+    ds = LanceVideoDataset(out, keys_to_load=['pixels', 'action', 'proprio'])
+    for ep_idx, ep in enumerate(eps):
+        ep_len = len(ep['pixels'])
+        sample = ds.load_episode(ep_idx)
+        assert sample['pixels'].shape[0] == ep_len, (
+            f'episode {ep_idx}: got {sample["pixels"].shape[0]} video frames, '
+            f'expected {ep_len}'
+        )
+        assert sample['action'].shape[0] == ep_len
+        assert sample['proprio'].shape[0] == ep_len
+
+
 def test_select_video_keys(tmp_path):
     out = tmp_path / 'set'
     _write(out)

@@ -2,7 +2,7 @@
 whose optional dependencies are available; the rest are silently skipped.
 
 Lance and folder ship with the core install. HDF5, video, and lerobot
-need their backing libraries (h5py, decord/av/imageio, lerobot); install
+need their backing libraries (h5py, torchcodec/imageio, lerobot); install
 them together with the umbrella extra ``[format]``.
 """
 
