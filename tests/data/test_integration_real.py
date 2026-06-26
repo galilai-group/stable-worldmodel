@@ -349,6 +349,15 @@ class TestVideoDatasetReal:
 
     def test_collect_convert_and_load(self, temp_cache_dir):
         """Test collecting data, converting to video format, and loading."""
+        # VideoDataset decodes via torchcodec, which eagerly loads libtorchcodec
+        # and its FFmpeg shared libraries. That load raises (not ImportError) on
+        # environments without a matching FFmpeg — common on CI runners — so skip
+        # when the backend can't load rather than failing at decode time.
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f'torchcodec unavailable ({exc})')
+
         import imageio.v3 as iio
 
         # 1. Collect data
