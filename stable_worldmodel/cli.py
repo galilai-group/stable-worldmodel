@@ -544,22 +544,26 @@ def convert(
 ):
     """Convert a dataset to another format (e.g. HDF5 → video)."""
     from stable_worldmodel.data import convert as data_convert
+    from stable_worldmodel.data import detect_format
     from stable_worldmodel.data.utils import get_cache_dir
 
     cache_dir = get_cache_dir(sub_folder='datasets')
 
-    h5_path = cache_dir / f'{name}.h5'
-    folder_path = cache_dir / name
-    lance_path = cache_dir / f'{name}.lance'
-    if h5_path.exists():
-        source_path = h5_path
-    elif folder_path.is_dir() and (folder_path / 'ep_len.npz').exists():
-        source_path = folder_path
-    elif folder_path.is_dir() and (folder_path / '_versions').is_dir():
-        source_path = folder_path
-    elif lance_path.is_dir() and (lance_path / '_versions').is_dir():
-        source_path = lance_path
-    else:
+    # Resolve the source by name through the format registry, mirroring
+    # `inspect`/`datasets`, so every format (lance, lance_video, folder, video,
+    # hdf5) is found the same way instead of via per-format path heuristics.
+    candidates = [
+        cache_dir / name,
+        cache_dir / f'{name}.lance',
+        cache_dir / f'{name}.h5',
+        cache_dir / f'{name}.hdf5',
+    ]
+    source_path = None
+    for path in candidates:
+        if path.exists() and detect_format(path) is not None:
+            source_path = path
+            break
+    if source_path is None:
         print(f'[red]Dataset not found: {name}[/red]')
         print('Run [cyan]swm datasets[/cyan] to see available datasets.')
         raise typer.Exit(1)

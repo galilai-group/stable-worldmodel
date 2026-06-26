@@ -156,6 +156,37 @@ def test_inspect_finds_every_format(fmt_name, cache_root):
     assert expected_label in result.output
 
 
+@pytest.mark.parametrize('fmt_name', sorted(_BUILDERS))
+def test_convert_finds_every_format(fmt_name, cache_root):
+    """``swm convert <name>`` must resolve a source written in any format by
+    name. Like the listing, this used to hand-roll path heuristics (probing for
+    a top-level ``_versions``/``ep_len.npz`` sentinel) that didn't match the
+    ``lance_video`` layout — where ``_versions`` lives inside nested ``.lance``
+    subtables — so convert reported 'Dataset not found' for datasets that
+    ``swm datasets`` happily listed. It now resolves the source via
+    detect_format, so a layout the CLI can't address by name fails here.
+
+    Scope is source resolution only: we assert the command gets past the
+    'Dataset not found' guard into the conversion stage. Whether a particular
+    source→dest round-trip then succeeds is the concern of
+    ``test_convert_video_formats.py``, not this test."""
+    if fmt_name not in list_formats():
+        pytest.skip(f'format {fmt_name!r} not registered')
+    _needs('imageio')
+    name = f'ds_{fmt_name}'
+    _BUILDERS[fmt_name](cache_root, name)
+
+    result = runner.invoke(app, ['convert', name, f'{name}_out', '-f', 'video'])
+    assert 'Dataset not found' not in result.output
+    assert f'Converting {name}' in result.output
+
+
+def test_convert_missing_dataset_errors(cache_root):
+    result = runner.invoke(app, ['convert', 'does_not_exist', 'out'])
+    assert result.exit_code == 1
+    assert 'not found' in result.output.lower()
+
+
 def test_detect_format_recognizes_every_layout(cache_root):
     """Guard the CLI's foundation directly: detect_format must classify each
     written layout, so the listing built on it can never silently drop one."""
