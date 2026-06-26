@@ -511,8 +511,14 @@ class TestVideoWriter:
         )
 
     def test_torchcodec_roundtrip(self, tmp_path):
-        if importlib.util.find_spec('torchcodec') is None:
-            pytest.skip('torchcodec not available')
+        # find_spec only checks the package is installed, not that
+        # libtorchcodec can load its FFmpeg shared libraries — that load
+        # raises (not ImportError) on environments without a matching FFmpeg,
+        # so guard the actual import and skip on any failure.
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f'torchcodec unavailable ({exc})')
 
         out = tmp_path / 'video_ds'
         eps = [self._video_episode(8), self._video_episode(10)]
