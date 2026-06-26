@@ -182,9 +182,7 @@ def test_load_episode_returns_full_video(tmp_path):
     single frame."""
     out = tmp_path / 'set'
     eps = _write(out)
-    ds = LanceVideoDataset(
-        out, keys_to_load=['pixels', 'action', 'proprio']
-    )
+    ds = LanceVideoDataset(out, keys_to_load=['pixels', 'action', 'proprio'])
     for ep_idx, ep in enumerate(eps):
         ep_len = len(ep['pixels'])
         sample = ds.load_episode(ep_idx)

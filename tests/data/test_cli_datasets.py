@@ -176,7 +176,9 @@ def test_convert_finds_every_format(fmt_name, cache_root):
     name = f'ds_{fmt_name}'
     _BUILDERS[fmt_name](cache_root, name)
 
-    result = runner.invoke(app, ['convert', name, f'{name}_out', '-f', 'video'])
+    result = runner.invoke(
+        app, ['convert', name, f'{name}_out', '-f', 'video']
+    )
     assert 'Dataset not found' not in result.output
     assert f'Converting {name}' in result.output
 

@@ -267,9 +267,7 @@ class LanceVideoDataset(LanceDataset):
     ) -> torch.Tensor:
         self._ensure_videos_open()
         dec = self._decoder_for(ep_idx, vkey)
-        indices = [
-            local_start + k * self.frameskip for k in range(num_steps)
-        ]
+        indices = [local_start + k * self.frameskip for k in range(num_steps)]
         return dec.get_frames_at(indices=indices).data  # (T, C, H, W) uint8
 
     def _process_batch(

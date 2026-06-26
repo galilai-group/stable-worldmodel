@@ -49,6 +49,7 @@ EP_LENGTHS = (6, 8)
 HW = 32
 COLUMNS = {IMG_KEY, 'action', 'proprio'}
 
+
 def _pair(src: str, dst: str):
     return pytest.param(src, dst, id=f'{src}->{dst}')
 
@@ -74,9 +75,7 @@ def _episodes() -> list[dict]:
         eps.append(
             {
                 IMG_KEY: [
-                    np.full(
-                        (HW, HW, 3), 10 + 5 * ep_i + 6 * t, dtype=np.uint8
-                    )
+                    np.full((HW, HW, 3), 10 + 5 * ep_i + 6 * t, dtype=np.uint8)
                     for t in range(ep_len)
                 ],
                 'action': [

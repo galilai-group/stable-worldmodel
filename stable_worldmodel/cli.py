@@ -179,7 +179,9 @@ def _sample_video_frame_shapes(videos_uri, video_keys) -> dict:
 
     try:
         vds = lance.dataset(videos_uri)
-        keys = vds.to_table(columns=['video_key']).column('video_key').to_pylist()
+        keys = (
+            vds.to_table(columns=['video_key']).column('video_key').to_pylist()
+        )
     except Exception:
         return shapes
 
@@ -199,9 +201,11 @@ def _sample_video_frame_shapes(videos_uri, video_keys) -> dict:
                 data = blob.readall()
             finally:
                 blob.close()
-            frames = VideoDecoder(data, seek_mode='approximate').get_frames_at(
-                indices=[0]
-            ).data  # (1, C, H, W)
+            frames = (
+                VideoDecoder(data, seek_mode='approximate')
+                .get_frames_at(indices=[0])
+                .data
+            )  # (1, C, H, W)
             shapes[vkey] = tuple(int(d) for d in frames.shape[1:])
         except Exception:
             shapes[vkey] = None

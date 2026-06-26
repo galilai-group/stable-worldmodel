@@ -64,9 +64,11 @@ class VideoDataset(FolderDataset):
             if col in self.folder_keys:
                 indices = list(range(start, end, self.frameskip))
                 # torchcodec returns (T, C, H, W) uint8 directly.
-                steps[col] = self._reader(ep_idx, col).get_frames_at(
-                    indices=indices
-                ).data
+                steps[col] = (
+                    self._reader(ep_idx, col)
+                    .get_frames_at(indices=indices)
+                    .data
+                )
             else:
                 data = self._cache[col][g_start:g_end]
                 if col != 'action':
