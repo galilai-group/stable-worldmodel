@@ -491,6 +491,12 @@ class LanceVideoWriter:
         for ep_data in episodes:
             if self._frames_schema is None:
                 self._init_schema(ep_data)
+            elif not self._rename_map:
+                # Appending to an existing dataset: `_load_existing_state`
+                # recovered the schema but not the rename map (it depends on
+                # the incoming column names). Rebuild it from the first
+                # appended episode before any batch is built.
+                self._rebuild_rename_map(ep_data)
             self._frames_batches.append(self._frames_batch(ep_data))
             for col, lance_name in self._rename_map.items():
                 if lance_name in self._image_cols:
@@ -502,6 +508,34 @@ class LanceVideoWriter:
                         )
                     )
             self._ep_idx += 1
+
+    def _rebuild_rename_map(self, sample_ep: dict) -> None:
+        """Recover the original→on-disk column map when reopening to append.
+
+        :meth:`_load_existing_state` reads the frames schema, ``_dims`` and
+        ``_image_cols`` back from disk, but ``_rename_map`` keys on the
+        *incoming* column names and so cannot be recovered from the table
+        alone. Rebuild it from the first appended episode — mirrors
+        :meth:`LanceWriter._validate_episode_against_existing`. Without this
+        the empty map makes :meth:`_frames_batch` raise ``StopIteration`` and
+        the video-row loop emit no blobs.
+        """
+        reserved = {'episode_idx', 'step_idx'}
+        known = set(self._dims) | self._image_cols
+        rename_map: dict[str, str] = {}
+        for col in sample_ep:
+            lance_name = _to_lance_name(col)
+            if lance_name in reserved or lance_name not in known:
+                continue
+            rename_map[col] = lance_name
+        missing = known - set(rename_map.values())
+        if missing:
+            raise ValueError(
+                f"LanceVideoWriter: append failed — table '{self.table_name}' "
+                f'expects columns {sorted(missing)} that the incoming episode '
+                'does not provide.'
+            )
+        self._rename_map = rename_map
 
     def _init_schema(self, sample_ep: dict) -> None:
         reserved = {'episode_idx', 'step_idx'}
