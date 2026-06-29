@@ -1,0 +1,108 @@
+
+==== CONFIG ====
+cache_dir: null
+solver:
+  _target_: stable_worldmodel.solver.CEMSolver
+  model: ???
+  batch_size: 1
+  num_samples: 300
+  var_scale: 1.0
+  n_steps: 30
+  topk: 30
+  device: cuda
+  seed: ${seed}
+world:
+  env_name: WireHarness-v0
+  num_envs: ${eval.num_eval}
+  max_episode_steps: 100
+  stage: 0
+  camera_view: top
+  add_pixels: true
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+  - action
+  - state
+seed: 42
+policy: random
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+eval:
+  num_eval: 8
+  goal_offset_steps: 25
+  eval_budget: 50
+  img_size: 224
+  dataset_name: stage_0.lance
+  callables:
+  - method: _set_state
+    args:
+      state:
+        value: state
+  - method: _set_goal_state
+    args:
+      goal_state:
+        value: goal_state
+compile: false
+bf16: false
+output:
+  filename: wireharness_results.txt
+
+==== RESULTS ====
+metrics: {'success_rate': 0.0, 'episode_successes': array([False, False, False, False, False, False, False, False]), 'seeds': None}
+evaluation_time: 127.38671970367432 seconds
+
+==== CONFIG ====
+cache_dir: null
+solver:
+  _target_: stable_worldmodel.solver.CEMSolver
+  model: ???
+  batch_size: 1
+  num_samples: 300
+  var_scale: 1.0
+  n_steps: 30
+  topk: 30
+  device: cuda
+  seed: ${seed}
+world:
+  env_name: WireHarness-v0
+  num_envs: ${eval.num_eval}
+  max_episode_steps: 100
+  stage: 0
+  camera_view: top
+  add_pixels: true
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+  - action
+  - state
+seed: 42
+policy: random
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+eval:
+  num_eval: 8
+  goal_offset_steps: 25
+  eval_budget: 50
+  img_size: 224
+  dataset_name: stage_0.lance
+  callables:
+  - method: _set_state
+    args:
+      state:
+        value: state
+  - method: _set_goal_state
+    args:
+      goal_state:
+        value: goal_state
+compile: false
+bf16: false
+output:
+  filename: wireharness_results.txt
+
+==== RESULTS ====
+metrics: {'success_rate': 0.0, 'episode_successes': array([False, False, False, False, False, False, False, False]), 'seeds': None}
+evaluation_time: 127.68102383613586 seconds

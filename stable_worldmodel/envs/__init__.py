@@ -215,3 +215,13 @@ try:
     from stable_worldmodel.envs import ale  # noqa: F401
 except ImportError:
     pass
+
+
+############
+# 3rd party environments #
+############
+
+register(
+    id='swm/WireHarness-v0',
+    entry_point='stable_worldmodel.envs.wire_harness.env:WireHarnessEnv',
+)

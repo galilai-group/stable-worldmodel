@@ -1,0 +1,69 @@
+# Plan/eval config for WireHarness — drives scripts/plan/eval_wm.py to evaluate
+# a trained LeWM world model with MPC, initialising each env from a dataset
+# start and planning toward a dataset goal (the frame goal_offset_steps later
+# in the same recorded trajectory). Mirrors pusht.yaml; see the tutorial
+# "Evaluate from dataset starts and goals".
+#
+# Run it via the project wrapper (which force-imports wireharness_gym so the
+# "WireHarness-v0" id is registered in eval_wm.py's process):
+#     ./eval_lewm.sh                 # stage 0, lewm_stage0, defaults below
+#     ./eval_lewm.sh 0 policy=lewm_stage0 eval.num_eval=16
+#
+# Requires:
+#   * the trained model ~/.stable_worldmodel/checkpoints/lewm_stage<k>/
+#   * the dataset ~/.stable_worldmodel/datasets/stage_<k>.lance
+#   * WireHarnessEnv._set_state / _set_goal_state (the callables below — without
+#     them the dataset starts/goals are silently ignored).
+defaults:
+  - launcher: local
+  - solver: cem
+  - _self_
+
+world:
+  env_name: WireHarness-v0
+  num_envs: ${eval.num_eval}        # dataset eval requires num_envs == num_eval
+  max_episode_steps: ???            # overwritten by eval_wm.py to 2*eval_budget
+  stage: 0                          # target configuration (Konf) to evaluate
+  camera_view: top                  # match data collection (collect_data_for_world.py)
+  add_pixels: true
+
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+    - action
+    - state                         # needed by the _set_state / _set_goal_state callables
+
+seed: 42
+policy: lewm_stage0                 # checkpoint name under ~/.stable_worldmodel/checkpoints, or "random"
+
+# horizon * action_block = 25 <= eval_budget. action_block = 5 matches the data
+# frameskip; the LeWM action encoder input_dim is 50 = action_dim(10) * 5.
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+
+# evaluation from dataset (replay starts, plan toward future-frame goals)
+eval:
+  num_eval: 8                       # parallel envs / episodes (== world.num_envs)
+  goal_offset_steps: 25             # goal is the state 25 steps ahead of the start
+  eval_budget: 50                   # max env steps the planner gets per episode
+  img_size: 224                     # matches the LeWM encoder (lewm img_size)
+  dataset_name: stage_0.lance
+  callables:
+    # -- place movers at the dataset start state (x, y per mover)
+    - method: _set_state
+      args:
+        state:
+          value: state
+    # -- redirect the per-mover success target at the dataset goal state
+    - method: _set_goal_state
+      args:
+        goal_state:
+          value: goal_state
+
+compile: false
+bf16: false
+
+output:
+  filename: wireharness_results.txt
