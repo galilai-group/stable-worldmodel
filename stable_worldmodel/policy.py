@@ -184,6 +184,14 @@ class RandomPolicy(BasePolicy):
             self.env.action_space.seed(seed)
 
 
+class MultiAgentRandomPolicy(RandomPolicy):
+    """Random policy alias for PettingZoo-backed worlds."""
+
+    def __init__(self, seed: int | None = None, **kwargs: Any) -> None:
+        super().__init__(seed=seed, **kwargs)
+        self.type = 'multi_agent_random'
+
+
 class ExpertPolicy(BasePolicy):
     """Policy using expert demonstrations or heuristics."""
 
