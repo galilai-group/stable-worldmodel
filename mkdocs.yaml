@@ -24,6 +24,7 @@ nav:
       - envs/dmc.md
       - envs/ogb.md
       - envs/tworoom.md
+      - envs/piecewise.md
       - envs/gymnasium_robotics.md
       - envs/gymnasium_control.md
       - envs/craftax.md

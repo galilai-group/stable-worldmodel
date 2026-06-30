@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 import os
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -9,6 +12,11 @@ from loguru import logger as logging
 from tqdm import tqdm
 
 from stable_worldmodel.utils import DEFAULT_CACHE_DIR, HF_BASE_URL
+
+if TYPE_CHECKING:
+    from stable_pretraining.data.transforms import WrapTorchTransform
+
+    from stable_worldmodel.data.dataset import Dataset
 
 
 def get_cache_dir(
@@ -36,8 +44,8 @@ def load_dataset(
     name: str,
     cache_dir: str = None,
     format: str | None = None,
-    **kwargs,
-):
+    **kwargs: Any,
+) -> Dataset:
     """Resolve a dataset name to a local path and dispatch to the matching
     format reader from the registry.
 
@@ -233,14 +241,14 @@ def _download(url: str, dest: Path) -> None:
 
 
 def convert(
-    source,
-    dest,
+    source: str | Path,
+    dest: str | Path,
     *,
     source_format: str | None = None,
     dest_format: str = 'lance',
     cache_dir: str | None = None,
     progress: bool = True,
-    **dest_kwargs,
+    **dest_kwargs: Any,
 ) -> None:
     """Convert a dataset from one registered format to another.
 
@@ -331,8 +339,8 @@ from stable_worldmodel.data.normalization import (  # noqa: E402
 
 
 def column_normalizer(
-    dataset, source: str, target: str, method: str = 'zscore'
-):
+    dataset: Dataset, source: str, target: str, method: str = 'zscore'
+) -> WrapTorchTransform:
     """Build a per-column normalizer :class:`WrapTorchTransform` from dataset stats.
 
     Args:

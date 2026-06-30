@@ -12,6 +12,8 @@ required when the dataset is consumed by a DataLoader using the ``spawn``
 start method.
 """
 
+from typing import Any
+
 import numpy as np
 import torch
 
@@ -152,7 +154,7 @@ _SCALERS = {
 }
 
 
-def get_scaler(method: str = 'zscore', **kwargs):
+def get_scaler(method: str = 'zscore', **kwargs: Any):
     """Return an unfitted scaler by method name.
 
     Args:

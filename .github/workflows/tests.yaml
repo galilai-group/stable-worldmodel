@@ -61,7 +61,7 @@ jobs:
         uv sync --group dev
         uv pip install -e .
     - name: Build docs
-      run: uv run --group dev mkdocs build
+      run: uv run --group dev mkdocs build --strict
     - uses: actions/configure-pages@v5
     - uses: actions/upload-pages-artifact@v3
       with:
