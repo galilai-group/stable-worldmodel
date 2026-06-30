@@ -1,0 +1,446 @@
+<mujoco model="ParallelWires">
+  <extension>
+    <plugin plugin="mujoco.elasticity.cable"/>
+  </extension>
+
+  <statistic center="0 0 .3" extent="1"/>
+  <visual>
+    <global elevation="-30"/>
+  </visual>
+
+  <compiler autolimits="true"/>
+  <size njmax="1000" nconmax="500"/>
+
+  <option gravity="0 0 -9.81"/>
+
+
+  <!-- Factor to reality: 150 mm in reality is 0.3 in Mujoco: 1mm = 0.002 -->
+
+  <worldbody>
+    <!-- Light source and ground plane -->
+    <light diffuse=".5 .5 .5" pos="0 0 30" dir="0 0 -1"/>
+    <geom type="plane" size="3.36 1.92 0.1" pos="3.36 1.92 0" rgba="0.9 0.9 0.9 1" name="ground"/>
+
+    <!-- Boundaries -->
+    <geom type="box" size=".01 1.92 0.08" pos="6.72 1.92 0.08" rgba="0.59 0.75 0.22 1" name="right_boundary"/>
+    <geom type="box" size="3.36 0.01 0.08" pos="3.36 3.84 0.08" rgba="0.59 0.75 0.22 1" name="upper_boundary"/> 
+    <geom type="box" size="3.36 0.01 0.08" pos="3.36 0 0.08" rgba="0.59 0.75 0.22 1" name="lower_boundary"/>
+    <geom type="box" size="0.01 1.92 0.08" pos="0 1.92 0.08" rgba="0.59 0.75 0.22 1" name="left_boundary"/>
+
+    <!-- Ersetze den gesamten Target-Bereich (Zeile 28-73) mit dieser Version: -->
+
+    <!-- ========== ORIGINAL TARGETS (als visuelle Marker ohne Kollision) ========== -->
+    
+
+    <!-- ========== ZIELKONFIGURATION 3 (Index 3 in MOVER_TARGETS) ========== -->
+        <!-- ========== TARGETS: kosmetische Subziele (keine Kollision) ========== -->
+    <!-- Farben je Agent: RED, GREEN, YELLOW, PURPLE, ORANGE -->
+    <!-- Einheitliche Darstellung: type="sphere", size="0.02", rgba alpha=0.5 -->
+    <!-- Keine Kollision/Einfluss: contype="0" conaffinity="0" -->
+
+    <!-- ===== Config 0: Rechts oben Cluster ===== -->
+    <!-- Reihenfolge: RED, GREEN, YELLOW, PURPLE, ORANGE -->
+    
+    <!-- ========== /TARGETS ========== -->
+
+
+    
+    
+    <!-- 001 wire -->
+    <composite prefix="Wire1" type="cable" 
+      vertex="0	0	0
+              0.093	-0.093	0
+              0.186	-0.186	0
+              0.279	-0.279	0
+              0.372	-0.372	0
+              0.465	-0.465	0
+              0.558	-0.558	0
+              0.651	-0.651	0
+              0.744	-0.744	0
+              0.837	-0.837	0
+              0.93	-0.93	0" 
+      offset="4.02 2.95 0.11" initial="free">
+      <plugin plugin="mujoco.elasticity.cable">
+        <config key="twist" value="1e7"/>
+        <config key="bend" value="6e7"/>
+        <config key="vmax" value="0.05"/>
+      </plugin>
+      <joint kind="main" damping=".15"/>
+      <geom type="capsule" size=".003" rgba="0 0 1 1" condim="1"/>
+    </composite>
+
+    <!-- 002 wire -->
+    <composite prefix="Wire2" type="cable" 
+      vertex="0   0 0
+              0.0977	0.0223	0
+              0.1954	0.0446	0
+              0.2931	0.0669	0
+              0.3908	0.0892	0
+              0.4885	0.1115	0
+              0.5862	0.1338	0
+              0.6839	0.1561	0
+              0.7816	0.1784	0
+              0.8793	0.2007	0
+              0.977	0.223	0
+              1.0747	0.2453	0
+              1.1724	0.2676	0
+              1.2701	0.2899	0
+              1.3678	0.3122	0
+              1.4655	0.3345	0
+              1.5632	0.3568	0
+              1.6609	0.3791	0
+              1.7586	0.4014	0
+              1.8563	0.4237	0
+              1.954	0.446	0
+              2.0517	0.4683	0
+              2.1494	0.4906	0
+              2.2471	0.5129	0
+              2.3448	0.5352	0
+              2.4425	0.5575	0
+              2.5402	0.5798	0
+              2.6379	0.6021	0
+              2.7356	0.6244	0
+              2.8333	0.6467	0
+              2.931	0.669	0" 
+      offset="1.05	2.28	0.11" initial="free">
+      <plugin plugin="mujoco.elasticity.cable">
+        <config key="twist" value="1e7"/>
+        <config key="bend" value="6e7"/>
+        <config key="vmax" value="0.05"/>
+      </plugin>
+      <joint kind="main" damping=".15"/>
+      <geom type="capsule" size=".003" rgba="0 0 1 1" condim="1"/>
+    </composite> 
+
+    <!-- 003 wire -->
+    <composite prefix="Wire3" type="cable" 
+      vertex="0 0 0 
+              0.081	0.039	0.00067
+              0.162	0.078	0.00134
+              0.243	0.117	0.00201
+              0.324	0.156	0.00268
+              0.405	0.195	0.00335
+              0.486	0.234	0.00402
+              0.567	0.273	0.00469
+              0.648	0.312	0.00536
+              0.729	0.351	0.00603
+              0.81	0.39	0.0067
+              0.891	0.429	0.00737
+              0.972	0.468	0.00804
+              1.053	0.507	0.00871
+              1.134	0.546	0.00938
+              1.215	0.585	0.01005
+              1.296	0.624	0.01072
+              1.377	0.663	0.01139
+              1.458	0.702	0.01206
+              1.539	0.741	0.01273
+              1.62	0.78	0.0134
+              1.701	0.819	0.01407
+              1.782	0.858	0.01474
+              1.863	0.897	0.01541
+              1.944	0.936	0.01608
+              2.025	0.975	0.01675
+              2.106	1.014	0.01742
+              2.187	1.053	0.01809
+              2.268	1.092	0.01876
+              2.349	1.131	0.01943
+              2.43	1.17	0.0201" 
+      offset="1.55	1.78	0.11" initial="free">
+      <plugin plugin="mujoco.elasticity.cable">
+        <config key="twist" value="1e7"/>
+        <config key="bend" value="6e7"/>
+        <config key="vmax" value="0.05"/>
+      </plugin>
+      <joint kind="main" damping=".15"/>
+      <geom type="capsule" size=".003" rgba="0 0 1 1" condim="1"/>
+    </composite> 
+
+    <!-- 004 wire -->
+    <composite prefix="Wire4" type="cable" 
+      vertex="0 0 0 
+              0	-0.12	0
+              0	-0.24	0
+              0	-0.36	0
+              0	-0.48	0
+              0	-0.6	0
+              0	-0.72	0
+              0	-0.84	0
+              0	-0.96	0
+              0	-1.08	0
+              0	-1.2	0
+              0	-1.32	0
+              0	-1.44	0
+              0	-1.56	0
+              0	-1.68	0
+              0	-1.8	0
+              0	-1.92	0
+              0	-2.04	0
+              0	-2.16	0
+              0	-2.28	0
+              0	-2.4	0" 
+      offset="4	2.95	0.11" initial="free">
+      <plugin plugin="mujoco.elasticity.cable">
+        <config key="twist" value="1e7"/>
+        <config key="bend" value="6e7"/>
+        <config key="vmax" value="0.05"/>
+      </plugin>
+      <joint kind="main" damping=".15"/>
+      <geom type="capsule" size=".003" rgba="0 0 1 1" condim="1"/>
+    </composite> 
+
+    <!-- Platforms 1 - KS_MIKO_17RT -->
+    <body name="platform1" pos="4 3 0.01">
+      <joint name="slide_joint1x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint1y" type="slide" axis="0 1 0" damping=".1"/>
+      <!-- Mover -->
+      <geom type="box" size="0.15 0.15 0.01" rgba="1 0 0 1" name="mover1"/>                 <!-- Red platform-->
+      <site name="platform1_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/>
+      <!-- Plate under the module -->
+      <body pos="0 0 0.03" euler="0 0 0" name="plat1">
+				<geom type="box" size="0.08 .08 0.02" rgba="0.5 0.5 0.5 1" name="plate1"/>
+			</body>
+      <body name="mod1" pos="0 0 0.1" euler="0 0 0">                                        <!-- Module/ Box -->
+        <site name="marker_p1" pos="0 0 0" size="0.01"/>
+				<joint name="turn1" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module1"/>
+        <body name="p1cav1" pos="0 -0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav1"/>
+          <site name="markerp1c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p1cav2" pos="-0.02 -0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav2"/>
+          <site name="markerp1c2" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p1cav3" pos="0.02 -0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav3"/>
+          <site name="markerp1c3" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p1cav4" pos="0 -0.05 0.02" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav4"/>
+          <site name="markerp1c4" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p1cav5" pos="-0.02 -0.05 0.02" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav5"/>
+          <site name="markerp1c5" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>      
+    </body>
+
+    <!-- Platform 2 - TEMPMANNHILI_LWB -->
+    <body name="platform2" pos="5 2 0.01">
+      <joint name="slide_joint2x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint2y" type="slide" axis="0 1 0" damping=".1"/>
+      <!-- Mover -->
+      <geom type="box" size="0.15 0.15 0.01" rgba="0 1 0 1" name="mover2"/>                 <!-- Green platform-->
+      <site name="platform2_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/>
+      <!-- Plate under the module -->
+      <body pos="0 0 0.03" euler="0 0 0" name="plat2">
+				<geom type="box" size="0.08 0.08 0.02" rgba="0.5 0.5 0.5 1" name="plate2"/>
+			</body>
+      <!-- Module -->
+      <body name="mod2" pos="0 0 0.1" euler="0 0 90">
+        <site name="marker_p2" pos="0 0 0" size="0.01"/>
+				<joint name="turn2" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module2"/>
+        <body name="p2cav1" pos="-0.02 0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 1 0 1" name="mod2_cav1"/>             <!--Green cavity-->
+          <site name="markerp2c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p2cav2" pos="0 0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod2_cav2"/>
+          <site name="markerp2c2" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p2cav3" pos="0.02 0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 1 1" name="mod2_cav3"/>             <!--Purple cavity-->
+          <site name="markerp2c3" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>
+      
+    </body>
+
+    <!-- Platform 3 - SCHALTBET_B -->
+    <body name="platform3" pos="1 2.3 0.01">
+      <joint name="slide_joint3x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint3y" type="slide" axis="0 1 0" damping=".1"/>
+      <!-- Mover -->
+      <geom type="box" size="0.15 0.15 0.01" rgba="1 1 0 1" name="mover3"/>      
+      <site name="platform3_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/>
+      <!-- Plate under the module -->
+      <body pos="0 0 0.03" euler="0 0 0" name="plat3">
+				<geom type="box" size="0.08 0.08 0.02" rgba="0.5 0.5 0.5 1" name="plate3"/>
+			</body>
+      <!-- Module -->
+      <body name="mod3" pos="0 0 0.1" euler="0 0 0">
+        <site name="marker_p3" pos="0 0 0" size="0.01"/>
+				<joint name="turn3" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module3"/>
+        <body name="p3cav1" pos="0.05 0 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod3_cav1"/>
+          <site name="markerp3c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p3cav2" pos="0.05 -0.02 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod3_cav2"/>
+          <site name="markerp3c2" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>
+    </body>
+
+    <!-- Platform 4 - KS_MIKO_17BR -->
+    <!--body name="platform4" pos="3 3.2 0.01"-->
+    <!--body name="platform4" pos="0.2 0.2 0.01"-->
+      <!--joint name="slide_joint4x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint4y" type="slide" axis="0 1 0" damping=".1"/-->
+      <!-- Mover -->
+      <!--geom type="box" size="0.15 0.15 0.01" rgba="0 0 1 1" name="mover4"/>      
+      <site name="platform4_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/-->
+      <!-- Plate under the module -->
+      <!--body pos="0 0 0.03" euler="0 0 0" name="plat4">
+				<geom type="box" size="0.08 0.08 0.02" rgba="0.5 0.5 0.5 1" name="plate4"/>
+			</body-->
+      <!-- Module -->
+      <!--body name="mod4" pos="0 0 0.1" euler="0 0 0">
+        <site name="marker_p4" pos="0 0 0" size="0.01"/>
+				<joint name="turn4" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module4"/>
+        <body name="p4cav1" pos="0.05 0 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod4_cav1"/>
+          <site name="markerp4c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p4cav2" pos="0.05 -0.02 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod4_cav2"/>
+          <site name="markerp4c2" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>
+    </body-->
+
+    <!-- Platform 5 - TEMPMANNHIMI -->
+    <!--body name="platform5" pos="5.5 1.4 0.01"-->
+    <!--body name="platform5" pos="0.2 0.6 0.01"-->
+      <!--joint name="slide_joint5x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint5y" type="slide" axis="0 1 0" damping=".1"/-->
+      <!-- Mover -->
+      <!--geom type="box" size="0.15 0.15 0.01" rgba="0 1 1 1" name="mover5"/>      
+      <site name="platform5_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/-->
+      <!-- Plate under the module -->
+      <!--body pos="0 0 0.03" euler="0 0 0" name="plat5">
+				<geom type="box" size="0.08 0.08 0.02" rgba="0.5 0.5 0.5 1" name="plate5"/>
+			</body-->
+      <!-- Module -->
+      <!--body name="mod5" pos="0 0 0.1" euler="0 0 0">
+        <site name="marker_p5" pos="0 0 0" size="0.01"/>
+				<joint name="turn5" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module5"/>
+        <body name="p5cav1" pos="0.05 0 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod5_cav1"/>
+          <site name="markerp5c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p5cav2" pos="0.05 -0.02 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod5_cav2"/>
+          <site name="markerp5c2" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>
+    </body-->
+
+    <!-- Platform 6 - SCHALTBET_A -->
+    <body name="platform6" pos="1.5 1.8 0.01">
+      <joint name="slide_joint6x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint6y" type="slide" axis="0 1 0" damping=".1"/>
+      <!-- Mover -->
+      <geom type="box" size="0.15 0.15 0.01" rgba="1 0 1 1" name="mover6"/>      
+      <site name="platform6_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/>
+      <!-- Plate under the module -->
+      <body pos="0 0 0.03" euler="0 0 0" name="plat6">
+				<geom type="box" size="0.08 0.08 0.02" rgba="0.5 0.5 0.5 1" name="plate6"/>
+			</body>
+      <!-- Module -->
+      <body name="mod6" pos="0 0 0.1" euler="0 0 0">
+        <site name="marker_p6" pos="0 0 0" size="0.01"/>
+				<joint name="turn6" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module6"/>
+        <body name="p6cav1" pos="0.05 0 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod6_cav1"/>
+          <site name="markerp6c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p6cav2" pos="0.05 -0.02 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod6_cav2"/>
+          <site name="markerp6c2" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>
+    </body>
+
+    <!-- Platform 7 - TEMPMANNHIRE_LWB -->
+    <body name="platform7" pos="4 0.5 0.01">
+      <joint name="slide_joint7x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint7y" type="slide" axis="0 1 0" damping=".1"/>
+      <!-- Mover -->
+      <geom type="box" size="0.15 0.15 0.01" rgba="1 0.5 0 1" name="mover7"/>      
+      <site name="platform7_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/>
+      <!-- Plate under the module -->
+      <body pos="0 0 0.03" euler="0 0 0" name="plat7">
+				<geom type="box" size="0.08 0.08 0.02" rgba="0.5 0.5 0.5 1" name="plate7"/>
+			</body>
+      <!-- Module -->
+      <body name="mod7" pos="0 0 0.1" euler="0 0 0">
+        <site name="marker_p7" pos="0 0 0" size="0.01"/>
+				<joint name="turn7" type="hinge" axis="0 0 1"/>
+				<geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module7"/>
+        <body name="p7cav1" pos="0 0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod7_cav1"/>
+          <site name="markerp7c1" pos="0 0 0" size="0.01"/>
+			  </body>
+        <body name="p7cav2" pos="-0.02 0.05 0" euler="0 0 0">
+				  <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod7_cav2"/>
+          <site name="markerp7c2" pos="0 0 0" size="0.01"/>
+			  </body>
+			</body>
+    </body>
+
+    <body name = "buendel1a" pos="4.578	2.392	0.11">
+      <geom type="sphere" size="0.008"  rgba="0 0 1 1"/>
+      <joint type="free"/>
+      <site name="b1a" pos="0 0 0" euler="0 0 0"/>
+    </body>
+
+    <body name = "buendel1b" pos="4	2.23	0.11">
+      <geom type="sphere" size="0.008"  rgba="0 0 1 1"/>
+      <joint type="free"/>
+      <site name="b1b" pos="0 0 0" euler="0 0 0"/>
+    </body>
+
+  </worldbody>
+
+  <equality>
+    <!-- Connections for the endpoints -->
+    <connect name="left_boundary_Wire1" body1="Wire1B_first" body2="p1cav3" anchor="0 0 0"/>
+    <connect name="right_boundary_Wire1" body1="p2cav3" body2="Wire1B_last" anchor="0 0 0"/>
+    <connect name="left_boundary_Wire2" body1="Wire2B_first" body2="p3cav2" anchor="0 0 0"/>
+    <connect name="right_boundary_Wire2" body1="p1cav2" body2="Wire2B_last" anchor="0 0 0"/>
+    <connect name="left_boundary_Wire3" body1="Wire3B_first" body2="p6cav2" anchor="0 0 0"/>
+    <connect name="right_boundary_Wire3" body1="p1cav5" body2="Wire3B_last" anchor="0 0 0"/>
+    <connect name="left_boundary_Wire4" body1="Wire4B_first" body2="p1cav1" anchor="0 0 0"/>
+    <connect name="right_boundary_Wire4" body1="p7cav1" body2="Wire4B_last" anchor="0 0 0"/>
+    <weld name="buendelp1a" body1="Wire1B_7" body2="buendel1a" anchor="0 0 0"/>
+    <weld name="buendelp1b" body1="Wire4B_7" body2="buendel1b" anchor="0 0 0"/>
+    <connect name="connect_buendel1" active="false" body1="buendel1a" body2="buendel1b" anchor="0 0 0"/>
+  </equality>
+
+  
+  <actuator>
+    <!-- Actuators for moving platforms -->
+    <motor joint="slide_joint1x" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint1y" ctrlrange="-1 1" gear="10"/> 
+    <motor joint="slide_joint2x" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint2y" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint3x" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint3y" ctrlrange="-1 1" gear="10"/>
+    <!--motor joint="slide_joint4x" ctrlrange="-1 1" gear="5"/>
+    <motor joint="slide_joint4y" ctrlrange="-1 1" gear="5"/>
+    <motor joint="slide_joint5x" ctrlrange="-1 1" gear="5"/>
+    <motor joint="slide_joint5y" ctrlrange="-1 1" gear="5"/-->
+    <motor joint="slide_joint6x" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint6y" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint7x" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint7y" ctrlrange="-1 1" gear="10"/>
+  </actuator>
+
+</mujoco>
