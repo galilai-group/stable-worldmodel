@@ -186,13 +186,14 @@ model.eval()
 
 ## Using a loaded model as a policy
 
-Once loaded, wrap the model with `AutoCostModel` or `AutoActionableModel` to use it with the `World` API:
+Load the model with `load_pretrained` and pass it to a policy to use it with the `World` API:
 
 ```python
-from stable_worldmodel.policy import AutoCostModel, WorldModelPolicy, PlanConfig
+from stable_worldmodel.wm.utils import load_pretrained
+from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.solver import CEMSolver
 
-cost_model = AutoCostModel('pusht_wm_v1')
+cost_model = load_pretrained('pusht_wm_v1')
 
 policy = WorldModelPolicy(
     solver=CEMSolver(model=cost_model, num_samples=300),
@@ -204,4 +205,4 @@ world.set_policy(policy)
 results = world.evaluate(episodes=50, seed=0)
 ```
 
-See [Policy](../api/policy.md) for details on `AutoCostModel`, `AutoActionableModel`, and `WorldModelPolicy`.
+See [Policy](../api/policy.md) for details on `WorldModelPolicy` and `FeedForwardPolicy`.

@@ -15,6 +15,12 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoModelForImageClassification
 
 import stable_worldmodel as swm
+from omegaconf import OmegaConf
+
+
+# Allow small arithmetic in the configs, e.g.
+# n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+OmegaConf.register_new_resolver('eval', eval, replace=True)
 
 
 DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
@@ -25,73 +31,49 @@ DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
 
 
 def get_data(cfg, dataset_cfg, model_cfg):
-    """Setup dataset with image transforms and normalization."""
+    """Setup dataset with image transforms and normalization.
 
-    def get_img_pipeline(key, target, img_size=224):
-        return spt.data.transforms.Compose(
-            spt.data.transforms.ToImage(
-                **spt.data.dataset_stats.ImageNet,
-                source=key,
-                target=target,
-            ),
-            spt.data.transforms.Resize(img_size, source=key, target=target),
-            spt.data.transforms.CenterCrop(
-                img_size, source=key, target=target
-            ),
-        )
+    Uses the current dataset API (``swm.data.load_dataset`` -> a flat
+    ``Dataset`` reader, format auto-detected). Mirrors how datasets are
+    loaded/transformed in ``scripts/train/lewm.py``: a single ``pixels``
+    column (shape ``(T, C, H, W)``) with ImageNet normalization + resize,
+    plus optional per-column z-score normalization for extra encoding keys.
+    """
 
-    def norm_col_transform(dataset, col='pixels'):
-        """Normalize column to zero mean, unit variance."""
-        data = dataset[col][:]
-        mean = data.mean(0).unsqueeze(0)
-        std = data.std(0).unsqueeze(0)
-        return lambda x: (x - mean) / std
+    # Columns to read: pixels (always) + any extra encoding inputs.
+    keys_to_load = ['pixels'] + list(model_cfg.get('encoding', {}).keys())
 
-    # Use dataset_cfg for specific dataset parameters
-    if dataset_cfg.data_format == 'frame':
-        dataset = swm.data.FrameDataset(
-            dataset_cfg.dataset_name,
-            num_steps=dataset_cfg.n_steps,
-            frameskip=cfg.frameskip,
-            transform=None,
-            cache_dir=cfg.get('cache_dir', None),
-        )
-    elif dataset_cfg.data_format == 'video':
-        dataset = swm.data.VideoDataset(
-            dataset_cfg.dataset_name,
-            num_steps=dataset_cfg.n_steps,
-            frameskip=cfg.frameskip,
-            transform=None,
-            cache_dir=cfg.get('cache_dir', None),
-        )
-    else:
-        raise NotImplementedError(
-            f"Data format '{dataset_cfg.data_format}' not supported."
-        )
-
-    all_norm_transforms = []
-    # Use global cfg for encoding keys to ensure consistency
-    for key in model_cfg.get('encoding', {}):
-        trans_fn = norm_col_transform(dataset.dataset, key)
-        trans_fn = spt.data.transforms.WrapTorchTransform(
-            trans_fn, source=key, target=key
-        )
-        all_norm_transforms.append(trans_fn)
-
-    # Image size must be multiple of DINO patch size (14)
-    img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
-
-    # Apply transforms to all steps
-    transform = spt.data.transforms.Compose(
-        *[
-            get_img_pipeline(f'{col}.{i}', f'{col}.{i}', img_size)
-            for col in ['pixels']
-            for i in range(dataset_cfg.n_steps)
-        ],
-        *all_norm_transforms,
+    dataset = swm.data.load_dataset(
+        dataset_cfg.dataset_name,
+        cache_dir=cfg.get('cache_dir', None),
+        frameskip=cfg.frameskip,
+        num_steps=dataset_cfg.n_steps,
+        keys_to_load=keys_to_load,
+        transform=None,
     )
 
-    dataset.transform = transform
+    # Image preprocessing on the single `pixels` key, matching training.
+    transforms = [
+        spt.data.transforms.ToImage(
+            **spt.data.dataset_stats.ImageNet,
+            source='pixels',
+            target='pixels',
+        ),
+        spt.data.transforms.Resize(
+            cfg.image_size, source='pixels', target='pixels'
+        ),
+    ]
+
+    # Per-column z-score normalization for extra encoding keys (proprio/action).
+    for key in model_cfg.get('encoding', {}):
+        if key not in dataset.column_names:
+            raise ValueError(
+                f"Encoding key '{key}' not found in dataset columns."
+            )
+        transforms.append(swm.data.column_normalizer(dataset, key, key))
+
+    dataset.transform = spt.data.transforms.Compose(*transforms)
+
     rnd_gen = torch.Generator().manual_seed(cfg.seed)
 
     # Use dataset_cfg for split and loader settings
@@ -107,7 +89,7 @@ def get_data(cfg, dataset_cfg, model_cfg):
         batch_size=dataset_cfg.batch_size,
         num_workers=dataset_cfg.num_workers,
         drop_last=True,
-        persistent_workers=True,
+        persistent_workers=dataset_cfg.num_workers > 0,
         pin_memory=True,
         shuffle=True,
         generator=rnd_gen,
@@ -115,11 +97,7 @@ def get_data(cfg, dataset_cfg, model_cfg):
     with open_dict(model_cfg) as model_cfg:
         model_cfg.extra_dims = {}
         for key in model_cfg.get('encoding', {}):
-            if key not in dataset.dataset.column_names:
-                raise ValueError(
-                    f"Encoding key '{key}' not found in dataset columns."
-                )
-            inpt_dim = dataset.dataset[0][key].numel()
+            inpt_dim = dataset.get_dim(key)
             model_cfg.extra_dims[key] = (
                 inpt_dim if key != 'action' else inpt_dim * cfg.frameskip
             )
@@ -202,11 +180,13 @@ def get_world_model(cfg, model_cfg):
     For visualization, we only need the model to implement the `encode` method."""
 
     if model_cfg.model_name is not None:
-        model = swm.policy.AutoCostModel(model_cfg.model_name).to(
-            cfg.get('device', 'cpu')
-        )
-        model = model.to(cfg.get('device', 'cpu'))
-        model = model.eval()
+        # Load a pretrained checkpoint (folder with weights.pt + config.json)
+        # from $STABLEWM_HOME/checkpoints/, as done in scripts/plan/eval_wm.py.
+        model = swm.wm.utils.load_pretrained(model_cfg.model_name)
+        model = model.to(cfg.get('device', 'cpu')).eval()
+        model.requires_grad_(False)
+        if hasattr(model, 'interpolate_pos_encoding'):
+            model.interpolate_pos_encoding = True
     else:  # no checkpoint found, build model from scratch
         encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(
             cfg, model_cfg
@@ -273,20 +253,27 @@ def collect_embeddings(cfg, exp_cfg):
     )
     dataset_embeddings = []
 
+    backbone_only = exp_cfg.world_model.get('backbone_only', False)
+
     # Process batches and collect embeddings
     for batch in tqdm(data, desc=f'Processing {exp_cfg.dataset.dataset_name}'):
         for key in batch:
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(cfg.get('device', 'cpu'))
 
-        # Encode
-        batch = world_model.encode(batch, target='embed')
-        if exp_cfg.world_model.get(
-            'backbone_only', False
-        ):  # use only vision backbone embeddings
-            dataset_embeddings.append(batch['pixels_embed'].cpu().detach())
-        else:  # use full model embeddings (proropio + action + vision)
-            dataset_embeddings.append(batch['embed'].cpu().detach())
+        # Encode. PreJEPA exposes `encode(info, target='embed')` producing
+        # `embed`/`pixels_embed`; LeWM exposes `encode(info)` producing
+        # `emb`/`pixels_emb`. Support both.
+        with torch.no_grad():
+            try:
+                batch = world_model.encode(batch, target='embed')
+                full_key, backbone_key = 'embed', 'pixels_embed'
+            except TypeError:
+                batch = world_model.encode(batch)
+                full_key, backbone_key = 'emb', 'pixels_emb'
+
+        key = backbone_key if backbone_only else full_key
+        dataset_embeddings.append(batch[key].cpu().detach())
 
     # Consolidate and flatten embeddings for this dataset
     if len(dataset_embeddings) > 0:
@@ -356,8 +343,15 @@ def run(cfg):
     all_embeddings_list = []
     all_labels_list = []  # Added to track source datasets
 
-    # Iterate over all defined datasets and collect embeddings
-    for exp_cfg in cfg.datasets.values():
+    # Select which datasets to process (defaults to all defined).
+    selected = cfg.get('datasets_to_run', None)
+    if selected:
+        exp_cfgs = [cfg.datasets[name] for name in selected]
+    else:
+        exp_cfgs = list(cfg.datasets.values())
+
+    # Iterate over the selected datasets and collect embeddings
+    for exp_cfg in exp_cfgs:
         embeddings = collect_embeddings(cfg, exp_cfg)
 
         if embeddings is not None:
