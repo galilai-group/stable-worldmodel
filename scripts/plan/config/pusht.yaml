@@ -1,6 +1,7 @@
 defaults:
   - launcher: local
   - solver: cem
+  - objective: goal_mse
   - _self_
 
 world:
