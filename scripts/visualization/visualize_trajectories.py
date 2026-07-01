@@ -303,7 +303,9 @@ def collect_embeddings(cfg, exp_cfg):
         else:
             truth = enc['emb']
             # LeWM: `predicted_emb`; PreJEPA: `predicted_embedding`.
-            pred = rolled.get('predicted_emb', rolled.get('predicted_embedding'))
+            pred = rolled.get(
+                'predicted_emb', rolled.get('predicted_embedding')
+            )
 
         trajs_embeddings.append(flatten_emb(truth[0]).cpu().detach())
         predicted_embeddings.append(flatten_emb(pred[0, 0]).cpu().detach())
@@ -590,7 +592,9 @@ def create_video_visualization(
                 imageio_ffmpeg.get_ffmpeg_exe()
             )
         except Exception as exc:  # noqa: BLE001
-            logging.warning(f'Could not locate ffmpeg via imageio-ffmpeg: {exc}')
+            logging.warning(
+                f'Could not locate ffmpeg via imageio-ffmpeg: {exc}'
+            )
     writer = animation.FFMpegWriter(fps=10, codec='libx264')
     ani.save(output_file, writer=writer)
     plt.close()

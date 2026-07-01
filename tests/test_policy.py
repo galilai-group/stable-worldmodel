@@ -778,4 +778,3 @@ def test_worldmodel_policy_no_warmstart_without_actionable():
 
     assert solver.received_init_action.shape == (1, 5, 2)
     assert solver.received_init_action.eq(0).all()
-
