@@ -659,7 +659,7 @@ class MockSolverWithWarmStart:
         return self._config.horizon
 
     def solve(self, info_dict: dict, init_action=None) -> dict:
-        from stable_worldmodel.solver.utils import prepare_init_action
+        from stable_worldmodel.planning.solver.utils import prepare_init_action
 
         init_action = prepare_init_action(
             self.model,

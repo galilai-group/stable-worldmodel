@@ -5,7 +5,7 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
-from stable_worldmodel.solver.pgd import PGDSolver
+from stable_worldmodel.planning.solver.pgd import PGDSolver
 
 
 class DummyCostModel:
@@ -34,7 +34,7 @@ def test_pgd_solver_init():
     """Test PGDSolver initialization creates unconfigured instance."""
     dummy_model = DummyCostModel()
 
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     assert solver._action_simplex_dim is None
     assert solver._n_envs is None
     assert solver._action_dim is None
@@ -46,7 +46,7 @@ def test_pgd_solver_properties_before_configure():
     """Test that properties return None before configuration."""
     dummy_model = DummyCostModel()
 
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     assert solver.n_envs is None
     # action_dim and horizon will raise AttributeError since config is None
 
@@ -59,7 +59,7 @@ def test_pgd_solver_properties_before_configure():
 def test_pgd_solver_configure_discrete_action_space():
     """Test configuration with discrete action space."""
     dummy_model = DummyCostModel()
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=8, receding_horizon=4, action_block=2)
 
@@ -75,7 +75,7 @@ def test_pgd_solver_configure_discrete_action_space():
 def test_pgd_solver_configure_multi_env():
     """Test configuration with multiple environments."""
     dummy_model = DummyCostModel()
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     action_space = gym_spaces.Discrete(10)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -87,7 +87,7 @@ def test_pgd_solver_configure_multi_env():
 def test_pgd_solver_properties_after_configure():
     """Test that properties work correctly after configuration."""
     dummy_model = DummyCostModel()
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     # action_space = gym_spaces.Box(low=-1, high=1, shape=(4, 3), dtype=np.float32)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=10, receding_horizon=5, action_block=2)
@@ -103,7 +103,7 @@ def test_pgd_solver_properties_after_configure():
 def test_pgd_solver_action_dim_with_action_block():
     """Test action_dim calculation with different action_block values."""
     dummy_model = DummyCostModel()
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     action_space = gym_spaces.Discrete(5)
 
     # Test action_block = 1
@@ -113,7 +113,7 @@ def test_pgd_solver_action_dim_with_action_block():
     assert solver.action_simplex_dim == 5  # 5 * 1
 
     # Test action_block = 3
-    solver2 = PGDSolver(model=dummy_model, n_steps=10)
+    solver2 = PGDSolver(cost=dummy_model, n_steps=10)
     config2 = PlanConfig(horizon=10, receding_horizon=5, action_block=3)
     solver2.configure(action_space=action_space, n_envs=1, config=config2)
     assert solver2.action_dim == 3  # 1 * 3 (base_dim * action_block)
@@ -128,7 +128,7 @@ def test_pgd_solver_action_dim_with_action_block():
 def test_pgd_solver_solve_full_horizon():
     """Test solving generates full action sequence."""
     dummy_model = DummyCostModel()
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=10, receding_horizon=5, action_block=1)
 
@@ -144,7 +144,7 @@ def test_pgd_solver_solve_full_horizon():
 def test_pgd_solver_solve_with_action_block():
     """Test solving with action blocking."""
     dummy_model = DummyCostModel()
-    solver = PGDSolver(model=dummy_model, n_steps=10)
+    solver = PGDSolver(cost=dummy_model, n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=3)
 
@@ -157,7 +157,7 @@ def test_pgd_solver_solve_with_action_block():
 
 def test_pgd_solver_solve_single_env():
     """Test solving with a single environment."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=7, receding_horizon=3, action_block=1)
 
@@ -170,7 +170,7 @@ def test_pgd_solver_solve_single_env():
 
 def test_pgd_solver_solve_ignores_info_dict():
     """Test that solve ignores info_dict content."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=3)
 
@@ -200,7 +200,7 @@ def test_pgd_solver_solve_ignores_info_dict():
 
 def test_pgd_solver_with_init_action():
     """Test warm-starting with partial action sequence."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=0, var_scale=0.0)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=0, var_scale=0.0)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=10, receding_horizon=5, action_block=1)
 
@@ -216,7 +216,7 @@ def test_pgd_solver_with_init_action():
 
 def test_pgd_solver_warm_start_full_horizon():
     """Test warm-starting with complete action sequence."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=0, var_scale=0.0)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=0, var_scale=0.0)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -232,7 +232,7 @@ def test_pgd_solver_warm_start_full_horizon():
 
 def test_pgd_solver_warm_start_with_action_block():
     """Test warm-starting with action blocking."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=0)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=0)
     action_space = gym_spaces.Discrete(5)
 
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=3)
@@ -247,7 +247,7 @@ def test_pgd_solver_warm_start_with_action_block():
 def test_pgd_solver_warm_start_with_var_scale():
     """Test warm-starting with var_scale."""
     solver = PGDSolver(
-        model=DummyCostModel(), n_steps=0, var_scale=0.1, num_samples=2
+        cost=DummyCostModel(), n_steps=0, var_scale=0.1, num_samples=2
     )
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=3)
@@ -265,7 +265,7 @@ def test_pgd_solver_warm_start_with_var_scale():
 
 def test_pgd_solver_warm_start_with_from_scalar():
     """Test warm-starting with from_scalar."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=0, var_scale=0.0)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=0, var_scale=0.0)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=3)
     solver.configure(action_space=action_space, n_envs=2, config=config)
@@ -287,7 +287,7 @@ def test_pgd_solver_warm_start_with_from_scalar():
 
 def test_pgd_solver_callable():
     """Test that solver is callable via __call__."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -302,7 +302,7 @@ def test_pgd_solver_callable():
 
 def test_pgd_solver_callable_with_kwargs():
     """Test callable interface with keyword arguments."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -321,7 +321,7 @@ def test_pgd_solver_callable_with_kwargs():
 
 def test_pgd_solver_solve_empty_init_action():
     """Test solving with empty init_action tensor."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -336,7 +336,7 @@ def test_pgd_solver_solve_empty_init_action():
 
 def test_pgd_solver_horizon_1():
     """Test solver with horizon of 1."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10, action_noise=0.1)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10, action_noise=0.1)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=1, receding_horizon=1, action_block=1)
 
@@ -348,7 +348,7 @@ def test_pgd_solver_horizon_1():
 
 def test_pgd_solver_large_horizon():
     """Test solver with large horizon."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=100, receding_horizon=50, action_block=1)
 
@@ -360,7 +360,7 @@ def test_pgd_solver_large_horizon():
 
 def test_pgd_solver_many_envs():
     """Test solver with many parallel environments."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=10, receding_horizon=5, action_block=1)
 
@@ -377,8 +377,8 @@ def test_pgd_solver_many_envs():
 
 def test_pgd_solver_deterministic_with_seed():
     """Test that results are reproducible with seeds."""
-    solver1 = PGDSolver(model=DummyCostModel(), n_steps=10)
-    solver2 = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver1 = PGDSolver(cost=DummyCostModel(), n_steps=10)
+    solver2 = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=2)
 
@@ -402,7 +402,7 @@ def test_pgd_solver_deterministic_with_seed():
 
 def test_pgd_solver_multiple_solves():
     """Test multiple solve calls produce different results."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=5)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=5)
     action_space = gym_spaces.Discrete(10)
     config = PlanConfig(horizon=10, receding_horizon=5, action_block=1)
 
@@ -417,7 +417,7 @@ def test_pgd_solver_multiple_solves():
 
 def test_pgd_solver_receding_horizon_pattern():
     """Test typical receding horizon planning pattern."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=10, receding_horizon=5, action_block=1)
 
@@ -442,7 +442,7 @@ def test_pgd_solver_receding_horizon_pattern():
 
 def test_pgd_solver_respects_action_space_bounds():
     """Test that sampled actions have only allowed discrete values 0, 1, 2, 3, or 4."""
-    solver = PGDSolver(model=DummyCostModel(), n_steps=10)
+    solver = PGDSolver(cost=DummyCostModel(), n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=20, receding_horizon=10, action_block=1)
 

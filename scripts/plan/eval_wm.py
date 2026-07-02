@@ -114,7 +114,9 @@ def run(cfg: DictConfig):
             )
             model.predictor = torch.compile(model.predictor)
         config = swm.PlanConfig(**cfg.plan_config)
-        solver = hydra.utils.instantiate(cfg.solver, model=model)
+        objective = hydra.utils.instantiate(cfg.objective)
+        cost = swm.planning.ShootingCostEvaluator(model, objective)
+        solver = hydra.utils.instantiate(cfg.solver, cost=cost)
         policy = swm.policy.WorldModelPolicy(
             solver=solver, config=config, process=process, transform=transform
         )

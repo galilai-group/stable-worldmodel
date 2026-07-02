@@ -3,7 +3,7 @@ from typing import Any, Protocol, runtime_checkable
 import gymnasium as gym
 import torch
 
-from stable_worldmodel.protocols import Costable  # noqa: F401
+from stable_worldmodel.protocols import Constrainable, Costable  # noqa: F401
 
 
 @runtime_checkable

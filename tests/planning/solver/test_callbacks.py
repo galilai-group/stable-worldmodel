@@ -6,7 +6,7 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
-from stable_worldmodel.solver.callbacks import (
+from stable_worldmodel.planning.solver.callbacks import (
     ActionNormRecorder,
     BestCostRecorder,
     Callback,
@@ -17,9 +17,9 @@ from stable_worldmodel.solver.callbacks import (
     MeanShiftRecorder,
     VarNormRecorder,
 )
-from stable_worldmodel.solver.cem import CEMSolver
-from stable_worldmodel.solver.gd import GradientSolver
-from stable_worldmodel.solver.icem import ICEMSolver
+from stable_worldmodel.planning.solver.cem import CEMSolver
+from stable_worldmodel.planning.solver.gd import GradientSolver
+from stable_worldmodel.planning.solver.icem import ICEMSolver
 
 
 class DummyCostModel:
@@ -278,7 +278,7 @@ def test_elite_spread_recorder():
 
 def _gd_solver(callbacks):
     solver = GradientSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=3,
         num_samples=4,
         batch_size=2,
@@ -294,7 +294,7 @@ def _gd_solver(callbacks):
 
 def _cem_solver(callbacks):
     solver = CEMSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=3,
         num_samples=20,
         batch_size=2,
@@ -311,7 +311,7 @@ def _cem_solver(callbacks):
 
 def _icem_solver(callbacks):
     solver = ICEMSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=3,
         num_samples=20,
         batch_size=2,

@@ -6,7 +6,7 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
-from stable_worldmodel.solver.lagrangian import LagrangianSolver
+from stable_worldmodel.planning.solver.lagrangian import LagrangianSolver
 
 
 # ---------------------------------------------------------------------------
@@ -57,12 +57,12 @@ def make_box_space(action_dim: int = 4):
 
 
 def make_solver(
-    model=None, n_steps=5, n_outer_steps=2, num_samples=3, **kwargs
+    cost=None, n_steps=5, n_outer_steps=2, num_samples=3, **kwargs
 ):
-    if model is None:
-        model = CostOnlyModel()
+    if cost is None:
+        cost = CostOnlyModel()
     return LagrangianSolver(
-        model=model,
+        cost=cost,
         n_steps=n_steps,
         n_outer_steps=n_outer_steps,
         num_samples=num_samples,
@@ -101,7 +101,7 @@ def test_init_defaults():
 def test_init_custom_params():
     """Constructor stores custom hyperparameters correctly."""
     solver = LagrangianSolver(
-        model=CostOnlyModel(),
+        cost=CostOnlyModel(),
         n_steps=20,
         n_outer_steps=7,
         num_samples=5,
@@ -366,7 +366,7 @@ def test_solve_actions_shape_with_action_block():
 def test_solve_actions_shape_with_constraints():
     """Actions shape is correct when model has constraints."""
     solver = make_solver(
-        model=ConstrainedModel(), n_steps=5, n_outer_steps=3, num_samples=4
+        cost=ConstrainedModel(), n_steps=5, n_outer_steps=3, num_samples=4
     )
     configure(solver, action_dim=4, n_envs=2, horizon=4, action_block=1)
 
@@ -376,7 +376,7 @@ def test_solve_actions_shape_with_constraints():
 
 def test_solve_lambdas_none_without_constraints():
     """lambdas is None when model has no constraints."""
-    solver = make_solver(model=CostOnlyModel())
+    solver = make_solver(cost=CostOnlyModel())
     configure(solver)
     out = solver.solve({})
     assert out['lambdas'] is None
@@ -385,7 +385,7 @@ def test_solve_lambdas_none_without_constraints():
 def test_solve_lambdas_shape_with_constraints():
     """lambdas has shape (n_envs, n_constraints) when constraints exist."""
     solver = make_solver(
-        model=ConstrainedModel(), n_steps=3, n_outer_steps=2, num_samples=3
+        cost=ConstrainedModel(), n_steps=3, n_outer_steps=2, num_samples=3
     )
     configure(solver, action_dim=4, n_envs=3, horizon=4, action_block=1)
 
@@ -397,7 +397,7 @@ def test_solve_lambdas_shape_with_constraints():
 def test_solve_lambdas_nonnegative():
     """Lagrange multipliers are always >= 0."""
     solver = make_solver(
-        model=ConstrainedModel(), n_steps=5, n_outer_steps=5, num_samples=4
+        cost=ConstrainedModel(), n_steps=5, n_outer_steps=5, num_samples=4
     )
     configure(solver, action_dim=4, n_envs=2, horizon=4, action_block=1)
 
@@ -408,7 +408,7 @@ def test_solve_lambdas_nonnegative():
 def test_solve_constraint_violation_recorded():
     """constraint_violation list is populated when constraints are present."""
     solver = make_solver(
-        model=ConstrainedModel(), n_steps=3, n_outer_steps=2, num_samples=3
+        cost=ConstrainedModel(), n_steps=3, n_outer_steps=2, num_samples=3
     )
     configure(solver, action_dim=4, n_envs=2, horizon=4, action_block=1)
 
@@ -437,7 +437,7 @@ def test_solve_callable_interface():
 def test_persist_multipliers_warm_starts():
     """With persist_multipliers=True, lambdas carry over between calls."""
     solver = make_solver(
-        model=ConstrainedModel(),
+        cost=ConstrainedModel(),
         n_steps=5,
         n_outer_steps=3,
         num_samples=4,
@@ -460,7 +460,7 @@ def test_persist_multipliers_warm_starts():
 def test_no_persist_multipliers_resets():
     """With persist_multipliers=False, lambdas reset each solve()."""
     solver = make_solver(
-        model=ConstrainedModel(),
+        cost=ConstrainedModel(),
         n_steps=5,
         n_outer_steps=3,
         num_samples=4,
@@ -488,7 +488,7 @@ def test_no_persist_multipliers_resets():
 def test_solve_with_batch_size_smaller_than_n_envs():
     """batch_size < n_envs triggers batched processing and still returns correct shape."""
     solver = LagrangianSolver(
-        model=CostOnlyModel(),
+        cost=CostOnlyModel(),
         n_steps=3,
         n_outer_steps=2,
         num_samples=3,
@@ -503,7 +503,7 @@ def test_solve_with_batch_size_smaller_than_n_envs():
 def test_solve_with_batch_size_equal_to_n_envs():
     """batch_size == n_envs is equivalent to no batching."""
     solver = LagrangianSolver(
-        model=CostOnlyModel(),
+        cost=CostOnlyModel(),
         n_steps=3,
         n_outer_steps=2,
         num_samples=3,
@@ -518,7 +518,7 @@ def test_solve_with_batch_size_equal_to_n_envs():
 def test_solve_with_batch_size_one():
     """batch_size=1 processes one env at a time."""
     solver = LagrangianSolver(
-        model=CostOnlyModel(),
+        cost=CostOnlyModel(),
         n_steps=3,
         n_outer_steps=2,
         num_samples=2,
@@ -549,7 +549,7 @@ def test_solve_expands_tensor_info():
             return action_candidates.pow(2).mean(dim=(-1, -2))
 
     solver = LagrangianSolver(
-        model=InfoConsumingModel(),
+        cost=InfoConsumingModel(),
         n_steps=2,
         n_outer_steps=1,
         num_samples=3,
@@ -572,7 +572,7 @@ def test_solve_expands_numpy_info():
             return action_candidates.pow(2).mean(dim=(-1, -2))
 
     solver = LagrangianSolver(
-        model=NpInfoModel(),
+        cost=NpInfoModel(),
         n_steps=2,
         n_outer_steps=1,
         num_samples=2,
@@ -608,7 +608,7 @@ def test_rho_grows_each_outer_step():
     """rho should not exceed rho_max."""
     n_outer = 20
     solver = LagrangianSolver(
-        model=ConstrainedModel(),
+        cost=ConstrainedModel(),
         n_steps=2,
         n_outer_steps=n_outer,
         num_samples=2,
@@ -665,7 +665,7 @@ def test_solve_cost_shape_assertion_violated():
             return action_candidates.pow(2).mean()
 
     solver = LagrangianSolver(
-        model=BadCostModel(), n_steps=2, n_outer_steps=1, num_samples=2
+        cost=BadCostModel(), n_steps=2, n_outer_steps=1, num_samples=2
     )
     configure(solver, action_dim=4, n_envs=2, horizon=4, action_block=1)
 
@@ -681,7 +681,7 @@ def test_solve_cost_requires_grad_assertion():
             return action_candidates.detach().pow(2).mean(dim=(-1, -2))
 
     solver = LagrangianSolver(
-        model=NoGradModel(), n_steps=2, n_outer_steps=1, num_samples=2
+        cost=NoGradModel(), n_steps=2, n_outer_steps=1, num_samples=2
     )
     configure(solver, action_dim=4, n_envs=2, horizon=4, action_block=1)
 
@@ -708,9 +708,7 @@ def test_cost_decreases_over_steps():
             return (action_candidates - self.goal).pow(2).mean(dim=(-1, -2))
 
     solver = LagrangianSolver(
-        model=QuadraticCost(
-            goal=0.0
-        ),  # goal at zero; init at zero -> cost = 0
+        cost=QuadraticCost(goal=0.0),  # goal at zero; init at zero -> cost = 0
         n_steps=30,
         n_outer_steps=1,
         num_samples=1,
@@ -730,7 +728,7 @@ def test_constrained_solve_reduces_violation():
 
     def run(n_outer):
         solver = LagrangianSolver(
-            model=ConstrainedModel(),
+            cost=ConstrainedModel(),
             n_steps=20,
             n_outer_steps=n_outer,
             num_samples=8,
@@ -784,7 +782,7 @@ def test_solve_info_dict_passthrough_non_tensor():
             return action_candidates.pow(2).mean(dim=(-1, -2))
 
     solver = LagrangianSolver(
-        model=ScalarInfoModel(),
+        cost=ScalarInfoModel(),
         n_steps=2,
         n_outer_steps=1,
         num_samples=2,
@@ -798,7 +796,7 @@ def test_solve_info_dict_passthrough_non_tensor():
 def test_action_noise_applied_during_solve():
     """action_noise > 0 perturbs actions between inner steps."""
     solver = LagrangianSolver(
-        model=CostOnlyModel(),
+        cost=CostOnlyModel(),
         n_steps=5,
         n_outer_steps=1,
         num_samples=1,
