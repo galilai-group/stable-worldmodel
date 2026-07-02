@@ -38,6 +38,93 @@ def _format_size(n_bytes: int) -> str:
     return f'{n_bytes:.1f} PB'
 
 
+def _normalize_gray(frames):
+    """Expand single-channel ``HxWx1`` frames to ``HxWx3`` for libx264.
+
+    ``is_image_column`` accepts 1- and 3-channel frames, but the MP4 encoder
+    wants RGB (or 2D grayscale); repeating the channel is the safe choice.
+    """
+    import numpy as np
+
+    out = []
+    for f in frames:
+        f = np.asarray(f)
+        if f.ndim == 3 and f.shape[-1] == 1:
+            f = np.repeat(f, 3, axis=-1)
+        out.append(f)
+    return out
+
+
+def _panel_frames(views_by_key: dict[str, list]):
+    """Compose several image columns of one episode into a single labeled,
+    side-by-side frame stack.
+
+    ``views_by_key`` maps a column name to its per-step frames (already ``HxWxC``
+    uint8, single-channel expanded). Views are padded to a common height and
+    laid out left-to-right with a label under each. Mirrors the compositing idiom
+    in :func:`stable_worldmodel.plot.video_utils.save_panel_videos` but stays
+    inline so the caller owns the ``ep<idx>.mp4`` naming and differing view
+    resolutions are handled.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+
+    labels = list(views_by_key)
+    views = [_normalize_gray(views_by_key[k]) for k in labels]
+
+    # Per-view H/W (from each view's first frame) and the shared canvas cell.
+    dims = [np.asarray(v[0]).shape[:2] for v in views]
+    h = max(d[0] for d in dims)
+    w = max(d[1] for d in dims)
+    n = len(labels)
+    T = max(len(v) for v in views)
+
+    pad, gap, lh = max(12, w // 14), max(10, w // 16), max(22, w // 9)
+    cw = (2 * pad + n * w + (n - 1) * gap + 15) // 16 * 16
+    ch = (2 * pad + h + lh + 15) // 16 * 16
+    try:
+        font = ImageFont.truetype('DejaVuSans.ttf', max(12, w // 14))
+    except OSError:
+        font = ImageFont.load_default()
+    y_text = pad + h + max(8, lh // 4)
+
+    composed = []
+    for t in range(T):
+        canvas = np.full((ch, cw, 3), 250, dtype=np.uint8)
+        for j, view in enumerate(views):
+            frame = np.asarray(view[min(t, len(view) - 1)])
+            fh, fw = frame.shape[:2]
+            x = pad + j * (w + gap)
+            canvas[pad : pad + fh, x : x + fw] = frame
+        img = Image.fromarray(canvas)
+        draw = ImageDraw.Draw(img)
+        for j, label in enumerate(labels):
+            b = draw.textbbox((0, 0), label, font=font)
+            x = pad + j * (w + gap) + w // 2 - (b[2] - b[0]) // 2
+            draw.text((x, y_text), label, fill=(130, 130, 130), font=font)
+        composed.append(np.array(img))
+    return composed
+
+
+def _open_folder(path) -> None:
+    """Open ``path`` in the OS file browser; print the path on any failure."""
+    import subprocess
+    import sys
+
+    p = str(path)
+    try:
+        if sys.platform == 'darwin':
+            subprocess.run(['open', p], check=False)
+        elif sys.platform.startswith('win'):
+            import os
+
+            os.startfile(p)  # type: ignore[attr-defined]
+        else:
+            subprocess.run(['xdg-open', p], check=False)
+    except Exception:
+        print(f'Output folder: {p}')
+
+
 def _inspect_hdf5_dataset(path) -> None:
     import h5py
 
@@ -125,6 +212,29 @@ def _format_label(path, fmt) -> str:
     if fmt.name == 'folder':
         return _detect_folder_format(path)
     return _FORMAT_LABELS.get(fmt.name, fmt.name)
+
+
+def _resolve_dataset_path(cache_dir, name):
+    """Resolve a dataset *name* to its on-disk entry via the format registry,
+    or ``None`` if nothing recognizable exists.
+
+    A dataset is addressed by name; its on-disk entry is either a directory
+    (lance/lance_video/folder/video) or a file (hdf5). Try each candidate and
+    let the registry say what it is, so callers cover the same formats the
+    listing does. Shared by ``inspect``, ``convert`` and ``merge``.
+    """
+    from stable_worldmodel.data import detect_format
+
+    candidates = [
+        cache_dir / name,
+        cache_dir / f'{name}.lance',
+        cache_dir / f'{name}.h5',
+        cache_dir / f'{name}.hdf5',
+    ]
+    for path in candidates:
+        if path.exists() and detect_format(path) is not None:
+            return path
+    return None
 
 
 def _iter_datasets(cache_dir):
@@ -419,38 +529,180 @@ def inspect(
     from stable_worldmodel.data.utils import get_cache_dir
 
     cache_dir = get_cache_dir(sub_folder='datasets')
-    # A dataset is addressed by name; its on-disk entry is either a directory
-    # (lance/lance_video/folder/video) or a file (hdf5). Try each candidate and
-    # let the registry say what it is, so inspect covers the same formats the
-    # listing does.
-    candidates = [
-        cache_dir / name,
-        cache_dir / f'{name}.lance',
-        cache_dir / f'{name}.h5',
-        cache_dir / f'{name}.hdf5',
-    ]
-    for path in candidates:
-        if not path.exists():
-            continue
-        fmt = detect_format(path)
-        if fmt is None:
-            continue
-        if fmt.name in ('lance', 'lance_video'):
-            _inspect_lance_dataset(path)
-        elif fmt.name == 'hdf5':
-            _inspect_hdf5_dataset(path)
-        elif fmt.name in ('folder', 'video'):
-            _inspect_folder_dataset(path)
-        else:
-            print(f'[bold]Name:[/bold]   {path.stem}')
-            print(f'[bold]Format:[/bold] {_format_label(path, fmt)}')
-            print(f'[bold]Path:[/bold]   {path}')
-            print(f'[bold]Size:[/bold]   {_format_size(_entry_size(path))}')
-        return
+    path = _resolve_dataset_path(cache_dir, name)
+    if path is None:
+        print(f'[red]Dataset not found: {name}[/red]')
+        print('Run [cyan]swm datasets[/cyan] to see available datasets.')
+        raise typer.Exit(1)
 
-    print(f'[red]Dataset not found: {name}[/red]')
-    print('Run [cyan]swm datasets[/cyan] to see available datasets.')
-    raise typer.Exit(1)
+    fmt = detect_format(path)
+    if fmt.name in ('lance', 'lance_video'):
+        _inspect_lance_dataset(path)
+    elif fmt.name == 'hdf5':
+        _inspect_hdf5_dataset(path)
+    elif fmt.name in ('folder', 'video'):
+        _inspect_folder_dataset(path)
+    else:
+        print(f'[bold]Name:[/bold]   {path.stem}')
+        print(f'[bold]Format:[/bold] {_format_label(path, fmt)}')
+        print(f'[bold]Path:[/bold]   {path}')
+        print(f'[bold]Size:[/bold]   {_format_size(_entry_size(path))}')
+
+
+@app.command()
+def preview(
+    name: Annotated[str, typer.Argument(help='Dataset name to preview.')],
+    num: Annotated[
+        int,
+        typer.Option('--num', '-n', help='Number of episodes to sample.'),
+    ] = 4,
+    episodes: Annotated[
+        str | None,
+        typer.Option(
+            '--episodes',
+            help='Explicit comma-separated episode indices (overrides sampling).',
+            show_default=False,
+        ),
+    ] = None,
+    seed: Annotated[
+        int,
+        typer.Option('--seed', help='Seed for random episode sampling.'),
+    ] = 0,
+    output: Annotated[
+        str | None,
+        typer.Option(
+            '--output',
+            '-o',
+            help='Output directory. Defaults to <cache>/previews/<name>.',
+            show_default=False,
+        ),
+    ] = None,
+    key: Annotated[
+        str | None,
+        typer.Option(
+            '--key',
+            help='Image column(s) to render, comma-separated. Defaults to all.',
+            show_default=False,
+        ),
+    ] = None,
+    fps: Annotated[
+        int,
+        typer.Option('--fps', help='Frame rate for MP4s.'),
+    ] = 15,
+    open_dir: Annotated[
+        bool,
+        typer.Option('--open', help='Open the output folder when done.'),
+    ] = False,
+):
+    """Render a random sample of episodes to MP4 for quick inspection.
+
+    Draws ``--num`` random episodes (or the exact ``--episodes`` indices) and
+    writes one ``ep<idx>.mp4`` per episode without converting the whole dataset.
+    Multi-view datasets get their image columns composed side-by-side into a
+    single labeled video per episode.
+    """
+    from pathlib import Path
+
+    import numpy as np
+
+    from stable_worldmodel.data.formats.utils import is_image_column
+    from stable_worldmodel.data.utils import (
+        _episode_to_step_lists,
+        get_cache_dir,
+        load_dataset,
+    )
+    from stable_worldmodel.plot.video_utils import save_video
+
+    cache_dir = get_cache_dir(sub_folder='datasets')
+    path = _resolve_dataset_path(cache_dir, name)
+    if path is None:
+        print(f'[red]Dataset not found: {name}[/red]')
+        print('Run [cyan]swm datasets[/cyan] to see available datasets.')
+        raise typer.Exit(1)
+
+    try:
+        import imageio  # noqa: F401
+    except ImportError:
+        print('[red]Preview requires imageio for MP4 encoding.[/red]')
+        print(
+            'Install with [cyan]pip install "stable-worldmodel[format]"[/cyan].'
+        )
+        raise typer.Exit(1)
+
+    ds = load_dataset(str(path))
+    n_eps = len(ds.lengths)
+    if n_eps == 0:
+        print('[yellow]Dataset has no episodes.[/yellow]')
+        raise typer.Exit(1)
+
+    if episodes is not None:
+        try:
+            indices = [int(x) for x in episodes.split(',') if x.strip() != '']
+        except ValueError:
+            print(f'[red]Invalid --episodes value: {episodes!r}[/red]')
+            raise typer.Exit(1)
+        bad = [i for i in indices if not 0 <= i < n_eps]
+        if bad:
+            print(
+                f'[red]Episode indices out of range (0–{n_eps - 1}): {bad}[/red]'
+            )
+            raise typer.Exit(1)
+    else:
+        k = min(num, n_eps)
+        if num > n_eps:
+            print(
+                f'[yellow]Only {n_eps} episode(s) available; sampling all.[/yellow]'
+            )
+        rng = np.random.default_rng(seed)
+        indices = sorted(rng.choice(n_eps, size=k, replace=False).tolist())
+
+    keys_filter = [k.strip() for k in key.split(',')] if key else None
+
+    out_dir = (
+        Path(output)
+        if output is not None
+        else get_cache_dir(sub_folder='previews') / name
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f'Previewing [cyan]{name}[/cyan] — episodes {indices} → {out_dir}')
+
+    written = []
+    for ep_idx in indices:
+        try:
+            ep = ds.load_episode(ep_idx)
+        except ImportError:
+            print(
+                '[red]Decoding this dataset requires torchcodec.[/red] '
+                'Install with [cyan]pip install "stable-worldmodel[format]"[/cyan].'
+            )
+            raise typer.Exit(1)
+
+        steps = _episode_to_step_lists(ep, int(ds.lengths[ep_idx]))
+        img_cols = [c for c, v in steps.items() if is_image_column(v)]
+        if keys_filter is not None:
+            img_cols = [c for c in img_cols if c in keys_filter]
+        if not img_cols:
+            print(
+                f'[yellow]Episode {ep_idx}: no image columns to render.[/yellow]'
+            )
+            continue
+
+        mp4 = out_dir / f'ep{ep_idx}.mp4'
+        if len(img_cols) == 1:
+            frames = _normalize_gray(steps[img_cols[0]])
+        else:
+            frames = _panel_frames({c: steps[c] for c in img_cols})
+        save_video(mp4, frames, fps=fps)
+        written.append(mp4)
+
+    if not written:
+        print('[yellow]No videos written (no image columns matched).[/yellow]')
+        raise typer.Exit(1)
+
+    print(f'[green]Wrote {len(written)} video(s) to[/green] {out_dir}')
+    if open_dir:
+        _open_folder(out_dir)
 
 
 @app.command()
@@ -548,7 +800,6 @@ def convert(
 ):
     """Convert a dataset to another format (e.g. HDF5 → video)."""
     from stable_worldmodel.data import convert as data_convert
-    from stable_worldmodel.data import detect_format
     from stable_worldmodel.data.utils import get_cache_dir
 
     cache_dir = get_cache_dir(sub_folder='datasets')
@@ -556,17 +807,7 @@ def convert(
     # Resolve the source by name through the format registry, mirroring
     # `inspect`/`datasets`, so every format (lance, lance_video, folder, video,
     # hdf5) is found the same way instead of via per-format path heuristics.
-    candidates = [
-        cache_dir / name,
-        cache_dir / f'{name}.lance',
-        cache_dir / f'{name}.h5',
-        cache_dir / f'{name}.hdf5',
-    ]
-    source_path = None
-    for path in candidates:
-        if path.exists() and detect_format(path) is not None:
-            source_path = path
-            break
+    source_path = _resolve_dataset_path(cache_dir, name)
     if source_path is None:
         print(f'[red]Dataset not found: {name}[/red]')
         print('Run [cyan]swm datasets[/cyan] to see available datasets.')
@@ -584,6 +825,103 @@ def convert(
         dest_format=dest_format,
         source_format=source_format,
     )
+    print(f'[green]Done.[/green] Output: {dest_path}')
+
+
+@app.command()
+def merge(
+    sources: Annotated[
+        list[str],
+        typer.Argument(help='Source dataset names to merge (2 or more).'),
+    ],
+    output: Annotated[
+        str,
+        typer.Option('--output', '-o', help='Output dataset name.'),
+    ],
+    dest_format: Annotated[
+        str | None,
+        typer.Option(
+            '--dest-format',
+            '-f',
+            help="Output format. Defaults to the first source's format.",
+            show_default=False,
+        ),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            '--overwrite',
+            help='Replace the output dataset if it already exists.',
+        ),
+    ] = False,
+    mode: Annotated[
+        str | None,
+        typer.Option(
+            '--mode',
+            help='Write mode: error | overwrite | append. Overrides --overwrite.',
+            show_default=False,
+        ),
+    ] = None,
+):
+    """Merge/concatenate several datasets into a single dataset.
+
+    Episodes from each source are concatenated in the order given and
+    renumbered into a single contiguous episode range. Sources must share the
+    same columns; a mismatch raises an error before anything is written.
+    """
+    from stable_worldmodel.data import detect_format
+    from stable_worldmodel.data import merge as data_merge
+    from stable_worldmodel.data.utils import get_cache_dir
+
+    if len(sources) < 2:
+        print('[red]merge needs at least two source datasets.[/red]')
+        raise typer.Exit(1)
+
+    cache_dir = get_cache_dir(sub_folder='datasets')
+
+    source_paths = []
+    for name in sources:
+        path = _resolve_dataset_path(cache_dir, name)
+        if path is None:
+            print(f'[red]Dataset not found: {name}[/red]')
+            print('Run [cyan]swm datasets[/cyan] to see available datasets.')
+            raise typer.Exit(1)
+        source_paths.append(path)
+
+    # Default output format = the first source's detected registry name, so
+    # merging shards keeps their format unless the user asks otherwise.
+    if dest_format is None:
+        dest_format = detect_format(source_paths[0]).name
+
+    write_mode = mode or ('overwrite' if overwrite else 'error')
+    # A plain `lance` table must live at `<name>.lance` and hdf5 at `<name>.h5`
+    # (the LanceWriter/HDF5Writer path contract, and what `inspect`/`datasets`
+    # resolve). Other formats (lance_video, folder, video) take a directory.
+    suffix = {'lance': '.lance', 'hdf5': '.h5'}.get(dest_format, '')
+    dest_path = cache_dir / f'{output}{suffix}'
+
+    names = ', '.join(f'[cyan]{n}[/cyan]' for n in sources)
+    print(
+        f'Merging {names} → [cyan]{output}[/cyan] '
+        f'([magenta]{dest_format}[/magenta], mode={write_mode})'
+    )
+    try:
+        data_merge(
+            [str(p) for p in source_paths],
+            dest_path,
+            dest_format=dest_format,
+            mode=write_mode,
+        )
+    except FileExistsError:
+        print(
+            f'[red]Output dataset already exists: {output}[/red]\n'
+            'Pass [cyan]--overwrite[/cyan] to replace it or '
+            '[cyan]--mode append[/cyan] to extend it.'
+        )
+        raise typer.Exit(1)
+    except ValueError as e:
+        print(f'[red]{e}[/red]')
+        raise typer.Exit(1)
     print(f'[green]Done.[/green] Output: {dest_path}')
 
 

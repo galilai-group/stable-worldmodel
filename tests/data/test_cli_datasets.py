@@ -189,6 +189,68 @@ def test_convert_missing_dataset_errors(cache_root):
     assert 'not found' in result.output.lower()
 
 
+def test_merge_combines_shards(cache_root):
+    """``swm merge`` concatenates two shards into a single dataset that the
+    listing and inspect then see, with the summed episode/step counts."""
+    _needs('lancedb')
+    _build_lance(cache_root, 'shard0')  # 2 episodes (4 + 5 steps)
+    _build_lance(cache_root, 'shard1')  # 2 episodes (4 + 5 steps)
+
+    result = runner.invoke(
+        app, ['merge', 'shard0', 'shard1', '-o', 'combined']
+    )
+    assert result.exit_code == 0, result.output
+    assert 'Done' in result.output
+
+    # The merged dataset resolves by name and reports the combined totals:
+    # 4 episodes, (4 + 5) * 2 = 18 steps.
+    inspect = runner.invoke(app, ['inspect', 'combined'])
+    assert inspect.exit_code == 0, inspect.output
+    assert 'Dataset not found' not in inspect.output
+    assert 'Lance' in inspect.output
+    assert 'Episodes: 4' in inspect.output
+    assert 'Steps:    18' in inspect.output
+
+
+def test_merge_missing_source_errors(cache_root):
+    _needs('lancedb')
+    _build_lance(cache_root, 'shard0')
+    result = runner.invoke(
+        app, ['merge', 'shard0', 'does_not_exist', '-o', 'combined']
+    )
+    assert result.exit_code == 1
+    assert 'not found' in result.output.lower()
+
+
+def test_merge_requires_two_sources(cache_root):
+    _needs('lancedb')
+    _build_lance(cache_root, 'shard0')
+    result = runner.invoke(app, ['merge', 'shard0', '-o', 'combined'])
+    assert result.exit_code == 1
+    assert 'at least two' in result.output.lower()
+
+
+def test_merge_existing_output_errors_then_overwrite(cache_root):
+    """Default mode refuses to clobber an existing output; --overwrite replaces
+    it."""
+    _needs('lancedb')
+    _build_lance(cache_root, 'shard0')
+    _build_lance(cache_root, 'shard1')
+
+    first = runner.invoke(app, ['merge', 'shard0', 'shard1', '-o', 'combined'])
+    assert first.exit_code == 0, first.output
+
+    again = runner.invoke(app, ['merge', 'shard0', 'shard1', '-o', 'combined'])
+    assert again.exit_code == 1
+    assert 'already exists' in again.output.lower()
+
+    forced = runner.invoke(
+        app, ['merge', 'shard0', 'shard1', '-o', 'combined', '--overwrite']
+    )
+    assert forced.exit_code == 0, forced.output
+    assert 'Done' in forced.output
+
+
 def test_detect_format_recognizes_every_layout(cache_root):
     """Guard the CLI's foundation directly: detect_format must classify each
     written layout, so the listing built on it can never silently drop one."""

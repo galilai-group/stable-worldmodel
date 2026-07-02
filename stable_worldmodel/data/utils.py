@@ -281,6 +281,97 @@ def convert(
         writer.write_episodes(episodes())
 
 
+def merge(
+    sources,
+    dest,
+    *,
+    dest_format: str = 'lance',
+    source_formats: list[str | None] | None = None,
+    mode: str = 'error',
+    cache_dir: str | None = None,
+    progress: bool = True,
+    **dest_kwargs,
+) -> None:
+    """Concatenate several datasets into a single dataset.
+
+    Episodes are read from each source in order and streamed through one
+    destination writer. The writer assigns contiguous episode indices across
+    all sources, so shards written independently (each starting at episode 0)
+    are renumbered into a single ``0..N-1`` range automatically — a source's
+    own ``episode_idx`` is stripped by the reader and never carried through.
+
+    Schema compatibility across sources is enforced by the writer: the first
+    episode fixes the schema and any later episode with different columns or
+    dimensions raises a clear error before more data is written.
+
+    Args:
+        sources: Two or more paths/identifiers accepted by :func:`load_dataset`.
+            Merged in the order given.
+        dest: Output path for the destination writer.
+        dest_format: Registered writer name (default ``'lance'``).
+        source_formats: Optional per-source format overrides (skips detection);
+            must align with ``sources`` when provided.
+        mode: Write mode for the destination — ``'error'`` (default) refuses to
+            touch an existing dataset, ``'overwrite'`` starts fresh,
+            ``'append'`` extends an existing one.
+        cache_dir: Forwarded to the source loader for HF/local resolution.
+        progress: Show a per-source progress bar over episodes.
+        **dest_kwargs: Forwarded to the destination writer.
+
+    Example::
+
+        from stable_worldmodel.data import merge
+        merge(['shard0', 'shard1', 'shard2'], 'combined', dest_format='lance')
+    """
+    from stable_worldmodel.data.format import get_format
+
+    sources = list(sources)
+    if len(sources) < 2:
+        raise ValueError('merge needs at least two source datasets')
+    if source_formats is not None and len(source_formats) != len(sources):
+        raise ValueError('source_formats must align with sources')
+
+    writer_cls = get_format(dest_format)
+
+    def _fmt(i):
+        return source_formats[i] if source_formats else None
+
+    # Pre-flight column check. Within a single writer session the schema is
+    # fixed by the first episode and a later mismatch surfaces only as an
+    # opaque Arrow key error, so compare column sets up front to fail fast with
+    # an actionable message before any data is written.
+    reference = None
+    for i, source in enumerate(sources):
+        cols = set(
+            load_dataset(
+                source, cache_dir=cache_dir, format=_fmt(i)
+            ).column_names
+        )
+        if reference is None:
+            reference, ref_source = cols, source
+        elif cols != reference:
+            missing = sorted(reference - cols)
+            extra = sorted(cols - reference)
+            raise ValueError(
+                f'merge: column mismatch between {ref_source!r} and {source!r}: '
+                f'missing {missing}; unexpected {extra}. '
+                'All sources must share the same columns.'
+            )
+
+    def episodes():
+        for i, source in enumerate(sources):
+            src = load_dataset(source, cache_dir=cache_dir, format=_fmt(i))
+            iterator = range(len(src.lengths))
+            if progress:
+                iterator = tqdm(iterator, desc=f'Merging {source}')
+            for ep_idx in iterator:
+                ep = src.load_episode(ep_idx)
+                yield _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+
+    with writer_cls.open_writer(dest, mode=mode, **dest_kwargs) as writer:
+        writer.write_episodes(episodes())
+
+
 def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
     """Adapt an episode dict from a reader to the ``{col: [step_arr, ...]}``
     shape that writers consume.
@@ -359,6 +450,7 @@ def column_normalizer(
 __all__ = [
     'load_dataset',
     'convert',
+    'merge',
     'get_cache_dir',
     'ensure_dir_exists',
     'IdentityScaler',
