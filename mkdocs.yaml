@@ -26,6 +26,7 @@ nav:
       - envs/tworoom.md
       - envs/gymnasium_robotics.md
       - envs/gymnasium_control.md
+      - envs/maniskill.md
       - envs/craftax.md
       - envs/ale.md
   - Guides:
