@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from torchvision import tv_tensors
 
-import stable_worldmodel as swm
 from stable_worldmodel.planning.solver import Solver
 from stable_worldmodel.protocols import Actionable, Transformable
 
