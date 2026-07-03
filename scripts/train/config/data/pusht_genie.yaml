@@ -1,0 +1,7 @@
+dataset:
+  num_steps: ${temporal_dim}
+  frameskip: 1
+  name: pusht_demo.lance
+  keys_to_load:
+    - pixels
+    - action
