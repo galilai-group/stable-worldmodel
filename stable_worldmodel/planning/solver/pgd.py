@@ -14,8 +14,14 @@ from .solver import Costable
 class PGDSolver(torch.nn.Module):
     """Projected Gradient Descent solver for discrete action optimization.
 
+    Like other gradient-based solvers, this optimizes actions via gradient
+    descent and therefore assumes the cost is differentiable with respect to
+    the actions (i.e. ``cost.get_cost`` produces a cost that ``requires_grad``
+    and supports ``backward()``).
+
     Args:
-        model: World model implementing the Costable protocol.
+        cost: Cost object to plan against (a Costable, e.g. a ShootingCostEvaluator).
+            Must be differentiable w.r.t. the actions for gradients to flow.
         n_steps: Number of gradient descent iterations.
         batch_size: Number of environments to process in parallel.
         var_scale: Initial variance scale for action perturbations.
@@ -27,7 +33,7 @@ class PGDSolver(torch.nn.Module):
 
     def __init__(
         self,
-        model: Costable,
+        cost: Costable,
         n_steps: int,
         batch_size: int | None = None,
         var_scale: float = 1,
@@ -37,7 +43,7 @@ class PGDSolver(torch.nn.Module):
         seed: int = 1234,
     ) -> None:
         super().__init__()
-        self.model = model
+        self.cost = cost
         self.n_steps = n_steps
         self.batch_size = batch_size
         self.num_samples = num_samples
@@ -200,7 +206,7 @@ class PGDSolver(torch.nn.Module):
             batch_cost_history = []
 
             for step in range(self.n_steps):
-                costs = self.model.get_cost(expanded_infos, batch_init)
+                costs = self.cost.get_cost(expanded_infos, batch_init)
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Got {type(costs)} cost, expect torch.Tensor'

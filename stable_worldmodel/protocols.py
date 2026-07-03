@@ -3,8 +3,16 @@ import numpy as np
 import torch
 
 
+@runtime_checkable
 class Costable(Protocol):
-    """Protocol for world model cost functions."""
+    """Protocol for the cost surface planning solvers consume.
+
+    This is the structural "has ``get_cost``" contract every solver types
+    against. It is polymorphic across implementations: a
+    :class:`~stable_worldmodel.planning.ShootingCostEvaluator` (a world model composed
+    with an :class:`Objective`), as well as models that expose ``get_cost``
+    natively (e.g. TD-MPC2, prejepa), all satisfy it.
+    """
 
     def criterion(
         self, info_dict: dict, action_candidates: torch.Tensor
@@ -32,6 +40,61 @@ class Costable(Protocol):
         Returns:
             A tensor of cost values for each action candidate.
         """
+        ...
+
+
+@runtime_checkable
+class Constrainable(Protocol):
+    """Protocol for the (optional) constraint surface of a cost object.
+
+    A cost object exposes ``get_constraints`` when planning under inequality
+    constraints. ``LagrangianSolver`` feature-detects it via
+    ``isinstance(cost, Constrainable)``. Following the Lagrangian contract, a
+    constraint term ``g_i`` is satisfied when ``g_i <= 0``.
+    """
+
+    def get_constraints(
+        self, info_dict: dict, action_candidates: torch.Tensor
+    ) -> torch.Tensor:  # pragma: no cover
+        """Compute constraint violations for given action candidates.
+
+        Args:
+            info_dict: Dictionary containing environment state information.
+            action_candidates: Tensor of proposed actions.
+
+        Returns:
+            A tensor of shape ``(B, S, C)`` of per-candidate constraint values,
+            where ``C`` is the number of constraints (satisfied when ``<= 0``).
+        """
+        ...
+
+
+@runtime_checkable
+class Dynamics(Protocol):
+    """The dynamics surface a ``ShootingCostEvaluator`` needs from a world model."""
+
+    def encode(self, x: dict) -> dict:  # pragma: no cover
+        ...
+
+    def rollout(
+        self, info_dict: dict, action_candidates: torch.Tensor
+    ) -> dict:  # pragma: no cover
+        ...
+
+
+@runtime_checkable
+class Objective(Protocol):
+    """Maps a populated ``info_dict`` to per-candidate cost ``(B, S)``.
+
+    Unlike :class:`Costable`, an ``Objective`` scores an *already-rolled-out*
+    ``info_dict`` — it takes no ``action_candidates`` and performs no rollout.
+    The ``info_dict`` is expected to already contain rollout outputs (e.g.
+    ``predicted_emb``) and any goal/conditioning the objective needs. The
+    ``ShootingCostEvaluator`` also stores the raw ``action_candidates`` under the
+    ``action_candidates`` key so action-space penalties can read them.
+    """
+
+    def __call__(self, info_dict: dict) -> torch.Tensor:  # pragma: no cover
         ...
 
 

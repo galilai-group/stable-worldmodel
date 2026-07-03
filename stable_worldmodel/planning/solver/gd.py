@@ -9,7 +9,7 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
-from stable_worldmodel.solver.utils import prepare_init_action
+from .utils import prepare_init_action
 from .callbacks import Callback
 from .solver import Costable
 
@@ -17,8 +17,14 @@ from .solver import Costable
 class GradientSolver(torch.nn.Module):
     """Gradient-based solver using backpropagation through the world model.
 
+    Unlike sampling-based solvers, this solver optimizes actions via gradient
+    descent and therefore assumes the cost is differentiable with respect to
+    the actions (i.e. ``cost.get_cost`` produces a cost that ``requires_grad``
+    and supports ``backward()``).
+
     Args:
-        model: World model implementing the Costable protocol.
+        cost: Cost object to plan against (a Costable, e.g. a ShootingCostEvaluator).
+            Must be differentiable w.r.t. the actions for gradients to flow.
         n_steps: Number of gradient descent iterations.
         batch_size: Number of environments to process in parallel.
         var_scale: Initial variance scale for action perturbations.
@@ -32,7 +38,7 @@ class GradientSolver(torch.nn.Module):
 
     def __init__(
         self,
-        model: Costable,
+        cost: Costable,
         n_steps: int,
         batch_size: int | None = None,
         var_scale: float = 1,
@@ -46,7 +52,7 @@ class GradientSolver(torch.nn.Module):
         callbacks: list[Callback] | None = None,
     ) -> None:
         super().__init__()
-        self.model = model
+        self.cost = cost
         self.n_steps = n_steps
         self.batch_size = batch_size
         self.num_samples = num_samples
@@ -63,7 +69,7 @@ class GradientSolver(torch.nn.Module):
         self.callbacks = list(callbacks) if callbacks else []
 
         try:
-            self._dtype = next(model.parameters()).dtype
+            self._dtype = next(cost.parameters()).dtype
         except (AttributeError, StopIteration):
             self._dtype = torch.float32
 
@@ -164,7 +170,7 @@ class GradientSolver(torch.nn.Module):
 
         with torch.no_grad():
             init_action = prepare_init_action(
-                self.model,
+                self.cost,
                 info_dict,
                 init_action,
                 self.horizon,
@@ -224,7 +230,7 @@ class GradientSolver(torch.nn.Module):
                 cb.start_batch()
 
             for step in range(self.n_steps):
-                costs = self.model.get_cost(expanded_infos, batch_init)
+                costs = self.cost.get_cost(expanded_infos, batch_init)
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Got {type(costs)} cost, expect torch.Tensor'
