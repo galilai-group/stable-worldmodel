@@ -42,23 +42,23 @@ class SelfAttention(nn.Module):
     def forward(self, x: Tensor, causal: bool = True) -> Tensor:
         qkv: Tensor = self.qkv(x)
         qkv = rearrange(qkv, 'B N (three H D) -> three B H N D', three=3, H=self.num_heads)
-        q,k,v = qkv[0], qkv[1], qkv[2]
+        q, k, v = qkv[0], qkv[1], qkv[2]
 
         if self.qk_norm:
             # cast back from fp32 to v.dtype (bf16 etc)
-            q: Tensor = self.norm(q).to(dtype=v.dtype)
-            k: Tensor = self.norm(k).to(dtype=v.dtype)
+            q = self.norm(q).to(dtype=v.dtype)
+            k = self.norm(k).to(dtype=v.dtype)
 
-        q *= self.scale
-        attn = q @ rearrange(k, 'B H N D -> B H D N')
+        # PyTorch SDPA (Flash / mem-efficient on Ampere+) — O(N) memory, ~2x speed.
+        # `is_causal=True` applies the standard upper-tri causal mask internally.
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            dropout_p=self.attn_drop.p if self.training else 0.0,
+            is_causal=causal,
+            scale=self.scale,
+        )
 
-        if causal:
-            N = attn.size(-1)
-            attn = attn.masked_fill(self.causal_mask[..., :N, :N], -1e9)
-
-        attn = attn.softmax(dim=-1)
-
-        x = rearrange((attn @ v), 'B H N D -> B N (H D)')
+        x = rearrange(out, 'B H N D -> B N (H D)')
         x = self.proj(x)
         return x
 
@@ -102,7 +102,9 @@ class ST_Block(nn.Module):
         mlp_use_bias: bool = True,
     ) -> None:
         super().__init__()
-        self.norm1 = nn.Identity() if qk_use_norm else nn.LayerNorm(d_model, eps=1e-05)
+        self.norm1 = nn.LayerNorm(d_model, eps=1e-05)
+        self.norm2 = nn.LayerNorm(d_model, eps=1e-05)
+        self.norm3 = nn.LayerNorm(d_model, eps=1e-05)
 
         attn_args = dict(
             num_heads=num_heads,
@@ -116,25 +118,22 @@ class ST_Block(nn.Module):
 
         self.spatial_attn = SelfAttention(**attn_args, causal=False)
         self.temporal_attn = SelfAttention(**attn_args, causal=True, max_seq_len=temporal_dim)
-        
-        self.norm2 = nn.Identity() if qk_use_norm else nn.LayerNorm(d_model, eps=1e-05)
+
         self.mlp = MLP(d_model=d_model, ratio=mlp_ratio, use_bias=mlp_use_bias, dropout=mlp_dropout)
 
 
     def forward(self, x_TSC: Tensor) -> Tensor:
-        # spatial attn (no ffw mlp)
         T, S = x_TSC.size(1), x_TSC.size(2)
+
         x_SC = rearrange(x_TSC, 'B T S C -> (B T) S C')
         x_SC = x_SC + self.spatial_attn(self.norm1(x_SC), causal=False)
 
-        # temporal attn (causal)
         x_TC = rearrange(x_SC, '(B T) S C -> (B S) T C', T=T)
-        x_TC = x_TC + self.temporal_attn(x_TC, causal=True)
+        x_TC = x_TC + self.temporal_attn(self.norm2(x_TC), causal=True)
 
-        # mlp
-        x_TC = x_TC + self.mlp(self.norm2(x_TC))
-        x_TSC = rearrange(x_TC, '(B S) T C -> B T S C', S=S)
-        return x_TSC
+        x_TC = x_TC + self.mlp(self.norm3(x_TC))
+
+        return rearrange(x_TC, '(B S) T C -> B T S C', S=S)
 
 
 class ST_Transformer(nn.Module):

@@ -20,13 +20,18 @@ class Genie(nn.Module):
     def __init__(
         self,
         tokenizer: ST_ViViT,
-        lam: LAM,
+        lam: LAM | None,
         dynamics: ST_MaskGIT,
+        action_encoder: nn.Module | None = None,
     ):
         super().__init__()
         self.tokenizer = tokenizer
         self.lam = lam
         self.dynamics = dynamics
+        # Maps raw env actions to action embeddings. Required at inference time
+        # when LAM is not present (real-action dyn). Used by the planner with
+        # GeniePolicy(action_mode="raw").
+        self.action_encoder = action_encoder
 
     @property
     def temporal_dim(self) -> int:
@@ -35,7 +40,14 @@ class Genie(nn.Module):
 
     @property
     def num_actions(self) -> int:
-        """Size of the latent action codebook (e.g. 8 in the paper)."""
+        """Size of the latent action codebook (e.g. 8 in the paper).
+
+        Only meaningful when LAM is present (joint-training path). Raises
+        AttributeError on a real-action Genie.
+        """
+        if self.lam is None:
+            raise AttributeError("num_actions undefined: this Genie has no LAM "
+                                 "(real-action training path).")
         return self.lam.vq.num_codes
 
     @torch.no_grad()

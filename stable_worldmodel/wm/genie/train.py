@@ -54,6 +54,7 @@ class TrainConfig:
     width: int = 128
     channels: int = 3
     temporal_dim: int = 16
+    frameskip: int = 1
     batch_size: int = 16
     num_workers: int = 4
 
@@ -66,6 +67,27 @@ class TrainConfig:
     tokenizer_codes: int = 1024
     lam_codes: int = 8
     vq_embed_dim: int = 32
+
+    # Dynamics architecture (decoupled from tokenizer/LAM). If None, falls
+    # back to the shared d_model/num_layers/num_heads.
+    dyn_d_model: int | None = None
+    dyn_num_layers: int | None = None
+    dyn_num_heads: int | None = None
+
+    # Real-action dyn training: skip LAM entirely, condition dyn on a learned
+    # MLP embedding of the ground-truth env action. action_dim should match
+    # the env action space (e.g. 2 for PushT).
+    action_dim: int = 2
+    action_encoder_hidden: int = 128
+    # `frameskip` is declared above; re-used for the real-action dataset to
+    # space observed frames. Actions in skipped steps are mean-pooled into
+    # one per kept frame.
+
+    # MaskGIT mask-rate range. Per-example p ~ Uniform(mask_floor, mask_ceiling).
+    # The MaskGIT paper uses (0.5, 1.0). Capping the ceiling removes
+    # near-impossible high-mask examples that hold train_acc down.
+    mask_floor: float = 0.5
+    mask_ceiling: float = 1.0
 
     # Optimization
     lr_tokenizer: float = 3e-4
@@ -150,16 +172,21 @@ class PushTVideoDataset(Dataset):
 # MaskGIT masking
 # ────────────────────────────────────────────────────────────────────────────
 
-def maskgit_mask(tokens: Tensor, mask_token_id: int) -> tuple[Tensor, Tensor]:
+def maskgit_mask(
+    tokens: Tensor,
+    mask_token_id: int,
+    mask_floor: float = 0.5,
+    mask_ceiling: float = 1.0,
+) -> tuple[Tensor, Tensor]:
     """
-    Per-example p ~ Uniform(0.5, 1.0), Bernoulli mask the last T-1 frames.
+    Per-example p ~ Uniform(mask_floor, mask_ceiling), Bernoulli mask the last T-1 frames.
     Frame 0 is never masked.
     """
     B, T, S = tokens.shape
     labels = tokens
     input_ids = tokens.clone()
 
-    p = 0.5 + 0.5 * torch.rand(B, device=tokens.device)
+    p = mask_floor + (mask_ceiling - mask_floor) * torch.rand(B, device=tokens.device)
     mask = torch.rand(B, T - 1, S, device=tokens.device) < p[:, None, None]
     input_ids[:, 1:][mask] = mask_token_id
     return input_ids, labels
@@ -197,11 +224,18 @@ def build_genie(cfg: TrainConfig) -> Genie:
     )
 
     spatial_tokens = (cfg.height // cfg.tokenizer_patch_size) * (cfg.width // cfg.tokenizer_patch_size)
+    dyn_d_model = cfg.dyn_d_model or cfg.d_model
+    dyn_st = ST_Transformer(
+        num_layers=cfg.dyn_num_layers or cfg.num_layers,
+        num_heads=cfg.dyn_num_heads or cfg.num_heads,
+        d_model=dyn_d_model,
+        temporal_dim=cfg.temporal_dim,
+    )
     dynamics = ST_MaskGIT(
-        decoder=make_st(),
+        decoder=dyn_st,
         spatial_dim=spatial_tokens,
         temporal_dim=cfg.temporal_dim,
-        d_model=cfg.d_model,
+        d_model=dyn_d_model,
         image_vocab_size=cfg.tokenizer_codes,
         action_embed_dim=cfg.vq_embed_dim,
     )
@@ -303,7 +337,7 @@ def validate_joint(genie: Genie, val_loader: DataLoader, cfg: TrainConfig) -> di
         next_pred = lam.predict_next_frames(video[:, :-1], action_q_TE)
         lam_recon = F.mse_loss(next_pred, video[:, 1:])
         tokens, _, _ = tok.encode(video)
-        input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id)
+        input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id, cfg.mask_floor, cfg.mask_ceiling)
         dyn_out = dyn(input_ids, labels, actions_T=action_q_TE)
         total_lam_recon += lam_recon.item() * video.size(0)
         total_lam_vq += lam_vq_loss.item() * video.size(0)
@@ -367,16 +401,18 @@ def train_tokenizer(
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(tok.parameters(), cfg.grad_clip)
+            grad_norm = torch.nn.utils.clip_grad_norm_(tok.parameters(), cfg.grad_clip)
             opt.step()
             sched.step()
 
             if step % cfg.log_every == 0:
                 print(f"[tokenizer] step {step:>7d} | recon {recon_loss.item():.4f} "
-                      f"| vq {vq_loss.item():.4f} | lr {sched.get_last_lr()[0]:.2e}")
+                      f"| vq {vq_loss.item():.4f} | gnorm {grad_norm.item():.3f} "
+                      f"| lr {sched.get_last_lr()[0]:.2e}")
                 _log_wandb(wandb_run, {
                     "train/recon": recon_loss.item(),
                     "train/vq": vq_loss.item(),
+                    "train/grad_norm": grad_norm.item(),
                     "train/lr": sched.get_last_lr()[0],
                 }, step)
 
@@ -449,7 +485,7 @@ def train_joint(
                 with torch.no_grad():
                     tokens, _, _ = tok.encode(video)
 
-                input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id)
+                input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id, cfg.mask_floor, cfg.mask_ceiling)
 
                 dyn_out = dyn(input_ids, labels, actions_T=action_q_TE.detach())
 
@@ -457,7 +493,7 @@ def train_joint(
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)
+            grad_norm = torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)
             opt.step()
             sched.step()
 
@@ -465,12 +501,13 @@ def train_joint(
                 print(f"[joint] step {step:>7d} | "
                       f"lam_recon {lam_recon.item():.4f} | lam_vq {lam_vq_loss.item():.4f} | "
                       f"dyn {dyn_out['loss'].item():.4f} | acc {dyn_out['acc'].item():.3f} | "
-                      f"lr {sched.get_last_lr()[0]:.2e}")
+                      f"gnorm {grad_norm.item():.3f} | lr {sched.get_last_lr()[0]:.2e}")
                 _log_wandb(wandb_run, {
                     "train/lam_recon": lam_recon.item(),
                     "train/lam_vq": lam_vq_loss.item(),
                     "train/dyn_loss": dyn_out["loss"].item(),
                     "train/dyn_acc": dyn_out["acc"].item(),
+                    "train/grad_norm": grad_norm.item(),
                     "train/lr": sched.get_last_lr()[0],
                 }, step)
 
@@ -500,6 +537,169 @@ def train_joint(
               f"| val_dyn {val['val/dyn_loss']:.4f} | val_acc {val['val/dyn_acc']:.3f}")
         _log_wandb(wandb_run, val, step)
     save_ckpt(genie, opt, step, ckpt_dir / "joint_final.pt")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Phase 2 (alt): real-action dyn — skip LAM, condition dyn on raw env actions
+# ────────────────────────────────────────────────────────────────────────────
+
+def build_real_action_components(cfg: TrainConfig):
+    """Tokenizer + Dynamics + ActionEncoder. No LAM."""
+    from stable_worldmodel.wm.genie.action_encoder import ActionEncoder
+
+    def make_st(d_model, num_layers, num_heads) -> ST_Transformer:
+        return ST_Transformer(
+            num_layers=num_layers, num_heads=num_heads,
+            d_model=d_model, temporal_dim=cfg.temporal_dim,
+        )
+
+    tokenizer = ST_ViViT(
+        encoder=make_st(cfg.d_model, cfg.num_layers, cfg.num_heads),
+        decoder=make_st(cfg.d_model, cfg.num_layers, cfg.num_heads),
+        vq=VectorQuantizer(num_codes=cfg.tokenizer_codes, embed_dim=cfg.vq_embed_dim),
+        patch_size=cfg.tokenizer_patch_size,
+        height=cfg.height, width=cfg.width, channels=cfg.channels,
+        temporal_dim=cfg.temporal_dim, d_model=cfg.d_model,
+    )
+
+    spatial_tokens = (cfg.height // cfg.tokenizer_patch_size) * (cfg.width // cfg.tokenizer_patch_size)
+    dyn_d_model = cfg.dyn_d_model or cfg.d_model
+    dynamics = ST_MaskGIT(
+        decoder=make_st(
+            dyn_d_model,
+            cfg.dyn_num_layers or cfg.num_layers,
+            cfg.dyn_num_heads or cfg.num_heads,
+        ),
+        spatial_dim=spatial_tokens,
+        temporal_dim=cfg.temporal_dim,
+        d_model=dyn_d_model,
+        image_vocab_size=cfg.tokenizer_codes,
+        action_embed_dim=cfg.vq_embed_dim,
+    )
+
+    action_encoder = ActionEncoder(
+        input_dim=cfg.action_dim,
+        emb_dim=cfg.vq_embed_dim,
+        hidden_dim=cfg.action_encoder_hidden,
+    )
+
+    return tokenizer, dynamics, action_encoder
+
+
+@torch.no_grad()
+def validate_dyn_real_action(tok, dyn, action_encoder, val_loader, cfg) -> dict:
+    tok.eval(); dyn.eval(); action_encoder.eval()
+    device = torch.device(cfg.device)
+    total_dyn, total_acc, n = 0.0, 0.0, 0
+    grid = None
+    for video, action in val_loader:
+        video = video.to(device)
+        action = action.to(device)
+        tokens, _, _ = tok.encode(video)
+        action_embed = action_encoder(action.float())
+        input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id, cfg.mask_floor, cfg.mask_ceiling)
+        dyn_out = dyn(input_ids, labels, actions_T=action_embed)
+        total_dyn += dyn_out["loss"].item() * video.size(0)
+        total_acc += dyn_out["acc"].item() * video.size(0)
+        n += video.size(0)
+        if grid is None:
+            # Tokenizer recon as a sanity grid (dyn doesn't produce pixels directly).
+            video_hat, _, _ = tok(video)
+            k = min(cfg.val_samples, video.size(0))
+            grid = _stack_recon_grid(video[:k], video_hat[:k])
+    dyn.train(); action_encoder.train()
+    return {
+        "val/dyn_loss": total_dyn / max(1, n),
+        "val/dyn_acc":  total_acc / max(1, n),
+        "_grid": grid,
+    }
+
+
+def train_dyn_real_action(
+    tok: nn.Module,
+    dyn: nn.Module,
+    action_encoder: nn.Module,
+    loader: DataLoader,
+    cfg: TrainConfig,
+    start_step: int = 0,
+    val_loader: DataLoader | None = None,
+    wandb_run=None,
+):
+    tok.eval()
+    for p in tok.parameters():
+        p.requires_grad_(False)
+    dyn.train()
+    action_encoder.train()
+
+    device = torch.device(cfg.device)
+    dtype = getattr(torch, cfg.dtype)
+    ckpt_dir = Path(cfg.ckpt_dir)
+
+    params = list(dyn.parameters()) + list(action_encoder.parameters())
+    opt = torch.optim.AdamW(params, lr=cfg.lr_joint, weight_decay=cfg.weight_decay)
+    sched = torch.optim.lr_scheduler.LambdaLR(
+        opt, lambda s: cosine_with_warmup(s, cfg.warmup_steps, cfg.joint_steps))
+
+    def _save(step, name):
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        torch.save({
+            "tokenizer": tok.state_dict(),
+            "dynamics": dyn.state_dict(),
+            "action_encoder": action_encoder.state_dict(),
+            "optimizer": opt.state_dict(),
+            "step": step,
+        }, ckpt_dir / name)
+
+    step = start_step
+    while step < cfg.joint_steps:
+        for video, action in loader:
+            video = video.to(device, non_blocking=(device.type != "mps"))
+            action = action.to(device, non_blocking=(device.type != "mps"))
+
+            with torch.autocast(device_type=device.type, dtype=dtype):
+                with torch.no_grad():
+                    tokens, _, _ = tok.encode(video)
+                action_embed = action_encoder(action.float())
+                input_ids, labels = maskgit_mask(tokens, dyn.mask_token_id, cfg.mask_floor, cfg.mask_ceiling)
+                dyn_out = dyn(input_ids, labels, actions_T=action_embed)
+                loss = dyn_out["loss"]
+
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)
+            opt.step()
+            sched.step()
+
+            if step % cfg.log_every == 0:
+                print(f"[dyn-ra] step {step:>7d} | dyn {dyn_out['loss'].item():.4f} | "
+                      f"acc {dyn_out['acc'].item():.3f} | gnorm {grad_norm.item():.3f} | "
+                      f"lr {sched.get_last_lr()[0]:.2e}")
+                _log_wandb(wandb_run, {
+                    "train/dyn_loss": dyn_out["loss"].item(),
+                    "train/dyn_acc":  dyn_out["acc"].item(),
+                    "train/grad_norm": grad_norm.item(),
+                    "train/lr": sched.get_last_lr()[0],
+                }, step)
+
+            if val_loader is not None and step and step % cfg.val_every == 0:
+                val = validate_dyn_real_action(tok, dyn, action_encoder, val_loader, cfg)
+                print(f"[dyn-ra] step {step:>7d} | val_dyn {val['val/dyn_loss']:.4f} "
+                      f"| val_acc {val['val/dyn_acc']:.3f}")
+                _log_wandb(wandb_run, val, step)
+
+            if step and step % cfg.save_every == 0:
+                _save(step, f"dyn_ra_step{step}.pt")
+
+            step += 1
+            if step >= cfg.joint_steps:
+                break
+
+    if val_loader is not None:
+        val = validate_dyn_real_action(tok, dyn, action_encoder, val_loader, cfg)
+        print(f"[dyn-ra] step {step:>7d} | final val_dyn {val['val/dyn_loss']:.4f} "
+              f"| val_acc {val['val/dyn_acc']:.3f}")
+        _log_wandb(wandb_run, val, step)
+    _save(step, "dyn_ra_final.pt")
 
 
 # ────────────────────────────────────────────────────────────────────────────
