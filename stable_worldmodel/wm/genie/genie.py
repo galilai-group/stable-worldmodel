@@ -1,161 +1,218 @@
 import torch
+import torch.nn.functional as F
+from einops import rearrange
 from torch import nn
-from stable_worldmodel.wm.genie.st_vivit import ST_ViViT
-from stable_worldmodel.wm.genie.lam import LAM
-from stable_worldmodel.wm.genie.st_maskgit import ST_MaskGIT
+
+from stable_worldmodel.wm.genie.module import (
+    ActionEncoder,
+    LAM,
+    ST_MaskGIT,
+    ST_ViViT,
+)
 
 
 class Genie(nn.Module):
-    """
-    The full Genie model: video tokenizer + latent action model + dynamics model.
-
-    This wrapper is the inference-facing top level. Nothing here computes a loss.
-
-    Two ways to generate:
-      - `play`: one-shot. Give a prompt video and the full action sequence,
-        get back the full window of pixels.
-      - `step`: interactive. Extend a running context by one frame at a time.
-        The caller manages the context buffer between calls.
-    """
     def __init__(
         self,
         tokenizer: ST_ViViT,
-        lam: LAM | None,
         dynamics: ST_MaskGIT,
-        action_encoder: nn.Module | None = None,
+        lam: LAM | None = None,
+        action_encoder: ActionEncoder | None = None,
+        history_size: int = 1,
+        num_unmask_steps: int = 8,
+        temperature: float = 0.0,
+        cost_mode: str = "embed",
+        action_mode: str = "raw",
+        action_block: int = 1,
     ):
         super().__init__()
         self.tokenizer = tokenizer
-        self.lam = lam
         self.dynamics = dynamics
-        # Maps raw env actions to action embeddings. Required at inference time
-        # when LAM is not present (real-action dyn). Used by the planner with
-        # GeniePolicy(action_mode="raw").
+        self.lam = lam
         self.action_encoder = action_encoder
+
+        self.history_size = history_size
+        self.num_unmask_steps = num_unmask_steps
+        self.temperature = temperature
+
+        assert cost_mode in ("pixel", "token", "embed"), f"unknown cost_mode {cost_mode!r}"
+        self.cost_mode = cost_mode
+        assert action_mode in ("raw", "code"), f"unknown action_mode {action_mode!r}"
+        self.action_mode = action_mode
+        assert action_block >= 1
+        self.action_block = action_block
 
     @property
     def temporal_dim(self) -> int:
-        """Maximum window the dynamics model attends over."""
         return self.dynamics.pos_embed_TSC.size(1)
 
     @property
     def num_actions(self) -> int:
-        """Size of the latent action codebook (e.g. 8 in the paper).
-
-        Only meaningful when LAM is present (joint-training path). Raises
-        AttributeError on a real-action Genie.
-        """
         if self.lam is None:
-            raise AttributeError("num_actions undefined: this Genie has no LAM "
-                                 "(real-action training path).")
+            raise AttributeError("num_actions requires a LAM")
         return self.lam.vq.num_codes
 
-    @torch.no_grad()
-    def encode(self, video: torch.Tensor) -> torch.Tensor:
-        """(B, T_prompt, H, W, c) → (B, T_prompt, S) discrete token ids."""
-        tokens, _, _ = self.tokenizer.encode(video)
-        return tokens
+    @staticmethod
+    def _pixels_to_tokenizer(pixels):
+        return pixels.mul(2).sub(1).clamp(-1, 1).permute(0, 1, 3, 4, 2).contiguous()
+
+    @staticmethod
+    def _tokenizer_to_pixels(video):
+        return video.add(1).div(2).clamp(0, 1).permute(0, 1, 4, 2, 3).contiguous()
+
+    def _embed_actions(self, ac):
+        if self.action_mode == "raw":
+            assert self.action_encoder is not None, "action_mode='raw' requires an ActionEncoder"
+            return self.action_encoder(ac.float())
+        assert self.lam is not None, "action_mode='code' requires a LAM"
+        return self.lam.vq.codebook(ac.long())
 
     @torch.no_grad()
-    def decode(self, tokens: torch.Tensor) -> torch.Tensor:
-        """(B, T, S) discrete token ids → (B, T, H, W, c) pixels."""
-        return self.tokenizer.decode_from_indices(tokens)
-
-    @torch.no_grad()
-    def play(
-        self,
-        prompt_video: torch.Tensor,
-        action_ids: torch.Tensor,
-        num_steps: int = 25,
-        temperature: float = 2.0,
-        unmask_mode: str = "random",
-    ) -> torch.Tensor:
+    def encode(self, info):
+        """Tokenize the prompt frames with the frozen tokenizer.
+        info: dict with pixels of shape (B, C, H, W) or (B, T_hist, C, H, W).
+        Writes info['tokens'] of shape (B, T_hist, S).
         """
-        One-shot generation. Given a prompt video and the full action sequence
-        for the window, return the full pixel video including the prompt.
+        if "tokens" in info:
+            return info
+        pixels = info["pixels"]
+        T_model = self.temporal_dim
+        if pixels.ndim == 4:
+            pixels = pixels.unsqueeze(1)
+        T_hist = pixels.size(1)
+        if T_hist < T_model:
+            pad = pixels[:, -1:].expand(-1, T_model - T_hist, -1, -1, -1)
+            pixels_full = torch.cat([pixels, pad], dim=1)
+        else:
+            pixels_full = pixels[:, :T_model]
+        video = self._pixels_to_tokenizer(pixels_full)
+        tokens_full, _, _ = self.tokenizer.encode(video)
+        info["tokens"] = tokens_full[:, :T_hist]
+        return info
 
-        Args:
-            prompt_video: (B, T_prompt, H, W, c). T_prompt must be < temporal_dim.
-            action_ids:   (B, T-1) latent action ids in [0, num_actions). One per
-                          frame transition in the output window. Positions inside
-                          the prompt can be set to 0 if no real action is known.
-            num_steps:    MaskGIT iterations per generated frame.
-            temperature:  sampling temperature (paper uses 2.0).
-            unmask_mode:  "random" (default) or "greedy".
-
-        Returns:
-            video: (B, T, H, W, c) where T = temporal_dim.
+    @torch.no_grad()
+    def encode_goal(self, info):
+        """Tokenize the goal image once for later cost eval.
+        info: dict with goal of shape (B, C, H, W).
+        Writes info['goal_tokens'] of shape (B, S).
         """
-        T = self.temporal_dim
-        prompt_tokens = self.encode(prompt_video)             # (B, T_prompt, S)
-        num_new_frames = T - prompt_tokens.size(1)
+        if "goal_tokens" in info:
+            return info
+        goal = info["goal"]
+        if goal.ndim == 4:
+            goal = goal.unsqueeze(1)
+        goal_full = goal.expand(-1, self.temporal_dim, -1, -1, -1)
+        goal_video = self._pixels_to_tokenizer(goal_full)
+        tokens, _, _ = self.tokenizer.encode(goal_video)
+        info["goal_tokens"] = tokens[:, 0]
+        return info
 
-        action_embeds = self.lam.vq.codebook(action_ids)      # (B, T-1, E)
+    @torch.no_grad()
+    def rollout(self, info, action_candidates):
+        """Roll the dynamics forward under S action candidates via MaskGIT unmasking.
+        info:              dict with pixels; tokens will be produced by self.encode.
+        action_candidates: (B, S, T, A_raw) if action_mode='raw' else (B, S, T).
+        Writes info['predicted_tokens'] of shape (B, S, T_model, S_spatial),
+        and info['predicted_pixels'] (B, S, T_model, C, H, W) when cost_mode='pixel'.
+        """
+        info = self.encode(info)
+        prompt = info["tokens"]
+        B, H, Sp = prompt.shape
+        S = action_candidates.size(1)
+        T_model = self.temporal_dim
+
+        prompt_BS = prompt.unsqueeze(1).expand(B, S, H, Sp).reshape(B * S, H, Sp)
+
+        if self.action_mode == "raw":
+            ac = action_candidates.reshape(B * S, action_candidates.size(2), -1)
+            if self.action_block > 1:
+                raw_dim = ac.size(-1) // self.action_block
+                ac = ac.reshape(B * S, ac.size(1), self.action_block, raw_dim).mean(dim=2)
+        else:
+            ac = action_candidates.reshape(B * S, action_candidates.size(2))
+
+        # actions align with frame transitions, so the first action drives the H-th
+        # frame; prepend H-1 zeros so ac[H-1:] carries the candidate at the right slot.
+        target_T = T_model - 1
+        prefix_len = H - 1
+        if prefix_len > 0:
+            if self.action_mode == "raw":
+                prefix = ac.new_zeros(B * S, prefix_len, ac.size(-1))
+            else:
+                prefix = ac.new_zeros(B * S, prefix_len, dtype=ac.dtype)
+            ac = torch.cat([prefix, ac], dim=1)
+        if ac.size(1) >= target_T:
+            ac = ac[:, :target_T]
+        else:
+            pad_len = target_T - ac.size(1)
+            if self.action_mode == "raw":
+                pad = ac.new_zeros(B * S, pad_len, ac.size(-1))
+            else:
+                pad = ac.new_zeros(B * S, pad_len, dtype=ac.dtype)
+            ac = torch.cat([ac, pad], dim=1)
+
+        action_embeds = self._embed_actions(ac)
 
         full_tokens = self.dynamics.rollout(
-            prompt_tokens,
-            num_new_frames=num_new_frames,
-            num_steps=num_steps,
+            prompt_TS=prompt_BS,
+            num_new_frames=T_model - H,
+            num_steps=self.num_unmask_steps,
             actions_T=action_embeds,
-            temperature=temperature,
-            unmask_mode=unmask_mode,
+            temperature=self.temperature,
         )
-        return self.decode(full_tokens)
+        info["predicted_tokens"] = rearrange(full_tokens, "(b s) t k -> b s t k", b=B, s=S)
+
+        if self.cost_mode == "pixel":
+            decoded = self.tokenizer.decode_from_indices(full_tokens)
+            decoded = self._tokenizer_to_pixels(decoded)
+            info["predicted_pixels"] = rearrange(decoded, "(b s) t c h w -> b s t c h w", b=B, s=S)
+
+        return info
 
     @torch.no_grad()
-    def step(
-        self,
-        context_tokens: torch.Tensor,
-        action_ids: torch.Tensor,
-        num_steps: int = 25,
-        temperature: float = 2.0,
-        unmask_mode: str = "random",
-    ) -> torch.Tensor:
+    def criterion(self, info):
+        """Cost between the last predicted frame and the goal, per action candidate.
+        Returns a (B, S) tensor; lower is better.
         """
-        Interactive generation. Extend a running token context by one frame.
+        if self.cost_mode == "pixel":
+            assert "predicted_pixels" in info
+            pred = info["predicted_pixels"]
+            goal = info["goal"]
+            while goal.ndim > 4 and goal.size(1) == 1:
+                goal = goal.squeeze(1)
+            last = pred[..., -1, :, :, :]
+            goal_b = goal.unsqueeze(1).expand_as(last)
+            return F.mse_loss(last, goal_b, reduction="none").sum(dim=(2, 3, 4))
 
-        Args:
-            context_tokens: (B, t, S) tokens for the first t frames (t < temporal_dim).
-            action_ids:     (B, t) full action history. action_ids[:, -1] is the
-                            action being taken to produce the new frame.
-            num_steps:      MaskGIT iterations.
-            temperature:    sampling temperature.
-            unmask_mode:    "random" or "greedy".
+        assert "predicted_tokens" in info
+        assert "goal_tokens" in info
+        pred_last = info["predicted_tokens"][..., -1, :]
+        goal = info["goal_tokens"]
 
-        Returns:
-            new_frame_tokens: (B, S) the freshly sampled frame in token space.
-                              Caller is responsible for appending it to its context.
-        """
-        T = self.temporal_dim
-        B, t, S = context_tokens.shape
-        assert t < T, f"context already at max length {T}; cannot step further"
-        assert action_ids.size(1) == t, \
-            f"need {t} action ids (full history), got {action_ids.size(1)}"
+        if self.cost_mode == "token":
+            return (pred_last != goal.unsqueeze(1).expand_as(pred_last)).float().sum(-1)
 
-        # Pad token context with fully-masked tail
-        masked_tail = torch.full(
-            (B, T - t, S),
-            self.dynamics.mask_token_id,
-            dtype=context_tokens.dtype,
-            device=context_tokens.device,
-        )
-        full_tokens = torch.cat([context_tokens, masked_tail], dim=1)
+        codebook = self.tokenizer.vq.codebook
+        pred_e = codebook(pred_last)
+        goal_e = codebook(goal).unsqueeze(1).expand_as(pred_e)
+        return F.mse_loss(pred_e, goal_e, reduction="none").sum(dim=(-2, -1))
 
-        # Look up action embeddings, pad to T-1 with zeros (= "no action" for unknown future positions)
-        action_embeds = self.lam.vq.codebook(action_ids)      # (B, t, E)
-        pad_len = (T - 1) - t
-        if pad_len > 0:
-            zero_pad = torch.zeros(
-                B, pad_len, action_embeds.size(-1),
-                device=action_embeds.device, dtype=action_embeds.dtype,
-            )
-            action_embeds = torch.cat([action_embeds, zero_pad], dim=1)
+    @torch.no_grad()
+    def get_cost(self, info, action_candidates):
+        """Compute the cost of action candidates given an info dict with goal and initial state."""
+        # the solver may broadcast tensors along a candidate axis of size S; drop it
+        # so encode/rollout see the raw (B, ...) prompt and candidates flow separately.
+        S = action_candidates.size(1)
+        collapsed = {}
+        for k, v in info.items():
+            if torch.is_tensor(v) and v.ndim >= 2 and v.size(1) == S:
+                collapsed[k] = v[:, 0]
+            else:
+                collapsed[k] = v
+        if "goal" in collapsed:
+            self.encode_goal(collapsed)
+        collapsed = self.rollout(collapsed, action_candidates)
+        return self.criterion(collapsed)
 
-        return self.dynamics.sample_frame(
-            full_tokens,
-            frame_idx=t,
-            num_steps=num_steps,
-            actions_T=action_embeds,
-            temperature=temperature,
-            unmask_mode=unmask_mode,
-        )
+
+__all__ = ['Genie']
