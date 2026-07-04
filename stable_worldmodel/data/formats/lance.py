@@ -255,13 +255,9 @@ class LanceDataset(Dataset):
 
         stripped = loc.rstrip('/')
         if stripped.lower().endswith('.lance'):
-            sep = stripped.rfind('/')
-            parent, leaf = (
-                (stripped[:sep], stripped[sep + 1 :])
-                if sep >= 0
-                else ('.', stripped)
-            )
-            return parent, leaf[: -len('.lance')]
+            p = Path(stripped)
+            parent = str(p.parent)
+            return parent, p.stem
 
         # Directory holding a single *.lance subdir.
         p = Path(loc)
