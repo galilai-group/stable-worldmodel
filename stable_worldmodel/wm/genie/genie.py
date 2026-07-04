@@ -21,8 +21,8 @@ class Genie(nn.Module):
         history_size: int = 1,
         num_unmask_steps: int = 8,
         temperature: float = 0.0,
-        cost_mode: str = "embed",
-        action_mode: str = "raw",
+        cost_mode: str = 'embed',
+        action_mode: str = 'raw',
         action_block: int = 1,
     ):
         super().__init__()
@@ -35,9 +35,13 @@ class Genie(nn.Module):
         self.num_unmask_steps = num_unmask_steps
         self.temperature = temperature
 
-        assert cost_mode in ("pixel", "token", "embed"), f"unknown cost_mode {cost_mode!r}"
+        assert cost_mode in ('pixel', 'token', 'embed'), (
+            f'unknown cost_mode {cost_mode!r}'
+        )
         self.cost_mode = cost_mode
-        assert action_mode in ("raw", "code"), f"unknown action_mode {action_mode!r}"
+        assert action_mode in ('raw', 'code'), (
+            f'unknown action_mode {action_mode!r}'
+        )
         self.action_mode = action_mode
         assert action_block >= 1
         self.action_block = action_block
@@ -49,20 +53,30 @@ class Genie(nn.Module):
     @property
     def num_actions(self) -> int:
         if self.lam is None:
-            raise AttributeError("num_actions requires a LAM")
+            raise AttributeError('num_actions requires a LAM')
         return self.lam.vq.num_codes
 
     @staticmethod
     def _pixels_to_tokenizer(pixels):
-        return pixels.mul(2).sub(1).clamp(-1, 1).permute(0, 1, 3, 4, 2).contiguous()
+        return (
+            pixels.mul(2)
+            .sub(1)
+            .clamp(-1, 1)
+            .permute(0, 1, 3, 4, 2)
+            .contiguous()
+        )
 
     @staticmethod
     def _tokenizer_to_pixels(video):
-        return video.add(1).div(2).clamp(0, 1).permute(0, 1, 4, 2, 3).contiguous()
+        return (
+            video.add(1).div(2).clamp(0, 1).permute(0, 1, 4, 2, 3).contiguous()
+        )
 
     def _embed_actions(self, ac):
-        if self.action_mode == "raw":
-            assert self.action_encoder is not None, "action_mode='raw' requires an ActionEncoder"
+        if self.action_mode == 'raw':
+            assert self.action_encoder is not None, (
+                "action_mode='raw' requires an ActionEncoder"
+            )
             return self.action_encoder(ac.float())
         assert self.lam is not None, "action_mode='code' requires a LAM"
         return self.lam.vq.codebook(ac.long())
@@ -73,9 +87,9 @@ class Genie(nn.Module):
         info: dict with pixels of shape (B, C, H, W) or (B, T_hist, C, H, W).
         Writes info['tokens'] of shape (B, T_hist, S).
         """
-        if "tokens" in info:
+        if 'tokens' in info:
             return info
-        pixels = info["pixels"]
+        pixels = info['pixels']
         T_model = self.temporal_dim
         if pixels.ndim == 4:
             pixels = pixels.unsqueeze(1)
@@ -87,7 +101,7 @@ class Genie(nn.Module):
             pixels_full = pixels[:, :T_model]
         video = self._pixels_to_tokenizer(pixels_full)
         tokens_full, _, _ = self.tokenizer.encode(video)
-        info["tokens"] = tokens_full[:, :T_hist]
+        info['tokens'] = tokens_full[:, :T_hist]
         return info
 
     @torch.no_grad()
@@ -96,15 +110,15 @@ class Genie(nn.Module):
         info: dict with goal of shape (B, C, H, W).
         Writes info['goal_tokens'] of shape (B, S).
         """
-        if "goal_tokens" in info:
+        if 'goal_tokens' in info:
             return info
-        goal = info["goal"]
+        goal = info['goal']
         if goal.ndim == 4:
             goal = goal.unsqueeze(1)
         goal_full = goal.expand(-1, self.temporal_dim, -1, -1, -1)
         goal_video = self._pixels_to_tokenizer(goal_full)
         tokens, _, _ = self.tokenizer.encode(goal_video)
-        info["goal_tokens"] = tokens[:, 0]
+        info['goal_tokens'] = tokens[:, 0]
         return info
 
     @torch.no_grad()
@@ -116,18 +130,24 @@ class Genie(nn.Module):
         and info['predicted_pixels'] (B, S, T_model, C, H, W) when cost_mode='pixel'.
         """
         info = self.encode(info)
-        prompt = info["tokens"]
+        prompt = info['tokens']
         B, H, Sp = prompt.shape
         S = action_candidates.size(1)
         T_model = self.temporal_dim
 
-        prompt_BS = prompt.unsqueeze(1).expand(B, S, H, Sp).reshape(B * S, H, Sp)
+        prompt_BS = (
+            prompt.unsqueeze(1).expand(B, S, H, Sp).reshape(B * S, H, Sp)
+        )
 
-        if self.action_mode == "raw":
-            ac = action_candidates.reshape(B * S, action_candidates.size(2), -1)
+        if self.action_mode == 'raw':
+            ac = action_candidates.reshape(
+                B * S, action_candidates.size(2), -1
+            )
             if self.action_block > 1:
                 raw_dim = ac.size(-1) // self.action_block
-                ac = ac.reshape(B * S, ac.size(1), self.action_block, raw_dim).mean(dim=2)
+                ac = ac.reshape(
+                    B * S, ac.size(1), self.action_block, raw_dim
+                ).mean(dim=2)
         else:
             ac = action_candidates.reshape(B * S, action_candidates.size(2))
 
@@ -136,7 +156,7 @@ class Genie(nn.Module):
         target_T = T_model - 1
         prefix_len = H - 1
         if prefix_len > 0:
-            if self.action_mode == "raw":
+            if self.action_mode == 'raw':
                 prefix = ac.new_zeros(B * S, prefix_len, ac.size(-1))
             else:
                 prefix = ac.new_zeros(B * S, prefix_len, dtype=ac.dtype)
@@ -145,7 +165,7 @@ class Genie(nn.Module):
             ac = ac[:, :target_T]
         else:
             pad_len = target_T - ac.size(1)
-            if self.action_mode == "raw":
+            if self.action_mode == 'raw':
                 pad = ac.new_zeros(B * S, pad_len, ac.size(-1))
             else:
                 pad = ac.new_zeros(B * S, pad_len, dtype=ac.dtype)
@@ -160,12 +180,16 @@ class Genie(nn.Module):
             actions_T=action_embeds,
             temperature=self.temperature,
         )
-        info["predicted_tokens"] = rearrange(full_tokens, "(b s) t k -> b s t k", b=B, s=S)
+        info['predicted_tokens'] = rearrange(
+            full_tokens, '(b s) t k -> b s t k', b=B, s=S
+        )
 
-        if self.cost_mode == "pixel":
+        if self.cost_mode == 'pixel':
             decoded = self.tokenizer.decode_from_indices(full_tokens)
             decoded = self._tokenizer_to_pixels(decoded)
-            info["predicted_pixels"] = rearrange(decoded, "(b s) t c h w -> b s t c h w", b=B, s=S)
+            info['predicted_pixels'] = rearrange(
+                decoded, '(b s) t c h w -> b s t c h w', b=B, s=S
+            )
 
         return info
 
@@ -174,28 +198,34 @@ class Genie(nn.Module):
         """Cost between the last predicted frame and the goal, per action candidate.
         Returns a (B, S) tensor; lower is better.
         """
-        if self.cost_mode == "pixel":
-            assert "predicted_pixels" in info
-            pred = info["predicted_pixels"]
-            goal = info["goal"]
+        if self.cost_mode == 'pixel':
+            assert 'predicted_pixels' in info
+            pred = info['predicted_pixels']
+            goal = info['goal']
             while goal.ndim > 4 and goal.size(1) == 1:
                 goal = goal.squeeze(1)
             last = pred[..., -1, :, :, :]
             goal_b = goal.unsqueeze(1).expand_as(last)
-            return F.mse_loss(last, goal_b, reduction="none").sum(dim=(2, 3, 4))
+            return F.mse_loss(last, goal_b, reduction='none').sum(
+                dim=(2, 3, 4)
+            )
 
-        assert "predicted_tokens" in info
-        assert "goal_tokens" in info
-        pred_last = info["predicted_tokens"][..., -1, :]
-        goal = info["goal_tokens"]
+        assert 'predicted_tokens' in info
+        assert 'goal_tokens' in info
+        pred_last = info['predicted_tokens'][..., -1, :]
+        goal = info['goal_tokens']
 
-        if self.cost_mode == "token":
-            return (pred_last != goal.unsqueeze(1).expand_as(pred_last)).float().sum(-1)
+        if self.cost_mode == 'token':
+            return (
+                (pred_last != goal.unsqueeze(1).expand_as(pred_last))
+                .float()
+                .sum(-1)
+            )
 
         codebook = self.tokenizer.vq.codebook
         pred_e = codebook(pred_last)
         goal_e = codebook(goal).unsqueeze(1).expand_as(pred_e)
-        return F.mse_loss(pred_e, goal_e, reduction="none").sum(dim=(-2, -1))
+        return F.mse_loss(pred_e, goal_e, reduction='none').sum(dim=(-2, -1))
 
     @torch.no_grad()
     def get_cost(self, info, action_candidates):
@@ -209,7 +239,7 @@ class Genie(nn.Module):
                 collapsed[k] = v[:, 0]
             else:
                 collapsed[k] = v
-        if "goal" in collapsed:
+        if 'goal' in collapsed:
             self.encode_goal(collapsed)
         collapsed = self.rollout(collapsed, action_candidates)
         return self.criterion(collapsed)

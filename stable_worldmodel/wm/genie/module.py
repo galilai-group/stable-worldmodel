@@ -1,5 +1,5 @@
 import math
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 import torch
 import torch.nn.functional as F
@@ -42,7 +42,7 @@ class VectorQuantizer(nn.Module):
 
         self.codebook = nn.Embedding(num_codes, embed_dim)
         self.codebook.weight.data.uniform_(-1.0 / num_codes, 1.0 / num_codes)
-        self.register_buffer("usage_count", torch.zeros(num_codes))
+        self.register_buffer('usage_count', torch.zeros(num_codes))
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         orig_shape = x.shape
@@ -68,8 +68,12 @@ class VectorQuantizer(nn.Module):
 
         if self.training:
             with torch.no_grad():
-                one_hot_NK = F.one_hot(indices_N, self.num_codes).to(self.usage_count.dtype)
-                self.usage_count.mul_(self.usage_decay).add_(one_hot_NK.sum(dim=0))
+                one_hot_NK = F.one_hot(indices_N, self.num_codes).to(
+                    self.usage_count.dtype
+                )
+                self.usage_count.mul_(self.usage_decay).add_(
+                    one_hot_NK.sum(dim=0)
+                )
 
         return quantized, indices, loss
 
@@ -97,7 +101,7 @@ class SelfAttention(nn.Module):
         qk_use_mup: bool = True,
         attn_drop: float = 0.0,
         causal: bool = True,
-        max_seq_len: Optional[int] = None,
+        max_seq_len: int | None = None,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -111,29 +115,44 @@ class SelfAttention(nn.Module):
         if self.qk_norm:
             self.norm = nn.LayerNorm(self.head_dim, eps=1e-5)
         if self.causal:
-            assert max_seq_len is not None, "causal=True requires max_seq_len"
-            mask = torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool), diagonal=1)
-            self.register_buffer("causal_mask", mask.view(1, 1, max_seq_len, max_seq_len))
+            assert max_seq_len is not None, 'causal=True requires max_seq_len'
+            mask = torch.triu(
+                torch.ones(max_seq_len, max_seq_len, dtype=torch.bool),
+                diagonal=1,
+            )
+            self.register_buffer(
+                'causal_mask', mask.view(1, 1, max_seq_len, max_seq_len)
+            )
 
     def forward(self, x: Tensor, causal: bool = True) -> Tensor:
         qkv = self.qkv(x)
-        qkv = rearrange(qkv, "B N (three H D) -> three B H N D", three=3, H=self.num_heads)
+        qkv = rearrange(
+            qkv, 'B N (three H D) -> three B H N D', three=3, H=self.num_heads
+        )
         q, k, v = qkv[0], qkv[1], qkv[2]
         if self.qk_norm:
             q = self.norm(q).to(dtype=v.dtype)
             k = self.norm(k).to(dtype=v.dtype)
         out = F.scaled_dot_product_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             dropout_p=self.attn_drop.p if self.training else 0.0,
             is_causal=causal,
             scale=self.scale,
         )
-        out = rearrange(out, "B H N D -> B N (H D)")
+        out = rearrange(out, 'B H N D -> B N (H D)')
         return self.proj(out)
 
 
 class MLP(nn.Module):
-    def __init__(self, d_model: int, ratio: float = 4.0, use_bias: bool = True, dropout: float = 0.0):
+    def __init__(
+        self,
+        d_model: int,
+        ratio: float = 4.0,
+        use_bias: bool = True,
+        dropout: float = 0.0,
+    ):
         super().__init__()
         hidden_dim = int(d_model * ratio)
         self._model = nn.Sequential(
@@ -182,17 +201,24 @@ class ST_Block(nn.Module):
             attn_drop=attn_dropout,
         )
         self.spatial_attn = SelfAttention(**attn_args, causal=False)
-        self.temporal_attn = SelfAttention(**attn_args, causal=True, max_seq_len=temporal_dim)
-        self.mlp = MLP(d_model=d_model, ratio=mlp_ratio, use_bias=mlp_use_bias, dropout=mlp_dropout)
+        self.temporal_attn = SelfAttention(
+            **attn_args, causal=True, max_seq_len=temporal_dim
+        )
+        self.mlp = MLP(
+            d_model=d_model,
+            ratio=mlp_ratio,
+            use_bias=mlp_use_bias,
+            dropout=mlp_dropout,
+        )
 
     def forward(self, x_TSC: Tensor) -> Tensor:
         T, S = x_TSC.size(1), x_TSC.size(2)
-        x_SC = rearrange(x_TSC, "B T S C -> (B T) S C")
+        x_SC = rearrange(x_TSC, 'B T S C -> (B T) S C')
         x_SC = x_SC + self.spatial_attn(self.norm1(x_SC), causal=False)
-        x_TC = rearrange(x_SC, "(B T) S C -> (B S) T C", T=T)
+        x_TC = rearrange(x_SC, '(B T) S C -> (B S) T C', T=T)
         x_TC = x_TC + self.temporal_attn(self.norm2(x_TC), causal=True)
         x_TC = x_TC + self.mlp(self.norm3(x_TC))
-        return rearrange(x_TC, "(B S) T C -> B T S C", S=S)
+        return rearrange(x_TC, '(B S) T C -> B T S C', S=S)
 
 
 class ST_Transformer(nn.Module):
@@ -225,7 +251,9 @@ class ST_Transformer(nn.Module):
             mlp_use_bias=mlp_use_bias,
             mlp_dropout=mlp_dropout,
         )
-        self.blocks = nn.ModuleList([ST_Block(**block_args) for _ in range(num_layers)])
+        self.blocks = nn.ModuleList(
+            [ST_Block(**block_args) for _ in range(num_layers)]
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         for blk in self.blocks:
@@ -250,10 +278,12 @@ class ST_MaskGIT(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.h = self.w = math.isqrt(spatial_dim)
-        assert self.h * self.w == spatial_dim, "spatial_dim must be a square"
+        assert self.h * self.w == spatial_dim, 'spatial_dim must be a square'
 
         self.decoder = decoder
-        self.pos_embed_TSC = nn.Parameter(torch.zeros(1, temporal_dim, spatial_dim, d_model))
+        self.pos_embed_TSC = nn.Parameter(
+            torch.zeros(1, temporal_dim, spatial_dim, d_model)
+        )
         self.token_embed_VD = nn.Embedding(image_vocab_size, d_model)
         self.mask_token_embed_1D = nn.Parameter(torch.zeros(1, d_model))
         self.image_vocab_size = image_vocab_size
@@ -265,13 +295,15 @@ class ST_MaskGIT(nn.Module):
     def compute_logits(
         self,
         input_ids_TS: Tensor,
-        actions_T: Optional[Tensor] = None,
+        actions_T: Tensor | None = None,
     ) -> Tensor:
         T = input_ids_TS.size(1)
         is_mask = input_ids_TS == self.mask_token_id
         safe_ids = input_ids_TS.masked_fill(is_mask, 0)
         x_TSC = self.token_embed_VD(safe_ids)
-        x_TSC = torch.where(is_mask.unsqueeze(-1), self.mask_token_embed_1D, x_TSC)
+        x_TSC = torch.where(
+            is_mask.unsqueeze(-1), self.mask_token_embed_1D, x_TSC
+        )
         x_TSC = x_TSC + self.pos_embed_TSC
 
         if actions_T is not None:
@@ -283,30 +315,36 @@ class ST_MaskGIT(nn.Module):
 
         x_TSC = self.decoder(x_TSC)
         logits_TSV = self.out_x_proj(x_TSC)
-        return rearrange(logits_TSV, "B T (H W) C -> B C T H W", H=self.h, W=self.w)
+        return rearrange(
+            logits_TSV, 'B T (H W) C -> B C T H W', H=self.h, W=self.w
+        )
 
     def forward(
         self,
         input_ids: Tensor,
         labels: Tensor,
-        actions_T: Optional[Tensor] = None,
+        actions_T: Tensor | None = None,
     ) -> dict:
         logits_BCTHW = self.compute_logits(input_ids, actions_T)
-        labels_THW = rearrange(labels, "B T (H W) -> B T H W", H=self.h, W=self.w)
-        input_THW = rearrange(input_ids, "B T (H W) -> B T H W", H=self.h, W=self.w)
+        labels_THW = rearrange(
+            labels, 'B T (H W) -> B T H W', H=self.h, W=self.w
+        )
+        input_THW = rearrange(
+            input_ids, 'B T (H W) -> B T H W', H=self.h, W=self.w
+        )
 
         logits_BCTHW = logits_BCTHW[:, :, 1:]
         labels_THW = labels_THW[:, 1:]
         input_THW = input_THW[:, 1:]
 
-        loss_THW = F.cross_entropy(logits_BCTHW, labels_THW, reduction="none")
+        loss_THW = F.cross_entropy(logits_BCTHW, labels_THW, reduction='none')
         correct_THW = logits_BCTHW.argmax(dim=1) == labels_THW
         mask_THW = input_THW == self.mask_token_id
         num_masked = mask_THW.sum().clamp(min=1)
 
         loss = (loss_THW * mask_THW).sum() / num_masked
         acc = (correct_THW * mask_THW).float().sum() / num_masked
-        return {"loss": loss, "acc": acc, "logits": logits_BCTHW}
+        return {'loss': loss, 'acc': acc, 'logits': logits_BCTHW}
 
     @torch.no_grad()
     def sample_frame(
@@ -314,20 +352,24 @@ class ST_MaskGIT(nn.Module):
         context_TS: Tensor,
         frame_idx: int,
         num_steps: int,
-        actions_T: Optional[Tensor] = None,
+        actions_T: Tensor | None = None,
         temperature: float = 1.0,
-        unmask_mode: str = "random",
+        unmask_mode: str = 'random',
     ) -> Tensor:
         assert frame_idx >= 1
         assert torch.all(context_TS[:, frame_idx:] == self.mask_token_id)
 
         B, T, S = context_TS.shape
         working = context_TS.clone()
-        unmasked = torch.zeros(B, S, dtype=torch.bool, device=context_TS.device)
+        unmasked = torch.zeros(
+            B, S, dtype=torch.bool, device=context_TS.device
+        )
 
         for step in range(num_steps):
             logits_BCTHW = self.compute_logits(working, actions_T)
-            logits_BCS = rearrange(logits_BCTHW[:, :, frame_idx], "B C H W -> B C (H W)")
+            logits_BCS = rearrange(
+                logits_BCTHW[:, :, frame_idx], 'B C H W -> B C (H W)'
+            )
 
             if temperature <= 1e-8:
                 samples_S = logits_BCS.argmax(dim=1)
@@ -335,22 +377,26 @@ class ST_MaskGIT(nn.Module):
             else:
                 probs_BCS = torch.softmax(logits_BCS / temperature, dim=1)
                 samples_S = torch.distributions.Categorical(
-                    probs=rearrange(probs_BCS, "B C S -> B S C")
+                    probs=rearrange(probs_BCS, 'B C S -> B S C')
                 ).sample()
 
-            confidences_S = torch.gather(probs_BCS, 1, samples_S.unsqueeze(1)).squeeze(1)
+            confidences_S = torch.gather(
+                probs_BCS, 1, samples_S.unsqueeze(1)
+            ).squeeze(1)
             samples_S = torch.where(unmasked, working[:, frame_idx], samples_S)
 
             if step != num_steps - 1:
                 n = math.ceil(cosine_schedule((step + 1) / num_steps) * S)
-                if unmask_mode == "greedy":
+                if unmask_mode == 'greedy':
                     scores_S = confidences_S
                 else:
                     scores_S = torch.rand_like(confidences_S)
                 scores_S = scores_S.masked_fill(unmasked, torch.inf)
                 order = torch.argsort(scores_S, dim=1)
                 unmasked = unmasked.scatter(1, order[:, n:], True)
-                samples_S = samples_S.scatter(1, order[:, :n], self.mask_token_id)
+                samples_S = samples_S.scatter(
+                    1, order[:, :n], self.mask_token_id
+                )
 
             working[:, frame_idx] = samples_S
 
@@ -362,9 +408,9 @@ class ST_MaskGIT(nn.Module):
         prompt_TS: Tensor,
         num_new_frames: int,
         num_steps: int,
-        actions_T: Optional[Tensor] = None,
+        actions_T: Tensor | None = None,
         temperature: float = 1.0,
-        unmask_mode: str = "random",
+        unmask_mode: str = 'random',
     ) -> Tensor:
         B, T_prompt, S = prompt_TS.shape
         T_total = T_prompt + num_new_frames
@@ -372,15 +418,21 @@ class ST_MaskGIT(nn.Module):
         assert T_total == T_model
 
         masked_tail = torch.full(
-            (B, num_new_frames, S), self.mask_token_id,
-            dtype=prompt_TS.dtype, device=prompt_TS.device,
+            (B, num_new_frames, S),
+            self.mask_token_id,
+            dtype=prompt_TS.dtype,
+            device=prompt_TS.device,
         )
         full_TS = torch.cat([prompt_TS, masked_tail], dim=1)
 
         for frame_idx in range(T_prompt, T_total):
             sample_S = self.sample_frame(
-                full_TS, frame_idx=frame_idx, num_steps=num_steps,
-                actions_T=actions_T, temperature=temperature, unmask_mode=unmask_mode,
+                full_TS,
+                frame_idx=frame_idx,
+                num_steps=num_steps,
+                actions_T=actions_T,
+                temperature=temperature,
+                unmask_mode=unmask_mode,
             )
             full_TS[:, frame_idx] = sample_S
         return full_TS
@@ -416,19 +468,29 @@ class ST_ViViT(nn.Module):
         self.channels = channels
         S = self.h_grid * self.w_grid
 
-        self.patchify = nn.Conv2d(channels, d_model, kernel_size=patch_size, stride=patch_size)
-        self.enc_pos_embed_TSC = nn.Parameter(torch.zeros(1, temporal_dim, S, d_model))
-        self.dec_pos_embed_TSC = nn.Parameter(torch.zeros(1, temporal_dim, S, d_model))
+        self.patchify = nn.Conv2d(
+            channels, d_model, kernel_size=patch_size, stride=patch_size
+        )
+        self.enc_pos_embed_TSC = nn.Parameter(
+            torch.zeros(1, temporal_dim, S, d_model)
+        )
+        self.dec_pos_embed_TSC = nn.Parameter(
+            torch.zeros(1, temporal_dim, S, d_model)
+        )
         self.pre_vq_proj = nn.Linear(d_model, vq.embed_dim)
         self.post_vq_proj = nn.Linear(vq.embed_dim, d_model)
-        self.unpatchify = nn.Linear(d_model, patch_size * patch_size * channels)
+        self.unpatchify = nn.Linear(
+            d_model, patch_size * patch_size * channels
+        )
         init_weights(self.modules())
 
     def encode(self, video: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         B, T = video.size(0), video.size(1)
-        video_NcHW = rearrange(video, "B T H W c -> (B T) c H W")
+        video_NcHW = rearrange(video, 'B T H W c -> (B T) c H W')
         patches_NChw = self.patchify(video_NcHW)
-        patches_TSC = rearrange(patches_NChw, "(B T) C h w -> B T (h w) C", B=B, T=T)
+        patches_TSC = rearrange(
+            patches_NChw, '(B T) C h w -> B T (h w) C', B=B, T=T
+        )
 
         z_TSC = patches_TSC + self.enc_pos_embed_TSC
         z_TSC = self.encoder(z_TSC)
@@ -443,8 +505,11 @@ class ST_ViViT(nn.Module):
         patches_TSP = self.unpatchify(z_TSC)
         return rearrange(
             patches_TSP,
-            "B T (h w) (p1 p2 c) -> B T (h p1) (w p2) c",
-            h=self.h_grid, w=self.w_grid, p1=self.patch_size, p2=self.patch_size,
+            'B T (h w) (p1 p2 c) -> B T (h p1) (w p2) c',
+            h=self.h_grid,
+            w=self.w_grid,
+            p1=self.patch_size,
+            p2=self.patch_size,
         )
 
     def decode_from_indices(self, indices_TS: Tensor) -> Tensor:
@@ -488,20 +553,32 @@ class LAM(nn.Module):
         self.d_model = d_model
         S = self.h_grid * self.w_grid
 
-        self.enc_patchify = nn.Conv2d(channels, d_model, kernel_size=patch_size, stride=patch_size)
-        self.dec_patchify = nn.Conv2d(channels, d_model, kernel_size=patch_size, stride=patch_size)
-        self.enc_pos_embed_TSC = nn.Parameter(torch.zeros(1, temporal_dim, S, d_model))
-        self.dec_pos_embed_TSC = nn.Parameter(torch.zeros(1, temporal_dim - 1, S, d_model))
+        self.enc_patchify = nn.Conv2d(
+            channels, d_model, kernel_size=patch_size, stride=patch_size
+        )
+        self.dec_patchify = nn.Conv2d(
+            channels, d_model, kernel_size=patch_size, stride=patch_size
+        )
+        self.enc_pos_embed_TSC = nn.Parameter(
+            torch.zeros(1, temporal_dim, S, d_model)
+        )
+        self.dec_pos_embed_TSC = nn.Parameter(
+            torch.zeros(1, temporal_dim - 1, S, d_model)
+        )
         self.pre_vq_proj = nn.Linear(d_model, vq.embed_dim)
         self.action_to_dmodel = nn.Linear(vq.embed_dim, d_model)
-        self.unpatchify = nn.Linear(d_model, patch_size * patch_size * channels)
+        self.unpatchify = nn.Linear(
+            d_model, patch_size * patch_size * channels
+        )
         init_weights(self.modules())
 
     def extract_actions(self, video: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         B, T = video.size(0), video.size(1)
-        video_NcHW = rearrange(video, "B T H W c -> (B T) c H W")
+        video_NcHW = rearrange(video, 'B T H W c -> (B T) c H W')
         patches_NChw = self.enc_patchify(video_NcHW)
-        patches_TSC = rearrange(patches_NChw, "(B T) C h w -> B T (h w) C", B=B, T=T)
+        patches_TSC = rearrange(
+            patches_NChw, '(B T) C h w -> B T (h w) C', B=B, T=T
+        )
 
         z_TSC = patches_TSC + self.enc_pos_embed_TSC
         z_TSC = self.encoder(z_TSC)
@@ -512,11 +589,15 @@ class LAM(nn.Module):
         action_q_TE, action_ids, vq_loss = self.vq(action_TE)
         return action_ids, action_q_TE, vq_loss
 
-    def predict_next_frames(self, prev_video: Tensor, action_q_TE: Tensor) -> Tensor:
+    def predict_next_frames(
+        self, prev_video: Tensor, action_q_TE: Tensor
+    ) -> Tensor:
         B, Tm1 = prev_video.size(0), prev_video.size(1)
-        video_NcHW = rearrange(prev_video, "B T H W c -> (B T) c H W")
+        video_NcHW = rearrange(prev_video, 'B T H W c -> (B T) c H W')
         patches_NChw = self.dec_patchify(video_NcHW)
-        patches_TSC = rearrange(patches_NChw, "(B T) C h w -> B T (h w) C", B=B, T=Tm1)
+        patches_TSC = rearrange(
+            patches_NChw, '(B T) C h w -> B T (h w) C', B=B, T=Tm1
+        )
 
         action_TC = self.action_to_dmodel(action_q_TE)
         patches_TSC = patches_TSC + action_TC.unsqueeze(2)
@@ -526,8 +607,11 @@ class LAM(nn.Module):
         patches_TSP = self.unpatchify(z_TSC)
         return rearrange(
             patches_TSP,
-            "B T (h w) (p1 p2 c) -> B T (h p1) (w p2) c",
-            h=self.h_grid, w=self.w_grid, p1=self.patch_size, p2=self.patch_size,
+            'B T (h w) (p1 p2 c) -> B T (h p1) (w p2) c',
+            h=self.h_grid,
+            w=self.w_grid,
+            p1=self.patch_size,
+            p2=self.patch_size,
         )
 
     def forward(self, video: Tensor) -> tuple[Tensor, Tensor, Tensor]:
