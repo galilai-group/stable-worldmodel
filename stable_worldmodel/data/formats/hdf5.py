@@ -166,6 +166,15 @@ class HDF5Dataset(Dataset):
         return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
 
+def _is_string_col(sample) -> bool:
+    """True if a column's per-step value is text — stored as a variable-length
+    UTF-8 string rather than a numeric array. Covers python ``str``/``bytes`` and
+    numpy string/object (``U``/``S``/``O``) dtypes."""
+    if isinstance(sample, (str, bytes, bytearray)):
+        return True
+    return np.asarray(sample).dtype.kind in ('U', 'S', 'O')
+
+
 class HDF5Writer:
     """Append episodes to a single HDF5 file. Schema is inferred from the
     first episode and locked thereafter.
@@ -221,7 +230,17 @@ class HDF5Writer:
         for col, vals in ep_data.items():
             ds = self._f[col]
             ds.resize(self._global_ptr + ep_len, axis=0)
-            ds[self._global_ptr : self._global_ptr + ep_len] = np.array(vals)
+            if h5py.check_string_dtype(ds.dtype):
+                arr = np.array(
+                    [
+                        v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+                        for v in vals
+                    ],
+                    dtype=object,
+                )
+            else:
+                arr = np.array(vals)
+            ds[self._global_ptr : self._global_ptr + ep_len] = arr
 
         n = self._f['ep_len'].shape[0]
         self._f['ep_len'].resize(n + 1, axis=0)
@@ -261,6 +280,8 @@ class HDF5Writer:
                 f'unexpected columns: {sorted(extra)}.'
             )
         for col, vals in ep_data.items():
+            if h5py.check_string_dtype(self._f[col].dtype):
+                continue  # variable-length strings have no fixed per-step shape
             sample = np.asarray(vals[0])
             ds_shape = self._f[col].shape[1:]
             if sample.shape != ds_shape:
@@ -272,6 +293,16 @@ class HDF5Writer:
 
     def _init_schema(self, sample_ep: dict) -> None:
         for col, vals in sample_ep.items():
+            if _is_string_col(vals[0]):
+                # Text column: one variable-length UTF-8 string per step.
+                self._f.create_dataset(
+                    col,
+                    shape=(0,),
+                    maxshape=(None,),
+                    dtype=h5py.string_dtype(),
+                    chunks=(1,),
+                )
+                continue
             sample = np.asarray(vals[0])
             self._f.create_dataset(
                 col,
