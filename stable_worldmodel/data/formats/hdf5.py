@@ -233,7 +233,9 @@ class HDF5Writer:
             if h5py.check_string_dtype(ds.dtype):
                 arr = np.array(
                     [
-                        v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+                        v.decode()
+                        if isinstance(v, (bytes, bytearray))
+                        else str(v)
                         for v in vals
                     ],
                     dtype=object,
