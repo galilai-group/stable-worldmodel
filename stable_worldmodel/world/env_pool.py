@@ -37,6 +37,7 @@ from gymnasium.vector.utils import batch_space
 AsyncEnvEventKind = Literal['step', 'reset']
 AsyncEnvMask = np.NDArray[np.bool_]
 
+
 class EnvPool:
     """Batched env runner with selective stepping.
 

@@ -597,9 +597,7 @@ def test_worldmodel_policy_async_only_consumes_ready_slots():
         'pixels': np.zeros((1, 1, 4, 4, 3), dtype=np.float32),
         'goal': np.zeros((1, 1, 4, 4, 3), dtype=np.float32),
     }
-    action = policy.get_action(
-        info, env_mask=np.array([False, True, False])
-    )
+    action = policy.get_action(info, env_mask=np.array([False, True, False]))
 
     np.testing.assert_array_equal(action, np.full((1, 2), 11.0))
     assert [len(buffer) for buffer in policy._action_buffer] == [2, 1, 2]
@@ -624,9 +622,7 @@ def test_worldmodel_policy_async_replans_ready_empty_slots():
         'pixels': np.zeros((2, 1, 4, 4, 3), dtype=np.float32),
         'goal': np.zeros((2, 1, 4, 4, 3), dtype=np.float32),
     }
-    action = policy.get_action(
-        info, env_mask=np.array([False, True, True])
-    )
+    action = policy.get_action(info, env_mask=np.array([False, True, True]))
 
     assert solver.call_count == 1
     assert solver.last_batch_size == 1

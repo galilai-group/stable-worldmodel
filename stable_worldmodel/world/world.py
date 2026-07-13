@@ -445,7 +445,9 @@ class World:
         episode completion. Letting callers consume completions as a
         generator is what makes streaming writes possible without threading.
         """
-        assert mode in RESET_MODES, f'mode must be one of {RESET_MODES}, received {mode=}'
+        assert mode in RESET_MODES, (
+            f'mode must be one of {RESET_MODES}, received {mode=}'
+        )
 
         if self.policy is None:
             raise RuntimeError('No policy set.')
@@ -517,7 +519,9 @@ class World:
         on_step=None,
     ):
         """Drive environments from a first-completed event loop."""
-        assert mode in RESET_MODES, f'mode must be one of {RESET_MODES}, received {mode=}'
+        assert mode in RESET_MODES, (
+            f'mode must be one of {RESET_MODES}, received {mode=}'
+        )
 
         if self.policy is None:
             raise RuntimeError('No policy set.')
@@ -532,9 +536,7 @@ class World:
             self.reset(seed=seed, options=options)
 
         active_count = (
-            self.num_envs
-            if episodes is None
-            else min(self.num_envs, episodes)
+            self.num_envs if episodes is None else min(self.num_envs, episodes)
         )
         active = np.zeros(self.num_envs, dtype=bool)
         active[:active_count] = True
@@ -618,12 +620,9 @@ class World:
                 self.infos.pop('_needs_flush', None)
                 self.envs.submit_step(next_step_mask, actions)
 
-            for env_idx, episode_idx in completions:
-                yield env_idx, episode_idx
+            yield from completions
 
-    def _get_actions(
-        self, env_mask: AsyncEnvMask | None = None
-    ) -> np.ndarray:
+    def _get_actions(self, env_mask: AsyncEnvMask | None = None) -> np.ndarray:
         if env_mask is None:
             return self.policy.get_action(self.infos)
 
