@@ -48,7 +48,7 @@ import torch
 
 from stable_worldmodel.policy import Policy
 
-from .env_pool import AsyncEnvPool, EnvMask, EnvPool
+from .env_pool import AsyncEnvPool, AsyncEnvMask, EnvPool
 from ..plot import save_panel_videos, save_video
 from ..wrapper import MegaWrapper
 
@@ -622,7 +622,7 @@ class World:
                 yield env_idx, episode_idx
 
     def _get_actions(
-        self, env_mask: EnvMask | None = None
+        self, env_mask: AsyncEnvMask | None = None
     ) -> np.ndarray:
         if env_mask is None:
             return self.policy.get_action(self.infos)
