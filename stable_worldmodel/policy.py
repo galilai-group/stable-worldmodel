@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -12,7 +12,9 @@ from torchvision import tv_tensors
 
 from stable_worldmodel.planning.solver import Solver
 from stable_worldmodel.protocols import Actionable, Transformable
-from stable_worldmodel.world.env_pool import AsyncEnvMask
+
+if TYPE_CHECKING:
+    from stable_worldmodel.world.env_pool import AsyncEnvMask
 
 
 @dataclass(frozen=True)

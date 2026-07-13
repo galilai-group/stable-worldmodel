@@ -35,6 +35,7 @@ from .formats.lerobot import LeRobotAdapter
 try:
     from .formats.hdf5 import HDF5Dataset, HDF5Writer  # noqa: F401
 except ImportError:
+    breakpoint()
     pass
 
 try:

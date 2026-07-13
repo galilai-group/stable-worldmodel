@@ -35,7 +35,7 @@ from gymnasium.vector.utils import batch_space
 
 
 AsyncEnvEventKind = Literal['step', 'reset']
-AsyncEnvMask = np.NDArray[np.bool_]
+AsyncEnvMask = np.typing.NDArray[np.bool_]
 
 
 class EnvPool:
