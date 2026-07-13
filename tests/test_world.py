@@ -95,6 +95,19 @@ class RecordingPolicy:
         return actions
 
 
+class ResetAwarePolicy(RecordingPolicy):
+    """Recording policy that also implements the reset-hook contract."""
+
+    def __init__(self):
+        super().__init__()
+        self.reset_masks = []
+
+    def on_reset(self, env_mask=None):
+        self.reset_masks.append(
+            None if env_mask is None else np.array(env_mask, copy=True)
+        )
+
+
 def _make_world(num_envs=2, max_steps=3):
     """Build a World with CounterEnv directly, bypassing gym.make."""
     pool = EnvPool(
@@ -466,6 +479,32 @@ class TestSetPolicy:
         assert world.truncateds is not None
         assert len(world.infos) > 0
         np.testing.assert_array_equal(world.terminateds, [False, False])
+
+    def test_reset_notifies_policy_that_all_envs_reset(self):
+        world = _make_world(num_envs=2)
+        policy = ResetAwarePolicy()
+        world.policy = policy
+        policy.set_env(world.envs)
+
+        world.reset(seed=42)
+
+        assert policy.reset_masks == [None]
+
+    def test_auto_reset_notifies_policy_with_done_env_mask(self):
+        world = _make_world(num_envs=2, max_steps=100)
+        world.envs.envs[0]._max_steps = 2
+        policy = ResetAwarePolicy()
+        world.policy = policy
+        policy.set_env(world.envs)
+
+        world._run(episodes=2, seed=0, mode='auto')
+
+        selective_masks = [
+            mask for mask in policy.reset_masks if mask is not None
+        ]
+        assert selective_masks
+        for mask in selective_masks:
+            np.testing.assert_array_equal(mask, [True, False])
 
     def test_reset_per_env_options_passed_through(self):
         seen = {'opts': None}

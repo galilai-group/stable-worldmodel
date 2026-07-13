@@ -445,7 +445,7 @@ class World:
         episode completion. Letting callers consume completions as a
         generator is what makes streaming writes possible without threading.
         """
-        assert mode in RESET_MODES, f'reset_mode must be one of {RESET_MODES}'
+        assert mode in RESET_MODES, f'mode must be one of {RESET_MODES}, received {mode=}'
 
         if self.policy is None:
             raise RuntimeError('No policy set.')
@@ -628,9 +628,9 @@ class World:
             return self.policy.get_action(self.infos)
 
         indices = np.flatnonzero(env_mask)
-        info_batch = _select_ready(self.infos, indices, self.num_envs)
+        ready_info = _slice_ready(self.infos, indices, self.num_envs)
         actions = self.policy.get_action(
-            info_batch,
+            ready_info,
             env_mask=env_mask,
         )
         return _select_actions(
@@ -757,7 +757,7 @@ class World:
         return results
 
 
-def _select_ready(infos: dict, indices: np.ndarray, num_envs: int) -> dict:
+def _slice_ready(infos: dict, indices: np.ndarray, num_envs: int) -> dict:
     """Select ready environment rows while preserving non-batched values."""
     selected = {}
     for key, value in infos.items():

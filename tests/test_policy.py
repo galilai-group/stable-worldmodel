@@ -346,7 +346,7 @@ class MockSolver:
 
     @property
     def action_dim(self) -> int:
-        return self._action_space.shape[0] * self._config.action_block
+        return self._action_space.shape[-1] * self._config.action_block
 
     @property
     def n_envs(self) -> int:
@@ -357,7 +357,7 @@ class MockSolver:
         return self._config.horizon
 
     def solve(self, info_dict, init_action=None):
-        action_dim = self._action_space.shape[0]
+        action_dim = self._action_space.shape[-1]
         batch = (
             len(next(iter(info_dict.values()))) if info_dict else self._n_envs
         )
@@ -571,6 +571,107 @@ def test_worldmodel_policy_selective_replan():
     assert len(policy._action_buffer[1]) == 1
     # env 1's warm-start slot should be untouched; env 0's slot was overwritten
     assert torch.equal(policy._next_init[1], next_init_before[1])
+
+
+def test_worldmodel_policy_async_only_consumes_ready_slots():
+    """A ready-only call must leave busy environments' plans untouched."""
+    solver = MockSolver()
+    config = PlanConfig(horizon=4, receding_horizon=2)
+    policy = WorldModelPolicy(solver=solver, config=config)
+
+    mock_env = MagicMock()
+    mock_env.num_envs = 3
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(3, 2))
+    mock_env.single_action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    policy.set_env(mock_env)
+
+    for env_i, buffer in enumerate(policy._action_buffer):
+        buffer.extend(
+            [
+                torch.full((2,), float(env_i * 10 + 1)),
+                torch.full((2,), float(env_i * 10 + 2)),
+            ]
+        )
+
+    info = {
+        'pixels': np.zeros((1, 1, 4, 4, 3), dtype=np.float32),
+        'goal': np.zeros((1, 1, 4, 4, 3), dtype=np.float32),
+    }
+    action = policy.get_action(
+        info, env_mask=np.array([False, True, False])
+    )
+
+    np.testing.assert_array_equal(action, np.full((1, 2), 11.0))
+    assert [len(buffer) for buffer in policy._action_buffer] == [2, 1, 2]
+    assert solver.call_count == 0
+
+
+def test_worldmodel_policy_async_replans_ready_empty_slots():
+    """Only empty buffers among ready environments enter the solver batch."""
+    solver = MockSolver()
+    config = PlanConfig(horizon=4, receding_horizon=2)
+    policy = WorldModelPolicy(solver=solver, config=config)
+
+    mock_env = MagicMock()
+    mock_env.num_envs = 3
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(3, 2))
+    mock_env.single_action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    policy.set_env(mock_env)
+    policy._action_buffer[0].append(torch.full((2,), 10.0))
+    policy._action_buffer[1].append(torch.full((2,), 20.0))
+
+    info = {
+        'pixels': np.zeros((2, 1, 4, 4, 3), dtype=np.float32),
+        'goal': np.zeros((2, 1, 4, 4, 3), dtype=np.float32),
+    }
+    action = policy.get_action(
+        info, env_mask=np.array([False, True, True])
+    )
+
+    assert solver.call_count == 1
+    assert solver.last_batch_size == 1
+    np.testing.assert_array_equal(action[0], np.full(2, 20.0))
+    np.testing.assert_array_equal(action[1], np.zeros(2))
+    assert [len(buffer) for buffer in policy._action_buffer] == [1, 0, 1]
+
+
+def test_worldmodel_policy_on_reset_only_clears_selected_slots():
+    """Per-environment reset preserves unrelated plans and warm starts."""
+    solver = MockSolver()
+    config = PlanConfig(horizon=4, receding_horizon=2)
+    policy = WorldModelPolicy(solver=solver, config=config)
+
+    mock_env = MagicMock()
+    mock_env.num_envs = 3
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(3, 2))
+    mock_env.single_action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    policy.set_env(mock_env)
+    for buffer in policy._action_buffer:
+        buffer.append(torch.ones(2))
+    policy._next_init = torch.ones(3, 2, 2)
+
+    policy.on_reset(np.array([False, True, False]))
+
+    assert [len(buffer) for buffer in policy._action_buffer] == [1, 0, 1]
+    assert policy._next_init[0].eq(1).all()
+    assert policy._next_init[1].eq(0).all()
+    assert policy._next_init[2].eq(1).all()
+
+
+def test_worldmodel_policy_rejects_non_boolean_env_mask():
+    """The scheduling contract accepts one full-pool boolean mask only."""
+    solver = MockSolver()
+    policy = WorldModelPolicy(
+        solver=solver, config=PlanConfig(horizon=4, receding_horizon=2)
+    )
+    mock_env = MagicMock()
+    mock_env.num_envs = 3
+    mock_env.action_space = gym_spaces.Box(low=-1, high=1, shape=(3, 2))
+    mock_env.single_action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    policy.set_env(mock_env)
+
+    with pytest.raises(ValueError, match='env_mask must be boolean'):
+        policy.get_action({}, env_mask=np.array([0, 1, 0]))
 
 
 def test_worldmodel_policy_no_warm_start():

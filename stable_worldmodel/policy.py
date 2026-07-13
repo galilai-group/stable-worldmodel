@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from collections.abc import Callable
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from torchvision import tv_tensors
 
 from stable_worldmodel.planning.solver import Solver
 from stable_worldmodel.protocols import Actionable, Transformable
+from stable_worldmodel.world.env_pool import AsyncEnvMask
 
 
 @dataclass(frozen=True)
@@ -57,11 +61,21 @@ class BasePolicy:
         for arg, value in kwargs.items():
             setattr(self, arg, value)
 
-    def get_action(self, obs: Any, **kwargs: Any) -> np.ndarray:
+    def get_action(
+        self,
+        obs: Any,
+        *,
+        env_mask: AsyncEnvMask | None = None,
+        **kwargs: Any,
+    ) -> np.ndarray:
         """Get action from the policy given the observation.
 
         Args:
             obs: The current observation from the environment.
+            env_mask: Optional boolean mask over the full environment pool.
+                When provided, ``obs`` contains only the selected rows, in
+                ascending environment-index order. Stateful policies use the
+                mask to map those rows back to their per-environment state.
             **kwargs: Additional parameters for action selection.
 
         Returns:
@@ -71,6 +85,16 @@ class BasePolicy:
             NotImplementedError: If not implemented by a subclass.
         """
         raise NotImplementedError
+
+    def on_reset(self, env_mask: AsyncEnvMask | None = None) -> None:
+        """Notify the policy that selected environments were reset.
+
+        Args:
+            env_mask: Boolean mask over the full environment pool. ``None``
+                means that every environment was reset.
+
+        Stateless policies do not need to override this hook.
+        """
 
     def set_env(self, env: Any) -> None:
         """Associate this policy with an environment.
@@ -345,11 +369,21 @@ class WorldModelPolicy(BasePolicy):
             'Solver must implement the Solver protocol'
         )
 
-    def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
+    def get_action(
+        self,
+        info_dict: dict,
+        *,
+        env_mask: AsyncEnvMask | None = None,
+        **kwargs: Any,
+    ) -> np.ndarray:
         """Get action via planning with the world model.
 
         Args:
             info_dict: Current state information from the environment.
+            env_mask: Optional boolean mask over the full environment pool.
+                ``info_dict`` contains one row per true entry, in ascending
+                environment-index order. If omitted, all environments are
+                assumed present (sync EnvPool).
             **kwargs: Additional parameters for planning.
 
         Returns:
@@ -357,45 +391,50 @@ class WorldModelPolicy(BasePolicy):
         """
         assert hasattr(self, 'env'), 'Environment not set for the policy'
 
-        info_dict = self._prepare_info(info_dict)
         n_envs = self.env.num_envs
+        env_indices = _selected_env_indices(env_mask, n_envs)
+        batch_size = len(env_indices)
 
-        needs_flush = info_dict.pop('_needs_flush', None)
+        needs_flush = info_dict.get('_needs_flush')
         if needs_flush is not None:
-            for i in range(n_envs):
-                if needs_flush[i]:
-                    self._action_buffer[i].clear()
-                    if self._next_init is not None:
-                        self._next_init[i] = 0
+            flush_rows = _bool_rows(needs_flush, batch_size, '_needs_flush')
+            flush_mask = np.zeros(n_envs, dtype=bool)
+            flush_mask[env_indices[flush_rows]] = True
+            self.on_reset(flush_mask)
+
+        info_dict = self._prepare_info(info_dict)
+        info_dict.pop('_needs_flush', None)
 
         terminated = info_dict.get('terminated')
         dead = (
-            np.asarray(terminated, dtype=bool)
+            _bool_rows(terminated, batch_size, 'terminated')
             if terminated is not None
-            else np.zeros(n_envs, dtype=bool)
+            else np.zeros(batch_size, dtype=bool)
         )
 
-        replan_idx = [
-            i
-            for i in range(n_envs)
-            if len(self._action_buffer[i]) == 0 and not dead[i]
+        replan_rows = [
+            row
+            for row, env_i in enumerate(env_indices)
+            if len(self._action_buffer[env_i]) == 0 and not dead[row]
         ]
+        replan_envs = env_indices[replan_rows]
 
-        if replan_idx:
-            idx_tensor = torch.as_tensor(replan_idx, dtype=torch.long)
+        if replan_rows:
+            row_tensor = torch.as_tensor(replan_rows, dtype=torch.long)
+            env_tensor = torch.as_tensor(replan_envs, dtype=torch.long)
             sliced = {}
             for k, v in info_dict.items():
                 if torch.is_tensor(v):
-                    sliced[k] = v[idx_tensor]
+                    sliced[k] = v[row_tensor]
                 elif isinstance(v, np.ndarray):
-                    sliced[k] = v[replan_idx]
+                    sliced[k] = v[replan_rows]
                 elif isinstance(v, list):
-                    sliced[k] = [v[i] for i in replan_idx]
+                    sliced[k] = [v[i] for i in replan_rows]
                 else:
                     sliced[k] = v
 
             sliced_init = (
-                self._next_init[idx_tensor]
+                self._next_init[env_tensor]
                 if self._next_init is not None
                 else None
             )
@@ -412,37 +451,78 @@ class WorldModelPolicy(BasePolicy):
                     self._next_init = torch.zeros(
                         n_envs, rest.shape[1], rest.shape[2], dtype=rest.dtype
                     )
-                self._next_init[idx_tensor] = rest
+                self._next_init[env_tensor] = rest
             elif not self.cfg.warm_start:
                 self._next_init = None
 
             plan = plan.reshape(
-                len(replan_idx), self.flatten_receding_horizon, -1
+                len(replan_rows), self.flatten_receding_horizon, -1
             )
 
-            for row, env_i in enumerate(replan_idx):
+            for row, env_i in enumerate(replan_envs):
                 self._action_buffer[env_i].extend(plan[row])
 
         single_shape = self.env.single_action_space.shape
         is_discrete = 'Discrete' in type(self.env.single_action_space).__name__
 
         action = torch.full(
-            (n_envs, *single_shape),
+            (batch_size, *single_shape),
             fill_value=0 if is_discrete else float('nan'),
             dtype=torch.long if is_discrete else torch.float32,
         )
 
-        for i in range(n_envs):
-            if not dead[i]:
-                action[i] = self._action_buffer[i].popleft()
+        for row, env_i in enumerate(env_indices):
+            if not dead[row]:
+                action[row] = self._action_buffer[env_i].popleft()
 
-        action = action.reshape(*self.env.action_space.shape)
+        if env_mask is None:
+            action = action.reshape(*self.env.action_space.shape)
         action = action.numpy()
 
         if 'action' in self.process:
             action = self.process['action'].inverse_transform(action)
 
         return action
+
+    def on_reset(self, env_mask: AsyncEnvMask | None = None) -> None:
+        """Clear plans and warm starts for reset environment slots."""
+        if self._action_buffer is None:
+            return
+
+        n_envs = len(self._action_buffer)
+        env_indices = _selected_env_indices(env_mask, n_envs)
+        for env_i in env_indices:
+            self._action_buffer[env_i].clear()
+            if self._next_init is not None:
+                self._next_init[env_i] = 0
+
+
+def _selected_env_indices(
+    env_mask: AsyncEnvMask | None, n_envs: int
+) -> NDArray[np.int64]:
+    """Map an optional full-pool boolean mask to global env indices."""
+    if env_mask is None:
+        return np.arange(n_envs, dtype=np.int64)
+
+    mask = np.asarray(env_mask)
+    if mask.dtype != np.bool_ or mask.shape != (n_envs,):
+        raise ValueError(
+            f'env_mask must be boolean with shape ({n_envs},), '
+            f'got dtype={mask.dtype} and shape={mask.shape}'
+        )
+    return np.flatnonzero(mask)
+
+
+def _bool_rows(value: Any, batch_size: int, name: str) -> NDArray[np.bool_]:
+    """Collapse a batched boolean value to one flag per input row."""
+    if torch.is_tensor(value):
+        value = value.detach().cpu().numpy()
+    rows = np.asarray(value, dtype=bool)
+    if rows.ndim == 0 or rows.shape[0] != batch_size:
+        raise ValueError(
+            f'{name} must have {batch_size} leading rows, got {rows.shape}'
+        )
+    return rows.reshape(batch_size, -1).any(axis=1)
 
 
 # Alias for backward compatibility and type hinting
