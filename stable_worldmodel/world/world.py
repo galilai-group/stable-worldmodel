@@ -183,12 +183,12 @@ class World:
         """Attach a policy and configure it for this world's envs.
 
         Calls ``policy.set_env(self.envs)``. If the policy exposes a
-        ``seed`` attribute and ``set_seed`` method, the seed is applied.
+        ``seed`` attribute and ``_set_seed`` method, the seed is applied.
         """
         self.policy = policy
         self.policy.set_env(self.envs)
-        if hasattr(self.policy, 'seed') and self.policy.seed is not None:
-            self.policy.set_seed(self.policy.seed)
+        if hasattr(self.policy, '_set_seed') and self.policy.seed is not None:
+            self.policy._set_seed(self.policy.seed)
 
     def reset(self, seed=None, options=None) -> None:
         """Reset every env and refresh ``self.infos``.
@@ -504,6 +504,7 @@ class World:
                 self.terminateds[done] = False
                 self.truncateds[done] = False
                 self.infos['_needs_flush'] = done
+                self._notify_policy_reset(done)
             elif mode == 'wait':
                 alive[done] = False
 
@@ -610,6 +611,7 @@ class World:
             if reset_indices:
                 flush = np.zeros(self.num_envs, dtype=bool)
                 flush[reset_indices] = True
+                self._notify_policy_reset(flush)
                 self.infos['_needs_flush'] = flush
                 self.terminateds[reset_indices] = False
                 self.truncateds[reset_indices] = False
@@ -755,7 +757,7 @@ class World:
                 },
             )
         return results
-    
+
     def _notify_policy_reset(
         self, env_mask: AsyncEnvMask | None = None
     ) -> None:

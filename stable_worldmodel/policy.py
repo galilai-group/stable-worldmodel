@@ -202,9 +202,9 @@ class RandomPolicy(BasePolicy):
     def set_env(self, env: Any) -> None:
         super().set_env(env)
         if self.seed is not None:
-            self.set_seed(self.seed)
+            self._set_seed(self.seed)
 
-    def set_seed(self, seed: int) -> None:
+    def _set_seed(self, seed: int) -> None:
         if self.env is not None:
             self.env.action_space.seed(seed)
 
