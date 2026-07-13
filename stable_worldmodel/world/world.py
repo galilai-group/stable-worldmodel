@@ -202,6 +202,7 @@ class World:
         if not hasattr(self, 'ready'):
             self.ready = np.zeros(self.num_envs, dtype=bool)
         self.ready[:] = False
+        self._notify_policy_reset()
 
     def evaluate(
         self,
@@ -754,6 +755,16 @@ class World:
                 },
             )
         return results
+    
+    def _notify_policy_reset(
+        self, env_mask: AsyncEnvMask | None = None
+    ) -> None:
+        if self.policy is None:
+            return
+
+        on_reset = getattr(self.policy, 'on_reset', None)
+        if on_reset is not None:
+            on_reset(env_mask)
 
 
 def _slice_ready(infos: dict, indices: np.ndarray, num_envs: int) -> dict:
