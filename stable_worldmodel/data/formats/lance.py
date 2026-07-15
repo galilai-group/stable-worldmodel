@@ -108,6 +108,8 @@ _FORKSERVER_PRELOAD = (
     'transformers',
     'datasets',
     'cv2',
+    'imageio',
+    'torchcodec',
     'stable_pretraining',
     'stable_worldmodel',
 )
