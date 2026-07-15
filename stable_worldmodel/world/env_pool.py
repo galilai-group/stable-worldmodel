@@ -121,7 +121,8 @@ class EnvPool:
         """Step envs and return ``(None, rewards, terminateds, truncateds, infos)``.
 
         Args:
-            actions: Array of shape ``(num_envs, ...)`` — one action per env.
+            actions: Batched action array with one action per env. The first
+                dimension must be ``num_envs``.
             mask: If provided, only envs where ``mask[i]`` is truthy are
                 stepped. Masked envs contribute zero reward and ``False``
                 termination/truncation, and their slot in the stacked

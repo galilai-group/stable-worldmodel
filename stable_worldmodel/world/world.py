@@ -156,6 +156,45 @@ class World:
         self.terminateds: np.ndarray | None = None
         self.truncateds: np.ndarray | None = None
 
+    @classmethod
+    def from_pettingzoo(
+        cls,
+        env_fn: Callable[[], Any],
+        num_envs: int,
+        *,
+        api: str = 'parallel',
+        reward_aggregation: str | Callable[[dict[Any, float]], float] = 'sum',
+    ) -> World:
+        """Build a ``World`` from a PettingZoo environment factory.
+
+        Each PettingZoo environment instance is one SWM env; agents are
+        represented as per-agent columns in ``world.infos``.
+        """
+        if api not in ('parallel', 'aec'):
+            raise ValueError("api must be one of {'parallel', 'aec'}.")
+        from stable_worldmodel.wrapper import (
+            PettingZooAECWrapper,
+            PettingZooParallelWrapper,
+        )
+
+        def make_env():
+            if api == 'aec':
+                return PettingZooAECWrapper(
+                    env_fn(), reward_aggregation=reward_aggregation
+                )
+            return PettingZooParallelWrapper(
+                env_fn(), reward_aggregation=reward_aggregation
+            )
+
+        world = object.__new__(cls)
+        world.envs = EnvPool([make_env for _ in range(num_envs)])
+        world.policy = None
+        world.infos = {}
+        world.rewards = None
+        world.terminateds = None
+        world.truncateds = None
+        return world
+
     @property
     def num_envs(self) -> int:
         """Number of envs in the pool."""
@@ -343,8 +382,9 @@ class World:
                 ):
                     ep = {k: list(v) for k, v in buffers[env_idx].items()}
                     buffers[env_idx].clear()
-                    if 'action' in ep:
-                        ep['action'].append(ep['action'].pop(0))
+                    for key in list(ep):
+                        if key == 'action' or key.startswith('action.'):
+                            ep[key].append(ep[key].pop(0))
                     pbar.update(1)
                     yield ep
 
@@ -393,7 +433,7 @@ class World:
         if episodes is None and max_steps is None:
             raise ValueError('Provide episodes or max_steps (or both).')
 
-        if seed is not None or options is not None:
+        if seed is not None or options is not None or not self.infos:
             self.reset(seed=seed, options=options)
 
         alive = np.ones(self.num_envs, dtype=bool)
