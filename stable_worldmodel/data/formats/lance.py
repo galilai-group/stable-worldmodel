@@ -89,6 +89,29 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
 
 _MP_START_FORCED = False
 
+# Imported once by the forkserver so DataLoader workers fork from a warm
+# interpreter instead of re-importing this stack per worker (~15-30 s each
+# from a network-mounted env; the whole tree is >5 min cold).
+# INVARIANT: nothing on these modules' import path may import lance/lancedb
+# or start runtimes, threads holding locks, or CUDA at import time. In
+# particular the lance Tokio runtime must only ever be created inside each
+# worker, after the fork — that is the whole reason forkserver is used. Do
+# NOT add `lancedb`, `stable_worldmodel.data`, `stable_pretraining.data`, or
+# anything else that imports lance at module level.
+_FORKSERVER_PRELOAD = (
+    'numpy',
+    'PIL',
+    'pyarrow',
+    'torch',
+    'torchvision',
+    'lightning',
+    'transformers',
+    'datasets',
+    'cv2',
+    'stable_pretraining',
+    'stable_worldmodel',
+)
+
 
 def _force_forkserver() -> None:
     """Switch Linux multiprocessing to a fork-safe start method for lancedb.
@@ -101,6 +124,11 @@ def _force_forkserver() -> None:
     lancedb itself recommends. Worker startup is also cheaper than ``spawn``
     (a fork of the clean server vs a full re-exec + re-import per worker).
     Falls back to ``spawn`` where forkserver is unavailable.
+
+    The server preloads :data:`_FORKSERVER_PRELOAD` (heavy, fork-benign
+    modules only — never lance itself) so each worker forks with the
+    expensive imports already in ``sys.modules``. Modules missing from the
+    environment are silently skipped by the stdlib forkserver.
     """
     import logging
     import multiprocessing as mp
@@ -121,6 +149,11 @@ def _force_forkserver() -> None:
             mp.set_start_method(target, force=True)
         except RuntimeError as exc:
             logging.warning('Could not switch to %s (%s)', target, exc)
+    if mp.get_start_method(allow_none=True) == 'forkserver':
+        try:
+            mp.set_forkserver_preload(list(_FORKSERVER_PRELOAD))
+        except Exception as exc:
+            logging.warning('Could not set forkserver preload (%s)', exc)
     try:
         torch.multiprocessing.set_sharing_strategy('file_system')
     except RuntimeError:
