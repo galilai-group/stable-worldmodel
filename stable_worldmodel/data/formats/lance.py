@@ -98,6 +98,12 @@ _MP_START_FORCED = False
 # worker, after the fork — that is the whole reason forkserver is used. Do
 # NOT add `lancedb`, `stable_worldmodel.data`, `stable_pretraining.data`, or
 # anything else that imports lance at module level.
+# Every module here must also import cleanly or raise *ImportError* when
+# absent: the stdlib forkserver swallows only ImportError from preload
+# modules, so any other exception at import time kills the server and makes
+# every worker start fail with BrokenPipeError. Modules that load native
+# libraries (and can raise RuntimeError/OSError) go in
+# _FORKSERVER_PRELOAD_OPTIONAL instead, which is probed before use.
 _FORKSERVER_PRELOAD = (
     'numpy',
     'PIL',
@@ -108,10 +114,19 @@ _FORKSERVER_PRELOAD = (
     'transformers',
     'datasets',
     'cv2',
-    'imageio',
-    'torchcodec',
     'stable_pretraining',
     'stable_worldmodel',
+)
+
+# Media decoders/encoders used by the lance-video path. They dlopen FFmpeg
+# shared libraries at import and raise RuntimeError/OSError (not ImportError)
+# when those are missing or ABI-incompatible — exactly what the forkserver
+# will not tolerate. We import them in the parent first and preload only the
+# ones that actually load, so a broken/absent FFmpeg degrades to "not
+# preloaded" instead of crashing every DataLoader worker.
+_FORKSERVER_PRELOAD_OPTIONAL = (
+    'imageio',
+    'torchcodec',
 )
 
 
@@ -129,9 +144,13 @@ def _force_forkserver() -> None:
 
     The server preloads :data:`_FORKSERVER_PRELOAD` (heavy, fork-benign
     modules only — never lance itself) so each worker forks with the
-    expensive imports already in ``sys.modules``. Modules missing from the
-    environment are silently skipped by the stdlib forkserver.
+    expensive imports already in ``sys.modules``. Modules absent from the
+    environment raise ImportError and are silently skipped by the stdlib
+    forkserver; :data:`_FORKSERVER_PRELOAD_OPTIONAL` modules (which can fail
+    with RuntimeError/OSError) are probed here and only preloaded when they
+    load, since a non-ImportError in the server would kill every worker.
     """
+    import importlib
     import logging
     import multiprocessing as mp
     import sys
@@ -152,8 +171,18 @@ def _force_forkserver() -> None:
         except RuntimeError as exc:
             logging.warning('Could not switch to %s (%s)', target, exc)
     if mp.get_start_method(allow_none=True) == 'forkserver':
+        preload = list(_FORKSERVER_PRELOAD)
+        for modname in _FORKSERVER_PRELOAD_OPTIONAL:
+            try:
+                importlib.import_module(modname)
+            except Exception as exc:
+                logging.warning(
+                    'Skipping forkserver preload of %s (%s)', modname, exc
+                )
+            else:
+                preload.append(modname)
         try:
-            mp.set_forkserver_preload(list(_FORKSERVER_PRELOAD))
+            mp.set_forkserver_preload(preload)
         except Exception as exc:
             logging.warning('Could not set forkserver preload (%s)', exc)
     try:
