@@ -89,6 +89,46 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
 
 _MP_START_FORCED = False
 
+# Imported once by the forkserver so DataLoader workers fork from a warm
+# interpreter instead of re-importing this stack per worker (~15-30 s each
+# from a network-mounted env; the whole tree is >5 min cold).
+# INVARIANT: nothing on these modules' import path may import lance/lancedb
+# or start runtimes, threads holding locks, or CUDA at import time. In
+# particular the lance Tokio runtime must only ever be created inside each
+# worker, after the fork — that is the whole reason forkserver is used. Do
+# NOT add `lancedb`, `stable_worldmodel.data`, `stable_pretraining.data`, or
+# anything else that imports lance at module level.
+# Every module here must also import cleanly or raise *ImportError* when
+# absent: the stdlib forkserver swallows only ImportError from preload
+# modules, so any other exception at import time kills the server and makes
+# every worker start fail with BrokenPipeError. Modules that load native
+# libraries (and can raise RuntimeError/OSError) go in
+# _FORKSERVER_PRELOAD_OPTIONAL instead, which is probed before use.
+_FORKSERVER_PRELOAD = (
+    'numpy',
+    'PIL',
+    'pyarrow',
+    'torch',
+    'torchvision',
+    'lightning',
+    'transformers',
+    'datasets',
+    'cv2',
+    'stable_pretraining',
+    'stable_worldmodel',
+)
+
+# Media decoders/encoders used by the lance-video path. They dlopen FFmpeg
+# shared libraries at import and raise RuntimeError/OSError (not ImportError)
+# when those are missing or ABI-incompatible — exactly what the forkserver
+# will not tolerate. We import them in the parent first and preload only the
+# ones that actually load, so a broken/absent FFmpeg degrades to "not
+# preloaded" instead of crashing every DataLoader worker.
+_FORKSERVER_PRELOAD_OPTIONAL = (
+    'imageio',
+    'torchcodec',
+)
+
 
 def _force_forkserver() -> None:
     """Switch Linux multiprocessing to a fork-safe start method for lancedb.
@@ -101,7 +141,16 @@ def _force_forkserver() -> None:
     lancedb itself recommends. Worker startup is also cheaper than ``spawn``
     (a fork of the clean server vs a full re-exec + re-import per worker).
     Falls back to ``spawn`` where forkserver is unavailable.
+
+    The server preloads :data:`_FORKSERVER_PRELOAD` (heavy, fork-benign
+    modules only — never lance itself) so each worker forks with the
+    expensive imports already in ``sys.modules``. Modules absent from the
+    environment raise ImportError and are silently skipped by the stdlib
+    forkserver; :data:`_FORKSERVER_PRELOAD_OPTIONAL` modules (which can fail
+    with RuntimeError/OSError) are probed here and only preloaded when they
+    load, since a non-ImportError in the server would kill every worker.
     """
+    import importlib
     import logging
     import multiprocessing as mp
     import sys
@@ -121,6 +170,21 @@ def _force_forkserver() -> None:
             mp.set_start_method(target, force=True)
         except RuntimeError as exc:
             logging.warning('Could not switch to %s (%s)', target, exc)
+    if mp.get_start_method(allow_none=True) == 'forkserver':
+        preload = list(_FORKSERVER_PRELOAD)
+        for modname in _FORKSERVER_PRELOAD_OPTIONAL:
+            try:
+                importlib.import_module(modname)
+            except Exception as exc:
+                logging.warning(
+                    'Skipping forkserver preload of %s (%s)', modname, exc
+                )
+            else:
+                preload.append(modname)
+        try:
+            mp.set_forkserver_preload(preload)
+        except Exception as exc:
+            logging.warning('Could not set forkserver preload (%s)', exc)
     try:
         torch.multiprocessing.set_sharing_strategy('file_system')
     except RuntimeError:
