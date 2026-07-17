@@ -648,7 +648,6 @@ class PushT(gym.Env):
         color='LightSlateGray',
         mask=pymunk.ShapeFilter.ALL_MASKS(),
     ):
-        scale = 30
         mass = 1
         length = 4
         vertices1 = [

@@ -4,6 +4,27 @@ import pytest
 from stable_worldmodel.envs.pusht.env import PushT
 
 
+@pytest.mark.parametrize('scale', [20, 60])
+def test_pusht_default_tee_respects_block_scale_variation(scale):
+    env = PushT()
+    try:
+        env.reset(
+            seed=0,
+            options={'variation_values': {'block.scale': scale}},
+        )
+        x_coordinates = [
+            vertex.x
+            for shape in env.block.shapes
+            for vertex in shape.get_vertices()
+        ]
+
+        assert max(x_coordinates) - min(x_coordinates) == pytest.approx(
+            4 * scale
+        )
+    finally:
+        env.close()
+
+
 @pytest.mark.parametrize(
     'shape,angle,expected_success,expected_distance',
     [
