@@ -307,7 +307,7 @@ class World:
 
         buffers = [defaultdict(list) for _ in range(self.num_envs)]
 
-        def on_step(world):
+        def on_step(world, mask):
             for col, data in world.infos.items():
                 if col.startswith('_'):
                     continue
@@ -318,7 +318,7 @@ class World:
                         data = data.squeeze(1)
                     else:
                         data = np.squeeze(data, axis=1)
-                for i in range(world.num_envs):
+                for i in np.where(mask)[0]:
                     val = data[i]
                     if isinstance(val, torch.Tensor):
                         val = val.detach().cpu().numpy()
@@ -385,6 +385,12 @@ class World:
         """Drive the policy and yield ``(env_idx, ep_count)`` on each
         episode completion. Letting callers consume completions as a
         generator is what makes streaming writes possible without threading.
+
+        ``on_step(world, mask)`` fires after every step and after every
+        reset (initial and per-env auto-reset), so callers see the reset
+        observation as well as stepped ones. ``mask`` marks which envs the
+        call reflects — all envs for a real step, just the reset ones for
+        an auto-reset.
         """
         assert mode in RESET_MODES, f'reset_mode must be one of {RESET_MODES}'
 
@@ -395,6 +401,8 @@ class World:
 
         if seed is not None or options is not None:
             self.reset(seed=seed, options=options)
+            if on_step:
+                on_step(self, mask=np.ones(self.num_envs, dtype=bool))
 
         alive = np.ones(self.num_envs, dtype=bool)
         next_seed = seed + self.num_envs if seed is not None else None
@@ -409,7 +417,7 @@ class World:
             )
 
             if on_step:
-                on_step(self)
+                on_step(self, mask=mask if mask is not None else alive)
 
             done = alive & (self.terminateds | self.truncateds)
             if not done.any():
@@ -439,6 +447,8 @@ class World:
                 self.terminateds[done] = False
                 self.truncateds[done] = False
                 self.infos['_needs_flush'] = done
+                if on_step:
+                    on_step(self, mask=done)
             elif mode == 'wait':
                 alive[done] = False
 
@@ -456,7 +466,7 @@ class World:
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
-        def on_step(world):
+        def on_step(world, mask):
             if frames is not None:
                 for i in range(world.num_envs):
                     f = world.infos['pixels'][i]
@@ -538,7 +548,7 @@ class World:
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
-        def on_step(world):
+        def on_step(world, mask):
             world.infos.update(deepcopy(goal_snapshot))
             results['episode_successes'] |= world.terminateds
             if frames is not None:
