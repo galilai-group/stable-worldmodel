@@ -74,11 +74,30 @@ class Dynamics(Protocol):
     """The dynamics surface a ``ShootingCostEvaluator`` needs from a world model."""
 
     def encode(self, x: dict) -> dict:  # pragma: no cover
+        """Embed raw observations into the model's latent space.
+
+        Args:
+            x: Dictionary of observations (e.g. ``pixels``, proprioception).
+
+        Returns:
+            The dictionary augmented with latent embeddings (e.g. ``emb``).
+        """
         ...
 
     def rollout(
         self, info_dict: dict, action_candidates: torch.Tensor
     ) -> dict:  # pragma: no cover
+        """Roll candidate action sequences forward through the dynamics.
+
+        Args:
+            info_dict: Dictionary containing environment state information.
+            action_candidates: Tensor of proposed action sequences of shape
+                ``(B, S, H, action_dim)``.
+
+        Returns:
+            The dictionary populated with rollout outputs (e.g.
+            ``predicted_emb`` of shape ``(B, S, T-1, dim)``).
+        """
         ...
 
 
@@ -95,6 +114,15 @@ class Objective(Protocol):
     """
 
     def __call__(self, info_dict: dict) -> torch.Tensor:  # pragma: no cover
+        """Score a rolled-out ``info_dict``.
+
+        Args:
+            info_dict: Dictionary already populated with rollout outputs
+                (e.g. ``predicted_emb``) and any goal/conditioning keys.
+
+        Returns:
+            Per-candidate cost tensor of shape ``(B, S)``.
+        """
         ...
 
 

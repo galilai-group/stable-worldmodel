@@ -124,14 +124,17 @@ class ChromaKeyWrapper(gym.Wrapper):
         return info
 
     def render(self):
+        """Render the wrapped env and chroma-key the returned frame."""
         frame = self.env.render()
         return frame if frame is None else self._apply(frame)
 
     def reset(self, **kwargs):
+        """Reset the wrapped env and chroma-key ``info['pixels*']``."""
         obs, info = self.env.reset(**kwargs)
         return obs, self._apply_to_info(info)
 
     def step(self, action):
+        """Step the wrapped env and chroma-key ``info['pixels*']``."""
         obs, reward, term, trunc, info = self.env.step(action)
         return obs, reward, term, trunc, self._apply_to_info(info)
 
@@ -153,6 +156,7 @@ class NoiseWrapper(_PixelTransform):
 
     @property
     def step_count(self):
+        """Number of ``env.step`` calls seen — the value fed to the schedule."""
         return self._step
 
     def _apply(self, frame):
@@ -165,6 +169,7 @@ class NoiseWrapper(_PixelTransform):
         )
 
     def step(self, action):
+        """Step the wrapped env, then advance the noise schedule counter."""
         out = super().step(action)
         self._step += 1
         return out
@@ -208,6 +213,7 @@ class ColorJitterWrapper(_PixelTransform):
         return out.astype(frame.dtype)
 
     def reset(self, **kwargs):
+        """Reset the wrapped env and resample the jitter factors."""
         self._sample()
         return super().reset(**kwargs)
 
@@ -259,6 +265,7 @@ class OcclusionWrapper(_PixelTransform):
         return out
 
     def reset(self, **kwargs):
+        """Reset the wrapped env and resample the occlusion patches."""
         self._patches = None
         return super().reset(**kwargs)
 
@@ -337,11 +344,13 @@ class MovingPatchWrapper(_PixelTransform):
         return out
 
     def reset(self, **kwargs):
+        """Reset the wrapped env and resample patch positions/velocities."""
         self._patches = None
         self._frame_shape = None
         return super().reset(**kwargs)
 
     def step(self, action):
+        """Step the wrapped env, then advance the patches by one velocity step."""
         out = super().step(action)
         self._advance()
         return out
@@ -412,6 +421,7 @@ class RandomConvWrapper(_PixelTransform):
         return np.clip(out, 0, 255).astype(frame.dtype)
 
     def reset(self, **kwargs):
+        """Reset the wrapped env and resample the conv weights."""
         self._sample()
         return super().reset(**kwargs)
 
