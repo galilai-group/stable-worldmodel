@@ -180,6 +180,16 @@ for _swm_id, _gym_id in [
         kwargs={'env_id': _gym_id, 'flatten': False},
     )
 
+# ManiSkill3 — Franka Panda manipulation + SIMPLER/real2sim Bridge (WidowX).
+# Registration is eager; the entry-point import (and thus mani_skill) is lazy.
+# TASK_SPECS is the single extension point — add a row to register a task/robot.
+from stable_worldmodel.envs.maniskill.tasks import TASK_SPECS as _MS_SPECS  # noqa: E402
+
+_MS_ENTRY = 'stable_worldmodel.envs.maniskill.env:ManiSkillWrapper'
+for _spec in _MS_SPECS:
+    _ms_kwargs = {k: v for k, v in _spec.items() if k != 'id'}
+    register(id=_spec['id'], entry_point=_MS_ENTRY, kwargs=_ms_kwargs)
+
 ############
 # DISCRETE #
 ############
