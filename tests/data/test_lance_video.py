@@ -247,3 +247,68 @@ def test_open_via_format_registry(tmp_path):
         out, num_steps=1, frameskip=1, keys_to_load=['pixels']
     )
     assert tuple(ds[0]['pixels'].shape) == (1, 3, 32, 32)
+
+
+def test_ranged_decode_parity_with_full_bytes(tmp_path):
+    """Decoding through the ranged blob reader must be bit-identical to
+    decoding from fully materialized blob bytes (the previous behavior)."""
+    import torch
+
+    import lance
+
+    _write(tmp_path / 'd')
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    item = ds[0]
+
+    videos_dir = next((tmp_path / 'd').glob('*_videos.lance'))
+    v = lance.dataset(str(videos_dir))
+    blob = v.take_blobs(blob_column='video_bytes', indices=[0])[0]
+    data = blob.readall()
+    blob.close()
+    ref = VideoDecoder(data, seek_mode='approximate')
+    expected = ref.get_frames_at(indices=[0, 1, 2, 3]).data
+    assert torch.equal(item['pixels'], expected)
+
+
+def test_ranged_decode_reads_partial_blob(tmp_path, monkeypatch):
+    """A small window from a long episode must not download the whole MP4."""
+    import stable_worldmodel.data.formats.lance_video as lv
+
+    rng = np.random.default_rng(1)
+    ep = {
+        'pixels': [
+            rng.integers(0, 255, (64, 64, 3)).astype(np.uint8)
+            for _ in range(300)
+        ],
+        'action': [
+            rng.standard_normal(2).astype(np.float32) for _ in range(300)
+        ],
+    }
+    with LanceVideoWriter(tmp_path / 'd') as w:
+        w.write_episodes([ep])
+
+    fetched = []
+    orig = lv._SeekableBlob.readinto
+
+    def counting(self, b):
+        n = orig(self, b)
+        fetched.append(n)
+        return n
+
+    monkeypatch.setattr(lv._SeekableBlob, 'readinto', counting)
+
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4, blob_buffer_size=4096)
+    item = ds[0]
+    assert item['pixels'].shape[0] == 4
+
+    import lance
+
+    videos_dir = next((tmp_path / 'd').glob('*_videos.lance'))
+    v = lance.dataset(str(videos_dir))
+    blob = v.take_blobs(blob_column='video_bytes', indices=[0])[0]
+    blob.seek(0, 2)
+    blob_size = blob.tell()
+    blob.close()
+    assert sum(fetched) < blob_size, (
+        f'ranged reader fetched {sum(fetched)} of {blob_size} bytes'
+    )
