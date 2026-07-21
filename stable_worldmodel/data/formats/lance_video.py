@@ -24,6 +24,7 @@ drawn from the same episode.
 
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 from collections import OrderedDict
@@ -109,6 +110,37 @@ def _encode_video(frames, fps: int, codec: str) -> bytes:
         os.unlink(path)
 
 
+class _SeekableBlob(io.RawIOBase):
+    """Adapt a lance ``BlobFile`` to the raw-IO protocol video decoders
+    expect, so decoding issues ranged object-store reads instead of
+    materializing the whole episode MP4 in memory."""
+
+    def __init__(self, blob) -> None:
+        self._blob = blob
+
+    def readinto(self, b) -> int:
+        data = self._blob.read(len(b))
+        n = len(data)
+        b[:n] = data
+        return n
+
+    def seek(self, pos: int, whence: int = 0) -> int:
+        return self._blob.seek(pos, whence)
+
+    def tell(self) -> int:
+        return self._blob.tell()
+
+    def seekable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        self._blob.close()
+        super().close()
+
+
 class LanceVideoDataset(LanceDataset):
     """Reader for the two-table video-blob layout.
 
@@ -122,6 +154,12 @@ class LanceVideoDataset(LanceDataset):
         video_keys: restrict which image columns to load; defaults to all
             present in the videos table.
         decoder_cache_size: per-worker LRU bound on open MP4 decoders.
+        blob_buffer_size: read-buffer size (bytes) for ranged blob reads.
+            Each decoder fetches only the byte ranges it needs from object
+            storage, in chunks of this size, instead of downloading the whole
+            episode MP4. Smaller values minimize bytes transferred
+            (rate-limited stores); larger values minimize round-trips
+            (high-latency links).
         Other args match :class:`LanceDataset`.
     """
 
@@ -132,6 +170,7 @@ class LanceVideoDataset(LanceDataset):
         *,
         video_keys: list[str] | None = None,
         decoder_cache_size: int = 16,
+        blob_buffer_size: int = 4 << 20,
         **kwargs: Any,
     ) -> None:
         loc = path if path is not None else kwargs.get('uri')
@@ -189,6 +228,7 @@ class LanceVideoDataset(LanceDataset):
         self._videos_uri = f'{resolved_uri}/{videos_name}.lance'
         self._storage_options = connect_kwargs.get('storage_options')
         self._decoder_cache_size = decoder_cache_size
+        self._blob_buffer_size = blob_buffer_size
         self._videos_ds = None
         self._decoder_cache: OrderedDict | None = None
 
@@ -244,20 +284,24 @@ class LanceVideoDataset(LanceDataset):
 
         cache = self._decoder_cache
         key = (ep_idx, vkey)
-        dec = cache.get(key)
-        if dec is not None:
+        entry = cache.get(key)
+        if entry is not None:
             cache.move_to_end(key)
-            return dec
+            return entry[0]
         row = self._blob_row[key]
         blob = self._videos_ds.take_blobs(
             blob_column='video_bytes', indices=[row]
         )[0]
-        try:
-            data = blob.readall()
-        finally:
-            blob.close()
-        dec = VideoDecoder(data, seek_mode='approximate')
-        cache[key] = dec
+        # Ranged reads: the decoder pulls only the byte ranges it needs
+        # (moov + touched GOPs) through a buffered seekable view of the
+        # blob, instead of downloading the whole episode MP4. The source
+        # is cached alongside the decoder so the handle stays open for
+        # subsequent windows and is dropped together with it on eviction.
+        src = io.BufferedReader(
+            _SeekableBlob(blob), buffer_size=self._blob_buffer_size
+        )
+        dec = VideoDecoder(src, seek_mode='approximate')
+        cache[key] = (dec, src)
         while len(cache) > self._decoder_cache_size:
             cache.popitem(last=False)
         return dec
