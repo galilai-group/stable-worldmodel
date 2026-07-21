@@ -294,7 +294,6 @@ def run(cfg):
     trainer = pl.Trainer(
         **cfg.trainer,
         callbacks=[
-            spt.callbacks.CPUOffloadCallback(),
             SaveCkptCallback(
                 run_name=cfg.output_model_name,
                 cfg=cfg.model,

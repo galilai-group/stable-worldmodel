@@ -6,11 +6,13 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
-from stable_worldmodel.solver.callbacks import (
+from stable_worldmodel.planning.solver.callbacks import (
     BestCostRecorder,
     MeanCostRecorder,
 )
-from stable_worldmodel.solver.categorical_cem import CategoricalCEMSolver
+from stable_worldmodel.planning.solver.categorical_cem import (
+    CategoricalCEMSolver,
+)
 
 
 class DummyCostModel:
@@ -51,9 +53,9 @@ def test_categorical_cem_solver_init():
     """Test CategoricalCEMSolver initialization."""
     model = DummyCostModel()
     solver = CategoricalCEMSolver(
-        model=model, n_steps=10, num_samples=64, topk=8
+        cost=model, n_steps=10, num_samples=64, topk=8
     )
-    assert solver.model is model
+    assert solver.cost is model
     assert solver.n_steps == 10
     assert solver.num_samples == 64
     assert solver.topk == 8
@@ -64,7 +66,7 @@ def test_categorical_cem_solver_init():
 def test_categorical_cem_solver_init_with_options():
     """Test initialization with smoothing and alpha."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=5,
         num_samples=32,
         topk=4,
@@ -82,7 +84,7 @@ def test_categorical_cem_solver_init_with_options():
 
 def test_categorical_cem_configure_discrete():
     """Configure with a Discrete action space."""
-    solver = CategoricalCEMSolver(model=DummyCostModel(), n_steps=5)
+    solver = CategoricalCEMSolver(cost=DummyCostModel(), n_steps=5)
     action_space = gym_spaces.Discrete(7)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -98,7 +100,7 @@ def test_categorical_cem_configure_discrete():
 
 def test_categorical_cem_configure_with_action_block():
     """action_simplex_dim should multiply by action_block."""
-    solver = CategoricalCEMSolver(model=DummyCostModel(), n_steps=5)
+    solver = CategoricalCEMSolver(cost=DummyCostModel(), n_steps=5)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=8, receding_horizon=4, action_block=3)
 
@@ -111,7 +113,7 @@ def test_categorical_cem_configure_with_action_block():
 
 def test_categorical_cem_configure_rejects_box():
     """Configure should assert on non-Discrete spaces."""
-    solver = CategoricalCEMSolver(model=DummyCostModel(), n_steps=5)
+    solver = CategoricalCEMSolver(cost=DummyCostModel(), n_steps=5)
     action_space = gym_spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=1)
 
@@ -126,7 +128,7 @@ def test_categorical_cem_configure_rejects_box():
 
 def test_categorical_cem_init_probs_uniform():
     """init_probs returns uniform distribution of correct shape."""
-    solver = CategoricalCEMSolver(model=DummyCostModel(), n_steps=5)
+    solver = CategoricalCEMSolver(cost=DummyCostModel(), n_steps=5)
     action_space = gym_spaces.Discrete(4)
     config = PlanConfig(horizon=6, receding_horizon=3, action_block=2)
     solver.configure(action_space=action_space, n_envs=3, config=config)
@@ -146,7 +148,7 @@ def test_categorical_cem_init_probs_uniform():
 def test_categorical_cem_solve_shape():
     """Solve produces actions of shape (n_envs, horizon, action_block)."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(), n_steps=3, num_samples=16, topk=4
+        cost=DummyCostModel(), n_steps=3, num_samples=16, topk=4
     )
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=4, receding_horizon=2, action_block=1)
@@ -164,7 +166,7 @@ def test_categorical_cem_solve_shape():
 def test_categorical_cem_solve_action_block_shape():
     """Solve handles action_block > 1 in output shape."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(), n_steps=2, num_samples=8, topk=2
+        cost=DummyCostModel(), n_steps=2, num_samples=8, topk=2
     )
     action_space = gym_spaces.Discrete(4)
     config = PlanConfig(horizon=3, receding_horizon=2, action_block=3)
@@ -178,7 +180,7 @@ def test_categorical_cem_solve_action_block_shape():
 def test_categorical_cem_solve_actions_in_bounds():
     """All action indices must be in [0, base_simplex_dim)."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=3,
         num_samples=16,
         topk=4,
@@ -198,7 +200,7 @@ def test_categorical_cem_solve_actions_in_bounds():
 def test_categorical_cem_probs_sum_to_one():
     """Output probs at each (env, t, block) sum to 1."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(), n_steps=3, num_samples=16, topk=4
+        cost=DummyCostModel(), n_steps=3, num_samples=16, topk=4
     )
     action_space = gym_spaces.Discrete(4)
     config = PlanConfig(horizon=5, receding_horizon=3, action_block=2)
@@ -214,7 +216,7 @@ def test_categorical_cem_probs_sum_to_one():
 def test_categorical_cem_solve_batched():
     """batch_size smaller than n_envs still produces full output."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=2,
         num_samples=8,
         topk=2,
@@ -240,7 +242,7 @@ def test_categorical_cem_converges_to_optimal_category():
     target = 2
     K = 4
     solver = CategoricalCEMSolver(
-        model=FavorCategoryCostModel(target=target, base_simplex_dim=K),
+        cost=FavorCategoryCostModel(target=target, base_simplex_dim=K),
         n_steps=15,
         num_samples=64,
         topk=8,
@@ -260,7 +262,7 @@ def test_categorical_cem_converges_to_optimal_category():
 def test_categorical_cem_smoothing_keeps_distribution_full_support():
     """With smoothing > 0, no probability collapses fully to 0."""
     solver = CategoricalCEMSolver(
-        model=FavorCategoryCostModel(target=1, base_simplex_dim=3),
+        cost=FavorCategoryCostModel(target=1, base_simplex_dim=3),
         n_steps=10,
         num_samples=32,
         topk=4,
@@ -288,7 +290,7 @@ def test_categorical_cem_deterministic_with_seed():
 
     def run(seed: int) -> torch.Tensor:
         solver = CategoricalCEMSolver(
-            model=DummyCostModel(),
+            cost=DummyCostModel(),
             n_steps=4,
             num_samples=16,
             topk=4,
@@ -313,7 +315,7 @@ def test_categorical_cem_deterministic_with_seed():
 def test_categorical_cem_callable():
     """__call__ forwards to solve."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(), n_steps=2, num_samples=8, topk=2
+        cost=DummyCostModel(), n_steps=2, num_samples=8, topk=2
     )
     action_space = gym_spaces.Discrete(4)
     config = PlanConfig(horizon=3, receding_horizon=2, action_block=1)
@@ -329,7 +331,7 @@ def test_categorical_cem_callbacks_record_history():
     """Callbacks accumulate per-step history across batches."""
     cbs = [BestCostRecorder(), MeanCostRecorder()]
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(),
+        cost=DummyCostModel(),
         n_steps=4,
         num_samples=16,
         topk=4,
@@ -357,7 +359,7 @@ def test_categorical_cem_callbacks_record_history():
 def test_categorical_cem_horizon_1():
     """Solver with horizon=1."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(), n_steps=2, num_samples=8, topk=2
+        cost=DummyCostModel(), n_steps=2, num_samples=8, topk=2
     )
     action_space = gym_spaces.Discrete(3)
     config = PlanConfig(horizon=1, receding_horizon=1, action_block=1)
@@ -371,7 +373,7 @@ def test_categorical_cem_horizon_1():
 def test_categorical_cem_topk_equals_num_samples():
     """topk == num_samples is a valid (degenerate) configuration."""
     solver = CategoricalCEMSolver(
-        model=DummyCostModel(), n_steps=2, num_samples=8, topk=8
+        cost=DummyCostModel(), n_steps=2, num_samples=8, topk=8
     )
     action_space = gym_spaces.Discrete(3)
     config = PlanConfig(horizon=2, receding_horizon=1, action_block=1)

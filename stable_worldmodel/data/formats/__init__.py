@@ -2,7 +2,7 @@
 whose optional dependencies are available; the rest are silently skipped.
 
 Lance and folder ship with the core install. HDF5, video, and lerobot
-need their backing libraries (h5py, decord/av/imageio, lerobot); install
+need their backing libraries (h5py, torchcodec/imageio, lerobot); install
 them together with the umbrella extra ``[format]``.
 """
 
@@ -26,3 +26,5 @@ def _try_import(modname: str) -> None:
 
 _try_import('hdf5')
 _try_import('video')
+# Blob-v2 video format depends on torchcodec + imageio (optional extras).
+_try_import('lance_video')

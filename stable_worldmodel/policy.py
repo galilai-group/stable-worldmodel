@@ -1,16 +1,13 @@
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
 import numpy as np
 import torch
-from loguru import logger as logging
 from torchvision import tv_tensors
 
-import stable_worldmodel as swm
-from stable_worldmodel.solver import Solver
+from stable_worldmodel.planning.solver import Solver
 from stable_worldmodel.protocols import Actionable, Transformable
 
 
@@ -155,7 +152,9 @@ class RandomPolicy(BasePolicy):
         """Initialize the random policy.
 
         Args:
-            seed: Optional random seed for the action space.
+            seed: Random seed applied to the action space when the environment
+                is attached. If None, the action space uses its own default RNG,
+                making action sampling non-deterministic across runs.
             **kwargs: Additional configuration parameters.
         """
         super().__init__(**kwargs)
@@ -174,12 +173,19 @@ class RandomPolicy(BasePolicy):
         """
         return self.env.action_space.sample()
 
-    def set_seed(self, seed: int) -> None:
-        """Set the random seed for action sampling.
+    def set_env(self, env: Any) -> None:
+        """Attach the environment and seed its action space.
 
         Args:
-            seed: The seed value.
+            env: The environment to attach. If the policy was constructed
+                with a seed, the environment's action space is seeded so
+                action sampling is reproducible.
         """
+        super().set_env(env)
+        if self.seed is not None:
+            self._set_seed(self.seed)
+
+    def _set_seed(self, seed: int) -> None:
         if self.env is not None:
             self.env.action_space.seed(seed)
 
@@ -444,104 +450,6 @@ class WorldModelPolicy(BasePolicy):
             action = self.process['action'].inverse_transform(action)
 
         return action
-
-
-def _load_model_with_attribute(run_name, attribute_name, cache_dir=None):
-    """Helper function to load a model checkpoint and find a module with the specified attribute.
-
-    Args:
-        run_name: Path or name of the model run
-        attribute_name: Name of the attribute to look for in the module (e.g., 'get_action', 'get_cost')
-        cache_dir: Optional cache directory path
-
-    Returns:
-        The module with the specified attribute
-
-    Raises:
-        RuntimeError: If no module with the specified attribute is found
-    """
-    if Path(run_name).exists():
-        run_path = Path(run_name)
-    else:
-        run_path = Path(
-            cache_dir
-            or swm.data.utils.get_cache_dir(sub_folder='checkpoints'),
-            run_name,
-        )
-
-    if run_path.is_dir():
-        ckpt_files = list(run_path.glob('*_object.ckpt'))
-        ckpt_files.sort(key=lambda x: x.stat().st_ctime, reverse=True)
-        path = ckpt_files[0]
-        logging.info(f'Loading model from checkpoint: {path}')
-    else:
-        path = Path(f'{run_path}_object.ckpt')
-        assert path.exists(), (
-            f'Checkpoint path does not exist: {path}. Launch pretraining first.'
-        )
-
-    spt_module = torch.load(path, weights_only=False, map_location='cpu')
-
-    def scan_module(module):
-        if hasattr(module, attribute_name):
-            if isinstance(module, torch.nn.Module):
-                module = module.eval()
-            return module
-        for child in module.children():
-            result = scan_module(child)
-            if result is not None:
-                return result
-        return None
-
-    result = scan_module(spt_module)
-    if result is not None:
-        return result
-
-    raise RuntimeError(
-        f"No module with '{attribute_name}' found in the loaded world model."
-    )
-
-
-def AutoActionableModel(
-    run_name: str, cache_dir: str | Path | None = None
-) -> torch.nn.Module:
-    """Load a model checkpoint and return the module with a `get_action` method.
-
-    Automatically scans the checkpoint for a module implementing the Actionable
-    protocol (i.e., has a `get_action` method).
-
-    Args:
-        run_name: Path or name of the model run/checkpoint.
-        cache_dir: Optional cache directory path. Defaults to STABLEWM_HOME.
-
-    Returns:
-        The module with a `get_action` method, set to eval mode.
-
-    Raises:
-        RuntimeError: If no module with `get_action` is found in the checkpoint.
-    """
-    return _load_model_with_attribute(run_name, 'get_action', cache_dir)
-
-
-def AutoCostModel(
-    run_name: str, cache_dir: str | Path | None = None
-) -> torch.nn.Module:
-    """Load a model checkpoint and return the module with a `get_cost` method.
-
-    Automatically scans the checkpoint for a module implementing a cost function
-    (i.e., has a `get_cost` method) for use with planning solvers.
-
-    Args:
-        run_name: Path or name of the model run/checkpoint.
-        cache_dir: Optional cache directory path. Defaults to STABLEWM_HOME.
-
-    Returns:
-        The module with a `get_cost` method, set to eval mode.
-
-    Raises:
-        RuntimeError: If no module with `get_cost` is found in the checkpoint.
-    """
-    return _load_model_with_attribute(run_name, 'get_cost', cache_dir)
 
 
 # Alias for backward compatibility and type hinting

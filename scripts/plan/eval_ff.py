@@ -98,7 +98,7 @@ def run(cfg: DictConfig):
     policy = cfg.get('policy', 'random')
 
     if policy != 'random':
-        model = swm.policy.AutoActionableModel(cfg.policy)
+        model = swm.wm.utils.load_pretrained(cfg.policy)
         model = model.to('cuda')
         model = model.eval()
         model.requires_grad_(False)

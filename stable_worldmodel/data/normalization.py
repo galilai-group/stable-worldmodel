@@ -52,15 +52,19 @@ class IdentityScaler:
     """No-op scaler. Use for columns that should pass through unchanged."""
 
     def fit(self, X):
+        """Do nothing; kept for sklearn-interface compatibility."""
         return self
 
     def transform(self, X):
+        """Return ``X`` unchanged."""
         return X
 
     def inverse_transform(self, X):
+        """Return ``X`` unchanged."""
         return X
 
     def fit_transform(self, X):
+        """Return ``X`` unchanged."""
         return X
 
     def __call__(self, X):
@@ -80,22 +84,26 @@ class ZScoreScaler:
         self.eps = eps
 
     def fit(self, X):
+        """Compute per-dim mean/std from ``X`` (NaN rows are dropped)."""
         data = _to_numpy_2d(X)
         self.mean = data.mean(axis=0, keepdims=True)
         self.std = data.std(axis=0, keepdims=True)
         return self
 
     def transform(self, X):
+        """Standardize ``X`` to ``(x - mean) / max(std, eps)``."""
         mean, std = _as_like(self.mean, self.std, X)
         if isinstance(X, torch.Tensor):
             return (X - mean) / std.clamp(min=self.eps)
         return (X - mean) / np.maximum(std, self.eps)
 
     def inverse_transform(self, X):
+        """Map standardized values back to the original scale."""
         mean, std = _as_like(self.mean, self.std, X)
         return X * std + mean
 
     def fit_transform(self, X):
+        """Fit on ``X`` then transform it."""
         return self.fit(X).transform(X)
 
     def __call__(self, X):
@@ -122,12 +130,14 @@ class PercentileScaler:
         self.eps = eps
 
     def fit(self, X):
+        """Compute the per-dim ``low``/``high`` percentile bounds from ``X``."""
         data = _to_numpy_2d(X)
         self.q_low = np.percentile(data, self.low, axis=0)
         self.q_high = np.percentile(data, self.high, axis=0)
         return self
 
     def transform(self, X):
+        """Map ``X`` linearly from ``[q_low, q_high]`` to ``[-1, 1]``, clipped."""
         q_low, q_high = _as_like(self.q_low, self.q_high, X)
         if isinstance(X, torch.Tensor):
             scale = (q_high - q_low).clamp(min=self.eps)
@@ -136,10 +146,12 @@ class PercentileScaler:
         return np.clip(2 * (X - q_low) / scale - 1, -1, 1)
 
     def inverse_transform(self, X):
+        """Map values from ``[-1, 1]`` back to ``[q_low, q_high]``."""
         q_low, q_high = _as_like(self.q_low, self.q_high, X)
         return (X + 1) * (q_high - q_low) / 2 + q_low
 
     def fit_transform(self, X):
+        """Fit on ``X`` then transform it."""
         return self.fit(X).transform(X)
 
     def __call__(self, X):
@@ -159,7 +171,7 @@ def get_scaler(method: str = 'zscore', **kwargs: Any):
 
     Args:
         method: One of ``'zscore'``, ``'percentile'``, ``'none'``.
-        **kwargs: Forwarded to the scaler constructor.
+        **kwargs (Any): Forwarded to the scaler constructor.
 
     Raises:
         ValueError: If ``method`` is not registered.

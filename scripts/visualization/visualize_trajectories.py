@@ -1,7 +1,5 @@
 from collections import OrderedDict
-from pathlib import Path
 
-import datasets
 import hydra
 import matplotlib.animation as animation
 import matplotlib.colors as mcolors
@@ -11,7 +9,7 @@ import stable_pretraining as spt
 import torch
 from einops import rearrange
 from loguru import logger as logging
-from omegaconf import open_dict
+from omegaconf import OmegaConf, open_dict
 from scipy.interpolate import interp1d
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -21,6 +19,11 @@ from transformers import AutoModel, AutoModelForImageClassification
 import stable_worldmodel as swm
 
 
+# Allow small arithmetic in the configs, e.g.
+# n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
+OmegaConf.register_new_resolver('eval', eval, replace=True)
+
+
 DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
 
 # ============================================================================
@@ -28,130 +31,79 @@ DINO_PATCH_SIZE = 14  # DINO encoder uses 14x14 patches
 # ============================================================================
 
 
-def get_episodes_length(dataset, episodes):
-    episode_idx = dataset['episode_idx'][:]
-    step_idx = dataset['step_idx'][:]
-    lengths = []
-    for ep_id in episodes:
-        lengths.append(np.max(step_idx[episode_idx == ep_id]) + 1)
-    return np.array(lengths)
-
-
 def get_data(cfg, dataset_cfg, model_cfg):
-    """Setup dataset with image transforms and normalization."""
+    """Load full trajectories with image transforms and normalization.
 
-    # Load dataset
-    dataset_path = Path(
-        cfg.cache_dir or swm.data.utils.get_cache_dir(),
-        dataset_cfg.dataset_name,
-    )
-    dataset = datasets.load_from_disk(dataset_path).with_format('numpy')
+    Uses the current dataset API (``swm.data.load_dataset`` -> a flat
+    ``Dataset`` reader). Episodes are addressed by positional index
+    (``0..N-1``) into ``dataset.lengths`` and loaded whole via
+    ``load_chunk``. Transforms mirror ``scripts/train/lewm.py``: a single
+    ``pixels`` column (shape ``(T, C, H, W)``) with ImageNet normalization +
+    resize, plus optional per-column z-score normalization for extra keys.
+    """
 
-    # Get unique episode indices
-    ep_indices = np.unique(dataset['episode_idx'][:])
-
-    # Compute episode lengths
-    episode_len = get_episodes_length(dataset, ep_indices)
-
-    # Randomly sample episodes
-    g = np.random.default_rng(cfg.seed)
-    assert dataset_cfg.n_trajectories <= len(ep_indices), (
-        f'Requested number of trajectories ({dataset_cfg.n_trajectories}) '
-        f'exceeds available episodes ({len(ep_indices)}) in dataset {dataset_cfg.dataset_name}.'
-    )
-    num_trajectories = dataset_cfg.n_trajectories
-    sampled_ep_indices = g.choice(
-        ep_indices, size=num_trajectories, replace=False
-    )
-
-    # Build start and end steps for full trajectories
-
-    ep_len_dict = {ep_id: episode_len[i] for i, ep_id in enumerate(ep_indices)}
-
-    start_steps = np.zeros(num_trajectories, dtype=int)
-    end_steps = []
-    for ep_id in sampled_ep_indices:
-        # we make sure that the end step allows for full frameskip intervals
-        end_steps.append(
-            ep_len_dict[ep_id] - (ep_len_dict[ep_id] % cfg.frameskip)
+    # Columns to read: pixels + action (needed for rollout) + encoding inputs.
+    keys_to_load = list(
+        dict.fromkeys(
+            ['pixels', 'action'] + list(model_cfg.get('encoding', {}).keys())
         )
+    )
 
-    end_steps = np.array(end_steps, dtype=int)
-
-    # Load dataset and keep only needed trajectories
-
-    def get_img_pipeline(key, target, img_size=224):
-        return spt.data.transforms.Compose(
-            spt.data.transforms.ToImage(
-                **spt.data.dataset_stats.ImageNet,
-                source=key,
-                target=target,
-            ),
-            spt.data.transforms.Resize(img_size, source=key, target=target),
-            spt.data.transforms.CenterCrop(
-                img_size, source=key, target=target
-            ),
-        )
-
-    def norm_col_transform(dataset, col='pixels'):
-        """Normalize column to zero mean, unit variance."""
-        data = dataset[col][:]
-        mean = data.mean(0).unsqueeze(0)
-        std = data.std(0).unsqueeze(0)
-        return lambda x: (x - mean) / std
-
-    # Use dataset_cfg for specific dataset parameters
-    dataset = swm.data.FrameDataset(
+    dataset = swm.data.load_dataset(
         dataset_cfg.dataset_name,
-        num_steps=dataset_cfg.n_steps,
-        frameskip=cfg.frameskip,
-        transform=None,
         cache_dir=cfg.get('cache_dir', None),
+        frameskip=cfg.frameskip,
+        num_steps=dataset_cfg.n_steps,
+        keys_to_load=keys_to_load,
+        transform=None,
     )
 
-    all_norm_transforms = []
-    # Use global cfg for encoding keys to ensure consistency
+    # Image preprocessing on the single `pixels` key, matching training.
+    transforms = [
+        spt.data.transforms.ToImage(
+            **spt.data.dataset_stats.ImageNet,
+            source='pixels',
+            target='pixels',
+        ),
+        spt.data.transforms.Resize(
+            cfg.image_size, source='pixels', target='pixels'
+        ),
+    ]
+    # Per-column z-score normalization for extra encoding keys (proprio/action).
     for key in model_cfg.get('encoding', {}):
-        trans_fn = norm_col_transform(dataset.dataset, key)
-        trans_fn = spt.data.transforms.WrapTorchTransform(
-            trans_fn, source=key, target=key
-        )
-        all_norm_transforms.append(trans_fn)
+        if key not in dataset.column_names:
+            raise ValueError(
+                f"Encoding key '{key}' not found in dataset columns."
+            )
+        transforms.append(swm.data.column_normalizer(dataset, key, key))
 
-    # Image size must be multiple of DINO patch size (14)
-    img_size = (cfg.image_size // cfg.patch_size) * DINO_PATCH_SIZE
+    dataset.transform = spt.data.transforms.Compose(*transforms)
 
-    # Apply transforms to all steps
+    # Randomly sample whole episodes (by positional index 0..N-1).
+    num_episodes = len(dataset.lengths)
+    num_trajectories = dataset_cfg.n_trajectories
+    assert num_trajectories <= num_episodes, (
+        f'Requested number of trajectories ({num_trajectories}) '
+        f'exceeds available episodes ({num_episodes}) in dataset {dataset_cfg.dataset_name}.'
+    )
+    g = np.random.default_rng(cfg.seed)
+    sampled_pos = g.choice(num_episodes, size=num_trajectories, replace=False)
+
     traj_list = []
-    for j in range(num_trajectories):
-        transform = spt.data.transforms.Compose(
-            *[
-                get_img_pipeline(f'{col}.{i}', f'{col}.{i}', img_size)
-                for col in ['pixels']
-                for i in range(end_steps[j] // cfg.frameskip)
-            ],
-            *all_norm_transforms,
-        )
-
-        dataset.transform = transform
+    for pos in sampled_pos:
+        length = int(dataset.lengths[pos])
+        # trim so the range covers full frameskip intervals
+        end = length - (length % cfg.frameskip)
         data = dataset.load_chunk(
-            episode=sampled_ep_indices[j],
-            start=start_steps[j],
-            end=end_steps[j],
+            np.array([pos]), np.array([0]), np.array([end])
         )[0]
-        data['id'] = (
-            torch.ones(data['pixels'].shape[0], 1) * sampled_ep_indices[j]
-        )
+        data['id'] = torch.ones(data['pixels'].shape[0], 1) * int(pos)
         traj_list.append(data)
 
     with open_dict(model_cfg) as model_cfg:
         model_cfg.extra_dims = {}
         for key in model_cfg.get('encoding', {}):
-            if key not in dataset.dataset.column_names:
-                raise ValueError(
-                    f"Encoding key '{key}' not found in dataset columns."
-                )
-            inpt_dim = dataset.dataset[0][key].numel()
+            inpt_dim = dataset.get_dim(key)
             model_cfg.extra_dims[key] = (
                 inpt_dim if key != 'action' else inpt_dim * cfg.frameskip
             )
@@ -234,11 +186,13 @@ def get_world_model(cfg, model_cfg):
     For visualization, we only need the model to implement the `encode` method."""
 
     if model_cfg.model_name is not None:  # load checkpointed model
-        model = swm.policy.AutoCostModel(model_cfg.model_name).to(
-            cfg.get('device', 'cpu')
-        )
-        model = model.to(cfg.get('device', 'cpu'))
-        model = model.eval()
+        # Load a pretrained checkpoint (folder with weights.pt + config.json)
+        # from $STABLEWM_HOME/checkpoints/, as done in scripts/plan/eval_wm.py.
+        model = swm.wm.utils.load_pretrained(model_cfg.model_name)
+        model = model.to(cfg.get('device', 'cpu')).eval()
+        model.requires_grad_(False)
+        if hasattr(model, 'interpolate_pos_encoding'):
+            model.interpolate_pos_encoding = True
     else:  # no checkpoint found, build model from scratch
         encoder, embedding_dim, num_patches, interp_pos_enc = get_encoder(
             cfg, model_cfg
@@ -308,7 +262,16 @@ def collect_embeddings(cfg, exp_cfg):
     predicted_embeddings = []  # list to store the predicted embeddings of the trajectories (T x D)
     trajs_pixels = []  # list to store the pixels of the trajectories (T x C x H x W)
 
-    # Process batches and collect embeddings
+    backbone_only = exp_cfg.world_model.get('backbone_only', False)
+
+    def flatten_emb(x):
+        """Flatten per-frame embeddings to (T, feat).
+
+        PreJEPA keeps a patch dim -> (T, P, D); LeWM is CLS-only -> (T, D).
+        """
+        return rearrange(x, 't p d -> t (p d)') if x.dim() == 3 else x
+
+    # Process trajectories and collect (truth, predicted) embeddings
     for traj in tqdm(trajs, desc=f'Processing {exp_cfg.dataset.dataset_name}'):
         init_state = {}
         for key in traj:
@@ -319,33 +282,33 @@ def collect_embeddings(cfg, exp_cfg):
         # store pixels for visualization
         trajs_pixels.append(traj['pixels'].squeeze(0).cpu().detach())
 
-        # Encode trajectory
-        traj = world_model.encode(traj, target='emb')
-        if exp_cfg.world_model.get(
-            'backbone_only', False
-        ):  # use only vision backbone embeddings
-            flat_embed = rearrange(traj['pixels_emb'][0], 't p d ->t (p d)')
-            trajs_embeddings.append(flat_embed.cpu().detach())
-        else:  # use full model embeddings (proropio + action + vision)
-            flat_embed = rearrange(traj['emb'][0], 't p d ->t (p d)')
-            trajs_embeddings.append(flat_embed.cpu().detach())
+        # Encode ground-truth trajectory. PreJEPA exposes
+        # `encode(info, target='emb')`; LeWM exposes `encode(info)`. Both
+        # produce `emb` (and PreJEPA additionally `pixels_emb`).
+        with torch.no_grad():
+            try:
+                enc = world_model.encode(traj, target='emb')
+            except TypeError:
+                enc = world_model.encode(traj)
 
-        # predict trajectory
-        traj = world_model.rollout(
-            init_state, traj['action'][:, :-1].unsqueeze(0)
-        )
-        if exp_cfg.world_model.get(
-            'backbone_only', False
-        ):  # use only vision backbone embeddings
-            flat_predicted = rearrange(
-                traj['predicted_pixels_emb'][0, 0], 't p d ->t (p d)'
+            # Predict the trajectory by rolling out from the initial state.
+            rolled = world_model.rollout(
+                init_state, traj['action'][:, :-1].unsqueeze(0)
             )
-            predicted_embeddings.append(flat_predicted.cpu().detach())
-        else:  # use full model embeddings (proropio + action + vision)
-            flat_predicted = rearrange(
-                traj['predicted_embedding'][0, 0], 't p d ->t (p d)'
+
+        # Select truth / predicted embedding keys, supporting both models.
+        if backbone_only:
+            truth = enc['pixels_emb']
+            pred = rolled['predicted_pixels_emb']
+        else:
+            truth = enc['emb']
+            # LeWM: `predicted_emb`; PreJEPA: `predicted_embedding`.
+            pred = rolled.get(
+                'predicted_emb', rolled.get('predicted_embedding')
             )
-            predicted_embeddings.append(flat_predicted.cpu().detach())
+
+        trajs_embeddings.append(flatten_emb(truth[0]).cpu().detach())
+        predicted_embeddings.append(flatten_emb(pred[0, 0]).cpu().detach())
 
     return trajs_embeddings, predicted_embeddings, trajs_pixels
 
@@ -390,7 +353,7 @@ def plot_static_trajectories(
     plt.figure(figsize=(12, 10))
 
     unique_labels = np.unique(labels)
-    cmap = plt.cm.get_cmap('tab10')
+    cmap = plt.get_cmap('tab10')
     colors = cmap(np.linspace(0, 1, len(unique_labels)))
     label_color_map = dict(zip(unique_labels, colors))
 
@@ -509,7 +472,7 @@ def create_video_visualization(
 
     # Color Setup
     unique_labels = np.unique(labels)
-    cmap = plt.cm.get_cmap('tab10')
+    cmap = plt.get_cmap('tab10')
     colors = cmap(np.linspace(0, 1, len(unique_labels)))
     label_color_map = dict(zip(unique_labels, colors))
 
@@ -619,7 +582,21 @@ def create_video_visualization(
     ani = animation.FuncAnimation(
         fig, update, frames=max_len, interval=100, blit=True
     )
-    ani.save(output_file, fps=10, extra_args=['-vcodec', 'libx264'])
+    # Compute nodes may not have a system `ffmpeg` on PATH; fall back to the
+    # binary bundled with imageio-ffmpeg (installed in the env).
+    if not animation.FFMpegWriter.isAvailable():
+        try:
+            import imageio_ffmpeg
+
+            plt.rcParams['animation.ffmpeg_path'] = (
+                imageio_ffmpeg.get_ffmpeg_exe()
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.warning(
+                f'Could not locate ffmpeg via imageio-ffmpeg: {exc}'
+            )
+    writer = animation.FFMpegWriter(fps=10, codec='libx264')
+    ani.save(output_file, writer=writer)
     plt.close()
     logging.info(f'Animation saved to {output_file}')
 

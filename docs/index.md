@@ -63,7 +63,7 @@ Here is a quick start example: collect a dataset and perform an evaluation.
 import stable_worldmodel as swm
 from stable_worldmodel.data import HDF5Dataset
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
-from stable_worldmodel.solver import CEMSolver
+from stable_worldmodel.planning import CEMSolver
 
 
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(64, 64))
@@ -88,7 +88,7 @@ dataset = HDF5Dataset(
 )
 
 # model predictive control
-solver = CEMSolver(model=world_model, num_samples=300, device='cuda')
+solver = CEMSolver(cost=world_model, num_samples=300, device='cuda')
 policy = WorldModelPolicy(
     solver=solver,
     config=PlanConfig(horizon=10, receding_horizon=5)

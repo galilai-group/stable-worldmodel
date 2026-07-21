@@ -56,7 +56,7 @@ from omegaconf import OmegaConf, open_dict
 from loguru import logger as logging
 
 from stable_worldmodel.data.buffer import ReplayBuffer
-from stable_worldmodel.solver.cem import CEMSolver
+from stable_worldmodel.planning.solver.cem import CEMSolver
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
 from stable_worldmodel.wm.tdmpc2 import TDMPC2, tdmpc2_forward
 from stable_worldmodel.world.env_pool import EnvPool
@@ -237,7 +237,7 @@ def build_policy(
     n_steps: int = TRAIN_N_STEPS,
 ) -> WorldModelPolicy:
     solver = CEMSolver(
-        model=model,
+        cost=model,
         num_samples=num_samples,
         n_steps=n_steps,
         topk=CEM_TOPK,

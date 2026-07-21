@@ -235,6 +235,101 @@ def convert_hdf5_to_image_format(
                         img.save(img_dir / f'ep_{ep_idx}_step_{step_idx}.jpeg')
 
 
+class TestCollectResetFrame:
+    """Regression tests: collect() must include the reset observation as
+    frame 0 of every episode, with a trailing-NaN action marking the
+    boundary (matching MegaWrapper's own reset/step action convention)."""
+
+    @pytest.fixture
+    def temp_cache_dir(self, tmp_path):
+        return tmp_path
+
+    def test_first_frame_matches_reset_state(self, temp_cache_dir):
+        """The first buffered/recorded observation of a collected episode
+        must exactly match world.infos right after reset()."""
+        world = World(
+            env_name='swm/TwoRoom-v1',
+            num_envs=1,
+            image_shape=(32, 32),
+            max_episode_steps=6,
+            render_target=True,
+        )
+        policy = RandomPolicy(seed=0)
+        world.set_policy(policy)
+
+        world.reset(seed=0)
+        reset_state = np.array(world.infos['state'][0]).copy()
+
+        h5_path = temp_cache_dir / 'datasets' / 'reset_frame.h5'
+        world.collect(
+            h5_path, episodes=1, seed=0, format='hdf5', progress=False
+        )
+        world.envs.close()
+
+        with h5py.File(h5_path, 'r') as f:
+            first_state = f['state'][0]
+
+        np.testing.assert_allclose(first_state, reset_state.squeeze())
+
+    def test_action_has_single_trailing_nan(self, temp_cache_dir):
+        """Recorded action arrays should contain exactly one NaN entry per
+        episode, at the last index of that episode."""
+        world = World(
+            env_name='swm/TwoRoom-v1',
+            num_envs=1,
+            image_shape=(32, 32),
+            max_episode_steps=15,
+            render_target=True,
+        )
+        policy = RandomPolicy(seed=0)
+        world.set_policy(policy)
+
+        h5_path = temp_cache_dir / 'datasets' / 'trailing_nan.h5'
+        world.collect(
+            h5_path, episodes=3, seed=0, format='hdf5', progress=False
+        )
+        world.envs.close()
+
+        with h5py.File(h5_path, 'r') as f:
+            action = f['action'][:]
+            ep_offsets = f['ep_offset'][:]
+            ep_lengths = f['ep_len'][:]
+
+        nan_rows = np.where(np.isnan(action).any(axis=1))[0]
+
+        assert len(nan_rows) == len(ep_offsets)
+        for offset, length in zip(ep_offsets, ep_lengths):
+            assert (offset + length - 1) in nan_rows
+            # no NaN anywhere else in this episode
+            episode_actions = action[offset : offset + length - 1]
+            assert not np.isnan(episode_actions).any()
+
+    def test_short_episode_no_spurious_length(self, temp_cache_dir):
+        """An env that resets then terminates almost immediately should
+        still yield a well-formed episode (reset frame + terminal frame),
+        not a spurious length-0 episode."""
+        world = World(
+            env_name='swm/TwoRoom-v1',
+            num_envs=1,
+            image_shape=(32, 32),
+            max_episode_steps=1,
+            render_target=True,
+        )
+        policy = RandomPolicy(seed=0)
+        world.set_policy(policy)
+
+        h5_path = temp_cache_dir / 'datasets' / 'short_episode.h5'
+        world.collect(
+            h5_path, episodes=2, seed=0, format='hdf5', progress=False
+        )
+        world.envs.close()
+
+        with h5py.File(h5_path, 'r') as f:
+            ep_lengths = f['ep_len'][:]
+
+        assert (ep_lengths >= 2).all()
+
+
 class TestImageDatasetReal:
     """Test ImageDataset with real collected data."""
 
@@ -349,6 +444,15 @@ class TestVideoDatasetReal:
 
     def test_collect_convert_and_load(self, temp_cache_dir):
         """Test collecting data, converting to video format, and loading."""
+        # VideoDataset decodes via torchcodec, which eagerly loads libtorchcodec
+        # and its FFmpeg shared libraries. That load raises (not ImportError) on
+        # environments without a matching FFmpeg — common on CI runners — so skip
+        # when the backend can't load rather than failing at decode time.
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f'torchcodec unavailable ({exc})')
+
         import imageio.v3 as iio
 
         # 1. Collect data

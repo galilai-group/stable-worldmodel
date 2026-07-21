@@ -5,101 +5,101 @@ summary: Model-based planning solvers for action optimization
 
 ## **[ Base Class ]**
 
-::: stable_worldmodel.solver.Solver
+::: stable_worldmodel.planning.solver.Solver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.Solver.configure
+::: stable_worldmodel.planning.solver.Solver.configure
 
-::: stable_worldmodel.solver.Solver.solve
+::: stable_worldmodel.planning.solver.Solver.solve
 
-::: stable_worldmodel.solver.Solver.action_dim
-::: stable_worldmodel.solver.Solver.n_envs
-::: stable_worldmodel.solver.Solver.horizon
+::: stable_worldmodel.planning.solver.Solver.action_dim
+::: stable_worldmodel.planning.solver.Solver.n_envs
+::: stable_worldmodel.planning.solver.Solver.horizon
 
 ## **[ Implementations ]**
 
-::: stable_worldmodel.solver.CEMSolver
+::: stable_worldmodel.planning.solver.CEMSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.CEMSolver.configure
+::: stable_worldmodel.planning.solver.CEMSolver.configure
 
-::: stable_worldmodel.solver.CEMSolver.solve
+::: stable_worldmodel.planning.solver.CEMSolver.solve
 
-::: stable_worldmodel.solver.ICEMSolver
+::: stable_worldmodel.planning.solver.ICEMSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.ICEMSolver.configure
+::: stable_worldmodel.planning.solver.ICEMSolver.configure
 
-::: stable_worldmodel.solver.ICEMSolver.solve
+::: stable_worldmodel.planning.solver.ICEMSolver.solve
 
-::: stable_worldmodel.solver.MPPISolver
+::: stable_worldmodel.planning.solver.MPPISolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.MPPISolver.configure
+::: stable_worldmodel.planning.solver.MPPISolver.configure
 
-::: stable_worldmodel.solver.MPPISolver.solve
+::: stable_worldmodel.planning.solver.MPPISolver.solve
 
-::: stable_worldmodel.solver.PredictiveSamplingSolver
+::: stable_worldmodel.planning.solver.PredictiveSamplingSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.PredictiveSamplingSolver.configure
+::: stable_worldmodel.planning.solver.PredictiveSamplingSolver.configure
 
-::: stable_worldmodel.solver.PredictiveSamplingSolver.solve
+::: stable_worldmodel.planning.solver.PredictiveSamplingSolver.solve
 
-::: stable_worldmodel.solver.GradientSolver
+::: stable_worldmodel.planning.solver.GradientSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.GradientSolver.configure
+::: stable_worldmodel.planning.solver.GradientSolver.configure
 
-::: stable_worldmodel.solver.GradientSolver.solve
+::: stable_worldmodel.planning.solver.GradientSolver.solve
 
-::: stable_worldmodel.solver.PGDSolver
+::: stable_worldmodel.planning.solver.PGDSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.PGDSolver.configure
+::: stable_worldmodel.planning.solver.PGDSolver.configure
 
-::: stable_worldmodel.solver.PGDSolver.solve
+::: stable_worldmodel.planning.solver.PGDSolver.solve
 
-::: stable_worldmodel.solver.CategoricalCEMSolver
+::: stable_worldmodel.planning.solver.CategoricalCEMSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.CategoricalCEMSolver.configure
+::: stable_worldmodel.planning.solver.CategoricalCEMSolver.configure
 
-::: stable_worldmodel.solver.CategoricalCEMSolver.solve
+::: stable_worldmodel.planning.solver.CategoricalCEMSolver.solve
 
-::: stable_worldmodel.solver.LagrangianSolver
+::: stable_worldmodel.planning.solver.LagrangianSolver
     options:
         heading_level: 3
         members: false
         show_source: false
 
-::: stable_worldmodel.solver.LagrangianSolver.configure
+::: stable_worldmodel.planning.solver.LagrangianSolver.configure
 
-::: stable_worldmodel.solver.LagrangianSolver.solve
+::: stable_worldmodel.planning.solver.LagrangianSolver.solve
 
 ## **[ Warm-start with Actionable Models ]**
 
@@ -117,19 +117,19 @@ actor fills:    [a1, a2, a3, a4, a_new] (actor provides the last step)
 If the model is not Actionable, `init_action` is forwarded unchanged (and the solver handles any missing steps with its own initialisation strategy, e.g. mean of the previous distribution for CEM/ICEM).
 ## **[ Callbacks ]**
 
-Solvers accept a `callbacks=[...]` list of [`Callback`][stable_worldmodel.solver.callbacks.Callback]
+Solvers accept a `callbacks=[...]` list of [`Callback`][stable_worldmodel.planning.solver.callbacks.Callback]
 objects. Each callback fires once per inner-loop step and accumulates a
 per-batch buffer; final histories are returned in `outputs['callbacks']`,
 keyed by `cb.output_key` (defaults to the class name).
 
 ```python
-from stable_worldmodel.solver import GradientSolver
-from stable_worldmodel.solver.callbacks import (
+from stable_worldmodel.planning.solver import GradientSolver
+from stable_worldmodel.planning.solver.callbacks import (
     BestCostRecorder, GradNormRecorder, ActionNormRecorder,
 )
 
 solver = GradientSolver(
-    model=model, n_steps=20, num_samples=8,
+    cost=model, n_steps=20, num_samples=8,
     callbacks=[
         BestCostRecorder(),                # mean over envs (default)
         GradNormRecorder(reduction='none'), # one entry per env
@@ -170,12 +170,12 @@ samples for `BestCostRecorder`) are intrinsic to each metric.
 
 ### Writing a custom callback
 
-Subclass [`Callback`][stable_worldmodel.solver.callbacks.Callback] and
+Subclass [`Callback`][stable_worldmodel.planning.solver.callbacks.Callback] and
 implement `compute(**state)`. Pull the tensors you need from `state` and
 call `self._reduce(per_env_tensor)` to honour the reduction mode.
 
 ```python
-from stable_worldmodel.solver.callbacks import Callback
+from stable_worldmodel.planning.solver.callbacks import Callback
 
 class CostRangeRecorder(Callback):
     """Records per-env (max - min) cost across the sample population."""
@@ -195,7 +195,7 @@ State keys passed by each solver:
 - **CategoricalCEM**: `step`, `candidates`, `costs`, `topk_vals`, `topk_inds`,
   `topk_candidates`, `probs`, `prev_probs`
 
-::: stable_worldmodel.solver.callbacks.Callback
+::: stable_worldmodel.planning.solver.callbacks.Callback
     options:
         heading_level: 3
         members:
@@ -205,14 +205,14 @@ State keys passed by each solver:
             - compute
             - output_key
 
-::: stable_worldmodel.solver.callbacks.BestCostRecorder
-::: stable_worldmodel.solver.callbacks.MeanCostRecorder
-::: stable_worldmodel.solver.callbacks.GradNormRecorder
-::: stable_worldmodel.solver.callbacks.ActionNormRecorder
-::: stable_worldmodel.solver.callbacks.EliteCostRecorder
-::: stable_worldmodel.solver.callbacks.VarNormRecorder
-::: stable_worldmodel.solver.callbacks.MeanShiftRecorder
-::: stable_worldmodel.solver.callbacks.EliteSpreadRecorder
+::: stable_worldmodel.planning.solver.callbacks.BestCostRecorder
+::: stable_worldmodel.planning.solver.callbacks.MeanCostRecorder
+::: stable_worldmodel.planning.solver.callbacks.GradNormRecorder
+::: stable_worldmodel.planning.solver.callbacks.ActionNormRecorder
+::: stable_worldmodel.planning.solver.callbacks.EliteCostRecorder
+::: stable_worldmodel.planning.solver.callbacks.VarNormRecorder
+::: stable_worldmodel.planning.solver.callbacks.MeanShiftRecorder
+::: stable_worldmodel.planning.solver.callbacks.EliteSpreadRecorder
 
 ## **[ Example: Constrained Planning with LagrangianSolver ]**
 
@@ -227,7 +227,7 @@ import dataclasses
 import torch
 import gymnasium as gym
 import numpy as np
-from stable_worldmodel.solver import LagrangianSolver
+from stable_worldmodel.planning.solver import LagrangianSolver
 from stable_worldmodel.policy import PlanConfig
 
 
@@ -256,7 +256,7 @@ class MyModel(torch.nn.Module):
 model = MyModel()
 
 solver = LagrangianSolver(
-    model=model,
+    cost=model,
     n_steps=30,            # inner gradient steps per outer iteration
     n_outer_steps=10,      # dual-ascent (outer) iterations
     num_samples=8,         # parallel action candidates per env
@@ -325,7 +325,7 @@ discrete world models work unchanged.
 ```python
 import torch
 import gymnasium as gym
-from stable_worldmodel.solver import CategoricalCEMSolver
+from stable_worldmodel.planning.solver import CategoricalCEMSolver
 from stable_worldmodel.policy import PlanConfig
 
 
@@ -346,7 +346,7 @@ class DiscreteModel(torch.nn.Module):
 # ── 2. Build and configure the solver ──────────────────────────────────────
 
 solver = CategoricalCEMSolver(
-    model=DiscreteModel(),
+    cost=DiscreteModel(),
     n_steps=20,        # CEM iterations
     num_samples=128,   # candidates per iteration
     topk=16,           # elite count

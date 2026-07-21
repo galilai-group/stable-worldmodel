@@ -89,6 +89,46 @@ def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
 
 _MP_START_FORCED = False
 
+# Imported once by the forkserver so DataLoader workers fork from a warm
+# interpreter instead of re-importing this stack per worker (~15-30 s each
+# from a network-mounted env; the whole tree is >5 min cold).
+# INVARIANT: nothing on these modules' import path may import lance/lancedb
+# or start runtimes, threads holding locks, or CUDA at import time. In
+# particular the lance Tokio runtime must only ever be created inside each
+# worker, after the fork — that is the whole reason forkserver is used. Do
+# NOT add `lancedb`, `stable_worldmodel.data`, `stable_pretraining.data`, or
+# anything else that imports lance at module level.
+# Every module here must also import cleanly or raise *ImportError* when
+# absent: the stdlib forkserver swallows only ImportError from preload
+# modules, so any other exception at import time kills the server and makes
+# every worker start fail with BrokenPipeError. Modules that load native
+# libraries (and can raise RuntimeError/OSError) go in
+# _FORKSERVER_PRELOAD_OPTIONAL instead, which is probed before use.
+_FORKSERVER_PRELOAD = (
+    'numpy',
+    'PIL',
+    'pyarrow',
+    'torch',
+    'torchvision',
+    'lightning',
+    'transformers',
+    'datasets',
+    'cv2',
+    'stable_pretraining',
+    'stable_worldmodel',
+)
+
+# Media decoders/encoders used by the lance-video path. They dlopen FFmpeg
+# shared libraries at import and raise RuntimeError/OSError (not ImportError)
+# when those are missing or ABI-incompatible — exactly what the forkserver
+# will not tolerate. We import them in the parent first and preload only the
+# ones that actually load, so a broken/absent FFmpeg degrades to "not
+# preloaded" instead of crashing every DataLoader worker.
+_FORKSERVER_PRELOAD_OPTIONAL = (
+    'imageio',
+    'torchcodec',
+)
+
 
 def _force_forkserver() -> None:
     """Switch Linux multiprocessing to a fork-safe start method for lancedb.
@@ -101,7 +141,16 @@ def _force_forkserver() -> None:
     lancedb itself recommends. Worker startup is also cheaper than ``spawn``
     (a fork of the clean server vs a full re-exec + re-import per worker).
     Falls back to ``spawn`` where forkserver is unavailable.
+
+    The server preloads :data:`_FORKSERVER_PRELOAD` (heavy, fork-benign
+    modules only — never lance itself) so each worker forks with the
+    expensive imports already in ``sys.modules``. Modules absent from the
+    environment raise ImportError and are silently skipped by the stdlib
+    forkserver; :data:`_FORKSERVER_PRELOAD_OPTIONAL` modules (which can fail
+    with RuntimeError/OSError) are probed here and only preloaded when they
+    load, since a non-ImportError in the server would kill every worker.
     """
+    import importlib
     import logging
     import multiprocessing as mp
     import sys
@@ -121,6 +170,21 @@ def _force_forkserver() -> None:
             mp.set_start_method(target, force=True)
         except RuntimeError as exc:
             logging.warning('Could not switch to %s (%s)', target, exc)
+    if mp.get_start_method(allow_none=True) == 'forkserver':
+        preload = list(_FORKSERVER_PRELOAD)
+        for modname in _FORKSERVER_PRELOAD_OPTIONAL:
+            try:
+                importlib.import_module(modname)
+            except Exception as exc:
+                logging.warning(
+                    'Skipping forkserver preload of %s (%s)', modname, exc
+                )
+            else:
+                preload.append(modname)
+        try:
+            mp.set_forkserver_preload(preload)
+        except Exception as exc:
+            logging.warning('Could not set forkserver preload (%s)', exc)
     try:
         torch.multiprocessing.set_sharing_strategy('file_system')
     except RuntimeError:
@@ -135,19 +199,16 @@ class LanceDataset(Dataset):
         table_name: Table inside the database; inferred from a ``.lance``
             path when omitted.
         uri: Alternative to ``path`` for passing a database URI directly.
-        frameskip: Stride between observation samples.
-        num_steps: Number of observation steps per sample.
-        transform: Optional dict-in / dict-out transform applied per sample.
-        keys_to_load: Columns to expose; defaults to every column in the
-            table.
-        keys_to_cache: Columns to read fully into memory once instead of
-            fetching them per sample (useful for low-dim state or actions).
-        keys_to_merge: Mapping of a target column to the source column(s)
-            to concatenate into it at load time.
+        frameskip: Standard ``Dataset`` knob.
+        num_steps: Standard ``Dataset`` knob.
+        transform: Standard ``Dataset`` knob.
+        keys_to_load: Standard ``Dataset`` knob.
+        keys_to_cache: Standard ``Dataset`` knob.
+        keys_to_merge: Standard ``Dataset`` knob.
         image_columns: override image-column auto-detection (any
             ``pa.binary`` column is treated as encoded image by default).
-        episode_index_column: Column holding the per-row episode index.
-        step_index_column: Column holding the per-row step index.
+        episode_index_column: episode index column name.
+        step_index_column: step index column name.
         connect_kwargs: forwarded to :func:`lancedb.connect` (e.g. S3 creds).
     """
 
@@ -444,49 +505,60 @@ class LanceDataset(Dataset):
         return tensor
 
     def _process_batch(
-        self, ep_idx: int, g_start: int, batch, g_end: int | None = None
+        self,
+        ep_idx: int,
+        g_start: int,
+        batch,
+        g_end: int | None = None,
+        decoded_images: dict | None = None,
     ) -> dict:
         if g_end is None:
             g_end = g_start + self.span
-        steps: dict[str, Any] = {}
+        decoded_images = decoded_images or {}
+        steps = {}
         for col in self._keys:
-            if col in self._cache:
-                values = self._cache[col][g_start:g_end]
-            elif batch is None:
-                raise KeyError(
-                    f"Column '{col}' not cached and no batch provided"
-                )
+            if col in decoded_images:
+                steps[col] = decoded_images[col]
             else:
-                values = self._extract_column(batch, col)
-
-            if col in self.image_columns:
-                blobs = values[:: self.frameskip]
-                if isinstance(blobs, np.ndarray):
-                    blobs = blobs.tolist()
-                steps[col] = self._decode_images(blobs)
-                continue
-
-            data = (
-                values
-                if isinstance(values, np.ndarray)
-                else self._pylist_to_numpy(values, col)
-            )
-
-            if data.size > 0 and (
-                data.dtype == object or data.dtype.kind in ('S', 'U')
-            ):
-                first = data.flat[0]
-                if isinstance(first, (bytes, bytearray)):
-                    steps[col] = bytes(first).decode()
-                    continue
-                if isinstance(first, str):
-                    steps[col] = str(first)
-                    continue
-
-            steps[col] = self._prepare_numeric_tensor(
-                data, downsample=col != 'action'
-            )
+                steps[col] = self._process_col(col, batch, g_start, g_end)
         return steps
+
+    def _process_col(self, col: str, batch, g_start: int, g_end: int) -> Any:
+        """Decode a single window column into its tensor / scalar value.
+
+        Split out from :meth:`_process_batch` so subclasses (e.g. the
+        video-blob reader) can intercept select columns while reusing the
+        tabular / JPEG decode path verbatim.
+        """
+        if col in self._cache:
+            values = self._cache[col][g_start:g_end]
+        elif batch is None:
+            raise KeyError(f"Column '{col}' not cached and no batch provided")
+        else:
+            values = self._extract_column(batch, col)
+
+        if col in self.image_columns:
+            blobs = values[:: self.frameskip]
+            if isinstance(blobs, np.ndarray):
+                blobs = blobs.tolist()
+            return self._decode_images(blobs)
+
+        data = (
+            values
+            if isinstance(values, np.ndarray)
+            else self._pylist_to_numpy(values, col)
+        )
+
+        if data.size > 0 and (
+            data.dtype == object or data.dtype.kind in ('S', 'U')
+        ):
+            first = data.flat[0]
+            if isinstance(first, (bytes, bytearray)):
+                return bytes(first).decode()
+            if isinstance(first, str):
+                return str(first)
+
+        return self._prepare_numeric_tensor(data, downsample=col != 'action')
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         g_start = int(self.offsets[ep_idx] + start)
@@ -509,18 +581,31 @@ class LanceDataset(Dataset):
             sample_meta.append((ep_idx, g_start))
 
         big_batch = None
+        unique_pos: dict[int, int] | None = None
+        decoded_images: dict[str, torch.Tensor] = {}
         if self._fetch_columns and all_rows:
             self._ensure_open()
             unique_rows = sorted(set(all_rows))
             unique_batch = self._perm.__getitems__(unique_rows)
+            unique_pos = {row: i for i, row in enumerate(unique_rows)}
             if len(unique_rows) == len(all_rows) and all_rows == unique_rows:
                 big_batch = unique_batch
             else:
-                row_lookup = {row: i for i, row in enumerate(unique_rows)}
                 gather = pa.array(
-                    [row_lookup[r] for r in all_rows], type=pa.int64()
+                    [unique_pos[r] for r in all_rows], type=pa.int64()
                 )
                 big_batch = unique_batch.take(gather)
+
+            # Decode each fetched image column once over the deduped rows;
+            # overlapping windows then gather shared frames instead of
+            # re-decoding the same blob per window.
+            for col in self.image_columns:
+                if col in self._cache:
+                    continue
+                blobs = self._extract_column(unique_batch, col)
+                if isinstance(blobs, np.ndarray):
+                    blobs = blobs.tolist()
+                decoded_images[col] = self._decode_images(blobs)
 
         results: list[dict] = []
         for i, (ep_idx, g_start) in enumerate(sample_meta):
@@ -529,7 +614,22 @@ class LanceDataset(Dataset):
                 if big_batch is not None
                 else None
             )
-            steps = self._process_batch(ep_idx, g_start, sub_batch)
+            if decoded_images:
+                window_rows = range(
+                    g_start, g_start + self.span, self.frameskip
+                )
+                gather_idx = [unique_pos[r] for r in window_rows]
+                steps = self._process_batch(
+                    ep_idx,
+                    g_start,
+                    sub_batch,
+                    decoded_images={
+                        col: frames[gather_idx]
+                        for col, frames in decoded_images.items()
+                    },
+                )
+            else:
+                steps = self._process_batch(ep_idx, g_start, sub_batch)
             if self.transform:
                 steps = self.transform(steps)
             if 'action' in steps:
@@ -938,6 +1038,10 @@ class Lance(Format):
             return True
         p = Path(s)
         if p.is_dir():
+            # A `*_videos.lance` sibling marks a video-blob dataset; defer to
+            # the `lance_video` format so it claims the directory instead.
+            if any(p.glob('*_videos.lance')):
+                return False
             return any(p.glob('*.lance'))
         return False
 

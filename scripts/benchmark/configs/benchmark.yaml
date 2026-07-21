@@ -15,8 +15,9 @@ benchmark:
 #
 # Required fields per entry:
 #   name         – label shown in the output table
-#   format       – hdf5 | lance | video
+#   format       – hdf5 | lance | lance_video | video
 #   path         – filename relative to the SWM datasets cache dir, absolute path, or s3:// URI
+#                  (lance_video: dir holding <name>.lance + <name>_videos.lance)
 #   keys_to_load – list of columns to read each step
 #
 # Optional fields:
