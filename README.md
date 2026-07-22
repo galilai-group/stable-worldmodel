@@ -279,6 +279,7 @@ The full documentation lives at [galilai-group.github.io/stable-worldmodel](http
 ## Built on `stable-worldmodel`
 
 - **[C-JEPA](https://hazel-heejeong-nam.github.io/cjepa/)**
+- **[CLEAR-LeWM](https://github.com/DavidSunok/CLEAR-LeWM)**
 - **[LeWM](https://le-wm.github.io/)**
 
 ## Citation
