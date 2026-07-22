@@ -5,8 +5,8 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from stable_worldmodel.solver.callbacks import Callback
-from stable_worldmodel.solver.solver import Costable
+from .callbacks import Callback
+from .solver import Costable
 
 
 class CategoricalCEMSolver:
@@ -17,7 +17,7 @@ class CategoricalCEMSolver:
     from the top-K elites' empirical frequencies.
 
     Args:
-        model: World model implementing the Costable protocol.
+        cost: Cost object to plan against (a Costable, e.g. a ShootingCostEvaluator).
         batch_size: Number of environments to process in parallel.
         num_samples: Number of action candidates to sample per iteration.
         n_steps: Number of CEM iterations.
@@ -31,7 +31,7 @@ class CategoricalCEMSolver:
 
     def __init__(
         self,
-        model: Costable,
+        cost: Costable,
         batch_size: int = 1,
         num_samples: int = 300,
         n_steps: int = 30,
@@ -42,7 +42,7 @@ class CategoricalCEMSolver:
         seed: int = 1234,
         callbacks: list[Callback] | None = None,
     ) -> None:
-        self.model = model
+        self.cost = cost
         self.batch_size = batch_size
         self.num_samples = num_samples
         self.n_steps = n_steps
@@ -53,7 +53,7 @@ class CategoricalCEMSolver:
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
         self.callbacks = list(callbacks) if callbacks else []
         try:
-            self._dtype = next(model.parameters()).dtype
+            self._dtype = next(cost.parameters()).dtype
         except (AttributeError, StopIteration):
             self._dtype = torch.float32
 
@@ -212,7 +212,7 @@ class CategoricalCEMSolver:
                     self.action_simplex_dim,
                 )
 
-                costs = self.model.get_cost(expanded_infos, candidates)
+                costs = self.cost.get_cost(expanded_infos, candidates)
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Expected cost to be a torch.Tensor, got {type(costs)}'

@@ -38,7 +38,7 @@ class FolderDataset(Dataset):
         folder_keys: list[str] | None = None,
         cache_dir: str | Path | None = None,
         path: str | Path | None = None,
-        dense_columns: Collection[str] | None = None,
+        dense_columns: str | Collection[str] | None = None,
     ) -> None:
         if path is not None:
             self.path = Path(path)
@@ -122,6 +122,7 @@ class FolderDataset(Dataset):
                 steps[col] = torch.from_numpy(data)
                 if data.ndim == 4 and data.shape[-1] in (1, 3):
                     steps[col] = steps[col].permute(0, 3, 1, 2)
+        self._validate_dense_values(steps)
         return self.transform(steps) if self.transform else steps
 
     def get_col_data(self, col: str) -> np.ndarray:

@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from .dataset import Dataset
+from .dataset import Dataset, _normalize_dense_columns
 from .format import get_format
 
 
@@ -58,14 +58,16 @@ class ReplayBuffer(Dataset):
         sampler: ``fn(step, buffer, batch_size, history_len) -> indices``
             returning flat clip indices in
             ``[0, buffer.num_valid_ends(history_len))``. Default is uniform.
-        transform: Optional dict-in / dict-out transform applied per clip
-            in the Dataset path (``__getitem__``).
+        transform: Optional dict-in / dict-out transform applied to gathered
+            rows before dense grouping, only in the Dataset path
+            (``__getitem__``).
         key_filter: Optional ``fn(ep_data) -> ep_data`` applied to each
             episode in ``write_episode``, returning the subset of columns to
             store. ``None`` (default) stores every column.
         dense_columns: Additional columns to sample at every underlying row.
             ``action`` is always dense and retains its existing flattened
-            representation.
+            representation. Other dense columns retain a separate frameskip
+            axis and are never aggregated automatically.
     """
 
     def __init__(
@@ -76,7 +78,7 @@ class ReplayBuffer(Dataset):
         sampler: Sampler | None = None,
         transform: Callable[[dict], dict] | None = None,
         key_filter: Callable[[dict], dict] | None = None,
-        dense_columns: Collection[str] | None = None,
+        dense_columns: str | Collection[str] | None = None,
     ) -> None:
         if max_steps <= 0:
             raise ValueError(f'max_steps must be positive, got {max_steps}')
@@ -94,13 +96,8 @@ class ReplayBuffer(Dataset):
         self.span = self.num_steps * self.frameskip
         self.transform = transform
         self.key_filter = key_filter
-        self.dense_columns = {'action'}
-        if dense_columns is not None:
-            self.dense_columns.update(
-                (dense_columns,)
-                if isinstance(dense_columns, str)
-                else dense_columns
-            )
+        self.dense_columns = _normalize_dense_columns(dense_columns)
+        self._dense_columns_validated = False
         self.sampler: Sampler = (
             sampler if sampler is not None else _uniform_sampler
         )
@@ -135,6 +132,8 @@ class ReplayBuffer(Dataset):
                 f'ReplayBuffer.write_episode: episode length {ep_len} '
                 f'exceeds max_steps={self.max_steps}'
             )
+        self._validate_dense_columns(per_step)
+        self._validate_dense_values(per_step)
         self._ensure_allocated(per_step)
         self._evict_to_fit(ep_len)
         self._append(per_step, ep_len)
@@ -189,7 +188,8 @@ class ReplayBuffer(Dataset):
 
         Returns:
             ``{col: np.ndarray}`` with each array shaped
-            ``(batch_size, history_len, ...)``. Raw numpy — no per-clip
+            ``(batch_size, history_len, ...)`` plus the frameskip grouping
+            described above for dense columns. Raw numpy — no per-clip
             transform is applied here.
         """
         if batch_size <= 0:
@@ -241,10 +241,12 @@ class ReplayBuffer(Dataset):
             np.array([idx], dtype=np.int64), self.span
         )
         ring_start, _ = self._episodes[int(ep_idx[0])]
-        clip = self._gather_clip(
+        clip = self._gather_rows(
             ring_start, int(local_start[0]), self.history_len
         )
-        return self.transform(clip) if self.transform is not None else clip
+        if self.transform is not None:
+            clip = self.transform(clip)
+        return self._reshape_clip(clip, self.history_len)
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         if not 0 <= ep_idx < self.num_episodes:
@@ -260,6 +262,10 @@ class ReplayBuffer(Dataset):
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
     ) -> list[dict]:
+        """Load grouped clips without applying the Dataset transform.
+
+        Each requested length must be divisible by ``frameskip``.
+        """
         chunk = []
         for ep, s, e in zip(episodes_idx, start, end):
             ep = int(ep)
@@ -438,7 +444,16 @@ class ReplayBuffer(Dataset):
     def _gather_clip(
         self, ring_start: int, clip_local_start: int, history_len: int
     ) -> dict[str, np.ndarray]:
-        """Gather one clip with sparse and dense columns."""
+        """Gather and group one clip with sparse and dense columns."""
+        return self._reshape_clip(
+            self._gather_rows(ring_start, clip_local_start, history_len),
+            history_len,
+        )
+
+    def _gather_rows(
+        self, ring_start: int, clip_local_start: int, history_len: int
+    ) -> dict[str, np.ndarray]:
+        """Gather raw sparse and dense rows without grouping them."""
         base = ring_start + clip_local_start
         sparse_idx = (
             base + np.arange(history_len) * self.frameskip
@@ -451,7 +466,7 @@ class ReplayBuffer(Dataset):
         for col, arr in self._cols.items():
             positions = dense_idx if col in self.dense_columns else sparse_idx
             clip[col] = arr[positions]
-        return self._reshape_clip(clip, history_len)
+        return clip
 
 
 def classic_filter(ep_data: dict) -> dict:

@@ -18,6 +18,28 @@ import numpy as np
 import torch
 
 
+def _normalize_dense_columns(
+    dense_columns: str | Collection[str] | None,
+) -> frozenset[str]:
+    """Return the requested dense columns plus the implicit action column."""
+    if dense_columns is None:
+        columns: tuple[object, ...] = ()
+    elif isinstance(dense_columns, str):
+        columns = (dense_columns,)
+    elif isinstance(dense_columns, Collection):
+        columns = tuple(dense_columns)
+    else:
+        raise TypeError(
+            'dense_columns must be a string, a collection of strings, or None'
+        )
+
+    if any(not isinstance(column, str) for column in columns):
+        raise TypeError(
+            'dense_columns must be a string, a collection of strings, or None'
+        )
+    return frozenset((*columns, 'action'))
+
+
 class Dataset:
     """Base class for episode-based datasets.
 
@@ -30,11 +52,14 @@ class Dataset:
         offsets: Episode start offsets in the underlying flat storage.
         frameskip: Stride between samples for non-dense columns.
         num_steps: Number of observation steps per sample.
-        transform: Optional dict-in / dict-out transform applied per sample.
+        transform: Optional dict-in / dict-out transform applied after rows
+            are selected and before dense rows are grouped.
         dense_columns: Additional columns to sample at every underlying row.
             Dense columns are grouped into ``(num_steps, frameskip, ...)``;
             ``action`` is always dense and retains its existing flattened
-            ``(num_steps, frameskip * action_dim)`` representation.
+            ``(num_steps, frameskip * action_dim)`` representation. Names
+            must refer to numeric, boolean, tensor, or image columns. Values
+            such as rewards are never aggregated automatically.
     """
 
     def __init__(
@@ -44,7 +69,7 @@ class Dataset:
         frameskip: int = 1,
         num_steps: int = 1,
         transform: Callable[[dict], dict] | None = None,
-        dense_columns: Collection[str] | None = None,
+        dense_columns: str | Collection[str] | None = None,
     ) -> None:
         self.lengths = lengths
         self.offsets = offsets
@@ -52,13 +77,8 @@ class Dataset:
         self.num_steps = num_steps
         self.span = num_steps * frameskip
         self.transform = transform
-        self.dense_columns = {'action'}
-        if dense_columns is not None:
-            self.dense_columns.update(
-                (dense_columns,)
-                if isinstance(dense_columns, str)
-                else dense_columns
-            )
+        self.dense_columns = _normalize_dense_columns(dense_columns)
+        self._dense_columns_validated = False
         self.clip_indices = [
             (ep, start)
             for ep, length in enumerate(lengths)
@@ -68,6 +88,7 @@ class Dataset:
 
     @property
     def column_names(self) -> list[str]:
+        """Names of the columns stored in the dataset."""
         raise NotImplementedError
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
@@ -77,6 +98,19 @@ class Dataset:
         return len(self.clip_indices)
 
     def __getitem__(self, idx: int) -> dict:
+        """Load one clip of ``num_steps`` observations (``frameskip`` apart).
+
+        Args:
+            idx: Clip index into ``clip_indices``.
+
+        Returns:
+            Dict of per-column tensors. Sparse columns have shape
+            ``(num_steps, ...)``, ``action`` has shape
+            ``(num_steps, frameskip * action_dim)``, and other dense columns
+            have shape ``(num_steps, frameskip, ...)``. The dense singleton
+            axis is retained when ``frameskip=1``.
+        """
+        self._validate_dense_columns()
         ep_idx, start = self.clip_indices[idx]
         steps = self._load_slice(ep_idx, start, start + self.span)
         return self._reshape_clip(steps, self.num_steps)
@@ -84,6 +118,20 @@ class Dataset:
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
     ) -> list[dict]:
+        """Load one step-range per episode, in bulk.
+
+        Args:
+            episodes_idx: Episode index for each slice to load.
+            start: Start step (inclusive) of each slice, per episode.
+            end: End step (exclusive) of each slice, per episode.
+
+        Returns:
+            One dict of per-column tensors per requested slice, in order;
+            shapes follow :meth:`__getitem__`. Each requested length must be
+            divisible by ``frameskip`` so dense rows group without a partial
+            final block.
+        """
+        self._validate_dense_columns()
         chunk = []
         for ep, s, e in zip(episodes_idx, start, end):
             length = int(e - s)
@@ -97,9 +145,22 @@ class Dataset:
         return chunk
 
     def _reshape_clip(self, steps: dict, num_steps: int) -> dict:
+        self._validate_dense_values(steps)
+        expected_rows = num_steps * self.frameskip
         for col, data in steps.items():
             if col not in self.dense_columns:
                 continue
+            if data.ndim == 0:
+                raise ValueError(
+                    f"Dense column '{col}' must have a leading row dimension "
+                    f'before grouping; got shape {tuple(data.shape)}'
+                )
+            if data.shape[0] != expected_rows:
+                raise ValueError(
+                    f"Dense column '{col}' has {data.shape[0]} rows before "
+                    f'grouping; expected {expected_rows} '
+                    f'(num_steps={num_steps}, frameskip={self.frameskip})'
+                )
             if col == 'action':
                 steps[col] = data.reshape(num_steps, -1)
             else:
@@ -108,16 +169,81 @@ class Dataset:
                 )
         return steps
 
+    def _validate_dense_columns(
+        self, available_columns: Collection[str] | None = None
+    ) -> None:
+        """Validate dense names after a reader's public schema is complete."""
+        if self._dense_columns_validated:
+            return
+        available = set(
+            self.column_names
+            if available_columns is None
+            else available_columns
+        )
+        unknown = self.dense_columns - available - {'action'}
+        if unknown:
+            raise ValueError(
+                f'Unknown dense_columns: {sorted(unknown)}. Available '
+                f'columns: {sorted(available)}.'
+            )
+        self._dense_columns_validated = True
+
+    def _validate_dense_value(self, col: str, data: Any) -> None:
+        """Reject dense values that cannot be grouped into numeric tensors."""
+        if col not in self.dense_columns:
+            return
+        if isinstance(data, (str, bytes, bytearray, memoryview)):
+            raise TypeError(
+                f"Dense column '{col}' must contain array-like numeric, "
+                'boolean, or image values; string/object columns cannot '
+                'be dense.'
+            )
+        if isinstance(data, np.ndarray):
+            if data.dtype.kind not in 'buifc':
+                raise TypeError(
+                    f"Dense column '{col}' must contain array-like numeric, "
+                    'boolean, or image values; string/object columns cannot '
+                    'be dense.'
+                )
+            return
+        if isinstance(data, torch.Tensor):
+            return
+        raise TypeError(
+            f"Dense column '{col}' must be a NumPy array or PyTorch tensor; "
+            f'got {type(data).__name__}.'
+        )
+
+    def _validate_dense_values(self, steps: dict) -> None:
+        for col, data in steps.items():
+            self._validate_dense_value(col, data)
+
     def load_episode(self, episode_idx: int) -> dict:
+        """Load a full episode as a dict of per-column tensors.
+
+        Fixed-window dense grouping is intentionally not applied here.
+        Reader-specific sampling and transform behavior is preserved, so use
+        :meth:`__getitem__` or :meth:`load_chunk` when grouped dense shapes
+        are required.
+
+        Args:
+            episode_idx: Index of the episode to load.
+
+        Returns:
+            Dict of ungrouped per-column values for the episode.
+        """
+        self._validate_dense_columns()
         return self._load_slice(episode_idx, 0, self.lengths[episode_idx])
 
     def get_col_data(self, col: str) -> np.ndarray:
+        """Return every value of column ``col`` across the whole dataset."""
         raise NotImplementedError
 
     def get_dim(self, col: str) -> int:
+        """Return the per-step dimensionality of column ``col``."""
         raise NotImplementedError
 
     def get_row_data(self, row_idx: int | list[int]) -> dict:
+        """Return all columns for the given flat storage row(s)."""
         raise NotImplementedError
 
     def merge_col(
@@ -126,6 +252,13 @@ class Dataset:
         target: str,
         dim: int = -1,
     ) -> None:
+        """Concatenate ``source`` column(s) into a new ``target`` column.
+
+        Args:
+            source: Column name(s) to combine.
+            target: Name of the resulting column.
+            dim: Axis along which the source columns are concatenated.
+        """
         raise NotImplementedError
 
 
@@ -160,6 +293,7 @@ class MergeDataset:
 
     @property
     def column_names(self) -> list[str]:
+        """Union of the columns contributed by each dataset, in order."""
         cols = []
         for keys in self.keys_map:
             cols.extend(keys)
@@ -167,6 +301,7 @@ class MergeDataset:
 
     @property
     def lengths(self) -> np.ndarray:
+        """Episode lengths, taken from the first dataset."""
         return self.datasets[0].lengths
 
     def __len__(self) -> int:
@@ -184,6 +319,7 @@ class MergeDataset:
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
     ) -> list[dict]:
+        """Load slices from every dataset and merge them column-wise."""
         all_chunks = [
             ds.load_chunk(episodes_idx, start, end) for ds in self.datasets
         ]
@@ -196,12 +332,14 @@ class MergeDataset:
         return merged
 
     def get_col_data(self, col: str) -> np.ndarray:
+        """Return column ``col`` from the dataset that contributes it."""
         for ds, keys in zip(self.datasets, self.keys_map):
             if col in keys:
                 return ds.get_col_data(col)
         raise KeyError(col)
 
     def get_row_data(self, row_idx: int | list[int]) -> dict:
+        """Return the given row(s) with columns gathered from all datasets."""
         out = {}
         for ds, keys in zip(self.datasets, self.keys_map):
             data = ds.get_row_data(row_idx)
@@ -212,7 +350,12 @@ class MergeDataset:
 
 
 class ConcatDataset:
-    """Concatenate datasets sequentially (vertical join, more episodes)."""
+    """Concatenate datasets sequentially (vertical join, more episodes).
+
+    Args:
+        datasets: Datasets to concatenate, in order. Episode and clip
+            indices of later datasets are shifted past the earlier ones.
+    """
 
     def __init__(self, datasets: list[Any]) -> None:
         if not datasets:
@@ -227,6 +370,7 @@ class ConcatDataset:
 
     @property
     def column_names(self) -> list[str]:
+        """Union of all datasets' columns, first occurrence order."""
         seen = set()
         cols = []
         for ds in self.datasets:
@@ -277,6 +421,7 @@ class ConcatDataset:
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
     ) -> list[dict]:
+        """Route each slice to its dataset using global episode indices."""
         episodes_idx = np.asarray(episodes_idx)
         start = np.asarray(start)
         end = np.asarray(end)
@@ -300,6 +445,7 @@ class ConcatDataset:
         return results  # type: ignore[return-value]
 
     def get_col_data(self, col: str) -> np.ndarray:
+        """Concatenate column ``col`` from every dataset that has it."""
         data = []
         for ds in self.datasets:
             if col in ds.column_names:
@@ -309,6 +455,7 @@ class ConcatDataset:
         return np.concatenate(data)
 
     def get_row_data(self, row_idx: int | list[int]) -> dict:
+        """Return the given global row(s), stacked when a list is given."""
         if isinstance(row_idx, int):
             ds_idx, local_idx = self._loc(row_idx)
             return self.datasets[ds_idx].get_row_data(local_idx)
@@ -334,6 +481,19 @@ class GoalDataset:
       - uniform future state in same episode
       - current state
     with probabilities (0.3, 0.5, 0.0, 0.2) by default.
+
+    Args:
+        dataset: The dataset to wrap.
+        goal_probabilities: 4-tuple of probabilities (random,
+            geometric_future, uniform_future, current); must sum to 1.
+        gamma: Discount for the geometric future sampler; the future offset
+            is drawn from ``Geom(1 - gamma)``.
+        current_goal_offset: Step offset (in clip steps) defining the
+            "current" state used as goal. Defaults to ``dataset.num_steps``.
+        goal_keys: Mapping of source column to goal column (e.g.
+            ``{'pixels': 'goal_pixels'}``). Defaults to ``pixels`` and
+            ``proprio`` when present in the dataset.
+        seed: Seed for the goal-sampling RNG.
     """
 
     def __init__(
@@ -406,6 +566,7 @@ class GoalDataset:
 
     @property
     def clip_indices(self):
+        """Clip indices, filtered to clips that still have a future frame."""
         return self._clip_indices
 
     def __len__(self):
@@ -413,6 +574,7 @@ class GoalDataset:
 
     @property
     def column_names(self):
+        """Columns of the wrapped dataset (goal columns are added per item)."""
         return self.dataset.column_names
 
     def _sample_goal_kind(self) -> str:

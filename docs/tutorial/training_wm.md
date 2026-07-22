@@ -188,7 +188,7 @@ Load the model and wrap it with a solver-backed policy:
 ```python
 import stable_worldmodel as swm
 from stable_worldmodel.policy import PlanConfig, WorldModelPolicy
-from stable_worldmodel.solver import CEMSolver
+from stable_worldmodel.planning import CEMSolver
 from stable_worldmodel.wm.utils import load_pretrained
 
 
@@ -204,7 +204,7 @@ world = swm.World(
 )
 
 solver = CEMSolver(
-    model=model,
+    cost=model,
     num_samples=300,
     n_steps=5,
     device=device,

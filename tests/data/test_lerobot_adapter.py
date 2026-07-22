@@ -10,6 +10,7 @@ import torch
 
 from stable_worldmodel import World
 from stable_worldmodel.data import GoalDataset, HDF5Dataset, LeRobotAdapter
+from stable_worldmodel.data.formats import lerobot as lerobot_format
 from stable_worldmodel.policy import RandomPolicy
 
 # Lightweight public dataset used as the integration target.
@@ -17,6 +18,173 @@ PUSHT_REPO_ID = 'lerobot/pusht'
 
 # pyav is the portable default; avoids a hard dependency on torchcodec/FFmpeg.
 PUSHT_VIDEO_BACKEND = 'pyav'
+
+
+@pytest.fixture
+def fake_hub_dataset(monkeypatch):
+    """Replace the optional LeRobot dependency with an in-memory dataset."""
+    num_rows = 12
+    source = {
+        'observation.images.front': torch.arange(
+            num_rows * 2 * 2 * 3, dtype=torch.uint8
+        ).reshape(num_rows, 2, 2, 3),
+        'action': torch.arange(num_rows * 2, dtype=torch.float32).reshape(
+            num_rows, 2
+        ),
+        'observation.state': torch.arange(
+            num_rows * 3, dtype=torch.float32
+        ).reshape(num_rows, 3),
+        'reward': torch.arange(num_rows, dtype=torch.float32),
+        'task': np.asarray(['move left'] * num_rows, dtype=object),
+        'episode_index': torch.tensor([10] * 6 + [20] * 6),
+    }
+
+    class FakeMeta:
+        camera_keys = ['observation.images.front']
+        info = {'fps': 10}
+
+    class FakeHubDataset:
+        calls = []
+
+        def __init__(
+            self,
+            *,
+            repo_id,
+            root,
+            episodes,
+            image_transforms,
+            delta_timestamps,
+            **kwargs,
+        ):
+            del repo_id, root, episodes, image_transforms, kwargs
+            self.features = {key: object() for key in source}
+            self.meta = FakeMeta()
+            self.hf_dataset = source
+            self.delta_timestamps = delta_timestamps
+            type(self).calls.append(delta_timestamps)
+
+        def __getitem__(self, row_idx):
+            assert self.delta_timestamps is not None
+            item = {}
+            for key, timestamps in self.delta_timestamps.items():
+                positions = np.asarray(
+                    [
+                        row_idx + round(timestamp * 10)
+                        for timestamp in timestamps
+                    ]
+                )
+                values = source[key]
+                if isinstance(values, torch.Tensor):
+                    positions_tensor = torch.as_tensor(positions)
+                    item[key] = values[positions_tensor]
+                else:
+                    item[key] = values[positions]
+            return item
+
+    monkeypatch.setattr(
+        lerobot_format,
+        '_import_lerobot_hub_dataset',
+        lambda: FakeHubDataset,
+    )
+    return FakeHubDataset
+
+
+def test_fake_hub_uses_public_aliases(fake_hub_dataset):
+    dataset = LeRobotAdapter(
+        repo_id='fake/repo',
+        key_aliases={'reward': 'score'},
+        keys_to_load=['pixels', 'action', 'proprio', 'score'],
+    )
+
+    assert dataset.column_names == ['pixels', 'action', 'proprio', 'score']
+    item = dataset[0]
+    assert set(item) == {'pixels', 'action', 'proprio', 'score'}
+    assert 'observation.images.front' not in item
+    assert 'observation.state' not in item
+    assert fake_hub_dataset.calls[-1]['reward'] == [0.0]
+
+
+def test_fake_hub_dense_and_sparse_windows(fake_hub_dataset):
+    dataset = LeRobotAdapter(
+        repo_id='fake/repo',
+        frameskip=2,
+        num_steps=2,
+        key_aliases={'reward': 'reward'},
+        keys_to_load=[
+            'pixels',
+            'action',
+            'proprio',
+            'reward',
+            'step_idx',
+        ],
+        dense_columns=['proprio', 'step_idx'],
+    )
+
+    item = dataset[0]
+    assert item['pixels'].shape == (2, 3, 2, 2)
+    assert item['action'].shape == (2, 4)
+    assert item['proprio'].shape == (2, 2, 3)
+    assert item['reward'].shape == (2,)
+    assert item['step_idx'].shape == (2, 2)
+    torch.testing.assert_close(item['reward'], torch.tensor([0.0, 2.0]))
+    torch.testing.assert_close(
+        item['step_idx'], torch.tensor([[0, 1], [2, 3]])
+    )
+
+    timestamps = fake_hub_dataset.calls[-1]
+    assert timestamps['action'] == pytest.approx([0.0, 0.1, 0.2, 0.3])
+    assert timestamps['observation.state'] == pytest.approx(
+        [0.0, 0.1, 0.2, 0.3]
+    )
+    assert timestamps['observation.images.front'] == pytest.approx([0.0, 0.2])
+    assert timestamps['reward'] == pytest.approx([0.0, 0.2])
+
+
+def test_fake_hub_dense_columns_keep_singleton_axis(fake_hub_dataset):
+    dataset = LeRobotAdapter(
+        repo_id='fake/repo',
+        frameskip=1,
+        num_steps=2,
+        key_aliases={'reward': 'reward'},
+        keys_to_load=['action', 'reward', 'step_idx'],
+        dense_columns=['reward', 'step_idx'],
+    )
+
+    item = dataset[0]
+    assert item['action'].shape == (2, 2)
+    assert item['reward'].shape == (2, 1)
+    assert item['step_idx'].shape == (2, 1)
+    torch.testing.assert_close(item['reward'][:, 0], torch.tensor([0.0, 1.0]))
+
+
+def test_fake_hub_rejects_unknown_public_dense_name(fake_hub_dataset):
+    dataset = LeRobotAdapter(
+        repo_id='fake/repo',
+        dense_columns=['observation.state'],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown dense_columns: \['observation\.state'\]",
+    ):
+        dataset[0]
+
+
+def test_fake_hub_rejects_dense_string_value(fake_hub_dataset):
+    dataset = LeRobotAdapter(
+        repo_id='fake/repo',
+        key_aliases={'task': 'instruction'},
+        keys_to_load=['instruction'],
+        dense_columns=['instruction'],
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            "Dense column 'instruction'.*string/object columns cannot be dense"
+        ),
+    ):
+        dataset[0]
 
 
 def _skip_if_unavailable() -> None:

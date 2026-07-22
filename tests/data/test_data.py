@@ -241,6 +241,98 @@ def test_hdf5_dataset_dense_columns(tmp_path):
         dataset.load_chunk(np.array([0]), np.array([0]), np.array([5]))
 
 
+def test_hdf5_dense_column_validation_and_transform_order(tmp_path):
+    path = tmp_path / 'dense_validation.h5'
+    n = 7
+    with h5py.File(path, 'w') as f:
+        f.create_dataset('ep_len', data=np.array([n]))
+        f.create_dataset('ep_offset', data=np.array([0]))
+        f.create_dataset('observation', data=np.arange(n * 2).reshape(n, 2))
+        f.create_dataset('action', data=np.arange(n * 2).reshape(n, 2))
+        f.create_dataset('reward', data=np.arange(n, dtype=np.float32))
+        f.create_dataset('terminated', data=np.arange(n) % 3 == 0)
+        f.create_dataset('left', data=np.arange(n).reshape(n, 1))
+        f.create_dataset('right', data=np.arange(n, n * 2).reshape(n, 1))
+        f.create_dataset(
+            'label',
+            data=np.asarray(['task'] * n, dtype=h5py.string_dtype()),
+        )
+
+    unknown = HDF5Dataset(path=path, dense_columns='rewad')
+    with pytest.raises(
+        ValueError,
+        match=(
+            "^Unknown dense_columns: \\['rewad'\\]\\. Available columns: "
+            '.*\\.$'
+        ),
+    ):
+        _ = unknown[0]
+
+    strings = HDF5Dataset(path=path, dense_columns='label')
+    with pytest.raises(
+        TypeError,
+        match=(
+            "^Dense column 'label' must contain array-like numeric, boolean, "
+            'or image values; string/object columns cannot be dense\\.$'
+        ),
+    ):
+        _ = strings[0]
+
+    seen = []
+
+    def inspect_rows(steps):
+        seen.append({key: value.shape for key, value in steps.items()})
+        return steps
+
+    dataset = HDF5Dataset(
+        path=path,
+        frameskip=2,
+        num_steps=2,
+        keys_to_load=['observation', 'action', 'reward', 'terminated'],
+        dense_columns=['reward', 'terminated'],
+        transform=inspect_rows,
+    )
+    item = dataset[0]
+    assert seen == [
+        {
+            'observation': torch.Size([2, 2]),
+            'action': torch.Size([4, 2]),
+            'reward': torch.Size([4]),
+            'terminated': torch.Size([4]),
+        }
+    ]
+    assert item['reward'].shape == (2, 2)
+    assert item['terminated'].shape == (2, 2)
+    assert item['terminated'].dtype == torch.bool
+
+    episode = HDF5Dataset(
+        path=path,
+        frameskip=2,
+        dense_columns=['reward'],
+        keys_to_load=['observation', 'action', 'reward'],
+    ).load_episode(0)
+    assert episode['observation'].shape[0] == 4
+    assert episode['action'].shape[0] == n
+    assert episode['reward'].shape[0] == n
+
+    merged = HDF5Dataset(
+        path=path,
+        frameskip=2,
+        num_steps=2,
+        dense_columns='state',
+        keys_to_merge={'state': ['left', 'right']},
+    )[0]
+    assert merged['state'].shape == (2, 2, 2)
+
+    singleton = HDF5Dataset(
+        path=path,
+        frameskip=1,
+        num_steps=2,
+        dense_columns='terminated',
+    )[0]
+    assert singleton['terminated'].shape == (2, 1)
+
+
 def test_hdf5_dataset_keys_to_load(sample_h5_file):
     """Test HDF5Dataset with specific keys_to_load."""
     cache_dir, name = sample_h5_file

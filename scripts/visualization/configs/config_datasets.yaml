@@ -1,6 +1,6 @@
 defaults:
-  - world_model@datasets.pusht_train.world_model: prejepa
-  - world_model@datasets.pusht_val.world_model: prejepa
+  - world_model@datasets.pusht_train.world_model: lewm
+  - world_model@datasets.pusht_val.world_model: lewm
   - world_model@datasets.pusht_background_color_variation.world_model: prejepa
   - world_model@datasets.pusht_block_color_variation.world_model: prejepa
   - world_model@datasets.pusht_agent_color_variation.world_model: prejepa
@@ -29,18 +29,23 @@ dimensionality_reduction: tsne
 
 dataset_groups_balancing: true
 
+# Subset of `datasets` keys to actually load/encode. Set to null to run all
+# datasets defined below. Override on the CLI, e.g. 'datasets_to_run=[pusht_train]'.
+datasets_to_run: [pusht_train]
+
 # Define multiple dataset-model pairs to visualize
 datasets:
   pusht_train:
     dataset:
-      dataset_name: pusht_expert_train
+      dataset_name: lewm-pusht
       batch_size: 32
-      num_workers: 16
+      num_workers: 8
+      # ~0.2% of the ~2M clip windows (~4k points) — a tractable size for t-SNE.
       visual_split: 0.002
       data_format: frame
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
-      model_name: null
+      model_name: lewm-pusht
     dataset_group: pusht
   pusht_val:
     dataset:
@@ -51,7 +56,7 @@ datasets:
       data_format: frame
       n_steps: ${eval:'${..world_model.num_preds} + ${..world_model.history_size}'}
     world_model:
-      model_name: null
+      model_name: lewm-pusht
     dataset_group: pusht
   pusht_background_color_variation:
     dataset:

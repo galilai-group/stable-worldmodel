@@ -58,6 +58,49 @@ ds = swm.data.load_dataset('lerobot://lerobot/pusht',
                            num_steps=8)
 ```
 
+## **[ Frameskip and Dense Columns ]**
+
+Let `T=num_steps` and `K=frameskip`. A fixed-window sample has three shape
+rules:
+
+- Sparse columns such as observations are sampled every `K` rows and have
+  shape `(T, ...)`.
+- `action` is always dense and has shape `(T, K * action_dim)`, preserving the
+  existing action-chunk convention.
+- Names passed through `dense_columns` are read at every row and have shape
+  `(T, K, ...)`. The `K` axis is retained when `K=1`.
+
+```python
+ds = swm.data.load_dataset(
+    'data/pusht.lance',
+    num_steps=4,
+    frameskip=2,
+    dense_columns=['reward', 'terminated'],
+)
+sample = ds[0]
+# pixels:     (4, C, H, W)
+# action:     (4, 2 * action_dim)
+# reward:     (4, 2)
+# terminated: (4, 2)
+```
+
+Dense columns must be numeric, boolean, tensor, or image values. Unknown names
+and string/object-valued dense columns raise an error instead of silently
+falling back to sparse sampling. Rewards and flags are never combined for you:
+choose the meaning appropriate to the algorithm, for example
+`sample['reward'].sum(dim=1)` or `sample['terminated'].any(dim=1)`.
+
+Transforms run after row selection and before grouping. They therefore receive
+sparse fields with `T` rows and dense fields, including action, with `T * K`
+rows. This keeps disk readers and `ReplayBuffer.__getitem__` consistent.
+
+`load_chunk()` follows the same grouping rules and requires every requested
+chunk length to be divisible by `K`. `load_episode()` does not apply
+fixed-window grouping. It preserves the existing backend-specific episode
+loading behavior: disk readers retain their per-column stride, while
+`ReplayBuffer` returns stored rows. Use fixed-window indexing or `load_chunk()`
+when grouped dense shapes are required.
+
 ## **[ Storage Formats ]**
 
 All built-in formats expose the same `Dataset` API: each item is a dict of

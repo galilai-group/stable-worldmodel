@@ -24,6 +24,7 @@ drawn from the same episode.
 
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 from collections import OrderedDict
@@ -44,7 +45,7 @@ from stable_worldmodel.data.format import (
 )
 from stable_worldmodel.data.formats.lance import (
     LanceDataset,
-    _force_spawn,
+    _force_forkserver,
     _is_image_name,
     _to_lance_name,
 )
@@ -109,6 +110,37 @@ def _encode_video(frames, fps: int, codec: str) -> bytes:
         os.unlink(path)
 
 
+class _SeekableBlob(io.RawIOBase):
+    """Adapt a lance ``BlobFile`` to the raw-IO protocol video decoders
+    expect, so decoding issues ranged object-store reads instead of
+    materializing the whole episode MP4 in memory."""
+
+    def __init__(self, blob) -> None:
+        self._blob = blob
+
+    def readinto(self, b) -> int:
+        data = self._blob.read(len(b))
+        n = len(data)
+        b[:n] = data
+        return n
+
+    def seek(self, pos: int, whence: int = 0) -> int:
+        return self._blob.seek(pos, whence)
+
+    def tell(self) -> int:
+        return self._blob.tell()
+
+    def seekable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        self._blob.close()
+        super().close()
+
+
 class LanceVideoDataset(LanceDataset):
     """Reader for the two-table video-blob layout.
 
@@ -122,6 +154,12 @@ class LanceVideoDataset(LanceDataset):
         video_keys: restrict which image columns to load; defaults to all
             present in the videos table.
         decoder_cache_size: per-worker LRU bound on open MP4 decoders.
+        blob_buffer_size: read-buffer size (bytes) for ranged blob reads.
+            Each decoder fetches only the byte ranges it needs from object
+            storage, in chunks of this size, instead of downloading the whole
+            episode MP4. Smaller values minimize bytes transferred
+            (rate-limited stores); larger values minimize round-trips
+            (high-latency links).
         Other args match :class:`LanceDataset`.
     """
 
@@ -132,6 +170,7 @@ class LanceVideoDataset(LanceDataset):
         *,
         video_keys: list[str] | None = None,
         decoder_cache_size: int = 16,
+        blob_buffer_size: int = 4 << 20,
         **kwargs: Any,
     ) -> None:
         loc = path if path is not None else kwargs.get('uri')
@@ -142,7 +181,7 @@ class LanceVideoDataset(LanceDataset):
         videos_name = f'{frames_name}_videos'
         connect_kwargs = kwargs.get('connect_kwargs') or {}
 
-        _force_spawn()
+        _force_forkserver()
         db = lancedb.connect(resolved_uri, **connect_kwargs)
         if videos_name not in db.list_tables().tables:
             raise FileNotFoundError(
@@ -189,6 +228,7 @@ class LanceVideoDataset(LanceDataset):
         self._videos_uri = f'{resolved_uri}/{videos_name}.lance'
         self._storage_options = connect_kwargs.get('storage_options')
         self._decoder_cache_size = decoder_cache_size
+        self._blob_buffer_size = blob_buffer_size
         self._videos_ds = None
         self._decoder_cache: OrderedDict | None = None
 
@@ -244,20 +284,24 @@ class LanceVideoDataset(LanceDataset):
 
         cache = self._decoder_cache
         key = (ep_idx, vkey)
-        dec = cache.get(key)
-        if dec is not None:
+        entry = cache.get(key)
+        if entry is not None:
             cache.move_to_end(key)
-            return dec
+            return entry[0]
         row = self._blob_row[key]
         blob = self._videos_ds.take_blobs(
             blob_column='video_bytes', indices=[row]
         )[0]
-        try:
-            data = blob.readall()
-        finally:
-            blob.close()
-        dec = VideoDecoder(data, seek_mode='approximate')
-        cache[key] = dec
+        # Ranged reads: the decoder pulls only the byte ranges it needs
+        # (moov + touched GOPs) through a buffered seekable view of the
+        # blob, instead of downloading the whole episode MP4. The source
+        # is cached alongside the decoder so the handle stays open for
+        # subsequent windows and is dropped together with it on eviction.
+        src = io.BufferedReader(
+            _SeekableBlob(blob), buffer_size=self._blob_buffer_size
+        )
+        dec = VideoDecoder(src, seek_mode='approximate')
+        cache[key] = (dec, src)
         while len(cache) > self._decoder_cache_size:
             cache.popitem(last=False)
         return dec
@@ -285,6 +329,7 @@ class LanceVideoDataset(LanceDataset):
                 )
             else:
                 steps[col] = self._process_col(col, batch, g_start, g_end)
+        self._validate_dense_values(steps)
         return steps
 
     def __getitems__(self, indices: list[int]) -> list[dict]:
@@ -298,6 +343,8 @@ class LanceVideoDataset(LanceDataset):
         difference between video throughput trailing the JPEG format by ~4×
         (per-window) versus ~1.2× (batched).
         """
+        self._validate_dense_columns()
+
         # Lay out window rows; fetch all tabular columns in one shot.
         all_rows: list[int] = []
         row_offsets: list[int] = []
@@ -359,6 +406,7 @@ class LanceVideoDataset(LanceDataset):
                     steps[col] = self._process_col(
                         col, sub_batch, g_start, g_start + self.span
                     )
+            self._validate_dense_values(steps)
             if self.transform:
                 steps = self.transform(steps)
             results.append(self._reshape_clip(steps, self.num_steps))
@@ -484,6 +532,12 @@ class LanceVideoWriter:
         for ep_data in episodes:
             if self._frames_schema is None:
                 self._init_schema(ep_data)
+            elif not self._rename_map:
+                # Appending to an existing dataset: `_load_existing_state`
+                # recovered the schema but not the rename map (it depends on
+                # the incoming column names). Rebuild it from the first
+                # appended episode before any batch is built.
+                self._rebuild_rename_map(ep_data)
             self._frames_batches.append(self._frames_batch(ep_data))
             for col, lance_name in self._rename_map.items():
                 if lance_name in self._image_cols:
@@ -495,6 +549,34 @@ class LanceVideoWriter:
                         )
                     )
             self._ep_idx += 1
+
+    def _rebuild_rename_map(self, sample_ep: dict) -> None:
+        """Recover the original→on-disk column map when reopening to append.
+
+        :meth:`_load_existing_state` reads the frames schema, ``_dims`` and
+        ``_image_cols`` back from disk, but ``_rename_map`` keys on the
+        *incoming* column names and so cannot be recovered from the table
+        alone. Rebuild it from the first appended episode — mirrors
+        :meth:`LanceWriter._validate_episode_against_existing`. Without this
+        the empty map makes :meth:`_frames_batch` raise ``StopIteration`` and
+        the video-row loop emit no blobs.
+        """
+        reserved = {'episode_idx', 'step_idx'}
+        known = set(self._dims) | self._image_cols
+        rename_map: dict[str, str] = {}
+        for col in sample_ep:
+            lance_name = _to_lance_name(col)
+            if lance_name in reserved or lance_name not in known:
+                continue
+            rename_map[col] = lance_name
+        missing = known - set(rename_map.values())
+        if missing:
+            raise ValueError(
+                f"LanceVideoWriter: append failed — table '{self.table_name}' "
+                f'expects columns {sorted(missing)} that the incoming episode '
+                'does not provide.'
+            )
+        self._rename_map = rename_map
 
     def _init_schema(self, sample_ep: dict) -> None:
         reserved = {'episode_idx', 'step_idx'}

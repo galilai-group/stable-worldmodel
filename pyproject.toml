@@ -37,7 +37,8 @@ swm = "stable_worldmodel.cli:app"
 [project.optional-dependencies]
 train = [
     "transformers>=4.50.0",
-    "stable-pretraining>=0.1.7",
+    "stable-pretraining>=0.1.8",
+    "datasets>=2.20.0",
     "hydra-submitit-launcher",
     "wandb",
 ]
@@ -59,8 +60,7 @@ env = [
 format = [
     "h5py",
     "hdf5plugin",
-    "decord; sys_platform != 'darwin'",
-    "av; sys_platform == 'darwin'",
+    "torchcodec",
     "imageio[ffmpeg]",
 ]
 
@@ -83,8 +83,7 @@ dev = [
   "mkdocs-shadcn",
   "pymdown-extensions",
   "pillow",
-  "decord; sys_platform != 'darwin'",
-  "av; sys_platform == 'darwin'",
+  "torchcodec",
   "imageio[ffmpeg]",
   "mkdocstrings[python]",
 ]

@@ -82,7 +82,7 @@ class LeRobotAdapter(Dataset):
         keys_to_cache: list[str] | None = None,
         primary_camera_key: str | None = None,
         key_aliases: dict[str, str] | None = None,
-        dense_columns: Collection[str] | None = None,
+        dense_columns: str | Collection[str] | None = None,
         **lerobot_kwargs: Any,
     ) -> None:
         LerobotHubDataset = _import_lerobot_hub_dataset()
@@ -351,6 +351,7 @@ class LeRobotAdapter(Dataset):
                     data = data.permute(0, 3, 1, 2)
             steps[key] = data
 
+        self._validate_dense_values(steps)
         return self.transform(steps) if self.transform else steps
 
     def get_col_data(self, col: str) -> np.ndarray:

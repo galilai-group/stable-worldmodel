@@ -12,31 +12,44 @@ from omegaconf import OmegaConf, open_dict
 from torch.utils.data import DataLoader
 import numpy as np
 
-from stable_worldmodel.wm.tdmpc2 import (
-    TDMPC2,
-    tdmpc2_forward,
-)
+from stable_worldmodel.wm.tdmpc2 import tdmpc2_forward
+from stable_worldmodel.wm.utils import save_pretrained
 
 
-class ModelObjectCallBack(Callback):
-    """Periodically saves the entire model object (not just state dict) to disk."""
+class SaveCkptCallback(Callback):
+    """Callback to save model checkpoint after each epoch using save_pretrained.
 
-    def __init__(self, dirpath, filename='model_object', epoch_interval=1):
+    Writes a state-dict ``weights_epoch_<n>.pt`` plus a ``config.json`` under
+    ``$STABLEWM_HOME/checkpoints/<run_name>/`` (the format consumed by
+    ``swm.wm.utils.load_pretrained``), replacing the old pickled
+    ``*_object.ckpt`` dump. ``cfg`` is the instantiable model config
+    (``cfg.model``), so ``config.json`` alone can rebuild the model.
+    """
+
+    def __init__(self, run_name, cfg, epoch_interval: int = 1):
         super().__init__()
-        self.dirpath, self.filename, self.epoch_interval = (
-            Path(dirpath),
-            filename,
-            epoch_interval,
-        )
+        self.run_name = run_name
+        self.cfg = cfg
+        self.epoch_interval = epoch_interval
 
     def on_train_epoch_end(self, trainer, pl_module):
-        if not trainer.is_global_zero:
-            return
-        epoch = trainer.current_epoch + 1
-        if epoch % self.epoch_interval == 0 or epoch == trainer.max_epochs:
-            path = self.dirpath / f'{self.filename}_epoch_{epoch}_object.ckpt'
-            torch.save(pl_module.model, path)
-            logging.info(f'Saved world model to {path}')
+        super().on_train_epoch_end(trainer, pl_module)
+
+        if trainer.is_global_zero:
+            if (trainer.current_epoch + 1) % self.epoch_interval == 0:
+                self._save(pl_module.model, trainer.current_epoch + 1)
+
+            # save final epoch
+            if (trainer.current_epoch + 1) == trainer.max_epochs:
+                self._save(pl_module.model, trainer.current_epoch + 1)
+
+    def _save(self, model, epoch):
+        save_pretrained(
+            model,
+            run_name=self.run_name,
+            config=self.cfg,
+            filename=f'weights_epoch_{epoch}.pt',
+        )
 
 
 def get_column_normalizer(dataset, source, target):
@@ -78,9 +91,12 @@ def run(cfg):
     """
     torch.set_float32_matmul_precision('high')
 
-    encoding_keys = list(cfg.wm.get('encoding', {}).keys())
+    model_cfg = cfg.model.cfg  # the config TDMPC2 is instantiated from
+    encoding_keys = list(model_cfg.wm.get('encoding', {}).keys())
     if not encoding_keys:
-        raise ValueError('No encoding modalities defined in cfg.wm.encoding!')
+        raise ValueError(
+            'No encoding modalities defined in cfg.model.cfg.wm.encoding!'
+        )
 
     use_pixels = 'pixels' in encoding_keys
     goal_obs_key = cfg.get(
@@ -90,12 +106,12 @@ def run(cfg):
 
     keys_to_load = list(encoding_keys) + ['action', 'reward']
 
-    base_dataset = swm.data.HDF5Dataset(
+    base_dataset = swm.data.load_dataset(
         cfg.dataset_name,
-        num_steps=cfg.wm.horizon + 1,
+        cache_dir=cfg.get('cache_dir'),
+        num_steps=model_cfg.wm.horizon + 1,
         keys_to_load=keys_to_load,
         keys_to_cache=keys_to_load if cfg.get('cache_dataset', True) else [],
-        cache_dir=cfg.get('cache_dir'),
     )
 
     if goal_obs_key is not None:
@@ -138,19 +154,19 @@ def run(cfg):
         )
 
     with open_dict(cfg):
-        cfg.action_dim = base_dataset.get_dim('action')
-        cfg.extra_dims = {'action': cfg.action_dim}
+        model_cfg.action_dim = base_dataset.get_dim('action')
+        model_cfg.extra_dims = {'action': model_cfg.action_dim}
 
         for key in extra_keys:
             if goal_obs_key is not None and key == goal_obs_key:
-                cfg.extra_dims[key] = base_dataset._cache[key].shape[-1]
+                model_cfg.extra_dims[key] = base_dataset._cache[key].shape[-1]
             else:
-                cfg.extra_dims[key] = base_dataset.get_dim(key)
+                model_cfg.extra_dims[key] = base_dataset.get_dim(key)
 
     transforms = []
     if use_pixels:
         transforms.append(
-            get_img_preprocessor('pixels', 'pixels', cfg.image_size)
+            get_img_preprocessor('pixels', 'pixels', model_cfg.image_size)
         )
 
     for key in extra_keys:
@@ -193,7 +209,7 @@ def run(cfg):
         persistent_workers=True,
     )
 
-    model = TDMPC2(cfg)
+    model = hydra.utils.instantiate(cfg.model)
 
     def add_opt(module_regex, lr, eps=1e-8):
         opt_cfg = dict(cfg.optimizer)
@@ -203,7 +219,7 @@ def run(cfg):
 
     module = spt.Module(
         model=model,
-        forward=partial(tdmpc2_forward, cfg=cfg),
+        forward=partial(tdmpc2_forward, cfg=model_cfg),
         hparams=OmegaConf.to_container(cfg, resolve=True),
         optim={
             'enc_opt': add_opt(
@@ -228,7 +244,7 @@ def run(cfg):
     logger = None
     if cfg.wandb.enable:
         logger = WandbLogger(
-            name=f'{cfg.wm.name}_{cfg.dataset_name}_{subdir}',
+            name=f'{model_cfg.wm.name}_{cfg.dataset_name}_{subdir}',
             project=cfg.wandb.project,
             resume='allow' if subdir else None,
             id=subdir or None,
@@ -240,9 +256,7 @@ def run(cfg):
         **cfg.trainer,
         logger=logger,
         callbacks=[
-            ModelObjectCallBack(
-                dirpath=run_dir, filename=cfg.output_model_name
-            )
+            SaveCkptCallback(run_name=cfg.output_model_name, cfg=cfg.model)
         ],
     )
     spt.Manager(

@@ -206,19 +206,42 @@ buf = ReplayBuffer(max_steps=200_000, history_len=4,
 
 ## **[ Frameskip Semantics ]**
 
-`frameskip > 1` strides observations and **keeps actions dense** — matching the convention used by `FolderDataset` and `Dataset.__getitem__`. With `history_len=H` and `frameskip=K`:
+`frameskip > 1` strides observations and keeps actions dense. Other fields can
+be kept dense explicitly, using the same convention as disk datasets. With
+`history_len=H` and `frameskip=K`:
 
 - Observation columns (`pixels`, `proprio`, …) → shape `(H, ...)`, sampled at positions `0, K, 2K, …, (H-1)K` within the clip.
 - The `action` column → shape `(H, K * action_dim)`, *all* `H * K` raw actions reshaped so each "step" carries the action chunk taken to advance to the next observation.
+- Other `dense_columns` → shape `(H, K, ...)`, including a singleton `K`
+  axis when `K=1`.
 
 ```python
-buf = ReplayBuffer(max_steps=10_000, history_len=4, frameskip=2)
+buf = ReplayBuffer(
+    max_steps=10_000,
+    history_len=4,
+    frameskip=2,
+    dense_columns=['reward', 'terminated'],
+)
 # clip = buf[0]:
-#   clip['pixels'].shape   == (4, ...)        # 4 strided observations
-#   clip['action'].shape   == (4, 2 * A_dim)  # action chunks, one per obs step
+#   clip['pixels'].shape     == (4, ...)        # strided observations
+#   clip['action'].shape     == (4, 2 * A_dim)  # action chunks
+#   clip['reward'].shape     == (4, 2)
+#   clip['terminated'].shape == (4, 2)
 ```
 
-If you don't use frameskipped rollouts, leave it at the default `1` — strided/dense behavior coincide and there's no overhead.
+The buffer does not guess how to combine dense values. Sum or discount rewards,
+and reduce termination flags with the exact semantics your learner expects.
+For example, `clip['reward'].sum(axis=1)` and
+`clip['terminated'].any(axis=1)` are explicit choices rather than buffer
+defaults.
+
+For `buf[index]`, the transform sees gathered rows before grouping: dense
+fields have `H * K` rows and sparse fields have `H`. `sample()` and
+`load_chunk()` remain transform-free and return grouped NumPy arrays.
+
+If you don't use frameskipped rollouts, leave it at the default `1` — sparse
+and dense fields select the same rows with no extra read overhead, while an
+additional dense field still retains its singleton grouping axis.
 
 ## **[ Persistence ]**
 
