@@ -198,6 +198,7 @@ class LanceDataset(Dataset):
         path: Either a ``.lance`` directory path or a database URI.
         table_name: Table inside the database; inferred from a ``.lance``
             path when omitted.
+        uri: Alternative to ``path`` for passing a database URI directly.
         frameskip: Standard ``Dataset`` knob.
         num_steps: Standard ``Dataset`` knob.
         transform: Standard ``Dataset`` knob.
