@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from stable_worldmodel.world.env_pool import EnvPool
+from stable_worldmodel.world.env_pool import AsyncEnvPool, EnvPool
 from stable_worldmodel.world.world import World
 
 
@@ -95,6 +95,59 @@ class RecordingPolicy:
         return actions
 
 
+class ResetAwarePolicy(RecordingPolicy):
+    """Recording policy that also implements the reset-hook contract."""
+
+    def __init__(self):
+        super().__init__()
+        self.reset_masks = []
+
+    def on_reset(self, env_mask=None):
+        self.reset_masks.append(
+            None if env_mask is None else np.array(env_mask, copy=True)
+        )
+
+
+class InfoKeysPolicy(RecordingPolicy):
+    """Recording policy that declares async info-key requirements."""
+
+    def __init__(self, info_keys):
+        super().__init__()
+        self.info_keys = info_keys
+        self.last_env_mask = None
+
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
+        self.call_count += 1
+        self.last_infos = {k: v for k, v in info_dict.items()}
+        self.last_env_mask = (
+            None if env_mask is None else np.array(env_mask, copy=True)
+        )
+        return np.zeros(
+            (self.env.num_envs, *self.env.single_action_space.shape)
+        )
+
+
+class AsyncReadyPolicy:
+    """Minimal async-aware policy: returns one zero action per ready env."""
+
+    def __init__(self):
+        self.env = None
+
+    def set_env(self, env):
+        self.env = env
+
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
+        info_dict.pop('_needs_flush', None)
+        count = (
+            self.env.num_envs
+            if env_mask is None
+            else int(np.count_nonzero(env_mask))
+        )
+        return np.zeros(
+            (count, *self.env.single_action_space.shape), dtype=np.float32
+        )
+
+
 def _make_world(num_envs=2, max_steps=3):
     """Build a World with CounterEnv directly, bypassing gym.make."""
     pool = EnvPool(
@@ -107,6 +160,23 @@ def _make_world(num_envs=2, max_steps=3):
     world.rewards = None
     world.terminateds = None
     world.truncateds = None
+    return world
+
+
+def _make_async_world(num_envs=1, max_steps=3):
+    """Build an async World (AsyncEnvPool + step_mode='async')."""
+    pool = AsyncEnvPool(
+        [lambda ms=max_steps: CounterEnv(ms) for _ in range(num_envs)]
+    )
+    world = object.__new__(World)
+    world.envs = pool
+    world.step_mode = 'async'
+    world.policy = None
+    world.infos = {}
+    world.rewards = None
+    world.terminateds = None
+    world.truncateds = None
+    world.ready = np.zeros(num_envs, dtype=bool)
     return world
 
 
@@ -177,7 +247,7 @@ class TestRunAutoMode:
         def on_done(env_idx, ep_idx, w):
             pass
 
-        def on_step(w, mask):
+        def on_step(w):
             infos_after_reset.append(w.infos['state'][0].copy())
 
         world._run(
@@ -195,6 +265,31 @@ class TestRunAutoMode:
         assert states[3] == 0.0  # reset happened, fresh env
         assert states[4] == 1.0
         assert states[5] == 2.0
+
+    def test_async_infos_updated_after_reset(self):
+        """Async parity with #294: on_step fires after the initial reset and
+        each per-env auto-reset, so the reset frame (state=0) is captured just
+        like the sync loop. num_envs=1 keeps the event order deterministic."""
+        world = _make_async_world(num_envs=1, max_steps=2)
+        policy = AsyncReadyPolicy()
+        world.policy = policy
+        policy.set_env(world.envs)
+
+        infos_after_reset = []
+
+        def on_step(w):
+            infos_after_reset.append(w.infos['state'][0].copy())
+
+        try:
+            world._run(episodes=2, seed=0, mode='auto', on_step=on_step)
+        finally:
+            world.envs.close()
+
+        # Same trace as the sync case:
+        # episode 1: reset (0), step 1, step 2 (terminates)
+        # episode 2: reset (0), step 1, step 2 (terminates)
+        states = [s[0] for s in infos_after_reset]
+        assert states == [0.0, 1.0, 2.0, 0.0, 1.0, 2.0]
 
 
 class TestRunWaitMode:
@@ -263,7 +358,7 @@ class TestRunCallbacks:
 
         step_count = [0]
 
-        def on_step(w, mask):
+        def on_step(w):
             step_count[0] += 1
 
         world._run(max_steps=3, mode='wait', seed=0, on_step=on_step)
@@ -472,6 +567,32 @@ class TestSetPolicy:
         assert len(world.infos) > 0
         np.testing.assert_array_equal(world.terminateds, [False, False])
 
+    def test_reset_notifies_policy_that_all_envs_reset(self):
+        world = _make_world(num_envs=2)
+        policy = ResetAwarePolicy()
+        world.policy = policy
+        policy.set_env(world.envs)
+
+        world.reset(seed=42)
+
+        assert policy.reset_masks == [None]
+
+    def test_auto_reset_notifies_policy_with_done_env_mask(self):
+        world = _make_world(num_envs=2, max_steps=100)
+        world.envs.envs[0]._max_steps = 2
+        policy = ResetAwarePolicy()
+        world.policy = policy
+        policy.set_env(world.envs)
+
+        world._run(episodes=2, seed=0, mode='auto')
+
+        selective_masks = [
+            mask for mask in policy.reset_masks if mask is not None
+        ]
+        assert selective_masks
+        for mask in selective_masks:
+            np.testing.assert_array_equal(mask, [True, False])
+
     def test_reset_per_env_options_passed_through(self):
         seen = {'opts': None}
 
@@ -493,6 +614,38 @@ class TestSetPolicy:
         world.reset(options=per_env)
         # The second env's reset is called last, so `seen` holds its options.
         assert seen['opts'] == {'variation': ['b']}
+
+
+class TestAsyncPolicyInfo:
+    def test_async_get_actions_skips_info_for_no_info_policy(self):
+        world = _make_world(num_envs=3)
+        world.reset(seed=0)
+        policy = InfoKeysPolicy(info_keys=())
+        world.set_policy(policy)
+
+        mask = np.array([False, True, True])
+        actions = world._get_actions(mask)
+
+        assert policy.last_infos == {}
+        np.testing.assert_array_equal(policy.last_env_mask, mask)
+        assert actions.shape == (2, 2)
+
+    def test_async_get_actions_slices_only_declared_info_keys(self):
+        world = _make_world(num_envs=3)
+        world.reset(seed=0)
+        world.infos['state'] = np.array([[[1.0]], [[2.0]], [[3.0]]])
+        world.infos['unused'] = np.array([[[10.0]], [[20.0]], [[30.0]]])
+        policy = InfoKeysPolicy(info_keys=('state',))
+        world.set_policy(policy)
+
+        mask = np.array([False, True, True])
+        actions = world._get_actions(mask)
+
+        assert list(policy.last_infos) == ['state']
+        np.testing.assert_array_equal(
+            policy.last_infos['state'], np.array([[[2.0]], [[3.0]]])
+        )
+        assert actions.shape == (2, 2)
 
 
 class TestWorldMisc:

@@ -6,6 +6,8 @@ from stable_worldmodel.policy import BasePolicy
 class WeakPolicy(BasePolicy):
     """Collection policy for PushT environment."""
 
+    info_keys: tuple[str, ...] | None = ()
+
     def __init__(
         self,
         dist_constraint=100,
@@ -46,7 +48,7 @@ class WeakPolicy(BasePolicy):
         )
         self.discrete = 'Discrete' in spec.id
 
-    def get_action(self, info_dict, **kwargs):
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
 
         # Handle vectorized envs (VecEnv-style) and single envs gracefully
@@ -59,10 +61,18 @@ class WeakPolicy(BasePolicy):
             else:
                 envs = [base_env]
 
-        act_shape = self.env.action_space.shape
-        actions = np.zeros(act_shape, dtype=np.float32)
+        if env_mask is None:
+            env_indices = np.arange(len(envs))
+            actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
+        else:
+            env_indices = np.flatnonzero(env_mask)
+            single_shape = envs[0].action_space.shape
+            actions = np.zeros(
+                (len(env_indices), *single_shape), dtype=np.float32
+            )
 
-        for i, env in enumerate(envs):
+        for row, env_idx in enumerate(env_indices):
+            env = envs[env_idx]
             # sample a random action
             action = self.rng.uniform(-1, 1, size=env.action_space.shape)
             # scale action to environment position
@@ -83,7 +93,7 @@ class WeakPolicy(BasePolicy):
                 action = env.quantizer.quantize(action)
 
             # set action for this env
-            actions[i] = action
+            actions[row] = action
 
         # VecEnv expects (n_envs, action_dim)
         return actions

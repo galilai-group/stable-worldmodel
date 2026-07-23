@@ -177,7 +177,7 @@ class TestRunAutoMode:
         def on_done(env_idx, ep_idx, w):
             pass
 
-        def on_step(w, mask):
+        def on_step(w):
             infos_after_reset.append(w.infos['state'][0].copy())
 
         world._run(
@@ -263,7 +263,7 @@ class TestRunCallbacks:
 
         step_count = [0]
 
-        def on_step(w, mask):
+        def on_step(w):
             step_count[0] += 1
 
         world._run(max_steps=3, mode='wait', seed=0, on_step=on_step)

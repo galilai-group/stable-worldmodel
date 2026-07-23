@@ -1,8 +1,10 @@
 """Tests for PushT environment expert policy."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import gymnasium as gym
+import numpy as np
 import pytest
 
 from stable_worldmodel.envs.pusht.expert_policy import WeakPolicy
@@ -49,6 +51,7 @@ def test_weak_policy_init_default():
     policy = WeakPolicy()
     assert policy.dist_constraint == 100
     assert policy.discrete is False
+    assert policy.info_keys == ()
 
 
 def test_weak_policy_init_custom_constraint():
@@ -176,3 +179,45 @@ def test_weak_policy_set_env_sub_env_no_spec():
     policy = WeakPolicy()
     with pytest.raises(AssertionError):
         policy.set_env(mock_env)
+
+
+def test_weak_policy_get_action_with_env_mask_returns_selected_rows():
+    class MockPushTEnv:
+        def __init__(self, agent_pos, block_pos):
+            self.spec = SimpleNamespace(id='swm/PushT-v0')
+            self.action_space = gym.spaces.Box(
+                low=-1, high=1, shape=(2,), dtype=np.float32
+            )
+            self.action_scale = 10.0
+            self.agent = SimpleNamespace(
+                position=np.asarray(agent_pos, dtype=np.float32)
+            )
+            self.block = SimpleNamespace(
+                position=SimpleNamespace(x=block_pos[0], y=block_pos[1])
+            )
+
+        @property
+        def unwrapped(self):
+            return self
+
+    envs = [
+        MockPushTEnv((0.0, 0.0), (1.0, 1.0)),
+        MockPushTEnv((2.0, 2.0), (3.0, 3.0)),
+        MockPushTEnv((4.0, 4.0), (5.0, 5.0)),
+    ]
+    vec_env = MagicMock()
+    vec_env.spec = None
+    vec_env.envs = envs
+    vec_env.action_space = gym.spaces.Box(
+        low=-1, high=1, shape=(3, 2), dtype=np.float32
+    )
+
+    policy = WeakPolicy(seed=0)
+    policy.set_env(vec_env)
+
+    actions = policy.get_action({}, env_mask=np.array([False, True, True]))
+
+    assert actions.shape == (2, 2)
+    assert actions.dtype == np.float32
+    assert np.all(actions >= -1)
+    assert np.all(actions <= 1)

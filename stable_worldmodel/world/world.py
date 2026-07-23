@@ -2,8 +2,8 @@
 
 ``World`` bundles three things:
 
-1. A batched simulator (``EnvPool``) that steps N envs in parallel and
-   can skip terminated envs via a mask.
+1. A batched simulator (``EnvPool``) that can run in synchronous lockstep or
+   asynchronously continue whichever environments finish first.
 2. A preprocessing pipeline (``MegaWrapper``) that resizes pixels,
    lifts everything into the info dict, and applies optional transforms.
 3. A rollout loop that drives ``policy.get_action(infos)`` and handles
@@ -48,12 +48,13 @@ import torch
 
 from stable_worldmodel.policy import Policy
 
-from .env_pool import EnvPool
+from .env_pool import AsyncEnvPool, AsyncEnvMask, EnvPool
 from ..plot import save_panel_videos, save_video
 from ..wrapper import MegaWrapper
 
 
 RESET_MODES = ('auto', 'wait')
+STEP_MODES = ('sync', 'async')
 
 
 def _make_env(
@@ -70,16 +71,19 @@ def _make_env(
 class World:
     """Drive a policy through a pool of preprocessed envs.
 
-    After construction, ``world.envs`` is an ``EnvPool`` of ``num_envs``
-    environments, each wrapped by ``MegaWrapper`` (and any ``pre_wrappers`` /
-    ``extra_wrappers`` you pass). Attach a policy with ``set_policy(...)`` and then call
-    ``collect()`` or ``evaluate()`` to run rollouts.
+    After construction, ``world.envs`` is a pool of ``num_envs`` environments,
+    each wrapped by ``MegaWrapper`` (and any ``pre_wrappers`` /
+    ``extra_wrappers`` you pass). Attach a policy with ``set_policy(...)`` and
+    then call ``collect()`` or ``evaluate()`` to run rollouts.
 
     Attributes populated during a run:
         infos: Stacked info dict from the last reset/step. Tensor/array
             values have shape ``(num_envs, 1, ...)``.
         rewards, terminateds, truncateds: Per-env step outputs from the
             last ``step()``. Shape ``(num_envs,)``.
+        ready: Boolean mask identifying environments updated by the latest
+            rollout event. It is all active environments in synchronous mode
+            and whichever environments just completed in asynchronous mode.
 
     Args:
         env_name: Gymnasium id registered for the target env
@@ -108,6 +112,8 @@ class World:
             ``pixels`` observation; goal images are resized too. Set False
             for envs without pixels (e.g. audio): ``image_shape`` may then
             be omitted and the raw observation is lifted into info as-is.
+        step_mode: ``'sync'`` for fixed lockstep batches or ``'async'`` to
+            continue environments as soon as each one finishes.
         **kwargs: Forwarded to ``gym.make`` (e.g. ``render_mode``).
     """
 
@@ -124,8 +130,13 @@ class World:
         goal_transform: Callable | None = None,
         image_resample: str | int | None = None,
         add_pixels: bool = True,
+        step_mode: str = 'sync',
         **kwargs: Any,
     ):
+        if step_mode not in STEP_MODES:
+            raise ValueError(
+                f'step_mode must be one of {STEP_MODES}, got {step_mode!r}'
+            )
         if add_pixels and image_shape is None:
             raise ValueError('image_shape is required when add_pixels=True.')
         wrappers = [
@@ -149,12 +160,15 @@ class World:
             add_pixels=add_pixels,
             **kwargs,
         )
-        self.envs = EnvPool([env_fn] * num_envs)
+        pool_cls = AsyncEnvPool if step_mode == 'async' else EnvPool
+        self.envs = pool_cls([env_fn] * num_envs)
+        self.step_mode = step_mode
         self.policy: Policy | None = None
         self.infos: dict = {}
         self.rewards: np.ndarray | None = None
         self.terminateds: np.ndarray | None = None
         self.truncateds: np.ndarray | None = None
+        self.ready = np.zeros(num_envs, dtype=bool)
 
     @property
     def num_envs(self) -> int:
@@ -182,8 +196,13 @@ class World:
         Clears ``terminateds``/``truncateds`` back to all-False.
         """
         _, self.infos = self.envs.reset(seed=seed, options=options)
+        self.rewards = np.zeros(self.num_envs, dtype=np.float32)
         self.terminateds = np.zeros(self.num_envs, dtype=bool)
         self.truncateds = np.zeros(self.num_envs, dtype=bool)
+        if not hasattr(self, 'ready'):
+            self.ready = np.zeros(self.num_envs, dtype=bool)
+        self.ready[:] = False
+        self._notify_policy_reset()
 
     def evaluate(
         self,
@@ -307,7 +326,8 @@ class World:
 
         buffers = [defaultdict(list) for _ in range(self.num_envs)]
 
-        def on_step(world, mask):
+        def on_step(world):
+            ready_indices = np.flatnonzero(world.ready)
             for col, data in world.infos.items():
                 if col.startswith('_'):
                     continue
@@ -318,7 +338,7 @@ class World:
                         data = data.squeeze(1)
                     else:
                         data = np.squeeze(data, axis=1)
-                for i in np.where(mask)[0]:
+                for i in ready_indices:
                     val = data[i]
                     if isinstance(val, torch.Tensor):
                         val = val.detach().cpu().numpy()
@@ -334,7 +354,9 @@ class World:
         ):
 
             def episode_iter():
-                for env_idx, _ in self._run_iter(
+                pending_episodes = {}
+                next_episode = 0
+                for env_idx, ep_idx in self._run_iter(
                     episodes=episodes,
                     seed=seed,
                     options=options,
@@ -345,8 +367,12 @@ class World:
                     buffers[env_idx].clear()
                     if 'action' in ep:
                         ep['action'].append(ep['action'].pop(0))
-                    pbar.update(1)
-                    yield ep
+                    pending_episodes[ep_idx] = ep
+
+                    while next_episode in pending_episodes:
+                        pbar.update(1)
+                        yield pending_episodes.pop(next_episode)
+                        next_episode += 1
 
             w.write_episodes(episode_iter())
 
@@ -382,17 +408,53 @@ class World:
         mode: str = 'auto',
         on_step=None,
     ):
+        """Drive the configured pool and yield completed episodes.
+
+        Synchronous worlds retain the original fixed-batch rollout. Async
+        worlds use a first-completed event loop.
+        """
+        if getattr(self, 'step_mode', 'sync') == 'async':
+            yield from self._run_iter_async(
+                episodes=episodes,
+                max_steps=max_steps,
+                seed=seed,
+                options=options,
+                mode=mode,
+                on_step=on_step,
+            )
+            return
+
+        yield from self._run_iter_sync(
+            episodes=episodes,
+            max_steps=max_steps,
+            seed=seed,
+            options=options,
+            mode=mode,
+            on_step=on_step,
+        )
+
+    def _run_iter_sync(
+        self,
+        episodes: int | None = None,
+        max_steps: int | None = None,
+        seed: int | None = None,
+        options: dict | None = None,
+        mode: str = 'auto',
+        on_step=None,
+    ):
         """Drive the policy and yield ``(env_idx, ep_count)`` on each
         episode completion. Letting callers consume completions as a
         generator is what makes streaming writes possible without threading.
 
-        ``on_step(world, mask)`` fires after every step and after every
-        reset (initial and per-env auto-reset), so callers see the reset
-        observation as well as stepped ones. ``mask`` marks which envs the
-        call reflects — all envs for a real step, just the reset ones for
-        an auto-reset.
+        ``on_step(world)`` fires after every step and after every reset
+        (initial and per-env auto-reset), so callers see the reset
+        observation as well as stepped ones. ``world.ready`` marks which
+        envs the call reflects — all envs for a real step, just the reset
+        ones for an auto-reset.
         """
-        assert mode in RESET_MODES, f'reset_mode must be one of {RESET_MODES}'
+        assert mode in RESET_MODES, (
+            f'mode must be one of {RESET_MODES}, received {mode=}'
+        )
 
         if self.policy is None:
             raise RuntimeError('No policy set.')
@@ -402,7 +464,8 @@ class World:
         if seed is not None or options is not None:
             self.reset(seed=seed, options=options)
             if on_step:
-                on_step(self, mask=np.ones(self.num_envs, dtype=bool))
+                self.ready[:] = True
+                on_step(self)
 
         alive = np.ones(self.num_envs, dtype=bool)
         next_seed = seed + self.num_envs if seed is not None else None
@@ -416,8 +479,11 @@ class World:
                 self.envs.step(actions, mask=mask)
             )
 
+            if not hasattr(self, 'ready'):
+                self.ready = np.zeros(self.num_envs, dtype=bool)
+            self.ready[:] = True if mask is None else mask
             if on_step:
-                on_step(self, mask=mask if mask is not None else alive)
+                on_step(self)
 
             done = alive & (self.terminateds | self.truncateds)
             if not done.any():
@@ -447,16 +513,162 @@ class World:
                 self.terminateds[done] = False
                 self.truncateds[done] = False
                 self.infos['_needs_flush'] = done
+                self._notify_policy_reset(done)
                 if on_step:
-                    on_step(self, mask=done)
+                    self.ready[:] = done
+                    on_step(self)
             elif mode == 'wait':
                 alive[done] = False
 
             if budget_reached or (mode == 'wait' and not alive.any()):
                 return
 
-    def _get_actions(self) -> np.ndarray:
-        return self.policy.get_action(self.infos)
+    def _run_iter_async(
+        self,
+        episodes: int | None = None,
+        max_steps: int | None = None,
+        seed: int | None = None,
+        options: dict | None = None,
+        mode: str = 'auto',
+        on_step=None,
+    ):
+        """Drive environments from a first-completed event loop."""
+        assert mode in RESET_MODES, (
+            f'mode must be one of {RESET_MODES}, received {mode=}'
+        )
+
+        if self.policy is None:
+            raise RuntimeError('No policy set.')
+        if episodes is None and max_steps is None:
+            raise ValueError('Provide episodes or max_steps (or both).')
+        if episodes is not None and episodes <= 0:
+            return
+        if not isinstance(self.envs, AsyncEnvPool):
+            raise RuntimeError('Async rollout requires an AsyncEnvPool.')
+
+        did_reset = seed is not None or options is not None or not self.infos
+        if did_reset:
+            self.reset(seed=seed, options=options)
+
+        active_count = (
+            self.num_envs if episodes is None else min(self.num_envs, episodes)
+        )
+        active = np.zeros(self.num_envs, dtype=bool)
+        active[:active_count] = True
+        step_counts = np.zeros(self.num_envs, dtype=np.int64)
+        episode_ids = np.full(self.num_envs, -1, dtype=np.int64)
+        episode_ids[:active_count] = np.arange(active_count)
+        launched = active_count
+
+        # Mirror the sync loop (see #294): surface the initial reset frame to
+        # on_step so collect() records it instead of starting one step late.
+        if did_reset and on_step:
+            self.ready[:] = active
+            on_step(self)
+
+        actions = self._get_actions(active)
+        self.envs.submit_step(active, actions)
+
+        while self.envs.has_pending:
+            events = self.envs.wait_ready()
+            step_events = [event for event in events if event.kind == 'step']
+            reset_events = [event for event in events if event.kind == 'reset']
+
+            self.ready[:] = False
+            self.rewards[:] = 0.0
+            self.terminateds[:] = False
+            self.truncateds[:] = False
+
+            for event in step_events:
+                i = event.env_idx
+                self.ready[i] = True
+                self.rewards[i] = event.reward
+                self.terminateds[i] = event.terminated
+                self.truncateds[i] = event.truncated
+                step_counts[i] += 1
+
+            if step_events and on_step:
+                on_step(self)
+
+            next_step = [event.env_idx for event in reset_events]
+            reset_indices = list(next_step)
+            completions = []
+
+            for event in step_events:
+                i = event.env_idx
+                env_done = event.terminated or event.truncated
+                budget_done = (
+                    max_steps is not None and step_counts[i] >= max_steps
+                )
+
+                if env_done:
+                    completions.append((i, int(episode_ids[i])))
+
+                    should_reset = (
+                        mode == 'auto'
+                        and not budget_done
+                        and (episodes is None or launched < episodes)
+                    )
+                    if should_reset:
+                        reset_seed = (
+                            seed + launched if seed is not None else None
+                        )
+                        episode_ids[i] = launched
+                        launched += 1
+                        reset_mask = np.zeros(self.num_envs, dtype=bool)
+                        reset_mask[i] = True
+                        self.envs.submit_reset(
+                            reset_mask, seed=[reset_seed], options=options
+                        )
+                    else:
+                        active[i] = False
+                elif budget_done:
+                    active[i] = False
+                else:
+                    next_step.append(i)
+
+            if reset_indices:
+                flush = np.zeros(self.num_envs, dtype=bool)
+                flush[reset_indices] = True
+                self._notify_policy_reset(flush)
+                self.infos['_needs_flush'] = flush
+                self.terminateds[reset_indices] = False
+                self.truncateds[reset_indices] = False
+                # Record the per-env reset frame, matching the sync loop (#294).
+                if on_step:
+                    self.ready[:] = flush
+                    on_step(self)
+
+            if next_step:
+                next_step_mask = np.zeros(self.num_envs, dtype=bool)
+                next_step_mask[next_step] = True
+                actions = self._get_actions(next_step_mask)
+                self.infos.pop('_needs_flush', None)
+                self.envs.submit_step(next_step_mask, actions)
+
+            yield from completions
+
+    def _get_actions(self, env_mask: AsyncEnvMask | None = None) -> np.ndarray:
+        if env_mask is None:
+            return self.policy.get_action(self.infos)
+
+        indices = np.flatnonzero(env_mask)
+        ready_info = _slice_policy_info(
+            self.policy,
+            self.infos,
+            indices,
+            self.num_envs,
+        )
+        actions = self.policy.get_action(
+            ready_info,
+            env_mask=env_mask,
+        )
+        return _select_actions(
+            actions,
+            indices,
+            self.num_envs,
+            self.envs.single_action_space.shape,
+        )
 
     def _evaluate(self, episodes, seed, options, video, mode) -> dict:
         results = {
@@ -466,9 +678,9 @@ class World:
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
-        def on_step(world, mask):
+        def on_step(world):
             if frames is not None:
-                for i in range(world.num_envs):
+                for i in np.flatnonzero(world.ready):
                     f = world.infos['pixels'][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
@@ -548,11 +760,12 @@ class World:
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
-        def on_step(world, mask):
+        def on_step(world):
             world.infos.update(deepcopy(goal_snapshot))
-            results['episode_successes'] |= world.terminateds
+            ready = np.flatnonzero(world.ready)
+            results['episode_successes'][ready] |= world.terminateds[ready]
             if frames is not None:
-                for i in range(world.num_envs):
+                for i in ready:
                     f = world.infos['pixels'][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
@@ -572,6 +785,110 @@ class World:
                 },
             )
         return results
+
+    def _notify_policy_reset(
+        self, env_mask: AsyncEnvMask | None = None
+    ) -> None:
+        if self.policy is None:
+            return
+
+        on_reset = getattr(self.policy, 'on_reset', None)
+        if on_reset is not None:
+            on_reset(env_mask)
+
+
+def _contiguous_slice(indices: np.ndarray) -> slice | None:
+    """Return an equivalent ``slice`` when ``indices`` is an ascending run.
+
+    ``indices`` is always sorted and unique (from ``np.flatnonzero``), so a
+    unit-stride run can be expressed as a slice. Slicing returns a *view* of
+    the shared info buffers instead of the copy that advanced indexing forces,
+    which is the common case in async rollouts (a single completed env, or a
+    full batch finishing together).
+    """
+    n = len(indices)
+    if n == 0:
+        return slice(0, 0)
+    start = int(indices[0])
+    stop = int(indices[-1]) + 1
+    if stop - start == n:
+        return slice(start, stop)
+    return None
+
+
+def _slice_ready(infos: dict, indices: np.ndarray, num_envs: int) -> dict:
+    """Select ready environment rows while preserving non-batched values.
+
+    Values are only read by policies (``_get_actions`` returns before the pool
+    overwrites the buffers), so a zero-copy view is safe for the contiguous
+    fast path; scattered index sets fall back to a copy.
+    """
+    row_selector = _contiguous_slice(indices)
+    if row_selector is None:
+        row_selector = indices
+
+    selected = {}
+    for key, value in infos.items():
+        if isinstance(value, (np.ndarray, torch.Tensor)):
+            if value.ndim > 0 and value.shape[0] == num_envs:
+                selected[key] = value[row_selector]
+            else:
+                selected[key] = value
+        elif isinstance(value, list) and len(value) == num_envs:
+            if isinstance(row_selector, slice):
+                selected[key] = value[row_selector]
+            else:
+                selected[key] = [value[i] for i in indices]
+        else:
+            selected[key] = value
+    return selected
+
+
+def _slice_policy_info(
+    policy,
+    infos: dict,
+    indices: np.ndarray,
+    num_envs: int,
+) -> dict:
+    """Select only the ready info keys a policy declares it needs."""
+    info_keys = getattr(policy, 'info_keys', None)
+    if info_keys is None:
+        return _slice_ready(infos, indices, num_envs)
+
+    info_keys = tuple(info_keys)
+    if not info_keys:
+        return {}
+
+    return _slice_ready(
+        {key: infos[key] for key in info_keys if key in infos},
+        indices,
+        num_envs,
+    )
+
+
+def _select_actions(
+    actions,
+    indices: np.ndarray,
+    num_envs: int,
+    single_action_shape: tuple[int, ...],
+) -> np.ndarray:
+    """Normalize policy output to actions for only the ready environments."""
+    actions = np.asarray(actions)
+    if len(indices) == 1 and actions.shape == single_action_shape:
+        actions = actions[None, ...]
+    elif actions.ndim == 0 and len(indices) == 1:
+        actions = actions.reshape(1)
+
+    if actions.ndim == 0:
+        raise ValueError('Policy returned a scalar for multiple environments.')
+    if actions.shape[0] == num_envs and len(indices) != num_envs:
+        actions = actions[indices]
+    if actions.shape[0] != len(indices):
+        raise ValueError(
+            'Policy must return one action per ready environment; '
+            f'got shape {actions.shape} for {len(indices)} ready environments.'
+        )
+    return actions
 
 
 def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
