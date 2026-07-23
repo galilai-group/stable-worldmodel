@@ -122,7 +122,9 @@ class InfoKeysPolicy(RecordingPolicy):
         self.last_env_mask = (
             None if env_mask is None else np.array(env_mask, copy=True)
         )
-        return np.zeros((self.env.num_envs, *self.env.single_action_space.shape))
+        return np.zeros(
+            (self.env.num_envs, *self.env.single_action_space.shape)
+        )
 
 
 class AsyncReadyPolicy:
