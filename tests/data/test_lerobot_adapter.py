@@ -149,6 +149,7 @@ def test_lerobot_adapter_pusht_matches_native_swm_dataset(tmp_path):
         tmp_path / 'datasets' / f'{dataset_name}.h5',
         episodes=3,
         seed=123,
+        format='hdf5',
     )
     world.envs.close()
 

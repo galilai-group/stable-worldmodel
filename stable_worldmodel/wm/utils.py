@@ -35,7 +35,8 @@ def save_pretrained(
 
     config_path = ckpt_dir / 'config.json'
 
-    config = OmegaConf.to_container(config, resolve=True)
+    if OmegaConf.is_config(config):
+        config = OmegaConf.to_container(config, resolve=True)
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
 
@@ -110,7 +111,9 @@ def _resolve(name: str, cache_dir: Path) -> tuple[Path, dict]:
         return local, _load_config(local.parent)
 
     # format 2: folder containing a .pt and config.json
-    if local.is_dir():
+    # (skip if it has no .pt — likely a sibling output dir, e.g. eval videos —
+    # and fall through to HF resolution when name looks like a repo id)
+    if local.is_dir() and list(local.glob('*.pt')):
         return _resolve_folder(local)
 
     # format 3: HuggingFace repo (<user>/<repo>)

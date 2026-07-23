@@ -21,7 +21,13 @@ _TASKS = {'spin', 'turn_easy', 'turn_hard'}
 
 
 class FingerDMControlWrapper(DMControlWrapper):
-    def __init__(self, task='turn_hard', seed=None, environment_kwargs=None):
+    def __init__(
+        self,
+        task='turn_hard',
+        seed=None,
+        environment_kwargs=None,
+        render_mode=None,
+    ):
         if task not in _TASKS:
             raise ValueError(
                 f"Unknown task '{task}'. Must be one of {sorted(_TASKS)}"

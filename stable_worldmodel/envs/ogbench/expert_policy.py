@@ -61,7 +61,7 @@ class ExpertPolicy(BasePolicy):
 
     def set_env(self, env):
         self.env = env
-        single_env = self.env.unwrapped.envs[0]
+        single_env = self.env.envs[0].unwrapped
         assert single_env.spec.id in [
             'swm/OGBCube-v0',
             'swm/OGBScene-v0',
@@ -79,7 +79,7 @@ class ExpertPolicy(BasePolicy):
         self._agents = [None] * self.env.num_envs
 
     def _set_oracle_agents(self):
-        single_env = self.env.unwrapped.envs[0]
+        single_env = self.env.envs[0].unwrapped
         if 'Cube' in single_env.spec.id:
             if self.type == 'markov_oracle':
                 # create one independent oracle instance per environment
@@ -194,12 +194,7 @@ class ExpertPolicy(BasePolicy):
                 }
 
     def _get_cube_stack_prob(self):
-        base_env = self.env.unwrapped
-        if hasattr(base_env, 'envs'):
-            envs = [e.unwrapped for e in base_env.envs]
-        else:
-            envs = [base_env]
-
+        envs = [e.unwrapped for e in self.env.envs]
         env_type = envs[0]._env_type  # assuming all envs have the same type
 
         if env_type == 'single':
@@ -223,13 +218,7 @@ class ExpertPolicy(BasePolicy):
             "'privileged/target_task' must be provided in info_dict"
         )
 
-        # Handle vectorized envs (VecEnv-style) and single envs gracefully
-        base_env = self.env.unwrapped
-        if hasattr(base_env, 'envs'):
-            envs = [e.unwrapped for e in base_env.envs]
-        else:
-            envs = [base_env]
-
+        envs = [e.unwrapped for e in self.env.envs]
         act_shape = self.env.action_space.shape
         actions = np.zeros(act_shape, dtype=np.float32)
 

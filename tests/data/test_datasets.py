@@ -143,6 +143,15 @@ def sample_image_dataset_short_episode(tmp_path):
 @pytest.fixture
 def sample_video_dataset(tmp_path):
     """Create a sample VideoDataset directory structure with MP4 files for testing."""
+    # VideoDataset decodes via torchcodec, which eagerly loads libtorchcodec and
+    # its FFmpeg shared libraries. That load raises (not ImportError) on
+    # environments without a matching FFmpeg — common on CI runners — so skip
+    # every test that builds a VideoDataset when the backend can't load.
+    try:
+        from torchcodec.decoders import VideoDecoder  # noqa: F401
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f'torchcodec unavailable ({exc})')
+
     import imageio.v3 as iio
 
     dataset_path = tmp_path / 'test_video_dataset'
@@ -656,17 +665,17 @@ def test_video_dataset_load_file(sample_video_dataset):
     assert frame.shape == (64, 64, 3)
 
 
-def test_video_dataset_decord_import_error(sample_video_dataset):
-    """Test VideoDataset raises ImportError when decord is not available."""
-    cache_dir, name = sample_video_dataset
-
-    # Reset the class-level cached decord module
-    VideoDataset._decord = None
-
-    # Mock the import to raise ImportError
-    with patch.dict(sys.modules, {'decord': None}):
-        with pytest.raises(ImportError, match='VideoDataset requires decord'):
-            VideoDataset(name, cache_dir=str(cache_dir))
+def test_video_dataset_backend_import_error(tmp_path):
+    """VideoDataset raises ImportError when the torchcodec backend is missing."""
+    # VideoDataset.__init__ eagerly imports torchcodec before touching any
+    # files, so hiding it forces the ImportError regardless of on-disk layout
+    # (and without needing a working FFmpeg, so this runs even where the other
+    # video tests skip).
+    with patch.dict(
+        sys.modules, {'torchcodec': None, 'torchcodec.decoders': None}
+    ):
+        with pytest.raises(ImportError):
+            VideoDataset('nonexistent', cache_dir=str(tmp_path))
 
 
 ##############################################################################
@@ -1030,6 +1039,131 @@ def test_concat_dataset_get_row_data_list(mock_dataset_a, mock_dataset_c):
     assert 'action' in row_data
     assert row_data['pixels'].shape[0] == 2
     assert row_data['action'].shape[0] == 2
+
+
+def test_concat_dataset_getitems_single_dataset(
+    mock_dataset_a, mock_dataset_c
+):
+    """Test __getitems__ with indices all from the first dataset."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    items = concat.__getitems__([0, 5, 10])
+
+    assert isinstance(items, list)
+    assert len(items) == 3
+    for item in items:
+        assert 'pixels' in item
+        assert 'action' in item
+        assert 'observation' in item
+
+
+def test_concat_dataset_getitems_cross_datasets(
+    mock_dataset_a, mock_dataset_c
+):
+    """Test __getitems__ with indices spanning both datasets."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # Indices 5 and 19 are in the first dataset; 20 and 30 are in the second.
+    items = concat.__getitems__([5, 19, 20, 30])
+
+    assert isinstance(items, list)
+    assert len(items) == 4
+    # All items should have the shared keys
+    for item in items:
+        assert 'pixels' in item
+        assert 'action' in item
+    # First two from dataset_a have 'observation'; last two from dataset_c do not
+    assert 'observation' in items[0]
+    assert 'observation' in items[1]
+    assert 'observation' not in items[2]
+    assert 'observation' not in items[3]
+
+
+def test_concat_dataset_getitems_preserves_order(
+    mock_dataset_a, mock_dataset_c
+):
+    """Test __getitems__ returns results in the same order as the input indices."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    # Interleave indices from both datasets
+    indices = [25, 3, 20, 10, 30]
+    items = concat.__getitems__(indices)
+
+    assert len(items) == len(indices)
+    # Each result should correspond to the matching __getitem__ call
+    for i, idx in enumerate(indices):
+        expected = concat[idx]
+        for key in expected:
+            assert torch.equal(items[i][key], expected[key])
+
+
+def test_concat_dataset_getitems_negative_indices(
+    mock_dataset_a, mock_dataset_c
+):
+    """Test __getitems__ handles negative indices correctly."""
+    concat = ConcatDataset([mock_dataset_a, mock_dataset_c])
+
+    items = concat.__getitems__([-1, -15])
+
+    assert len(items) == 2
+    for item in items:
+        assert 'pixels' in item
+        assert 'action' in item
+
+
+def test_concat_dataset_getitems_uses_sub_getitems(
+    mock_dataset_a, mock_dataset_c
+):
+    """Test __getitems__ delegates to sub-dataset __getitems__ when available."""
+    call_log = []
+
+    class TrackingDataset(MockDataset):
+        def __getitems__(self, indices):
+            call_log.append(indices)
+            return [self[i] for i in indices]
+
+    tracking_ds = TrackingDataset(
+        data={
+            'pixels': torch.randn(20, 3, 64, 64),
+            'action': torch.randn(20, 2),
+        },
+        length=20,
+    )
+    concat = ConcatDataset([tracking_ds, mock_dataset_c])
+
+    # All indices from the first (tracking) dataset
+    concat.__getitems__([0, 5, 10])
+
+    assert len(call_log) == 1, (
+        '__getitems__ on sub-dataset should be called once'
+    )
+    assert sorted(call_log[0]) == [0, 5, 10]
+
+
+def test_concat_dataset_getitems_fallback_without_sub_getitems(mock_dataset_c):
+    """Test __getitems__ falls back to __getitem__ when sub-dataset lacks __getitems__."""
+
+    class NoGetitemsDataset(MockDataset):
+        pass  # inherits __getitem__ but has no __getitems__
+
+    # Confirm the attribute is absent so the test stays meaningful
+    assert not hasattr(NoGetitemsDataset, '__getitems__')
+
+    no_gi_ds = NoGetitemsDataset(
+        data={
+            'pixels': torch.randn(20, 3, 64, 64),
+            'action': torch.randn(20, 2),
+        },
+        length=20,
+    )
+    concat = ConcatDataset([no_gi_ds, mock_dataset_c])
+
+    items = concat.__getitems__([1, 7])
+
+    assert len(items) == 2
+    for item in items:
+        assert 'pixels' in item
+        assert 'action' in item
 
 
 ##############################################################################

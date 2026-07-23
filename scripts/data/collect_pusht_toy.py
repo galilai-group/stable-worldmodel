@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import hydra
 import numpy as np
 from loguru import logger as logging
@@ -16,12 +18,12 @@ def run(cfg):
     rng = np.random.default_rng(cfg.seed)
 
     for i in range(10):
-        world.record_dataset(
-            f'pusht_toy/shard_{i}',
+        world.collect(
+            Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+            / 'datasets'
+            / f'pusht_toy/shard_{i}.lance',
             episodes=500,
             seed=rng.integers(0, 1_000_000).item(),
-            cache_dir=cfg.cache_dir,
-            mode=cfg.ds_type,
         )
 
     logging.success(' 🎉🎉🎉 Completed data collection for pusht_toy 🎉🎉🎉')

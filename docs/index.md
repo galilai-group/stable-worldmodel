@@ -22,12 +22,12 @@ Stable World-Model is an open-source library to conduct world model research.  Y
 === "uv (all dependencies)"
 
         :::bash
-        uv add stable-worldmodel --all-extras
+        uv add 'stable-worldmodel[all]'
 
 === "pip (all dependencies)"
 
         :::bash
-        pip install stable-worldmodel[env, train]
+        pip install 'stable-worldmodel[all]'
 
 
 !!! note ""
@@ -47,7 +47,7 @@ git clone https://github.com/galilai-group/stable-worldmodel
 cd stable-worldmodel/
 uv venv --python=3.10
 source .venv/bin/activate
-uv sync --all-extras --group dev
+uv sync --extra all --group dev
 ```
 
 !!! warning ""
@@ -63,7 +63,7 @@ Here is a quick start example: collect a dataset and perform an evaluation.
 import stable_worldmodel as swm
 from stable_worldmodel.data import HDF5Dataset
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
-from stable_worldmodel.solver import CEMSolver
+from stable_worldmodel.planning import CEMSolver
 
 
 world = swm.World('swm/PushT-v1', num_envs=8, image_shape=(64, 64))
@@ -88,7 +88,7 @@ dataset = HDF5Dataset(
 )
 
 # model predictive control
-solver = CEMSolver(model=world_model, num_samples=300, device='cuda')
+solver = CEMSolver(cost=world_model, num_samples=300, device='cuda')
 policy = WorldModelPolicy(
     solver=solver,
     config=PlanConfig(horizon=10, receding_horizon=5)
@@ -113,23 +113,24 @@ After you have installed stable-worldmodel, try the [Quick Start Guide](quick_st
 | | |
 |---|---|
 | **[Environments](envs/pusht.md)** | Explore the included environments: PushT, TwoRoom, OGBench, DMControl, and more. |
+| **[Tutorial: collect data](tutorial/collect_data.md)** | Build a small dataset, inspect it, load it for training, and convert it to another format. |
+| **[Tutorial: train a world model](tutorial/training_wm.md)** | Train or plug in a model that implements the planning cost interface, then evaluate it with MPC. |
+| **[Tutorial: add an environment](tutorial/new_env.md)** | Register a Gymnasium environment with pixels, state, goals, and factors of variation. |
 | **[CLI Reference](cli.md)** | Inspect datasets, environments, and checkpoints from the terminal with the `swm` command. |
 | **[API Reference](api/world.md)** | Detailed documentation for World, Policy, Solver, Dataset, and other modules. |
 
 ## Citation
 
-If you wish to cite our [pre-print](https://arxiv.org/abs/2602.08968):
+If you wish to cite our [pre-print](https://arxiv.org/abs/2605.21800v1):
 
 ```bibtex
-@misc{maes_lelidec2026swm-1,
-      title={stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation}, 
-      author = {Lucas Maes and Quentin Le Lidec and Dan Haramati and
-                Nassim Massaudi and Damien Scieur and Yann LeCun and
-                Randall Balestriero},
+@misc{maes_lld2026swm,
+      title={stable-worldmodel: A Platform for Reproducible World Modeling Research and Evaluation}, 
+      author={Lucas Maes and Quentin Le Lidec and Luiz Facury and Nassim Massaudi and Ayush Chaurasia and Francesco Capuano and Richard Gao and Taj Gillin and Dan Haramati and Damien Scieur and Yann LeCun and Randall Balestriero},
       year={2026},
-      eprint={2602.08968},
+      eprint={2605.21800},
       archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2602.08968}, 
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2605.21800}, 
 }
 ```

@@ -16,7 +16,7 @@ _CONTROL_TIMESTEP = 0.02
 
 
 class BallInCupDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, seed=None, environment_kwargs=None, render_mode=None):
         xml, assets = ball_in_cup.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(

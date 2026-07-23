@@ -13,12 +13,24 @@ import numpy as np
 import torch
 
 from stable_worldmodel.data.dataset import Dataset
-from stable_worldmodel.data.format import Format, register_format
+from stable_worldmodel.data.format import (
+    Format,
+    register_format,
+    validate_write_mode,
+)
 from stable_worldmodel.data.utils import get_cache_dir
 
 
+_REMOTE_SCHEMES = ('s3', 'gs', 'gcs', 'azure', 'abfs', 'http', 'https')
+
+
 class HDF5Dataset(Dataset):
-    """Dataset loading from a single HDF5 file (SWMR mode for safe reads)."""
+    """Dataset loading from a single HDF5 file (SWMR mode for safe reads).
+
+    For remote paths (``s3://``, ``gs://``, etc.), pass ``storage_options``
+    that fsspec recognises for the chosen scheme. The file handle is opened
+    lazily per-worker, so DataLoader multiprocessing is supported.
+    """
 
     def __init__(
         self,
@@ -31,19 +43,22 @@ class HDF5Dataset(Dataset):
         keys_to_merge: dict[str, list[str] | str] | None = None,
         cache_dir: str | Path | None = None,
         path: str | Path | None = None,
+        storage_options: dict | None = None,
     ) -> None:
         if path is not None:
-            self.h5_path = Path(path)
+            raw = str(path)
+            self.h5_path = raw if self._looks_remote(raw) else Path(raw)
         else:
             if name is None:
                 raise TypeError('HDF5Dataset requires either `name` or `path`')
             datasets_dir = get_cache_dir(cache_dir, sub_folder='datasets')
             self.h5_path = Path(datasets_dir, f'{name}.h5')
 
+        self.storage_options = storage_options or {}
         self.h5_file: h5py.File | None = None
         self._cache: dict[str, np.ndarray] = {}
 
-        with h5py.File(self.h5_path, 'r') as f:
+        with self._open_h5() as f:
             lengths, offsets = f['ep_len'][:], f['ep_offset'][:]
             self._keys = keys_to_load or [
                 k for k in f.keys() if k not in ('ep_len', 'ep_offset')
@@ -63,11 +78,35 @@ class HDF5Dataset(Dataset):
     def column_names(self) -> list[str]:
         return self._keys
 
+    @staticmethod
+    def _looks_remote(path: str) -> bool:
+        return any(path.startswith(s + '://') for s in _REMOTE_SCHEMES)
+
+    @property
+    def is_remote(self) -> bool:
+        return isinstance(self.h5_path, str) and self._looks_remote(
+            self.h5_path
+        )
+
+    def _open_h5(self) -> h5py.File:
+        if self.is_remote:
+            import fsspec
+
+            scheme = self.h5_path.split('://', 1)[0]
+            fs = fsspec.filesystem(scheme, **self.storage_options)
+            return h5py.File(fs.open(self.h5_path, 'rb'), 'r')
+        return h5py.File(
+            self.h5_path, 'r', swmr=True, rdcc_nbytes=256 * 1024 * 1024
+        )
+
     def _open(self) -> None:
         if self.h5_file is None:
-            self.h5_file = h5py.File(
-                self.h5_path, 'r', swmr=True, rdcc_nbytes=256 * 1024 * 1024
-            )
+            self.h5_file = self._open_h5()
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state['h5_file'] = None
+        return state
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         self._open()
@@ -127,20 +166,50 @@ class HDF5Dataset(Dataset):
         return np.prod(data.shape[1:]).item() if data.ndim > 1 else 1
 
 
+def _is_string_col(sample) -> bool:
+    """True if a column's per-step value is text — stored as a variable-length
+    UTF-8 string rather than a numeric array. Covers python ``str``/``bytes`` and
+    numpy string/object (``U``/``S``/``O``) dtypes."""
+    if isinstance(sample, (str, bytes, bytearray)):
+        return True
+    return np.asarray(sample).dtype.kind in ('U', 'S', 'O')
+
+
 class HDF5Writer:
     """Append episodes to a single HDF5 file. Schema is inferred from the
-    first episode and locked thereafter."""
+    first episode and locked thereafter.
 
-    def __init__(self, path):
+    Args:
+        path: target ``.h5`` file.
+        mode: ``'append'`` (default — extend if the file exists),
+            ``'overwrite'`` (truncate first), or ``'error'`` (raise if the
+            file already exists). See :data:`stable_worldmodel.data.format.WRITE_MODES`.
+    """
+
+    def __init__(self, path, *, mode: str = 'append'):
+        validate_write_mode(mode)
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.mode = mode
         self._f: h5py.File | None = None
         self._initialized = False
+        self._appending_existing = False
         self._ep_written = 0
         self._global_ptr = 0
 
     def __enter__(self):
-        self._f = h5py.File(str(self.path), 'w', libver='latest')
+        exists = self.path.exists()
+        if exists and self.mode == 'error':
+            raise FileExistsError(
+                f"HDF5Writer: '{self.path}' already exists. "
+                "Pass mode='overwrite' to replace it or mode='append' to "
+                'extend it.'
+            )
+        if self.mode == 'overwrite' or not exists:
+            self._f = h5py.File(str(self.path), 'w', libver='latest')
+        else:
+            self._f = h5py.File(str(self.path), 'a', libver='latest')
+            self._load_existing_state()
         return self
 
     def __exit__(self, *exc):
@@ -154,23 +223,88 @@ class HDF5Writer:
         if not self._initialized:
             self._init_schema(ep_data)
             self._initialized = True
+        elif self._appending_existing and self._ep_written == 0:
+            self._validate_episode_against_existing(ep_data)
 
         ep_len = len(next(iter(ep_data.values())))
         for col, vals in ep_data.items():
             ds = self._f[col]
             ds.resize(self._global_ptr + ep_len, axis=0)
-            ds[self._global_ptr : self._global_ptr + ep_len] = np.array(vals)
+            if h5py.check_string_dtype(ds.dtype):
+                arr = np.array(
+                    [
+                        v.decode()
+                        if isinstance(v, (bytes, bytearray))
+                        else str(v)
+                        for v in vals
+                    ],
+                    dtype=object,
+                )
+            else:
+                arr = np.array(vals)
+            ds[self._global_ptr : self._global_ptr + ep_len] = arr
 
-        self._f['ep_len'].resize(self._ep_written + 1, axis=0)
-        self._f['ep_len'][self._ep_written] = ep_len
-        self._f['ep_offset'].resize(self._ep_written + 1, axis=0)
-        self._f['ep_offset'][self._ep_written] = self._global_ptr
+        n = self._f['ep_len'].shape[0]
+        self._f['ep_len'].resize(n + 1, axis=0)
+        self._f['ep_len'][n] = ep_len
+        self._f['ep_offset'].resize(n + 1, axis=0)
+        self._f['ep_offset'][n] = self._global_ptr
 
         self._ep_written += 1
         self._global_ptr += ep_len
 
+    def write_episodes(self, episodes) -> None:
+        for ep in episodes:
+            self.write_episode(ep)
+
+    def _load_existing_state(self) -> None:
+        if 'ep_len' not in self._f or 'ep_offset' not in self._f:
+            raise ValueError(
+                f"HDF5Writer: cannot append to '{self.path}' — file is "
+                'missing ep_len/ep_offset metadata.'
+            )
+        ep_len = self._f['ep_len'][:]
+        self._global_ptr = int(ep_len.sum()) if len(ep_len) else 0
+        self._initialized = True
+        self._appending_existing = True
+
+    def _validate_episode_against_existing(self, ep_data: dict) -> None:
+        existing = {
+            k for k in self._f.keys() if k not in ('ep_len', 'ep_offset')
+        }
+        incoming = set(ep_data)
+        missing = existing - incoming
+        extra = incoming - existing
+        if missing or extra:
+            raise ValueError(
+                f"HDF5Writer: append failed — schema mismatch on '{self.path}'. "
+                f'Missing columns: {sorted(missing)}; '
+                f'unexpected columns: {sorted(extra)}.'
+            )
+        for col, vals in ep_data.items():
+            if h5py.check_string_dtype(self._f[col].dtype):
+                continue  # variable-length strings have no fixed per-step shape
+            sample = np.asarray(vals[0])
+            ds_shape = self._f[col].shape[1:]
+            if sample.shape != ds_shape:
+                raise ValueError(
+                    f"HDF5Writer: append failed — column '{col}' shape "
+                    f'mismatch: existing per-step={ds_shape}, '
+                    f'incoming per-step={sample.shape}.'
+                )
+
     def _init_schema(self, sample_ep: dict) -> None:
         for col, vals in sample_ep.items():
+            if _is_string_col(vals[0]):
+                # Text column: one variable-length UTF-8 string per step.
+                self._f.create_dataset(
+                    col,
+                    shape=(0,),
+                    maxshape=(None,),
+                    dtype=h5py.string_dtype(),
+                    chunks=(1,),
+                )
+                continue
             sample = np.asarray(vals[0])
             self._f.create_dataset(
                 col,
@@ -202,6 +336,18 @@ class HDF5(Format):
 
     @classmethod
     def open_reader(cls, path, **kwargs) -> HDF5Dataset:
+        s = str(path)
+        # Remote URI (s3://, gs://, ...) — pass through; HDF5Dataset uses
+        # fsspec to read. Auto-inject region from env if caller didn't.
+        if '://' in s:
+            if 'storage_options' not in kwargs:
+                import os
+
+                region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+                kwargs['storage_options'] = {
+                    'client_kwargs': {'region_name': region}
+                }
+            return HDF5Dataset(path=s, **kwargs)
         p = Path(path)
         if p.is_dir():
             files = sorted(p.glob('*.h5')) + sorted(p.glob('*.hdf5'))

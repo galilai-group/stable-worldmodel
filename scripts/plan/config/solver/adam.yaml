@@ -1,5 +1,5 @@
-_target_: stable_worldmodel.solver.GradientSolver
-model: ???
+_target_: stable_worldmodel.planning.solver.GradientSolver
+cost: ???
 n_steps: 30
 batch_size: null
 num_samples: 1

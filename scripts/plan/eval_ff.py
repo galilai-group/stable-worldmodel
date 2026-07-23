@@ -46,8 +46,10 @@ def get_episodes_length(dataset, episodes):
 
 
 def get_dataset(cfg, dataset_name):
-    dataset_path = Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
-    dataset = swm.data.HDF5Dataset(dataset_name, cache_dir=dataset_path)
+    dataset = swm.data.load_dataset(
+        dataset_name,
+        cache_dir=cfg.get('cache_dir', None),
+    )
     return dataset
 
 
@@ -96,7 +98,7 @@ def run(cfg: DictConfig):
     policy = cfg.get('policy', 'random')
 
     if policy != 'random':
-        model = swm.policy.AutoActionableModel(cfg.policy)
+        model = swm.wm.utils.load_pretrained(cfg.policy)
         model = model.to('cuda')
         model = model.eval()
         model.requires_grad_(False)

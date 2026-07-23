@@ -50,11 +50,14 @@ class WeakPolicy(BasePolicy):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
 
         # Handle vectorized envs (VecEnv-style) and single envs gracefully
-        base_env = self.env.unwrapped
-        if hasattr(base_env, 'envs'):
-            envs = [e.unwrapped for e in base_env.envs]
+        if hasattr(self.env, 'envs'):
+            envs = [e.unwrapped for e in self.env.envs]
         else:
-            envs = [base_env]
+            base_env = self.env.unwrapped
+            if hasattr(base_env, 'envs'):
+                envs = [e.unwrapped for e in base_env.envs]
+            else:
+                envs = [base_env]
 
         act_shape = self.env.action_space.shape
         actions = np.zeros(act_shape, dtype=np.float32)

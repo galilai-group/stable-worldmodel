@@ -1,6 +1,7 @@
 import os
+from pathlib import Path
 
-os.environ['MUJOCO_GL'] = 'egl'
+os.environ['MUJOCO_GL'] = 'glfw'
 import hydra
 import numpy as np
 from loguru import logger as logging
@@ -31,11 +32,12 @@ def run(cfg: DictConfig):
     rng = np.random.default_rng(cfg.seed)
     world.set_policy(ExpertPolicy())
 
-    world.record_dataset(
-        'ogbench/cube_single_multiview_expert',
+    world.collect(
+        Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+        / 'datasets'
+        / 'ogbench/cube_single_multiview_expert.lance',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
-        cache_dir=cfg.cache_dir,
         options=options,
     )
 

@@ -352,7 +352,7 @@ class TestStackFresh:
         ]
         stacked = _stack_fresh(infos)
         assert isinstance(stacked['s'], list)
-        assert stacked['s'] == ['hello', 'world']
+        assert stacked['s'] == [['hello'], ['world']]
 
     def test_mixed_types(self):
         infos = [
@@ -380,9 +380,9 @@ class TestWriteEnvInfo:
         assert torch.equal(stacked['t'][0, 0], torch.zeros(2))
 
     def test_list_inplace(self):
-        stacked = {'l': ['a', 'b', 'c']}
+        stacked = {'l': [['a'], ['b'], ['c']]}
         _write_env_info(stacked, 0, {'l': 'z'})
-        assert stacked['l'] == ['z', 'b', 'c']
+        assert stacked['l'] == [['z'], ['b'], ['c']]
 
     def test_unknown_key_ignored(self):
         stacked = {'a': np.zeros(3)}
@@ -607,8 +607,8 @@ def test_label_list_after_masked_step():
     mask = np.array([True, False])
     _, _, _, _, infos = pool.step(actions, mask=mask)
 
-    assert infos['label'][0] == 'step_2'
-    assert infos['label'][1] == 'step_1'  # unchanged
+    assert infos['label'][0][0] == 'step_2'
+    assert infos['label'][1][0] == 'step_1'  # unchanged
     pool.close()
 
 

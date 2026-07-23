@@ -1,7 +1,7 @@
 from .cube_env import CubeEnv
 from .expert_policy import ExpertPolicy
-from .pointmaze_env import PointMazeEnv
+from .maze_env import MazeEnv
 from .scene_env import SceneEnv
 
 
-__all__ = ['CubeEnv', 'PointMazeEnv', 'SceneEnv', 'ExpertPolicy']
+__all__ = ['CubeEnv', 'MazeEnv', 'SceneEnv', 'ExpertPolicy']

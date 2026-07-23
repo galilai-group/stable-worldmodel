@@ -18,7 +18,7 @@ _SMALL_TARGET = 0.015
 
 
 class ManipulatorDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, seed=None, environment_kwargs=None, render_mode=None):
         xml, assets = manipulator.make_model(use_peg=False, insert=False)
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(

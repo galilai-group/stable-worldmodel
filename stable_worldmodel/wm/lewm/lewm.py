@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 
@@ -12,6 +11,7 @@ class LeWM(nn.Module):
         action_encoder,
         projector=None,
         pred_proj=None,
+        **kwargs,
     ):
         super().__init__()
 
@@ -54,13 +54,15 @@ class LeWM(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(self, info, action_sequence, history_size: int = None):
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
          - S is the number of action plan samples
          - T is the time horizon
         """
+        if history_size is None:
+            history_size = getattr(self.predictor, 'num_frames', 3)
 
         assert 'pixels' in info, 'pixels not in info_dict'
         H = info['pixels'].size(2)
@@ -69,11 +71,14 @@ class LeWM(nn.Module):
         info['action'] = act_0
         n_steps = T - H
 
-        # encode initial state, or reuse cached embedding from a prior rollout
+        # encode initial state, or reuse cached embedding from a prior rollout.
+        # detach: to avoid backprop in encoder
         if 'emb' not in info:
             _init = {k: v[:, 0] for k, v in info.items() if torch.is_tensor(v)}
             _init = self.encode(_init)
-            info['emb'] = _init['emb'].unsqueeze(1).expand(B, S, -1, -1)
+            info['emb'] = (
+                _init['emb'].detach().unsqueeze(1).expand(B, S, -1, -1)
+            )
 
         # flatten batch and sample dimensions for rollout
         emb_init = rearrange(info['emb'], 'b s ... -> (b s) ...')
@@ -100,52 +105,6 @@ class LeWM(nn.Module):
         info['predicted_emb'] = pred_rollout
 
         return info
-
-    def criterion(self, info_dict: dict):
-        """Compute the cost between predicted embeddings and goal embeddings."""
-        pred_emb = info_dict['predicted_emb']  # (B, S, T-1, dim)
-        goal_emb = info_dict['goal_emb']  # (B, S, T, dim) or (B, T, dim)
-
-        # align dims: goal_emb may lack the S dimension when computed from a single obs
-        while goal_emb.ndim < pred_emb.ndim:
-            goal_emb = goal_emb.unsqueeze(1)
-        goal_emb = goal_emb[..., -1:, :].expand_as(pred_emb)
-
-        # return last-step cost per action candidate
-        cost = F.mse_loss(
-            pred_emb[..., -1:, :],
-            goal_emb[..., -1:, :].detach(),
-            reduction='none',
-        ).sum(dim=tuple(range(2, pred_emb.ndim)))  # (B, S)
-
-        return cost
-
-    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
-        """Compute the cost of action candidates given an info dict with goal and initial state."""
-
-        assert 'goal' in info_dict, 'goal not in info_dict'
-
-        # encode goal state, or reuse cached embedding from a prior call
-        if 'goal_emb' not in info_dict:
-            goal = {
-                k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)
-            }
-            goal['pixels'] = goal['goal']
-
-            for k in info_dict:
-                if k.startswith('goal_'):
-                    goal[k[len('goal_') :]] = goal.pop(k)
-
-            goal.pop('action')
-            goal = self.encode(goal)
-
-            info_dict['goal_emb'] = goal['emb']
-
-        info_dict = self.rollout(info_dict, action_candidates)
-
-        cost = self.criterion(info_dict)
-
-        return cost
 
 
 __all__ = ['LeWM']

@@ -47,7 +47,9 @@ _TASK_MOVE_SPEEDS = {
 
 
 class CheetahDMControlWrapper(DMControlWrapper):
-    def __init__(self, task='run', seed=None, environment_kwargs=None):
+    def __init__(
+        self, task='run', seed=None, environment_kwargs=None, render_mode=None
+    ):
         if task not in _TASKS:
             raise ValueError(
                 f"Unknown task '{task}'. Must be one of {list(_TASKS)}"
@@ -74,7 +76,7 @@ class CheetahDMControlWrapper(DMControlWrapper):
                             shape=(3,),
                             dtype=np.float64,
                             init_value=np.array(
-                                [0.6, 0.3, 0.3], dtype=np.float64
+                                [0.7, 0.5, 0.3], dtype=np.float64
                             ),
                         ),
                         'torso_density': swm_space.Box(

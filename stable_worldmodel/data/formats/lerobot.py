@@ -37,7 +37,7 @@ def _import_lerobot_hub_dataset() -> type:
         raise ImportError(
             'stable_worldmodel.data.LeRobotAdapter requires the optional '
             'lerobot dependency. Install it with '
-            "`pip install 'stable-worldmodel[lerobot]'`."
+            "`pip install 'stable-worldmodel[format]'`."
         ) from exc
 
     return LerobotHubDataset

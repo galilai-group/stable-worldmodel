@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import hydra
 import numpy as np
 from loguru import logger as logging
@@ -21,12 +23,12 @@ def run(cfg):
     rng = np.random.default_rng(cfg.seed)
 
     for i in range(cfg.num_shards):
-        world.record_dataset(
-            f'pusht_discrete_weak_100/shard_{i}',
+        world.collect(
+            Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+            / 'datasets'
+            / f'pusht_discrete_weak_100/shard_{i}.lance',
             episodes=traj_per_shard,
             seed=rng.integers(0, 1_000_000).item(),
-            cache_dir=cfg.cache_dir,
-            mode=cfg.ds_type,
             options=options,
         )
 

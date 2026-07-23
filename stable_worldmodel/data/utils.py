@@ -1,8 +1,8 @@
 import json
 import os
-import subprocess
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -10,6 +10,12 @@ from loguru import logger as logging
 from tqdm import tqdm
 
 from stable_worldmodel.utils import DEFAULT_CACHE_DIR, HF_BASE_URL
+
+
+if TYPE_CHECKING:
+    from stable_pretraining.data.transforms import WrapTorchTransform
+
+    from stable_worldmodel.data.dataset import Dataset
 
 
 def get_cache_dir(
@@ -38,7 +44,7 @@ def load_dataset(
     cache_dir: str = None,
     format: str | None = None,
     **kwargs,
-):
+) -> 'Dataset':
     """Resolve a dataset name to a local path and dispatch to the matching
     format reader from the registry.
 
@@ -60,7 +66,7 @@ def load_dataset(
         cache_dir: Root cache directory. Defaults to ``STABLEWM_HOME`` or
             ``~/.stable_worldmodel``.
         format: Explicit format name (skips detection).
-        **kwargs: Forwarded to the format's reader.
+        **kwargs (Any): Forwarded to the format's reader.
 
     Returns:
         A reader instance (typically a
@@ -102,7 +108,10 @@ def _resolve_dataset(name: str, datasets_dir: Path) -> Path:
     """Resolve *name* (local path or HF repo id) to a local path.
 
     Returns whatever exists on disk — file or directory. Format detection
-    happens after this in :func:`load_dataset`.
+    happens after this in :func:`load_dataset`. Local layout for cached
+    datasets is a directory under ``<datasets_dir>/<name>/``; the directory
+    may hold a ``foo.lance/`` table, a ``foo.h5`` file, or any other
+    layout a registered format can detect.
     """
     local = Path(name)
     if not local.is_absolute():
@@ -120,68 +129,99 @@ def _resolve_dataset(name: str, datasets_dir: Path) -> Path:
     )
 
 
-def _resolve_dataset_folder(folder: Path) -> Path:
-    """Return the single HDF5 file inside *folder*."""
-    h5_files = list(folder.glob('*.h5')) + list(folder.glob('*.hdf5'))
-    if not h5_files:
-        raise FileNotFoundError(f'No .h5 / .hdf5 file found in {folder}')
-    if len(h5_files) > 1:
-        raise ValueError(
-            f'Ambiguous dataset: multiple HDF5 files in {folder}. '
-            'Specify the file directly.'
-        )
-    logging.info(f'Using dataset at {h5_files[0]}')
-    return h5_files[0]
+# Suffixes we recognise on HF: a `.lance` directory (preferred) or a
+# `.h5` / `.hdf5` file. Each format is downloaded in its native shape — no
+# tar/zst wrapping.
+_HF_FILE_SUFFIXES: tuple[str, ...] = ('.h5', '.hdf5')
+_HF_DIR_SUFFIXES: tuple[str, ...] = ('.lance',)
 
 
-def _hf_dataset_find_archive(repo_id: str) -> str:
-    """Return the filename of the first .h5.zst or .tar.zst in a HF dataset repo."""
-    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main'
+def _hf_list_tree(repo_id: str, sub_path: str = '') -> list[dict]:
+    """One HF API call: list entries at ``<repo>/tree/main/<sub_path>``."""
+    suffix = f'/{sub_path}' if sub_path else ''
+    api_url = f'{HF_BASE_URL}/api/datasets/{repo_id}/tree/main{suffix}'
     with urllib.request.urlopen(api_url) as resp:
-        entries = json.loads(resp.read())
+        return json.loads(resp.read())
+
+
+def _hf_find_dataset_entry(repo_id: str) -> dict:
+    """Return the first top-level entry that looks like a dataset.
+
+    Preference: a ``*.lance`` directory wins over an ``*.h5`` file when
+    both are present, since lance is the default format.
+    """
+    entries = _hf_list_tree(repo_id)
+
     for entry in entries:
-        name = entry.get('path', '')
-        if name.endswith('.h5.zst') or name.endswith('.tar.zst'):
-            return name
+        path = entry.get('path', '')
+        if entry.get('type') == 'directory' and path.endswith(
+            _HF_DIR_SUFFIXES
+        ):
+            return entry
+    for entry in entries:
+        path = entry.get('path', '')
+        if entry.get('type') == 'file' and path.endswith(_HF_FILE_SUFFIXES):
+            return entry
+
     raise FileNotFoundError(
-        f'No .h5.zst or .tar.zst file found in HF dataset repo {repo_id}'
+        f'No dataset found in HF repo {repo_id}: expected a top-level '
+        f'`*.lance` directory or `*.h5`/`*.hdf5` file.'
     )
 
 
-def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
-    """Resolve a HF repo id, downloading and extracting when not cached.
+def _hf_walk_files(repo_id: str, sub_path: str) -> list[str]:
+    """Recursively list every *file* path under ``sub_path`` on HF."""
+    out: list[str] = []
+    stack = [sub_path]
+    while stack:
+        current = stack.pop()
+        for entry in _hf_list_tree(repo_id, current):
+            path = entry.get('path', '')
+            if entry.get('type') == 'directory':
+                stack.append(path)
+            else:
+                out.append(path)
+    return out
 
-    Local layout: ``<datasets_dir>/<user>--<repo>/dataset.h5``
-    The archive fetched from HF must be a ``.h5.zst`` or ``.tar.zst`` file.
+
+def _resolve_dataset_hf(repo_id: str, datasets_dir: Path) -> Path:
+    """Resolve a HF repo id, downloading on first use.
+
+    Local layout: ``<datasets_dir>/<user>--<repo>/`` — the directory is
+    returned as-is and format detection picks up whatever lives inside
+    (``*.lance``, ``*.h5``, …).
     """
     local_dir = datasets_dir / repo_id.replace('/', '--')
 
-    if local_dir.is_dir():
-        h5_files = list(local_dir.glob('*.h5')) + list(
-            local_dir.glob('*.hdf5')
-        )
-        if h5_files:
-            logging.info(f'Using cached dataset for {repo_id} at {local_dir}')
-            return _resolve_dataset_folder(local_dir)
+    if local_dir.is_dir() and any(local_dir.iterdir()):
+        logging.info(f'Using cached dataset for {repo_id} at {local_dir}')
+        return local_dir
 
     logging.info(f'Downloading dataset {repo_id} from HuggingFace...')
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    archive_name = _hf_dataset_find_archive(repo_id)
-    url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{archive_name}'
-    archive_path = local_dir / archive_name
+    entry = _hf_find_dataset_entry(repo_id)
+    entry_path = entry['path']
 
-    logging.info(f'Fetching {url}')
-    _download(url, archive_path)
-
-    logging.info(f'Extracting {archive_path} into {local_dir}')
-    if archive_name.endswith('.tar.zst'):
-        _extract_zst_tar(archive_path, local_dir)
+    if entry.get('type') == 'directory':
+        files = _hf_walk_files(repo_id, entry_path)
+        if not files:
+            raise FileNotFoundError(
+                f"HF repo {repo_id}: directory '{entry_path}' is empty."
+            )
+        for remote in tqdm(files, desc=f'Fetching {entry_path}'):
+            url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{remote}'
+            dest = local_dir / remote
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _download(url, dest)
     else:
-        _extract_zst(archive_path)
-    archive_path.unlink()
+        url = f'{HF_BASE_URL}/datasets/{repo_id}/resolve/main/{entry_path}'
+        dest = local_dir / entry_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        logging.info(f'Fetching {url}')
+        _download(url, dest)
 
-    return _resolve_dataset_folder(local_dir)
+    return local_dir
 
 
 def _download(url: str, dest: Path) -> None:
@@ -199,47 +239,12 @@ def _download(url: str, dest: Path) -> None:
             chunk = response.read(8192)
 
 
-def _extract_zst_tar(archive: Path, dest: Path) -> None:
-    """Extract a ``.tar.zst`` archive into *dest* using the system ``tar`` command."""
-    result = subprocess.run(
-        [
-            'tar',
-            '--use-compress-program=unzstd',
-            '-xf',
-            str(archive),
-            '-C',
-            str(dest),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to extract {archive}:\n{result.stderr.strip()}'
-        )
-
-
-def _extract_zst(archive: Path) -> None:
-    """Decompress a plain ``.zst`` file in-place using ``unzstd``."""
-    result = subprocess.run(
-        ['unzstd', str(archive), '-o', str(archive.with_suffix(''))],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to decompress {archive}:\n{result.stderr.strip()}'
-        )
-
-
 def convert(
     source,
     dest,
     *,
     source_format: str | None = None,
-    dest_format: str = 'hdf5',
+    dest_format: str = 'lance',
     cache_dir: str | None = None,
     progress: bool = True,
     **dest_kwargs,
@@ -252,18 +257,18 @@ def convert(
     explicitly.
 
     Args:
-        source: Path or identifier accepted by :func:`load_dataset`.
-        dest: Output path for the destination writer.
+        source (str | Path): Path or identifier accepted by :func:`load_dataset`.
+        dest (str | Path): Output path for the destination writer.
         source_format: Force a source format (skips detection).
-        dest_format: Registered writer name (default ``'hdf5'``).
+        dest_format: Registered writer name (default ``'lance'``).
         cache_dir: Forwarded to the source loader for HF/local resolution.
         progress: Show a progress bar over episodes.
-        **dest_kwargs: Forwarded to the destination writer.
+        **dest_kwargs (Any): Forwarded to the destination writer.
 
     Example::
 
         from stable_worldmodel.data import convert
-        convert('data.h5', 'data_video/', dest_format='video', fps=30)
+        convert('data.lance', 'data_video', dest_format='video')
     """
     from stable_worldmodel.data.format import get_format
 
@@ -274,12 +279,104 @@ def convert(
     if progress:
         iterator = tqdm(iterator, desc=f'Converting → {dest_format}')
 
-    with writer_cls.open_writer(dest, **dest_kwargs) as writer:
+    def episodes():
         for ep_idx in iterator:
             ep = src.load_episode(ep_idx)
-            writer.write_episode(
-                _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+            yield _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+
+    with writer_cls.open_writer(dest, **dest_kwargs) as writer:
+        writer.write_episodes(episodes())
+
+
+def merge(
+    sources,
+    dest,
+    *,
+    dest_format: str = 'lance',
+    source_formats: list[str | None] | None = None,
+    mode: str = 'error',
+    cache_dir: str | None = None,
+    progress: bool = True,
+    **dest_kwargs,
+) -> None:
+    """Concatenate several datasets into a single dataset.
+
+    Episodes are read from each source in order and streamed through one
+    destination writer. The writer assigns contiguous episode indices across
+    all sources, so shards written independently (each starting at episode 0)
+    are renumbered into a single ``0..N-1`` range automatically — a source's
+    own ``episode_idx`` is stripped by the reader and never carried through.
+
+    Schema compatibility across sources is enforced by the writer: the first
+    episode fixes the schema and any later episode with different columns or
+    dimensions raises a clear error before more data is written.
+
+    Args:
+        sources: Two or more paths/identifiers accepted by :func:`load_dataset`.
+            Merged in the order given.
+        dest: Output path for the destination writer.
+        dest_format: Registered writer name (default ``'lance'``).
+        source_formats: Optional per-source format overrides (skips detection);
+            must align with ``sources`` when provided.
+        mode: Write mode for the destination — ``'error'`` (default) refuses to
+            touch an existing dataset, ``'overwrite'`` starts fresh,
+            ``'append'`` extends an existing one.
+        cache_dir: Forwarded to the source loader for HF/local resolution.
+        progress: Show a per-source progress bar over episodes.
+        **dest_kwargs: Forwarded to the destination writer.
+
+    Example::
+
+        from stable_worldmodel.data import merge
+        merge(['shard0', 'shard1', 'shard2'], 'combined', dest_format='lance')
+    """
+    from stable_worldmodel.data.format import get_format
+
+    sources = list(sources)
+    if len(sources) < 2:
+        raise ValueError('merge needs at least two source datasets')
+    if source_formats is not None and len(source_formats) != len(sources):
+        raise ValueError('source_formats must align with sources')
+
+    writer_cls = get_format(dest_format)
+
+    def _fmt(i):
+        return source_formats[i] if source_formats else None
+
+    # Pre-flight column check. Within a single writer session the schema is
+    # fixed by the first episode and a later mismatch surfaces only as an
+    # opaque Arrow key error, so compare column sets up front to fail fast with
+    # an actionable message before any data is written.
+    reference = None
+    for i, source in enumerate(sources):
+        cols = set(
+            load_dataset(
+                source, cache_dir=cache_dir, format=_fmt(i)
+            ).column_names
+        )
+        if reference is None:
+            reference, ref_source = cols, source
+        elif cols != reference:
+            missing = sorted(reference - cols)
+            extra = sorted(cols - reference)
+            raise ValueError(
+                f'merge: column mismatch between {ref_source!r} and {source!r}: '
+                f'missing {missing}; unexpected {extra}. '
+                'All sources must share the same columns.'
             )
+
+    def episodes():
+        for i, source in enumerate(sources):
+            src = load_dataset(source, cache_dir=cache_dir, format=_fmt(i))
+            iterator = range(len(src.lengths))
+            if progress:
+                iterator = tqdm(iterator, desc=f'Merging {source}')
+            for ep_idx in iterator:
+                ep = src.load_episode(ep_idx)
+                yield _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+
+    with writer_cls.open_writer(dest, mode=mode, **dest_kwargs) as writer:
+        writer.write_episodes(episodes())
 
 
 def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
@@ -289,6 +386,10 @@ def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
     Specifically:
       - Tensors → NumPy arrays.
       - Image arrays in ``(N, C, H, W)`` are transposed back to ``(N, H, W, C)``.
+      - Image arrays in float dtypes (e.g. LeRobot's ``ToTensor``-normalised
+        ``[0, 1]`` floats) are rescaled to ``uint8 [0, 255]`` so downstream
+        writers (Lance JPEG encode, Video MP4 encode, HDF5 fixed-dtype
+        datasets) receive a consistent display-range integer image.
       - Scalars (e.g. flattened string columns) are repeated ``ep_len`` times.
     """
     out: dict[str, list] = {}
@@ -303,8 +404,66 @@ def _episode_to_step_lists(ep: dict, ep_len: int) -> dict[str, list]:
 
         if arr.ndim == 4 and arr.shape[1] in (1, 3):
             arr = arr.transpose(0, 2, 3, 1)
+
+        # Float image → uint8. LeRobot's ToTensor pipeline produces float32
+        # in [0, 1]; HDF5 / Lance / Video tworoom-style readers all assume
+        # uint8 HxWxC. Detect by shape (3D HWC or 4D NHWC with 1/3 channels)
+        # and float dtype, then clip-and-scale.
+        if (
+            arr.dtype.kind == 'f'
+            and arr.ndim in (3, 4)
+            and arr.shape[-1] in (1, 3)
+        ):
+            arr = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+
         out[col] = list(arr)
     return out
 
 
-__all__ = ['load_dataset', 'convert', 'get_cache_dir', 'ensure_dir_exists']
+from stable_worldmodel.data.normalization import (  # noqa: E402
+    IdentityScaler,
+    PercentileScaler,
+    ZScoreScaler,
+    get_scaler,
+)
+
+
+def column_normalizer(
+    dataset: 'Dataset', source: str, target: str, method: str = 'zscore'
+) -> 'WrapTorchTransform':
+    """Build a per-column normalizer :class:`WrapTorchTransform` from dataset stats.
+
+    Args:
+        dataset (Dataset): A dataset exposing ``get_col_data(col)`` returning
+            an array.
+        source: Column name to read.
+        target: Column name to write.
+        method: One of ``'zscore'`` (default), ``'percentile'``, or ``'none'``.
+            ``'none'`` returns a pass-through identity transform so call sites
+            can stay uniform.
+
+    Returns:
+        A picklable :class:`WrapTorchTransform` wrapping a fitted scaler.
+    """
+    # Lazy import — stable_pretraining is a training-only dep.
+    from stable_pretraining.data.transforms import WrapTorchTransform
+
+    scaler = get_scaler(method)
+    if method != 'none':
+        data = np.array(dataset.get_col_data(source))
+        scaler.fit(data)
+    return WrapTorchTransform(scaler, source=source, target=target)
+
+
+__all__ = [
+    'load_dataset',
+    'convert',
+    'merge',
+    'get_cache_dir',
+    'ensure_dir_exists',
+    'IdentityScaler',
+    'PercentileScaler',
+    'ZScoreScaler',
+    'column_normalizer',
+    'get_scaler',
+]

@@ -16,7 +16,7 @@ Three environment families are available:
 
 - **Cube**: Pure cube manipulation tasks with 1-8 colored cubes
 - **Scene**: Complex scene with cubes, buttons, a drawer, and a window
-- **PointMaze**: 2D maze navigation with point-mass, ant, or humanoid agents
+- **Maze**: 2D maze navigation with point-mass, ant, or humanoid agents
 
 ```python
 import stable_worldmodel as swm
@@ -27,8 +27,8 @@ world = swm.World('swm/OGBCube-v0', num_envs=4, env_type='single')
 # Scene environment (cube + drawer + window + buttons)
 world = swm.World('swm/OGBScene-v0', num_envs=4)
 
-# PointMaze environment - point agent in a large maze, pixel observations
-world = swm.World('swm/OGBPointMaze-v0', num_envs=4)
+# Maze environment - point agent in a large maze, pixel observations
+world = swm.World('swm/OGBMaze-v0', num_envs=4)
 ```
 
 ---
@@ -166,7 +166,7 @@ world.set_policy(policy)
 
 ---
 
-## PointMaze Environment
+## Maze Environment
 
 2D maze navigation tasks where an agent must reach a goal position (or push a ball to a goal). Built on OGBench's `locomaze` suite, wrapping it with a `variation_space` for visual domain randomization.
 
@@ -179,18 +179,18 @@ world.set_policy(policy)
 | Action Space | Depends on agent: `Box(-1, 1, shape=(2,))` for point, `Box(-1, 1, shape=(8,))` for ant |
 | Observation Space | Pixels `(64, 64, 3)` or state vector |
 | Render Size | 64×64 (configurable) |
-| Environment ID | `swm/OGBPointMaze-v0` |
+| Environment ID | `swm/OGBMaze-v0` |
 | Physics | MuJoCo |
 
 ### Configuration
 
 ```python
 # Default: point agent, large maze, pixel observations
-world = swm.World('swm/OGBPointMaze-v0', num_envs=4)
+world = swm.World('swm/OGBMaze-v0', num_envs=4)
 
 # Custom configuration
 world = swm.World(
-    'swm/OGBPointMaze-v0',
+    'swm/OGBMaze-v0',
     num_envs=4,
     loco_env_type='point',   # 'point', 'ant', or 'humanoid'
     maze_env_type='maze',    # 'maze' (navigate) or 'ball' (push ball to goal)

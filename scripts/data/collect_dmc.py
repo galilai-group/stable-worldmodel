@@ -3,7 +3,7 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-os.environ['MUJOCO_GL'] = 'egl'
+os.environ['MUJOCO_GL'] = 'glfw'
 
 import hydra
 import numpy as np
@@ -50,15 +50,16 @@ def run(cfg):
         )
     )
 
-    world.record_dataset(
-        f'dmc/{name}_expert',
+    world.collect(
+        Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+        / 'datasets'
+        / f'dmc/{name}_expert.lance',
         episodes=cfg.num_traj,
         seed=rng.integers(0, 1_000_000).item(),
-        cache_dir=cfg.cache_dir,
         options=options,
     )
 
-    logging.success(' 🎉🎉🎉 Completed data collection for tworoom 🎉🎉🎉')
+    logging.success(' 🎉🎉🎉 Completed data collection for dmc 🎉🎉🎉')
 
 
 if __name__ == '__main__':

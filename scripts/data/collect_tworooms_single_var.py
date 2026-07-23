@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import hydra
 import numpy as np
 from loguru import logger as logging
@@ -12,10 +14,10 @@ def run(cfg):
     world = swm.World('swm/TwoRoom-v1', **cfg.world, render_mode='rgb_array')
     world.set_policy(ExpertPolicy())
 
-    variation_list = list(world.single_variation_space.names())
+    variation_list = list(world.envs.single_variation_space.names())
     variation_default = {
         'agent.position',
-        'goal.position',
+        'target.position',
         'door.size',
         'door.position',
     }
@@ -34,11 +36,12 @@ def run(cfg):
         world.set_policy(ExpertPolicy())
         print(f'Collecting data for variable: {var}')
         var_name = var.replace('.', '/')
-        world.record_dataset(
-            f'tworoom_fov/{var_name}',
-            episodes=1000,
+        world.collect(
+            Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+            / 'datasets'
+            / f'tworoom_fov/{var_name}.lance',
+            episodes=cfg.num_traj,
             seed=rng.integers(0, 1_000_000).item(),
-            cache_dir=cfg.cache_dir,
             options={'variation': tuple([var] + list(variation_default))},
         )
 

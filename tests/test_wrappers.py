@@ -942,6 +942,91 @@ def test_everything_to_info_wrapper_variation_persists_in_step(minimal_env):
     assert result[4]['variation.color'] == 75
 
 
+#########################
+## test MapKeysWrapper ##
+#########################
+
+
+def test_map_keys_wrapper_reset_renames(minimal_env):
+    """Test that reset() renames the source key to the destination key."""
+    obs = {'observation': 'test_obs'}
+    info = {'observation': 'obs_value', 'goal': 'target'}
+    minimal_env.reset.return_value = (obs, info)
+
+    wrapped_env = wrapper.MapKeysWrapper(
+        minimal_env, key_map={'observation': 'pixels'}
+    )
+    result_obs, result_info = wrapped_env.reset()
+
+    # Source key is moved to the destination key
+    assert 'pixels' in result_info
+    assert result_info['pixels'] == 'obs_value'
+    assert 'observation' not in result_info
+    # Other keys are preserved
+    assert result_info['goal'] == 'target'
+    # Original obs is returned unchanged
+    assert result_obs == obs
+
+
+def test_map_keys_wrapper_step_renames(minimal_env):
+    """Test that step() renames the source key to the destination key."""
+    obs = {'observation': 'test_obs'}
+    info = {'observation': 'obs_value', 'reward': 1.0}
+    minimal_env.step.return_value = (obs, 1.0, False, False, info)
+
+    wrapped_env = wrapper.MapKeysWrapper(
+        minimal_env, key_map={'observation': 'pixels'}
+    )
+    result = wrapped_env.step(0.5)
+
+    assert 'pixels' in result[4]
+    assert result[4]['pixels'] == 'obs_value'
+    assert 'observation' not in result[4]
+    assert result[4]['reward'] == 1.0
+
+
+def test_map_keys_wrapper_multiple_mappings(minimal_env):
+    """Test that multiple key mappings are applied."""
+    obs = {'observation': 'test_obs'}
+    info = {'a': 1, 'b': 2, 'c': 3}
+    minimal_env.reset.return_value = (obs, info)
+
+    wrapped_env = wrapper.MapKeysWrapper(
+        minimal_env, key_map={'a': 'x', 'b': 'y'}
+    )
+    _, result_info = wrapped_env.reset()
+
+    assert result_info == {'x': 1, 'y': 2, 'c': 3}
+
+
+def test_map_keys_wrapper_reset_missing_key_raises(minimal_env):
+    """Test that reset() raises KeyError when the source key is missing."""
+    obs = {'observation': 'test_obs'}
+    info = {'goal': 'target'}
+    minimal_env.reset.return_value = (obs, info)
+
+    wrapped_env = wrapper.MapKeysWrapper(
+        minimal_env, key_map={'observation': 'pixels'}
+    )
+
+    with pytest.raises(KeyError):
+        wrapped_env.reset()
+
+
+def test_map_keys_wrapper_step_missing_key_raises(minimal_env):
+    """Test that step() raises KeyError when the source key is missing."""
+    obs = {'observation': 'test_obs'}
+    info = {'goal': 'target'}
+    minimal_env.step.return_value = (obs, 1.0, False, False, info)
+
+    wrapped_env = wrapper.MapKeysWrapper(
+        minimal_env, key_map={'observation': 'pixels'}
+    )
+
+    with pytest.raises(KeyError):
+        wrapped_env.step(0.5)
+
+
 ###########################
 ## test AddPixelsWrapper ##
 ###########################

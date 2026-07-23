@@ -34,6 +34,15 @@ class EnvPool:
         self.envs = [fn() for fn in env_fns]
         self._single_env = self.envs[0]
         self._stacked_infos: dict[str, Any] | None = None
+        self.seeds = np.zeros(len(self.envs), dtype=np.int64)
+        # Cache batched spaces — rebuilding them per-access creates a fresh
+        # unseeded space each call, so .seed() / .sample() never advances RNG.
+        self._action_space = batch_space(
+            self._single_env.action_space, len(self.envs)
+        )
+        self._observation_space = batch_space(
+            self._single_env.observation_space, len(self.envs)
+        )
 
     @property
     def num_envs(self) -> int:
@@ -43,7 +52,7 @@ class EnvPool:
     @property
     def action_space(self) -> gym.Space:
         """Batched action space (``batch_space(single_action_space, num_envs)``)."""
-        return batch_space(self._single_env.action_space, self.num_envs)
+        return self._action_space
 
     @property
     def single_action_space(self) -> gym.Space:
@@ -53,7 +62,7 @@ class EnvPool:
     @property
     def observation_space(self) -> gym.Space:
         """Batched observation space."""
-        return batch_space(self._single_env.observation_space, self.num_envs)
+        return self._observation_space
 
     @property
     def single_observation_space(self) -> gym.Space:
@@ -94,6 +103,8 @@ class EnvPool:
             if mask is not None and not mask[i]:
                 continue
             _, per_env_infos[i] = env.reset(seed=seeds[i], options=opts[i])
+            if seeds[i] is not None:
+                self.seeds[i] = seeds[i]
 
         if self._stacked_infos is None or mask is None:
             self._stacked_infos = _stack_fresh(per_env_infos)
@@ -167,7 +178,7 @@ def _stack_fresh(per_env_infos: list[dict]) -> dict[str, Any]:
         elif isinstance(first, (bool, int, float, np.number)):
             stacked[k] = np.array(vals)[:, None]
         else:
-            stacked[k] = vals
+            stacked[k] = [[v] for v in vals]
     return stacked
 
 
@@ -184,4 +195,4 @@ def _write_env_info(stacked: dict, idx: int, info: dict) -> None:
         elif isinstance(buf, np.ndarray):
             buf[idx, 0] = v
         elif isinstance(buf, list):
-            buf[idx] = v
+            buf[idx][0] = v

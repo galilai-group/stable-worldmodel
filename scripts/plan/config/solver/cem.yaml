@@ -1,5 +1,5 @@
-_target_: stable_worldmodel.solver.CEMSolver
-model: ???
+_target_: stable_worldmodel.planning.solver.CEMSolver
+cost: ???
 batch_size: 8
 num_samples: 300
 var_scale: 1.0

@@ -17,7 +17,7 @@ _SMALL_TARGET = 0.2
 
 
 class AcrobotDMControlWrapper(DMControlWrapper):
-    def __init__(self, seed=None, environment_kwargs=None):
+    def __init__(self, seed=None, environment_kwargs=None, render_mode=None):
         xml, assets = acrobot.get_model_and_assets()
         xml = xml.replace(b'file="./common/', b'file="common/')
         suite_dir = os.path.dirname(acrobot.__file__)  # .../dm_control/suite

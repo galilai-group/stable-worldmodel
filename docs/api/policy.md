@@ -23,7 +23,7 @@ A policy that uses a `Solver` (like CEM or MPPI) and a World Model to plan actio
 
 ```python
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
-from stable_worldmodel.solver.random import RandomSolver
+from stable_worldmodel.planning import CEMSolver
 
 # 1. Define Planning Configuration
 cfg = PlanConfig(
@@ -33,7 +33,7 @@ cfg = PlanConfig(
 )
 
 # 2. Instantiate a Solver
-solver = RandomSolver() # Or CEMSolver, MPPI, etc.
+solver = CEMSolver(cost=world_model) # Or MPPISolver, GradientSolver, etc.
 
 # 3. Create the Policy
 policy = WorldModelPolicy(
@@ -47,10 +47,11 @@ policy = WorldModelPolicy(
 A policy that uses a neural network model for direct action prediction via a single forward pass. Useful for imitation learning policies like Goal-Conditioned Behavioral Cloning (GCBC).
 
 ```python
-from stable_worldmodel.policy import FeedForwardPolicy, AutoActionableModel
+from stable_worldmodel.policy import FeedForwardPolicy
+from stable_worldmodel.wm.utils import load_pretrained
 
-# 1. Load a pre-trained model with get_action method
-model = AutoActionableModel("path/to/checkpoint")
+# 1. Load a pre-trained model with a get_action method
+model = load_pretrained("path/to/checkpoint")
 
 # 2. Create the Policy
 policy = FeedForwardPolicy(
@@ -117,12 +118,12 @@ policy = FeedForwardPolicy(
 
 ## **[ Utils ]**
 
-::: stable_worldmodel.policy.AutoActionableModel
-    options:
-        heading_level: 3
-        show_source: false
+Load a pretrained checkpoint (a folder with `weights.pt` + `config.json`) with
+[`load_pretrained`](../guides/checkpoints.md). It reconstructs the model from
+`config.json` and loads the weights — the model is returned directly, ready to
+pass to `FeedForwardPolicy` / `WorldModelPolicy`.
 
-::: stable_worldmodel.policy.AutoCostModel
+::: stable_worldmodel.wm.utils.load_pretrained
     options:
         heading_level: 3
         show_source: false

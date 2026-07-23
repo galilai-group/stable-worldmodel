@@ -37,13 +37,17 @@ class ExpertPolicy(BasePolicy):
             "'goal_state' must be provided in info_dict"
         )
 
-        base_env = self.env.unwrapped
-        if hasattr(base_env, 'envs'):
-            envs = [e.unwrapped for e in base_env.envs]
+        if hasattr(self.env, 'envs'):
+            envs = [e.unwrapped for e in self.env.envs]
             is_vectorized = True
         else:
-            envs = [base_env]
-            is_vectorized = False
+            base_env = self.env.unwrapped
+            if hasattr(base_env, 'envs'):
+                envs = [e.unwrapped for e in base_env.envs]
+                is_vectorized = True
+            else:
+                envs = [base_env]
+                is_vectorized = False
 
         actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
 

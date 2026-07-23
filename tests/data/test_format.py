@@ -25,7 +25,10 @@ from stable_worldmodel.data import (
 from stable_worldmodel.data.formats.folder import Folder, FolderWriter
 from stable_worldmodel.data.formats.hdf5 import HDF5, HDF5Writer
 from stable_worldmodel.data.formats.lerobot import LeRobot
-from stable_worldmodel.data.formats.video import Video, VideoWriter
+from stable_worldmodel.data.formats.video import (
+    Video,
+    VideoWriter,
+)
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -213,6 +216,33 @@ class TestHDF5Writer:
         assert ep0['pixels'].shape == (5, 3, 8, 8)  # NCHW
         assert ep0['proprio'].shape == (5, 4)
 
+    def test_string_column_roundtrip(self, tmp_path):
+        # A per-step text column (e.g. a `lang_instr` caption) must be stored as
+        # a variable-length UTF-8 string and decode back to a python `str` on
+        # read — the reader already collapses string columns to one value per
+        # sampled window (see HDF5Dataset._load_slice).
+        out = tmp_path / 'data.h5'
+        eps = [
+            {
+                'action': [np.zeros(2, np.float32) for _ in range(n)],
+                'lang_instr': [f'push the T to goal {i}'] * n,
+            }
+            for i, n in enumerate((5, 7))
+        ]
+        with HDF5Writer(out) as w:
+            for ep in eps:
+                w.write_episode(ep)
+
+        with h5py.File(out, 'r') as f:
+            assert h5py.check_string_dtype(f['lang_instr'].dtype)
+            assert f['lang_instr'].shape == (12,)  # flat, one string per step
+
+        ds = HDF5Dataset(path=out)
+        assert list(ds.lengths) == [5, 7]
+        assert 'lang_instr' in ds.column_names
+        assert ds.load_episode(0)['lang_instr'] == 'push the T to goal 0'
+        assert ds.load_episode(1)['lang_instr'] == 'push the T to goal 1'
+
     def test_open_writer_via_format(self, tmp_path, two_episodes):
         out = tmp_path / 'data.h5'
         with HDF5.open_writer(out) as w:
@@ -254,6 +284,64 @@ class TestHDF5Writer:
             with HDF5Writer(out) as w:
                 w.write_episode(ep_a)
                 w.write_episode(ep_b)
+
+    def test_append_extends_existing_file(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        with HDF5Writer(out) as w:  # default mode='append'
+            w.write_episode(two_episodes[1])
+        ds = HDF5Dataset(path=out)
+        assert list(ds.lengths) == [5, 7]
+        assert list(ds.offsets) == [0, 5]
+
+    def test_error_mode_raises_for_existing_file(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        with pytest.raises(FileExistsError):
+            HDF5Writer(out, mode='error').__enter__()
+
+    def test_overwrite_truncates_existing_file(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+            w.write_episode(two_episodes[1])
+        with HDF5Writer(out, mode='overwrite') as w:
+            w.write_episode(two_episodes[1])
+        ds = HDF5Dataset(path=out)
+        assert list(ds.lengths) == [7]
+
+    def test_append_schema_mismatch_raises(self, tmp_path, two_episodes):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_extra = dict(two_episodes[1])
+        ep_extra['unexpected'] = [
+            np.zeros(2, np.float32) for _ in range(len(ep_extra['action']))
+        ]
+        with pytest.raises(ValueError, match='schema mismatch'):
+            with HDF5Writer(out) as w:
+                w.write_episode(ep_extra)
+
+    def test_append_per_step_shape_mismatch_raises(
+        self, tmp_path, two_episodes
+    ):
+        out = tmp_path / 'data.h5'
+        with HDF5Writer(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_bad = {
+            'action': [np.zeros(99, np.float32) for _ in range(3)],
+            'proprio': [np.zeros(4, np.float32) for _ in range(3)],
+            'pixels': [np.zeros((8, 8, 3), np.uint8) for _ in range(3)],
+        }
+        with pytest.raises(ValueError, match='shape mismatch'):
+            with HDF5Writer(out) as w:
+                w.write_episode(ep_bad)
+
+    def test_invalid_mode_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='write mode'):
+            HDF5Writer(tmp_path / 'data.h5', mode='nope')
 
 
 class TestHDF5OpenReader:
@@ -347,6 +435,69 @@ class TestFolderWriter:
         ep0 = ds.load_episode(0)
         assert 'pixels' not in ep0
 
+    def test_append_extends_existing_folder(self, tmp_path, two_episodes):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        with FolderWriter(out) as w:  # default mode='append'
+            w.write_episode(two_episodes[1])
+        ds = FolderDataset(path=out, folder_keys=['pixels'])
+        assert list(ds.lengths) == [5, 7]
+        assert (out / 'pixels' / 'ep_0_step_0.jpeg').exists()
+        assert (out / 'pixels' / 'ep_1_step_6.jpeg').exists()
+
+    def test_error_mode_raises_for_existing_folder(
+        self, tmp_path, two_episodes
+    ):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        with pytest.raises(FileExistsError):
+            FolderWriter(out, mode='error').__enter__()
+
+    def test_overwrite_clears_existing_folder(self, tmp_path, two_episodes):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+            w.write_episode(two_episodes[1])
+        with FolderWriter(out, mode='overwrite') as w:
+            w.write_episode(two_episodes[1])
+        ds = FolderDataset(path=out, folder_keys=['pixels'])
+        assert list(ds.lengths) == [7]
+        # First-write image files from the discarded session must be gone.
+        assert not (out / 'pixels' / 'ep_1_step_0.jpeg').exists()
+
+    def test_append_schema_mismatch_raises(self, tmp_path, two_episodes):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_extra = dict(two_episodes[1])
+        ep_extra['unexpected'] = [
+            np.zeros(2, np.float32) for _ in range(len(ep_extra['action']))
+        ]
+        with pytest.raises(ValueError, match='schema mismatch'):
+            with FolderWriter(out) as w:
+                w.write_episode(ep_extra)
+
+    def test_append_per_step_shape_mismatch_raises(
+        self, tmp_path, two_episodes
+    ):
+        out = tmp_path / 'folder_ds'
+        with FolderWriter(out) as w:
+            w.write_episode(two_episodes[0])
+        ep_bad = {
+            'action': [np.zeros(99, np.float32) for _ in range(3)],
+            'proprio': [np.zeros(4, np.float32) for _ in range(3)],
+            'pixels': [np.zeros((8, 8, 3), np.uint8) for _ in range(3)],
+        }
+        with pytest.raises(ValueError, match='shape mismatch'):
+            with FolderWriter(out) as w:
+                w.write_episode(ep_bad)
+
+    def test_invalid_mode_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='write mode'):
+            FolderWriter(tmp_path / 'folder_ds', mode='nope')
+
 
 # ─── Video writer ─────────────────────────────────────────────────────────────
 
@@ -386,9 +537,15 @@ class TestVideoWriter:
             np.load(out / 'ep_len.npz')['arr_0'], np.array([8, 10], np.int32)
         )
 
-    def test_decord_roundtrip(self, tmp_path):
-        if importlib.util.find_spec('decord') is None:
-            pytest.skip('decord not available')
+    def test_torchcodec_roundtrip(self, tmp_path):
+        # find_spec only checks the package is installed, not that
+        # libtorchcodec can load its FFmpeg shared libraries — that load
+        # raises (not ImportError) on environments without a matching FFmpeg,
+        # so guard the actual import and skip on any failure.
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f'torchcodec unavailable ({exc})')
 
         out = tmp_path / 'video_ds'
         eps = [self._video_episode(8), self._video_episode(10)]
@@ -401,6 +558,63 @@ class TestVideoWriter:
         ep0 = ds.load_episode(0)
         assert ep0['pixels'].shape[0] == 8
         assert ep0['pixels'].shape[1] == 3  # CHW after reader permute
+
+    def test_append_extends_existing_video_dir(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(8))
+        with VideoWriter(out, fps=25) as w:  # default mode='append'
+            w.write_episode(self._video_episode(10))
+        np.testing.assert_array_equal(
+            np.load(out / 'ep_len.npz')['arr_0'], np.array([8, 10], np.int32)
+        )
+        assert (out / 'pixels' / 'ep_0.mp4').exists()
+        assert (out / 'pixels' / 'ep_1.mp4').exists()
+
+    def test_error_mode_raises_for_existing_video_dir(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(4))
+        with pytest.raises(FileExistsError):
+            VideoWriter(out, mode='error').__enter__()
+
+    def test_overwrite_clears_existing_video_dir(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(8))
+            w.write_episode(self._video_episode(10))
+        with VideoWriter(out, fps=25, mode='overwrite') as w:
+            w.write_episode(self._video_episode(5))
+        np.testing.assert_array_equal(
+            np.load(out / 'ep_len.npz')['arr_0'], np.array([5], np.int32)
+        )
+        assert not (out / 'pixels' / 'ep_1.mp4').exists()
+
+    def test_append_schema_mismatch_raises(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(4))
+        ep_extra = self._video_episode(4)
+        ep_extra['unexpected'] = [np.zeros(2, np.float32) for _ in range(4)]
+        with pytest.raises(ValueError, match='schema mismatch'):
+            with VideoWriter(out, fps=25) as w:
+                w.write_episode(ep_extra)
+
+    def test_append_per_step_shape_mismatch_raises(self, tmp_path):
+        out = tmp_path / 'video_ds'
+        with VideoWriter(out, fps=25) as w:
+            w.write_episode(self._video_episode(4))
+        ep_bad = {
+            'action': [np.zeros(99, np.float32) for _ in range(3)],
+            'pixels': [np.zeros((32, 32, 3), np.uint8) for _ in range(3)],
+        }
+        with pytest.raises(ValueError, match='shape mismatch'):
+            with VideoWriter(out, fps=25) as w:
+                w.write_episode(ep_bad)
+
+    def test_invalid_mode_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='write mode'):
+            VideoWriter(tmp_path / 'video_ds', mode='nope')
 
 
 # ─── Convert ──────────────────────────────────────────────────────────────────
