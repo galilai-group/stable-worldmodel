@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from stable_worldmodel.world.env_pool import EnvPool
+from stable_worldmodel.world.env_pool import AsyncEnvPool, EnvPool
 from stable_worldmodel.world.world import World
 
 
@@ -125,6 +125,27 @@ class InfoKeysPolicy(RecordingPolicy):
         return np.zeros((self.env.num_envs, *self.env.single_action_space.shape))
 
 
+class AsyncReadyPolicy:
+    """Minimal async-aware policy: returns one zero action per ready env."""
+
+    def __init__(self):
+        self.env = None
+
+    def set_env(self, env):
+        self.env = env
+
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
+        info_dict.pop('_needs_flush', None)
+        count = (
+            self.env.num_envs
+            if env_mask is None
+            else int(np.count_nonzero(env_mask))
+        )
+        return np.zeros(
+            (count, *self.env.single_action_space.shape), dtype=np.float32
+        )
+
+
 def _make_world(num_envs=2, max_steps=3):
     """Build a World with CounterEnv directly, bypassing gym.make."""
     pool = EnvPool(
@@ -137,6 +158,23 @@ def _make_world(num_envs=2, max_steps=3):
     world.rewards = None
     world.terminateds = None
     world.truncateds = None
+    return world
+
+
+def _make_async_world(num_envs=1, max_steps=3):
+    """Build an async World (AsyncEnvPool + step_mode='async')."""
+    pool = AsyncEnvPool(
+        [lambda ms=max_steps: CounterEnv(ms) for _ in range(num_envs)]
+    )
+    world = object.__new__(World)
+    world.envs = pool
+    world.step_mode = 'async'
+    world.policy = None
+    world.infos = {}
+    world.rewards = None
+    world.terminateds = None
+    world.truncateds = None
+    world.ready = np.zeros(num_envs, dtype=bool)
     return world
 
 
@@ -225,6 +263,31 @@ class TestRunAutoMode:
         assert states[3] == 0.0  # reset happened, fresh env
         assert states[4] == 1.0
         assert states[5] == 2.0
+
+    def test_async_infos_updated_after_reset(self):
+        """Async parity with #294: on_step fires after the initial reset and
+        each per-env auto-reset, so the reset frame (state=0) is captured just
+        like the sync loop. num_envs=1 keeps the event order deterministic."""
+        world = _make_async_world(num_envs=1, max_steps=2)
+        policy = AsyncReadyPolicy()
+        world.policy = policy
+        policy.set_env(world.envs)
+
+        infos_after_reset = []
+
+        def on_step(w):
+            infos_after_reset.append(w.infos['state'][0].copy())
+
+        try:
+            world._run(episodes=2, seed=0, mode='auto', on_step=on_step)
+        finally:
+            world.envs.close()
+
+        # Same trace as the sync case:
+        # episode 1: reset (0), step 1, step 2 (terminates)
+        # episode 2: reset (0), step 1, step 2 (terminates)
+        states = [s[0] for s in infos_after_reset]
+        assert states == [0.0, 1.0, 2.0, 0.0, 1.0, 2.0]
 
 
 class TestRunWaitMode:

@@ -546,7 +546,8 @@ class World:
         if not isinstance(self.envs, AsyncEnvPool):
             raise RuntimeError('Async rollout requires an AsyncEnvPool.')
 
-        if seed is not None or options is not None or not self.infos:
+        did_reset = seed is not None or options is not None or not self.infos
+        if did_reset:
             self.reset(seed=seed, options=options)
 
         active_count = (
@@ -558,6 +559,12 @@ class World:
         episode_ids = np.full(self.num_envs, -1, dtype=np.int64)
         episode_ids[:active_count] = np.arange(active_count)
         launched = active_count
+
+        # Mirror the sync loop (see #294): surface the initial reset frame to
+        # on_step so collect() records it instead of starting one step late.
+        if did_reset and on_step:
+            self.ready[:] = active
+            on_step(self)
 
         actions = self._get_actions(active)
         self.envs.submit_step(active, actions)
@@ -627,6 +634,10 @@ class World:
                 self.infos['_needs_flush'] = flush
                 self.terminateds[reset_indices] = False
                 self.truncateds[reset_indices] = False
+                # Record the per-env reset frame, matching the sync loop (#294).
+                if on_step:
+                    self.ready[:] = flush
+                    on_step(self)
 
             if next_step:
                 next_step_mask = np.zeros(self.num_envs, dtype=bool)
