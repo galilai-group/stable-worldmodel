@@ -206,6 +206,13 @@ class RandomPolicy(BasePolicy):
         return self.env.action_space.sample()
 
     def set_env(self, env: Any) -> None:
+        """Attach the environment and seed its action space.
+
+        Args:
+            env: The environment to attach. If the policy was constructed
+                with a seed, the environment's action space is seeded so
+                action sampling is reproducible.
+        """
         super().set_env(env)
         if self.seed is not None:
             self._set_seed(self.seed)

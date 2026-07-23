@@ -13,8 +13,7 @@ class Callback:
 
     Subclasses compute a per-env metric and call ``self._reduce(...)`` to
     apply the configured reduction across envs. ``history`` is
-    ``list[list[Any]]`` (batches x steps), matching the shape of
-    ``outputs['cost']`` in the gradient solver.
+    ``list[list[Any]]`` (batches x steps).
     """
 
     name: str | None = None

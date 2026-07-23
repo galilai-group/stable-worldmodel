@@ -445,6 +445,12 @@ class World:
         """Drive the policy and yield ``(env_idx, ep_count)`` on each
         episode completion. Letting callers consume completions as a
         generator is what makes streaming writes possible without threading.
+
+        ``on_step(world)`` fires after every step and after every reset
+        (initial and per-env auto-reset), so callers see the reset
+        observation as well as stepped ones. ``world.ready`` marks which
+        envs the call reflects — all envs for a real step, just the reset
+        ones for an auto-reset.
         """
         assert mode in RESET_MODES, (
             f'mode must be one of {RESET_MODES}, received {mode=}'
@@ -457,6 +463,9 @@ class World:
 
         if seed is not None or options is not None:
             self.reset(seed=seed, options=options)
+            if on_step:
+                self.ready[:] = True
+                on_step(self)
 
         alive = np.ones(self.num_envs, dtype=bool)
         next_seed = seed + self.num_envs if seed is not None else None
@@ -505,6 +514,9 @@ class World:
                 self.truncateds[done] = False
                 self.infos['_needs_flush'] = done
                 self._notify_policy_reset(done)
+                if on_step:
+                    self.ready[:] = done
+                    on_step(self)
             elif mode == 'wait':
                 alive[done] = False
 

@@ -340,7 +340,7 @@ def test_solve_output_keys():
     out = solver.solve({'obs': torch.zeros(2, 4)})
 
     assert 'actions' in out
-    assert 'cost' in out
+    assert 'costs' in out
     assert 'constraint_violation' in out
     assert 'lambdas' in out
 
@@ -708,7 +708,7 @@ def test_cost_decreases_over_steps():
             return (action_candidates - self.goal).pow(2).mean(dim=(-1, -2))
 
     solver = LagrangianSolver(
-        cost=QuadraticCost(goal=0.0),  # goal at zero; init at zero -> cost = 0
+        cost=QuadraticCost(goal=2.0),  # init at zero -> initial cost = 4.0
         n_steps=30,
         n_outer_steps=1,
         num_samples=1,
@@ -717,10 +717,9 @@ def test_cost_decreases_over_steps():
     configure(solver, action_dim=4, n_envs=1, horizon=4, action_block=1)
 
     out = solver.solve({})
-    costs = out['cost'][0]  # list of losses per inner step
-    # The optimizer should not increase cost by more than 2x from first to last
-    # (just a sanity check, not a strict convergence guarantee)
-    assert costs[-1] <= costs[0] * 10 or costs[-1] < 1.0
+    # 'costs' holds the final cost of the selected sequence, one per env
+    assert len(out['costs']) == 1
+    assert out['costs'][0] < 4.0
 
 
 def test_constrained_solve_reduces_violation():

@@ -80,6 +80,28 @@ One `ep<idx>.mp4` is written per sampled episode. For a multi-view dataset (seve
 
 Rendering MP4s needs the optional video stack; install it with `pip install "stable-worldmodel[format]"`.
 
+## `swm convert <name> [output]`
+
+Convert a dataset to another storage format (e.g. HDF5 → video). The source format is auto-detected through the format registry — `lance`, `lance_video`, `hdf5`, `folder`, `video`, `lerobot` — and the converted copy is written next to the source in your cache directory.
+
+```bash
+swm convert pusht_expert_train                    # → pusht_expert_train-video
+swm convert pusht_expert_train pusht_h5 -f hdf5   # explicit output name
+```
+
+```
+Converting pusht_expert_train → video as pusht_expert_train-video
+Done. Output: ~/.stable_worldmodel/pusht_expert_train-video
+```
+
+| Option | Description |
+| --- | --- |
+| `output` | Output dataset name. Defaults to `<name>-<dest-format>`. |
+| `-f, --dest-format` | Destination format (default `video`). |
+| `--source-format` | Force the source format instead of auto-detecting it. |
+
+For a quick visual check of a few episodes, prefer [`swm preview`](#swm-preview-name) — it renders a sample without transcoding the whole dataset.
+
 ## `swm merge <sources...>`
 
 Concatenate several datasets into a single one. Episodes from each source are appended in the order given and renumbered into one contiguous episode range. Sources must share the same columns; a mismatch fails before anything is written.

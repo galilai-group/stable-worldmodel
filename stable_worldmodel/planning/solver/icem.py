@@ -321,12 +321,14 @@ class ICEMSolver:
                         action_high=self._action_high,
                     )
 
-            final_batch_cost = topk_vals.mean(dim=1).cpu().tolist()
-
             if self.return_mean:
                 mean[start_idx:end_idx] = batch_mean
+                # Average elite cost as a summary of the returned mean
+                final_batch_cost = topk_vals.mean(dim=1).cpu().tolist()
             else:
                 mean[start_idx:end_idx] = topk_candidates[:, 0]
+                # Exact cost of the returned best elite
+                final_batch_cost = topk_vals[:, 0].cpu().tolist()
 
             var[start_idx:end_idx] = batch_var
 
