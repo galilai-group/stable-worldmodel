@@ -161,7 +161,7 @@ class GradientSolver(torch.nn.Module):
         """Solve the planning problem using gradient descent."""
         start_time = time.time()
         outputs = {
-            'cost': [],  # Will store list of cost histories per batch
+            'costs': [],  # Final cost of the selected sequence, per env
             'actions': None,
         }
 
@@ -224,8 +224,6 @@ class GradientSolver(torch.nn.Module):
                 expanded_infos[k] = v_batch
 
             # Perform Gradient Descent for this batch
-            batch_cost_history = []
-
             for cb in self.callbacks:
                 cb.start_batch()
 
@@ -270,20 +268,23 @@ class GradientSolver(torch.nn.Module):
                         * self.action_noise
                     )
 
-                batch_cost_history.append(cost.item())
-
-            # Store cost history for this batch
-            outputs['cost'].append(batch_cost_history)
-
             # Update the global self.init with the optimized batch values
+            # and evaluate the final candidates (the in-loop costs predate
+            # the last optimizer step)
             with torch.no_grad():
                 self.init[start_idx:end_idx] = batch_init
+                final_costs = self.cost.get_cost(expanded_infos, batch_init)
 
-            top_idx = torch.argsort(costs, dim=1)[:, 0]
+            top_idx = torch.argsort(final_costs, dim=1)[:, 0]
             batch_indices = torch.arange(current_bs)
 
             top_actions_batch = batch_init[batch_indices, top_idx]
             batch_top_actions_list.append(top_actions_batch.detach().cpu())
+
+            # Store the cost of the selected sequence for logging
+            outputs['costs'].extend(
+                final_costs[batch_indices, top_idx].cpu().tolist()
+            )
 
         # Concatenate all batch results
         outputs['actions'] = torch.cat(batch_top_actions_list, dim=0)

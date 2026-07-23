@@ -199,7 +199,7 @@ class LagrangianSolver(torch.nn.Module):
         """Solve the planning problem using augmented Lagrangian gradient descent."""
         start_time = time.time()
         outputs: dict = {
-            'cost': [],
+            'costs': [],  # Final cost of the selected sequence, per env
             'constraint_violation': [],
             'actions': None,
             'lambdas': None,
@@ -255,7 +255,6 @@ class LagrangianSolver(torch.nn.Module):
                     expanded_infos[k] = v.to(self.device)
 
             rho = self.rho_init
-            batch_cost_history = []
             costs = None
             final_constraints = None
 
@@ -316,8 +315,6 @@ class LagrangianSolver(torch.nn.Module):
                             * self.action_noise
                         )
 
-                    batch_cost_history.append(loss.item())
-
                 # Dual ascent after inner loop converges
                 if constraints is not None:
                     with torch.no_grad():
@@ -352,20 +349,29 @@ class LagrangianSolver(torch.nn.Module):
                             f'cost={mean_cost:.4f}'
                         )
 
-            outputs['cost'].append(batch_cost_history)
-
             if final_constraints is not None:
                 outputs['constraint_violation'].append(
                     F.relu(final_constraints).mean().item()
                 )
 
+            # Update the global self.init with the optimized batch values
+            # and evaluate the final candidates (the in-loop costs predate
+            # the last optimizer step)
             with torch.no_grad():
                 self.init[start_idx:end_idx] = batch_init
+                final_costs = self.cost.get_cost(
+                    expanded_infos.copy(), batch_init
+                )
 
-            top_idx = torch.argsort(costs, dim=1)[:, 0]
+            top_idx = torch.argsort(final_costs, dim=1)[:, 0]
             batch_indices = torch.arange(current_bs)
             top_actions_batch = batch_init[batch_indices, top_idx]
             batch_top_actions_list.append(top_actions_batch.detach().cpu())
+
+            # Store the cost of the selected sequence for logging
+            outputs['costs'].extend(
+                final_costs[batch_indices, top_idx].cpu().tolist()
+            )
 
         outputs['actions'] = torch.cat(batch_top_actions_list, dim=0)
         outputs['lambdas'] = (
