@@ -630,7 +630,12 @@ class World:
             return self.policy.get_action(self.infos)
 
         indices = np.flatnonzero(env_mask)
-        ready_info = _slice_ready(self.infos, indices, self.num_envs)
+        ready_info = _slice_policy_info(
+            self.policy,
+            self.infos,
+            indices,
+            self.num_envs,
+        )
         actions = self.policy.get_action(
             ready_info,
             env_mask=env_mask,
@@ -769,20 +774,73 @@ class World:
             on_reset(env_mask)
 
 
+def _contiguous_slice(indices: np.ndarray) -> slice | None:
+    """Return an equivalent ``slice`` when ``indices`` is an ascending run.
+
+    ``indices`` is always sorted and unique (from ``np.flatnonzero``), so a
+    unit-stride run can be expressed as a slice. Slicing returns a *view* of
+    the shared info buffers instead of the copy that advanced indexing forces,
+    which is the common case in async rollouts (a single completed env, or a
+    full batch finishing together).
+    """
+    n = len(indices)
+    if n == 0:
+        return slice(0, 0)
+    start = int(indices[0])
+    stop = int(indices[-1]) + 1
+    if stop - start == n:
+        return slice(start, stop)
+    return None
+
+
 def _slice_ready(infos: dict, indices: np.ndarray, num_envs: int) -> dict:
-    """Select ready environment rows while preserving non-batched values."""
+    """Select ready environment rows while preserving non-batched values.
+
+    Values are only read by policies (``_get_actions`` returns before the pool
+    overwrites the buffers), so a zero-copy view is safe for the contiguous
+    fast path; scattered index sets fall back to a copy.
+    """
+    row_selector = _contiguous_slice(indices)
+    if row_selector is None:
+        row_selector = indices
+
     selected = {}
     for key, value in infos.items():
         if isinstance(value, (np.ndarray, torch.Tensor)):
             if value.ndim > 0 and value.shape[0] == num_envs:
-                selected[key] = value[indices]
+                selected[key] = value[row_selector]
             else:
                 selected[key] = value
         elif isinstance(value, list) and len(value) == num_envs:
-            selected[key] = [value[i] for i in indices]
+            if isinstance(row_selector, slice):
+                selected[key] = value[row_selector]
+            else:
+                selected[key] = [value[i] for i in indices]
         else:
             selected[key] = value
     return selected
+
+
+def _slice_policy_info(
+    policy,
+    infos: dict,
+    indices: np.ndarray,
+    num_envs: int,
+) -> dict:
+    """Select only the ready info keys a policy declares it needs."""
+    info_keys = getattr(policy, 'info_keys', None)
+    if info_keys is None:
+        return _slice_ready(infos, indices, num_envs)
+
+    info_keys = tuple(info_keys)
+    if not info_keys:
+        return {}
+
+    return _slice_ready(
+        {key: infos[key] for key in info_keys if key in infos},
+        indices,
+        num_envs,
+    )
 
 
 def _select_actions(

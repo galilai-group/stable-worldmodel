@@ -108,6 +108,23 @@ class ResetAwarePolicy(RecordingPolicy):
         )
 
 
+class InfoKeysPolicy(RecordingPolicy):
+    """Recording policy that declares async info-key requirements."""
+
+    def __init__(self, info_keys):
+        super().__init__()
+        self.info_keys = info_keys
+        self.last_env_mask = None
+
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
+        self.call_count += 1
+        self.last_infos = {k: v for k, v in info_dict.items()}
+        self.last_env_mask = (
+            None if env_mask is None else np.array(env_mask, copy=True)
+        )
+        return np.zeros((self.env.num_envs, *self.env.single_action_space.shape))
+
+
 def _make_world(num_envs=2, max_steps=3):
     """Build a World with CounterEnv directly, bypassing gym.make."""
     pool = EnvPool(
@@ -527,6 +544,38 @@ class TestSetPolicy:
         world.reset(options=per_env)
         # The second env's reset is called last, so `seen` holds its options.
         assert seen['opts'] == {'variation': ['b']}
+
+
+class TestAsyncPolicyInfo:
+    def test_async_get_actions_skips_info_for_no_info_policy(self):
+        world = _make_world(num_envs=3)
+        world.reset(seed=0)
+        policy = InfoKeysPolicy(info_keys=())
+        world.set_policy(policy)
+
+        mask = np.array([False, True, True])
+        actions = world._get_actions(mask)
+
+        assert policy.last_infos == {}
+        np.testing.assert_array_equal(policy.last_env_mask, mask)
+        assert actions.shape == (2, 2)
+
+    def test_async_get_actions_slices_only_declared_info_keys(self):
+        world = _make_world(num_envs=3)
+        world.reset(seed=0)
+        world.infos['state'] = np.array([[[1.0]], [[2.0]], [[3.0]]])
+        world.infos['unused'] = np.array([[[10.0]], [[20.0]], [[30.0]]])
+        policy = InfoKeysPolicy(info_keys=('state',))
+        world.set_policy(policy)
+
+        mask = np.array([False, True, True])
+        actions = world._get_actions(mask)
+
+        assert list(policy.last_infos) == ['state']
+        np.testing.assert_array_equal(
+            policy.last_infos['state'], np.array([[[2.0]], [[3.0]]])
+        )
+        assert actions.shape == (2, 2)
 
 
 class TestWorldMisc:

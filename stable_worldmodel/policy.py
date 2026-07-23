@@ -47,10 +47,14 @@ class BasePolicy:
     Attributes:
         env: The environment the policy is associated with.
         type: A string identifier for the policy type.
+        info_keys: Async rollout info selection. ``None`` passes the full
+            ready info dict, ``()`` passes no info, and a tuple passes only
+            those keys.
     """
 
     env: Any
     type: str
+    info_keys: tuple[str, ...] | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the base policy.
@@ -173,6 +177,8 @@ class BasePolicy:
 
 class RandomPolicy(BasePolicy):
     """Policy that samples random actions from the action space."""
+
+    info_keys: tuple[str, ...] | None = ()
 
     def __init__(self, seed: int | None = None, **kwargs: Any) -> None:
         """Initialize the random policy.
