@@ -750,16 +750,19 @@ def fovs(
 
     try:
         environment = gym.make(env)
-        unwrapped = environment.unwrapped
     except Exception as e:
         print(f'[red]Failed to instantiate {env}: {e}[/red]')
         raise typer.Exit(1)
 
-    if not hasattr(unwrapped, 'variation_space'):
+    # variation_space may live on the env or on a wrapper, so search the chain.
+    try:
+        vs = environment.get_wrapper_attr('variation_space')
+    except AttributeError:
+        vs = None
+
+    if vs is None:
         print(f'[yellow]{env} has no variation_space.[/yellow]')
         raise typer.Exit()
-
-    vs = unwrapped.variation_space
     names = vs.names()
 
     table = Table(title=f'Factors of Variation — {env}')
