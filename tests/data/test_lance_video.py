@@ -312,3 +312,107 @@ def test_ranged_decode_reads_partial_blob(tmp_path, monkeypatch):
     assert sum(fetched) < blob_size, (
         f'ranged reader fetched {sum(fetched)} of {blob_size} bytes'
     )
+
+
+def test_writer_emits_gop_index_and_reader_plans(tmp_path):
+    """New writer emits index columns; reader uses the planned path and
+    produces frames identical to full-bytes decoding."""
+    import torch
+
+    import lance
+    from stable_worldmodel.data.formats.mp4_index import INDEX_COLUMNS
+
+    _write(tmp_path / 'd')
+    videos_dir = next((tmp_path / 'd').glob('*_videos.lance'))
+    v = lance.dataset(str(videos_dir))
+    for col in INDEX_COLUMNS:
+        assert col in v.schema.names
+
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    assert ds._video_index, 'reader did not load the GOP index'
+    item = ds[0]
+
+    blob = v.take_blobs(blob_column='video_bytes', indices=[0])[0]
+    data = blob.readall()
+    blob.close()
+    ref = VideoDecoder(data, seek_mode='approximate')
+    assert torch.equal(
+        item['pixels'], ref.get_frames_at(indices=[0, 1, 2, 3]).data
+    )
+
+
+def test_planned_decode_reads_partial_blob(tmp_path, monkeypatch):
+    """With an index, a window from a long episode must fetch less than the
+    blob, and unplanned fall-through reads must stay rare."""
+    import stable_worldmodel.data.formats.lance_video as lv
+
+    rng = np.random.default_rng(2)
+    ep = {
+        'pixels': [
+            rng.integers(0, 255, (64, 64, 3)).astype(np.uint8)
+            for _ in range(300)
+        ],
+        'action': [
+            rng.standard_normal(2).astype(np.float32) for _ in range(300)
+        ],
+    }
+    with LanceVideoWriter(tmp_path / 'd') as w:
+        w.write_episodes([ep])
+
+    fetched = []
+    orig_ensure = lv._SparseBlobIO.ensure
+
+    def counting_ensure(self, ranges):
+        fetched.extend(max(0, e - s) for s, e in ranges)
+        return orig_ensure(self, ranges)
+
+    monkeypatch.setattr(lv._SparseBlobIO, 'ensure', counting_ensure)
+
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    item = ds.__getitems__([0])[0]
+    assert item['pixels'].shape[0] == 4
+
+    import lance
+
+    videos_dir = next((tmp_path / 'd').glob('*_videos.lance'))
+    v = lance.dataset(str(videos_dir))
+    blob = v.take_blobs(blob_column='video_bytes', indices=[0])[0]
+    blob.seek(0, 2)
+    blob_size = blob.tell()
+    blob.close()
+    assert 0 < sum(fetched) < blob_size
+
+
+def test_reader_falls_back_without_index_columns(tmp_path):
+    """Datasets written before the GOP index (no columns) must keep working
+    through the streaming path."""
+    import lance
+    from stable_worldmodel.data.formats.mp4_index import INDEX_COLUMNS
+
+    _write(tmp_path / 'd')
+    videos_dir = next((tmp_path / 'd').glob('*_videos.lance'))
+    lance.dataset(str(videos_dir)).drop_columns(list(INDEX_COLUMNS))
+
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    assert not ds._video_index
+    item = ds[0]
+    assert item['pixels'].shape[0] == 4
+
+
+def test_append_to_legacy_videos_table_without_index(tmp_path):
+    """Appending with the new writer to a pre-index videos table must not
+    fail on schema mismatch (index columns are skipped with the table's
+    original schema)."""
+    import lance
+    from stable_worldmodel.data.formats.mp4_index import INDEX_COLUMNS
+
+    _write(tmp_path / 'd')
+    videos_dir = next((tmp_path / 'd').glob('*_videos.lance'))
+    lance.dataset(str(videos_dir)).drop_columns(list(INDEX_COLUMNS))
+
+    more = [{k: list(v) for k, v in ep.items()} for ep in _episodes((5,))]
+    with LanceVideoWriter(tmp_path / 'd') as w:
+        w.write_episodes([dict(ep) for ep in more])
+
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    assert len(ds.offsets) == 4  # 3 original + 1 appended episodes

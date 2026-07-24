@@ -38,6 +38,14 @@ import lance
 import lancedb
 import pyarrow as pa
 
+from stable_worldmodel.data.formats.mp4_index import (
+    INDEX_COLUMNS,
+    VIDEO_INDEX_META_KEY,
+    VIDEO_INDEX_VERSION,
+    Mp4Index,
+    parse_mp4_index_bytes,
+)
+
 from stable_worldmodel.data.format import (
     Format,
     register_format,
@@ -108,6 +116,91 @@ def _encode_video(frames, fps: int, codec: str) -> bytes:
         return Path(path).read_bytes()
     finally:
         os.unlink(path)
+
+
+#: bytes of file head (ftyp/probe data) prefetched with the moov box.
+_HEADER_PREFETCH = 64 * 1024
+
+
+class _SparseBlobIO(io.RawIOBase):
+    """File-like view over a lance ``BlobFile`` backed by planned ranged
+    reads.
+
+    ``ensure()`` prefetches the byte ranges a batch is known to need (from
+    the GOP index); decoder reads are then served from memory. Reads outside
+    planned ranges fall through to a ranged fetch, so correctness never
+    depends on the plan being complete.
+    """
+
+    def __init__(self, blob, size: int) -> None:
+        self._blob = blob
+        self._size = size
+        self._pos = 0
+        self._starts: list[int] = []  # sorted chunk starts
+        self._bufs: list[bytes] = []  # parallel chunk payloads
+
+    def ensure(self, ranges: list[tuple[int, int]]) -> None:
+        """Fetch any uncovered parts of ``ranges`` (``[start, end)``)."""
+        import bisect
+
+        for start, end in ranges:
+            end = min(end, self._size)
+            pos = max(start, 0)
+            while pos < end:
+                i = bisect.bisect_right(self._starts, pos) - 1
+                if i >= 0 and self._starts[i] + len(self._bufs[i]) > pos:
+                    pos = self._starts[i] + len(self._bufs[i])
+                    continue
+                j = bisect.bisect_right(self._starts, pos)
+                gap_end = (
+                    min(end, self._starts[j]) if j < len(self._starts) else end
+                )
+                data = self._blob.read_range(pos, gap_end - pos)
+                k = bisect.bisect_right(self._starts, pos)
+                self._starts.insert(k, pos)
+                self._bufs.insert(k, data)
+                pos = gap_end
+
+    def readinto(self, b) -> int:
+        import bisect
+
+        if self._pos >= self._size:
+            return 0
+        want = min(len(b), self._size - self._pos)
+        i = bisect.bisect_right(self._starts, self._pos) - 1
+        if i >= 0:
+            off = self._pos - self._starts[i]
+            avail = len(self._bufs[i]) - off
+            if avail > 0:  # serve (possibly short) from covered chunk
+                n = min(want, avail)
+                b[:n] = self._bufs[i][off : off + n]
+                self._pos += n
+                return n
+        # unplanned read: fetch through and remember the chunk
+        self.ensure([(self._pos, self._pos + want)])
+        return self.readinto(b)
+
+    def seek(self, pos: int, whence: int = 0) -> int:
+        if whence == 0:
+            self._pos = pos
+        elif whence == 1:
+            self._pos += pos
+        else:
+            self._pos = self._size + pos
+        return self._pos
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seekable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        self._blob.close()
+        super().close()
 
 
 class _SeekableBlob(io.RawIOBase):
@@ -194,6 +287,28 @@ class LanceVideoDataset(LanceDataset):
             .to_table(columns=['episode_idx', 'video_key'])
             .to_pylist()
         )
+        # GOP index columns (optional, written by newer writers): loaded up
+        # front — a few hundred bytes per episode — and used to batch-plan
+        # ranged blob reads instead of letting the decoder discover byte
+        # ranges by seeking.
+        self._video_index: dict[tuple[int, str], Mp4Index] = {}
+        videos_schema_names = set(videos_tbl.schema.names)
+        if all(c in videos_schema_names for c in INDEX_COLUMNS):
+            idx_rows = (
+                videos_tbl.to_lance()
+                .to_table(columns=['episode_idx', 'video_key', *INDEX_COLUMNS])
+                .to_pylist()
+            )
+            for r in idx_rows:
+                if r['moov_range'] is None:
+                    continue  # row written by an older writer after backfill
+                self._video_index[
+                    (int(r['episode_idx']), str(r['video_key']))
+                ] = Mp4Index(
+                    moov_range=tuple(r['moov_range']),
+                    gop_frame_idx=list(r['gop_frame_idx']),
+                    gop_byte_offset=list(r['gop_byte_offset']),
+                )
         avail = {str(r['video_key']) for r in rows}
         avail_set = avail if video_keys is None else (avail & set(video_keys))
 
@@ -280,6 +395,17 @@ class LanceVideoDataset(LanceDataset):
             self._decoder_cache = OrderedDict()
 
     def _decoder_for(self, ep_idx: int, vkey: str):
+        return self._decoder_entry(ep_idx, vkey)[0]
+
+    def _decoder_entry(self, ep_idx: int, vkey: str):
+        """Return ``(decoder, source, index_or_none)`` for one episode video.
+
+        With a GOP index, the source is a :class:`_SparseBlobIO` primed with
+        the container header — callers ``ensure()`` the GOP ranges they need
+        (batched, so a whole DataLoader batch prefetches concurrently).
+        Without one, it falls back to the buffered streaming reader and the
+        decoder discovers byte ranges by seeking.
+        """
         from torchcodec.decoders import VideoDecoder
 
         cache = self._decoder_cache
@@ -287,31 +413,41 @@ class LanceVideoDataset(LanceDataset):
         entry = cache.get(key)
         if entry is not None:
             cache.move_to_end(key)
-            return entry[0]
+            return entry
         row = self._blob_row[key]
         blob = self._videos_ds.take_blobs(
             blob_column='video_bytes', indices=[row]
         )[0]
-        # Ranged reads: the decoder pulls only the byte ranges it needs
-        # (moov + touched GOPs) through a buffered seekable view of the
-        # blob, instead of downloading the whole episode MP4. The source
-        # is cached alongside the decoder so the handle stays open for
-        # subsequent windows and is dropped together with it on eviction.
-        src = io.BufferedReader(
-            _SeekableBlob(blob), buffer_size=self._blob_buffer_size
-        )
+        midx = self._video_index.get(key)
+        if midx is not None:
+            blob.seek(0, 2)
+            size = blob.tell()
+            blob.seek(0)
+            src = _SparseBlobIO(blob, size)
+            # container header: file head (ftyp/probe) + moov sample tables
+            src.ensure([(0, _HEADER_PREFETCH), midx.moov_range])
+        else:
+            # Ranged reads: the decoder pulls only the byte ranges it
+            # needs through a buffered seekable view of the blob, instead
+            # of downloading the whole episode MP4.
+            src = io.BufferedReader(
+                _SeekableBlob(blob), buffer_size=self._blob_buffer_size
+            )
         dec = VideoDecoder(src, seek_mode='approximate')
-        cache[key] = (dec, src)
+        entry = (dec, src, midx)
+        cache[key] = entry
         while len(cache) > self._decoder_cache_size:
             cache.popitem(last=False)
-        return dec
+        return entry
 
     def _decode_video_window(
         self, ep_idx: int, vkey: str, local_start: int, num_steps: int
     ) -> torch.Tensor:
         self._ensure_videos_open()
-        dec = self._decoder_for(ep_idx, vkey)
+        dec, src, midx = self._decoder_entry(ep_idx, vkey)
         indices = [local_start + k * self.frameskip for k in range(num_steps)]
+        if midx is not None:
+            src.ensure(midx.ranges_for_frames(indices[0], indices[-1] + 1))
         return dec.get_frames_at(indices=indices).data  # (T, C, H, W) uint8
 
     def _process_batch(
@@ -383,9 +519,40 @@ class LanceVideoDataset(LanceDataset):
                 ]
                 for vkey in self._video_keys:
                     plan.setdefault((ep_idx, vkey), []).append((i, idxs))
+            # Open all decoders (header-only I/O with a GOP index), plan the
+            # byte ranges each episode's windows need, and prefetch every
+            # episode's ranges concurrently before any decoding starts.
+            unions: dict[tuple[int, str], list[int]] = {}
+            prefetch: list[tuple[Any, list[tuple[int, int]]]] = []
             for (ep_idx, vkey), items in plan.items():
-                dec = self._decoder_for(ep_idx, vkey)
                 union = sorted({j for _, idxs in items for j in idxs})
+                unions[(ep_idx, vkey)] = union
+                _dec, src, midx = self._decoder_entry(ep_idx, vkey)
+                if midx is None:
+                    continue
+                ranges = []
+                run_start = prev = union[0]
+                for j in union[1:] + [None]:
+                    if j is not None and j == prev + 1:
+                        prev = j
+                        continue
+                    ranges.extend(midx.ranges_for_frames(run_start, prev + 1))
+                    if j is not None:
+                        run_start = prev = j
+                prefetch.append((src, ranges))
+            if len(prefetch) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+
+                with ThreadPoolExecutor(
+                    max_workers=min(16, len(prefetch))
+                ) as ex:
+                    list(ex.map(lambda t: t[0].ensure(t[1]), prefetch))
+            elif prefetch:
+                prefetch[0][0].ensure(prefetch[0][1])
+
+            for (ep_idx, vkey), items in plan.items():
+                dec = self._decoder_entry(ep_idx, vkey)[0]
+                union = unions[(ep_idx, vkey)]
                 frames = dec.get_frames_at(indices=union).data
                 pos = {ix: j for j, ix in enumerate(union)}
                 for sample_i, idxs in items:
@@ -619,16 +786,26 @@ class LanceVideoWriter:
             )
         return pa.record_batch(arrays, schema=self._frames_schema)
 
-    def _videos_schema(self) -> pa.Schema:
-        return pa.schema(
-            [
-                pa.field('episode_idx', pa.int32()),
-                pa.field('video_key', pa.string()),
+    def _videos_schema(self, with_index: bool = True) -> pa.Schema:
+        fields = [
+            pa.field('episode_idx', pa.int32()),
+            pa.field('video_key', pa.string()),
+            pa.field('video_bytes', pa.large_binary(), metadata=_BLOB_META),
+        ]
+        if with_index:
+            idx_meta = {VIDEO_INDEX_META_KEY: VIDEO_INDEX_VERSION}
+            fields += [
                 pa.field(
-                    'video_bytes', pa.large_binary(), metadata=_BLOB_META
+                    'moov_range', pa.list_(pa.int64()), metadata=idx_meta
+                ),
+                pa.field(
+                    'gop_frame_idx', pa.list_(pa.int32()), metadata=idx_meta
+                ),
+                pa.field(
+                    'gop_byte_offset', pa.list_(pa.int64()), metadata=idx_meta
                 ),
             ]
-        )
+        return pa.schema(fields)
 
     def close(self) -> None:
         if self._db is None or not self._frames_batches:
@@ -636,19 +813,37 @@ class LanceVideoWriter:
         frames_reader = pa.RecordBatchReader.from_batches(
             self._frames_schema, iter(self._frames_batches)
         )
-        videos_schema = self._videos_schema()
-        videos_batch = pa.record_batch(
-            [
-                pa.array([e for e, _, _ in self._video_rows], type=pa.int32()),
+        # Appending to a videos table written before the GOP index existed:
+        # keep its schema (no index columns) so the append stays valid.
+        with_index = True
+        if self._appending:
+            existing = set(self._db.open_table(self.videos_name).schema.names)
+            with_index = all(c in existing for c in INDEX_COLUMNS)
+        videos_schema = self._videos_schema(with_index=with_index)
+        arrays = [
+            pa.array([e for e, _, _ in self._video_rows], type=pa.int32()),
+            pa.array([k for _, k, _ in self._video_rows], type=pa.string()),
+            pa.array(
+                [b for _, _, b in self._video_rows], type=pa.large_binary()
+            ),
+        ]
+        if with_index:
+            idxs = [parse_mp4_index_bytes(b) for _, _, b in self._video_rows]
+            arrays += [
                 pa.array(
-                    [k for _, k, _ in self._video_rows], type=pa.string()
+                    [list(x.moov_range) for x in idxs],
+                    type=pa.list_(pa.int64()),
                 ),
                 pa.array(
-                    [b for _, _, b in self._video_rows], type=pa.large_binary()
+                    [x.gop_frame_idx for x in idxs],
+                    type=pa.list_(pa.int32()),
                 ),
-            ],
-            schema=videos_schema,
-        )
+                pa.array(
+                    [x.gop_byte_offset for x in idxs],
+                    type=pa.list_(pa.int64()),
+                ),
+            ]
+        videos_batch = pa.record_batch(arrays, schema=videos_schema)
         if self._appending:
             self._db.open_table(self.table_name).add(frames_reader)
             self._db.open_table(self.videos_name).add(videos_batch)

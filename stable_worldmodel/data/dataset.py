@@ -47,12 +47,28 @@ class Dataset:
         self.num_steps = num_steps
         self.span = num_steps * frameskip
         self.transform = transform
-        self.clip_indices = [
-            (ep, start)
+        # (N, 2) int64 array of (episode, start) pairs. A materialized
+        # Python list of tuples costs ~100 bytes per window — for tens of
+        # millions of windows that is gigabytes PER DATALOADER WORKER and
+        # minutes of pickling at every worker spawn; the array form is
+        # ~16 bytes per window and pickles as a single buffer copy.
+        # Rows unpack like tuples (``ep, start = clip_indices[idx]``).
+        valid = [
+            (ep, length - self.span + 1)
             for ep, length in enumerate(lengths)
             if length >= self.span
-            for start in range(length - self.span + 1)
         ]
+        if valid:
+            eps = np.repeat(
+                np.array([e for e, _ in valid], dtype=np.int64),
+                np.array([c for _, c in valid], dtype=np.int64),
+            )
+            starts = np.concatenate(
+                [np.arange(c, dtype=np.int64) for _, c in valid]
+            )
+            self.clip_indices = np.stack([eps, starts], axis=1)
+        else:
+            self.clip_indices = np.empty((0, 2), dtype=np.int64)
 
     @property
     def column_names(self) -> list[str]:
@@ -430,21 +446,19 @@ class GoalDataset:
         _, p_geometric_future, p_uniform_future, _ = goal_probabilities
         needs_future_filtering = p_geometric_future > 0 or p_uniform_future > 0
 
+        clip_indices = np.asarray(dataset.clip_indices, dtype=np.int64)
         if needs_future_filtering:
             frameskip = dataset.frameskip
             current_end_offset = (self.current_goal_offset - 1) * frameskip
 
-            self._clip_indices = []
-            self._index_mapping = []
-
-            for wrapped_idx, (ep, start) in enumerate(dataset.clip_indices):
-                current_end = start + current_end_offset
-                if current_end + frameskip < self.episode_lengths[ep]:
-                    self._clip_indices.append((ep, start))
-                    self._index_mapping.append(wrapped_idx)
+            ep_lens = np.asarray(self.episode_lengths, dtype=np.int64)
+            current_end = clip_indices[:, 1] + current_end_offset
+            keep = current_end + frameskip < ep_lens[clip_indices[:, 0]]
+            self._clip_indices = clip_indices[keep]
+            self._index_mapping = np.flatnonzero(keep)
         else:
-            self._clip_indices = list(dataset.clip_indices)
-            self._index_mapping = list(range(len(dataset.clip_indices)))
+            self._clip_indices = clip_indices
+            self._index_mapping = np.arange(len(clip_indices), dtype=np.int64)
 
     @property
     def clip_indices(self):
@@ -514,7 +528,8 @@ class GoalDataset:
         return ep_idx, local_idx
 
     def _get_clip_info(self, idx: int) -> tuple[int, int]:
-        return self._clip_indices[idx]
+        ep_idx, start = self._clip_indices[idx]
+        return int(ep_idx), int(start)
 
     def _load_single_step(
         self, ep_idx: int, local_idx: int

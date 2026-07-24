@@ -1624,7 +1624,7 @@ def test_goal_dataset_get_clip_info(sample_hdf5_for_goal):
     for idx in range(min(5, len(goal_dataset))):
         ep_idx, local_start = goal_dataset._get_clip_info(idx)
         # Should match base dataset's clip_indices
-        expected = base_dataset.clip_indices[idx]
+        expected = tuple(base_dataset.clip_indices[idx])
         assert (ep_idx, local_start) == expected
 
 
