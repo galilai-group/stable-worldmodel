@@ -28,7 +28,9 @@ class HistoryBuffer:
         keeps the time dim at ``n`` for every env so histories stack
         across desynchronized envs without one env's reset truncating
         the others. All entries are real once the env has lived
-        ``(n - 1) * action_block + 1`` steps.
+        ``(n - 1) * action_block + 1`` steps. Callers that would
+        rather shrink ``n`` than receive padding can size their
+        request with :meth:`num_strided`.
 
     Output for a key with per-step shape ``(n_envs, T, ...)`` is
     ``(n_envs, n*T, ...)`` (concatenated along the time dim, oldest →
@@ -182,6 +184,31 @@ class HistoryBuffer:
             blocks = [zero] * (n - 1 - len(blocks)) + blocks
             per_env.append(_stack_envs(blocks))
         return _stack_envs(per_env)
+
+    def num_strided(self, env_ids: list[int] | None = None) -> list[int]:
+        """Number of real strided entries currently held per env.
+
+        This is the largest ``n`` for which :meth:`get` returns fully
+        real (unpadded) history for that env: entries counted at
+        ``action_block`` stride, ending at the newest entry. Empty
+        buffers count 0. Callers batching several envs can request
+        ``get(min(n, max(num_strided(ids))))`` to pad only when the
+        batch mixes envs at different fill levels.
+
+        Args:
+            env_ids: Env indices to count (all if ``None``); output
+                order follows this argument.
+
+        Returns:
+            One count per selected env.
+        """
+        ids = range(self.n_envs) if env_ids is None else env_ids
+        return [
+            (len(self._buffers[i]) - 1) // self.action_block + 1
+            if self._buffers[i]
+            else 0
+            for i in ids
+        ]
 
     def reset(self, env_ids: list[int] | None = None) -> None:
         """Clear buffers for the given envs (all if ``None``)."""

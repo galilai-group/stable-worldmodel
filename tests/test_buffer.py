@@ -382,6 +382,42 @@ class TestBlockKeys:
         torch.testing.assert_close(out['a'][0, 1], torch.tensor([3.0, 4.0]))
 
 
+class TestNumStrided:
+    def test_empty(self):
+        buf = HistoryBuffer(n_envs=3, max_len=5)
+        assert buf.num_strided() == [0, 0, 0]
+
+    def test_grows_at_block_cadence(self):
+        """One strided sample per full action_block of entries, starting
+        from the very first entry."""
+        buf = HistoryBuffer(n_envs=1, max_len=10, action_block=2)
+        expected = [1, 1, 2, 2, 3]
+        for i, exp in enumerate(expected):
+            buf.append({'x': np.full((1, 1, 1), i, dtype=np.float32)})
+            assert buf.num_strided() == [exp]
+
+    def test_matches_unpadded_get(self):
+        """get(num_strided) returns fully real history (no padding)."""
+        buf = HistoryBuffer(n_envs=1, max_len=10, action_block=2)
+        for i in range(3):
+            buf.append({'x': np.full((1, 1, 1), i, dtype=np.float32)})
+        (n,) = buf.num_strided()
+        out = buf.get(n)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [0.0, 2.0])
+
+    def test_capped_by_max_len(self):
+        buf = HistoryBuffer(n_envs=1, max_len=3, action_block=1)
+        for i in range(10):
+            buf.append({'x': np.full((1, 1, 1), i, dtype=np.float32)})
+        assert buf.num_strided() == [3]
+
+    def test_env_ids_selects_and_orders(self):
+        buf = HistoryBuffer(n_envs=3, max_len=5)
+        buf.append({'x': np.zeros((3, 1, 1), dtype=np.float32)})
+        buf._buffers[2].append(buf._buffers[2][-1])
+        assert buf.num_strided([2, 0]) == [2, 1]
+
+
 class TestReset:
     def test_reset_all(self):
         buf = HistoryBuffer(n_envs=3, max_len=5)

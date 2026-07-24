@@ -30,11 +30,16 @@ class PlanConfig:
             via ``info['action_history']``, and require a rollout-based
             ``Dynamics`` model (LeWM/PLDM/PreJEPA); Markovian ``Costable``
             models (TD-MPC2) only support the default of 1. **Warm-up
-            caveat**: during the first ``(history_len - 1) * action_block``
-            env steps of each episode the model receives partially
-            synthetic context — missing frames are copies of the episode's
-            first frame, with zero action blocks between them (as if the
-            env had been stationary before the episode began).
+            behavior**: during the first ``(history_len - 1) *
+            action_block`` env steps of each episode the context is
+            simply shorter — it grows from 1 frame at the first plan up
+            to ``history_len``, containing only real frames. Synthetic
+            padding (copies of an env's oldest frame, with zero action
+            blocks — as if the env had been stationary) is used only
+            when a replan batch mixes envs at different fill levels
+            (e.g. a freshly auto-reset env planning alongside envs with
+            full histories), since their histories must stack into one
+            tensor.
         history_max_len: Capacity (in env steps) of the per-env history
             buffer. ``None`` means derive
             ``(history_len - 1) * action_block + 1`` — the smallest size
@@ -465,13 +470,23 @@ class WorldModelPolicy(BasePolicy):
             if self._history_buffer is not None:
                 # replan calls land on block boundaries, so the strided
                 # history is the frames at the last history_len boundaries
-                # plus the executed blocks between them (solver space)
+                # plus the executed blocks between them (solver space).
+                # Request only as many frames as the fullest env in the
+                # batch holds: early in an episode the context grows
+                # 1 -> history_len with no synthetic frames; padding
+                # occurs only when the batch mixes envs at different
+                # fill levels (histories must stack into one tensor).
+                n_frames = min(
+                    self.cfg.history_len,
+                    max(self._history_buffer.num_strided(replan_idx)),
+                )
                 history = self._history_buffer.get(
-                    self.cfg.history_len, env_ids=replan_idx
+                    n_frames, env_ids=replan_idx
                 )
                 for k in self.history_keys:
                     sliced[k] = history[k]
-                sliced[ACTION_HISTORY_KEY] = history['action']
+                if 'action' in history:
+                    sliced[ACTION_HISTORY_KEY] = history['action']
 
             sliced_init = (
                 self._next_init[idx_tensor]
