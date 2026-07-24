@@ -28,6 +28,9 @@ plan_config:
   horizon: 5
   receding_horizon: 5
   action_block: 5 # frameskip
+  # history_len: 3  # context frames (block timesteps) fed to the world model;
+  #                 # match the training history_size. Rollout-based models only
+  #                 # (LeWM/PLDM/PreJEPA) — TD-MPC2 requires the default of 1.
 
 # evaluation from dataset (replay expert trajectories)
 eval:

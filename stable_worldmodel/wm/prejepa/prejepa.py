@@ -219,20 +219,33 @@ class PreJEPA(torch.nn.Module):
         """Rollout the world model given an initial observation and a sequence of actions.
 
         Params:
-        obs_start: n current observations (B, n, C, H, W)
-        actions: current and predicted actions (B, n+t, action_dim)
+        pixels: (B, S, n, C, H, W) — n context frames (block timesteps)
+        action_sequence: (B, S, t, action_dim) — strictly-future candidates
+        info['action_history']: (B, S, n - 1, action_dim) — executed action
+            blocks between the context frames (required when n > 1)
 
         Returns:
-        z_obs: dict with latent observations (B, n+t+1, n_patches, D)
-        z: predicted latent states (B, n+t+1, n_patches, D)
+        info with ``predicted_embedding`` (B, S, n+t, n_patches, D); the
+        first n entries are the encoded context frames.
         """
 
         assert 'pixels' in info, 'pixels not in info_dict'
         n_obs = info['pixels'].shape[2]
         emb_keys = [k for k in self.extra_encoders.keys() if k != 'action']
 
-        # == add action to info dict
-        act_0 = action_sequence[:, :, :n_obs]
+        # == add action to info dict: the action paired with context frame k
+        # is the block leaving it; the current frame pairs with the first
+        # candidate
+        act_past = info.get('action_history')
+        if act_past is None:
+            act_past = action_sequence.new_zeros(
+                *action_sequence.shape[:2], 0, action_sequence.size(-1)
+            )
+        assert act_past.size(2) == n_obs - 1, (
+            f'action_history must hold n-1={n_obs - 1} executed blocks, '
+            f'got {act_past.size(2)}'
+        )
+        act_0 = torch.cat([act_past, action_sequence[:, :, :1]], dim=2)
         info['action'] = act_0
 
         # check if we have already computed the initial embedding for this state
@@ -305,15 +318,16 @@ class PreJEPA(torch.nn.Module):
             info[f'{key}_emb'] = init_info_dict[f'{key}_emb']
 
         # actually compute the embedding of action for each candidate
-        info['emb'] = self.replace_action_in_embedding(
-            info['emb'], action_sequence[:, :, :n_obs]
-        )
+        # (act_0 = executed past blocks + the first candidate; the cached
+        # context embedding carries stale action slots which are replaced
+        # here on every call, so the (id, step_idx) cache stays valid)
+        info['emb'] = self.replace_action_in_embedding(info['emb'], act_0)
 
         action_dim = init_info_dict['action_emb'].shape[-1]
         info['action_emb'] = info['emb'][:, :, :n_obs, 0, -action_dim:]
 
         # number of step to predict
-        act_pred = action_sequence[:, :, n_obs:]
+        act_pred = action_sequence[:, :, 1:]
         n_steps = act_pred.shape[2]
 
         # == initial embedding

@@ -11,6 +11,10 @@ from stable_worldmodel.buffer import HistoryBuffer
 from stable_worldmodel.planning.solver import Solver
 from stable_worldmodel.protocols import Actionable, Transformable
 
+# info-dict key under which WorldModelPolicy supplies the executed past
+# action blocks (solver space, shape (B, history_len - 1, blocked_dim))
+ACTION_HISTORY_KEY = 'action_history'
+
 
 @dataclass(frozen=True)
 class PlanConfig:
@@ -19,13 +23,24 @@ class PlanConfig:
     Attributes:
         horizon: Planning horizon in number of steps.
         receding_horizon: Number of steps to execute before re-planning.
-        history_len: Number of past observations to sample (strided by
-            ``action_block``) when querying the history buffer.
+        history_len: Number of observation frames (in ``action_block``
+            timesteps, including the current frame) supplied to the world
+            model at planning time. Values above 1 additionally supply the
+            ``history_len - 1`` executed action blocks between those frames
+            via ``info['action_history']``, and require a rollout-based
+            ``Dynamics`` model (LeWM/PLDM/PreJEPA); Markovian ``Costable``
+            models (TD-MPC2) only support the default of 1. **Warm-up
+            caveat**: during the first ``(history_len - 1) * action_block``
+            env steps of each episode the model receives partially
+            synthetic context — missing frames are copies of the episode's
+            first frame, with zero action blocks between them (as if the
+            env had been stationary before the episode began).
         history_max_len: Capacity (in env steps) of the per-env history
-            buffer. ``None`` means derive ``history_len * action_block``
-            — the smallest size that yields ``history_len`` action
-            blocks (and ``history_len`` strided samples for non-block
-            keys). Set higher to retain more raw history than you sample.
+            buffer. ``None`` means derive
+            ``(history_len - 1) * action_block + 1`` — the smallest size
+            that yields ``history_len`` strided frames with a full action
+            block between each consecutive pair. Set higher to retain
+            more raw history than you sample.
         action_block: Number of times each action is repeated (frameskip).
         warm_start: Whether to use the previous plan to initialize the next one.
     """
@@ -36,6 +51,12 @@ class PlanConfig:
     history_max_len: int | None = None
     action_block: int = 1
     warm_start: bool = True
+
+    def __post_init__(self) -> None:
+        if self.history_len < 1:
+            raise ValueError(
+                f'history_len must be >= 1, got {self.history_len}'
+            )
 
     @property
     def plan_len(self) -> int:
@@ -315,6 +336,7 @@ class WorldModelPolicy(BasePolicy):
         process: dict[str, Transformable] | None = None,
         transform: dict[str, Callable[[torch.Tensor], torch.Tensor]]
         | None = None,
+        history_keys: tuple[str, ...] = ('pixels',),
         **kwargs: Any,
     ) -> None:
         """Initialize the world model policy.
@@ -324,6 +346,11 @@ class WorldModelPolicy(BasePolicy):
             config: MPC planning configuration.
             process: Dictionary of data preprocessors for specific keys.
             transform: Dictionary of tensor transformations (e.g., image transforms).
+            history_keys: Observation keys stacked over the last
+                ``config.history_len`` block timesteps when replanning
+                (only used when ``history_len > 1``). The executed action
+                blocks between those frames are supplied alongside under
+                ``'action_history'``.
             **kwargs: Additional configuration parameters.
         """
         super().__init__(**kwargs)
@@ -333,6 +360,7 @@ class WorldModelPolicy(BasePolicy):
         self.solver = solver
         self.process = process or {}
         self.transform = transform or {}
+        self.history_keys = tuple(history_keys)
         self._action_buffer: list[deque[torch.Tensor]] | None = None
         self._next_init: torch.Tensor | None = None
         self._history_buffer: HistoryBuffer | None = None
@@ -359,7 +387,9 @@ class WorldModelPolicy(BasePolicy):
         if self.cfg.history_len > 1:
             max_len = self.cfg.history_max_len
             if max_len is None:
-                max_len = self.cfg.history_len * self.cfg.action_block
+                max_len = (
+                    self.cfg.history_len - 1
+                ) * self.cfg.action_block + 1
             self._history_buffer = HistoryBuffer(
                 n_envs=n_envs,
                 max_len=max_len,
@@ -399,19 +429,14 @@ class WorldModelPolicy(BasePolicy):
                 if flush_ids:
                     self._history_buffer.reset(flush_ids)
 
-        raw_terminated = info_dict.get('terminated')
-
         info_dict = self._prepare_info(info_dict)
 
         if self._history_buffer is not None:
             self._history_buffer.append(
-                {k: v for k, v in info_dict.items() if not k.startswith('_')}
+                {k: info_dict[k] for k in (*self.history_keys, 'action')}
             )
-            history = self._history_buffer.get(self.cfg.history_len)
-            if history is not None:
-                info_dict = history
 
-        terminated = raw_terminated
+        terminated = info_dict.get('terminated')
         dead = (
             np.asarray(terminated, dtype=bool)
             if terminated is not None
@@ -436,6 +461,17 @@ class WorldModelPolicy(BasePolicy):
                     sliced[k] = [v[i] for i in replan_idx]
                 else:
                     sliced[k] = v
+
+            if self._history_buffer is not None:
+                # replan calls land on block boundaries, so the strided
+                # history is the frames at the last history_len boundaries
+                # plus the executed blocks between them (solver space)
+                history = self._history_buffer.get(
+                    self.cfg.history_len, env_ids=replan_idx
+                )
+                for k in self.history_keys:
+                    sliced[k] = history[k]
+                sliced[ACTION_HISTORY_KEY] = history['action']
 
             sliced_init = (
                 self._next_init[idx_tensor]

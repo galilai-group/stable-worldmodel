@@ -5,6 +5,10 @@ summary: Composable objectives and cost evaluators for planning
 
 Solvers optimize action sequences against a [`Costable`][stable_worldmodel.planning.Costable] — anything exposing `get_cost(info_dict, action_candidates)`. Some world models implement it natively (e.g. TD-MPC2); for the others, this module provides the glue: a [`ShootingCostEvaluator`][stable_worldmodel.planning.ShootingCostEvaluator] composes any model exposing the [`Dynamics`][stable_worldmodel.planning.Dynamics] surface (`encode`/`rollout`) with a swappable [`Objective`][stable_worldmodel.planning.Objective], so changing the planning cost never requires subclassing the world model.
 
+### The rollout contract
+
+`rollout(info_dict, action_candidates)` receives **strictly-future** candidates of shape `(B, S, horizon, action_dim)`. Observation context arrives via the info dict: `pixels` holds `H = history_len` frames `(B, S, H, C, h, w)`, and when `H > 1` the executed action blocks *between* those frames are supplied as `action_history` `(B, S, H - 1, action_dim)` — frozen inputs, never optimizer variables. Inside the rollout, context frame `k` pairs with the action block leaving it (`action_history[k]` for past frames; the **first candidate** for the current frame), matching the training-time `(frame[t], action[t])` alignment. The output `predicted_emb` has shape `(B, S, H + horizon, dim)` with the first `H` entries being the encoded context — objectives that read anything other than the last step must account for this ([`GoalMSE`][stable_worldmodel.planning.GoalMSE] reads `[..., -1:, :]` and is unaffected).
+
 
 
 ## **[ Quick Tour ]**

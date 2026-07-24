@@ -46,6 +46,12 @@ def test_plan_config_frozen():
         config.horizon = 20
 
 
+@pytest.mark.parametrize('history_len', [0, -1])
+def test_plan_config_rejects_non_positive_history_len(history_len):
+    with pytest.raises(ValueError, match='history_len'):
+        PlanConfig(horizon=10, receding_horizon=5, history_len=history_len)
+
+
 ###########################
 ## BasePolicy Tests      ##
 ###########################
@@ -218,18 +224,18 @@ def test_prepare_info_with_block_aggregated_key():
     policy = BasePolicy()
     scaler = MockTransformable(scale=2.0)
     scaler.n_features_in_ = 2  # sklearn convention
-    policy.process = {"action": scaler}
+    policy.process = {'action': scaler}
     # Shape: (n_envs=1, k=2, action_block * D = 2 * 2 = 4)
     info = {
-        "action": np.array(
+        'action': np.array(
             [[[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]],
             dtype=np.float32,
         )
     }
     result = policy._prepare_info(info)
-    assert result["action"].shape == (1, 2, 4)
+    assert result['action'].shape == (1, 2, 4)
     expected = torch.tensor([[[2.0, 4.0, 6.0, 8.0], [10.0, 12.0, 14.0, 16.0]]])
-    torch.testing.assert_close(result["action"], expected)
+    torch.testing.assert_close(result['action'], expected)
 
 
 def test_prepare_info_string_dtype_not_converted():
@@ -433,11 +439,10 @@ def test_worldmodel_policy_set_env():
 
 
 def test_worldmodel_policy_history_buffer_max_len():
-    """Auto-derived max_len must hold history_len full action blocks.
-
-    Block keys need k * action_block raw entries to surface k blocks
-    (buffer.py:115-116). Using the strided formula was one short.
-    """
+    """Auto-derived max_len is the smallest capacity yielding history_len
+    strided frames: (history_len - 1) * action_block + 1. The leaving-block
+    windows sit strictly between the frames, so no extra entries are needed
+    for the history_len - 1 action blocks."""
     solver = MockSolver()
     config = PlanConfig(
         horizon=10, receding_horizon=2, history_len=4, action_block=3
@@ -451,15 +456,16 @@ def test_worldmodel_policy_history_buffer_max_len():
     policy.set_env(mock_env)
 
     assert policy._history_buffer is not None
-    assert policy._history_buffer.max_len == 12  # history_len * action_block
+    assert policy._history_buffer.max_len == 10  # (4 - 1) * 3 + 1
 
-    for i in range(12):
+    for i in range(10):
         policy._history_buffer.append(
             {'action': np.full((1, 1, 2), i, dtype=np.float32)}
         )
     out = policy._history_buffer.get(config.history_len)
     assert out is not None
-    assert out['action'].shape == (1, 4, 6)  # (n_envs, history_len, action_block * D)
+    # (n_envs, history_len - 1, action_block * D): blocks between frames
+    assert out['action'].shape == (1, 3, 6)
 
 
 def test_worldmodel_policy_history_max_len_explicit():
@@ -852,3 +858,193 @@ def test_worldmodel_policy_no_warmstart_without_actionable():
 
     assert solver.received_init_action.shape == (1, 5, 2)
     assert solver.received_init_action.eq(0).all()
+
+
+#########################################
+## Planning-time history (history_len) ##
+#########################################
+
+
+class RecordingBlockSolver:
+    """MockSolver variant for history tests: records every received info
+    dict and returns call-tagged actions in blocked solver space
+    (base_action_dim * action_block), so executed blocks are identifiable."""
+
+    def __init__(self):
+        self.received = []
+        self._config = None
+
+    def configure(self, *, action_space, n_envs, config):
+        self._action_space = action_space
+        self._n_envs = n_envs
+        self._config = config
+
+    @property
+    def action_dim(self) -> int:
+        return self._action_space.shape[-1] * self._config.action_block
+
+    @property
+    def n_envs(self) -> int:
+        return self._n_envs
+
+    @property
+    def horizon(self) -> int:
+        return self._config.horizon
+
+    def solve(self, info_dict, init_action=None):
+        self.received.append(
+            {
+                k: (v.clone() if torch.is_tensor(v) else v)
+                for k, v in info_dict.items()
+            }
+        )
+        batch = len(next(iter(info_dict.values())))
+        base = 1000.0 * len(self.received)
+        actions = base + torch.arange(
+            batch * self._config.horizon * self.action_dim,
+            dtype=torch.float32,
+        ).reshape(batch, self._config.horizon, self.action_dim)
+        return {'actions': actions}
+
+    def __call__(self, info_dict, init_action=None):
+        return self.solve(info_dict, init_action)
+
+
+def _history_env(n_envs=1):
+    mock_env = MagicMock()
+    mock_env.num_envs = n_envs
+    mock_env.single_action_space = gym_spaces.Box(low=-1, high=1, shape=(2,))
+    if n_envs == 1:
+        mock_env.action_space = mock_env.single_action_space
+    else:
+        mock_env.action_space = gym_spaces.Box(
+            low=-1, high=1, shape=(n_envs, 2)
+        )
+    return mock_env
+
+
+def _step_info(step, n_envs=1, action=None):
+    """Env-step info: pixels tagged with the step index; ``action`` is the
+    env echo of the previously executed action (NaN at reset, like
+    EverythingToInfoWrapper)."""
+    if action is None:
+        action = np.full((n_envs, 1, 2), np.nan, dtype=np.float32)
+    return {
+        'pixels': np.full((n_envs, 1, 8, 8, 3), float(step), dtype=np.float32),
+        'goal': np.zeros((n_envs, 1, 8, 8, 3), dtype=np.float32),
+        'action': np.asarray(action, dtype=np.float32).reshape(n_envs, 1, 2),
+    }
+
+
+def _history_policy(n_envs=1, history_len=3):
+    solver = RecordingBlockSolver()
+    config = PlanConfig(
+        horizon=4,
+        receding_horizon=3,
+        history_len=history_len,
+        action_block=2,
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+    policy.set_env(_history_env(n_envs))
+    return policy, solver
+
+
+def test_history_len_one_keeps_single_frame_surface():
+    """Default history_len=1 is surface-compatible with the old behavior:
+    single-frame pixels, no action_history key, no history buffer."""
+    policy, solver = _history_policy(history_len=1)
+    assert policy._history_buffer is None
+
+    info = {
+        'pixels': np.random.rand(1, 1, 8, 8, 3).astype(np.float32),
+        'goal': np.random.rand(1, 1, 8, 8, 3).astype(np.float32),
+    }
+    policy.get_action(info)
+
+    rec = solver.received[0]
+    assert rec['pixels'].shape[1] == 1
+    assert 'action_history' not in rec
+
+
+def test_history_stacks_block_boundary_frames_and_executed_blocks():
+    """At a replan the solver receives the frames at the last history_len
+    block boundaries and the executed solver-space blocks between them."""
+    policy, solver = _history_policy()
+
+    action = None
+    for step in range(7):  # replans at steps 0 and 6 (receding 3 * block 2)
+        action = policy.get_action(_step_info(step, action=action))
+
+    assert len(solver.received) == 2
+
+    # episode start: repeat-oldest frame padding + zero action blocks
+    first = solver.received[0]
+    torch.testing.assert_close(first['pixels'][0, :, 0, 0, 0], torch.zeros(3))
+    torch.testing.assert_close(first['action_history'], torch.zeros(1, 2, 4))
+
+    # second replan: frames at block boundaries 2, 4, 6
+    second = solver.received[1]
+    torch.testing.assert_close(
+        second['pixels'][0, :, 0, 0, 0], torch.tensor([2.0, 4.0, 6.0])
+    )
+    # executed blocks between those frames are the first plan's blocked
+    # rows 1 and 2 (row r covers env steps 2r, 2r+1), echoed back by the
+    # env one step later
+    plan0 = 1000.0 + torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    torch.testing.assert_close(second['action_history'][0], plan0[1:3])
+
+
+def test_history_flush_resets_to_padded_reset_frame():
+    """_needs_flush clears the history; the reset frame enters exactly once
+    and the immediate replan is padded from it with zero action history."""
+    policy, solver = _history_policy()
+
+    action = None
+    for step in range(7):
+        action = policy.get_action(_step_info(step, action=action))
+
+    reset_info = _step_info(99)  # NaN action echo, like a real reset
+    reset_info['_needs_flush'] = np.array([True])
+    policy.get_action(reset_info)
+
+    assert len(policy._history_buffer._buffers[0]) == 1
+    rec = solver.received[-1]
+    torch.testing.assert_close(
+        rec['pixels'][0, :, 0, 0, 0], torch.full((3,), 99.0)
+    )
+    torch.testing.assert_close(rec['action_history'], torch.zeros(1, 2, 4))
+    assert not torch.isnan(rec['action_history']).any()
+
+
+def test_history_dead_env_not_replanned():
+    """Dead envs are excluded from the replan batch and its history rows."""
+    policy, solver = _history_policy(n_envs=2)
+
+    info = _step_info(0, n_envs=2)
+    info['terminated'] = np.array([False, True])
+    policy.get_action(info)
+
+    rec = solver.received[0]
+    assert rec['pixels'].shape[0] == 1
+    assert rec['action_history'].shape == (1, 2, 4)
+
+
+def test_history_selective_replan_uses_env_own_history():
+    """A desynchronized env replans from its own per-env history; the other
+    env's buffers and plan are untouched (no cross-env coupling)."""
+    policy, solver = _history_policy(n_envs=2)
+
+    action = None
+    action = policy.get_action(_step_info(0, n_envs=2, action=action))
+    # env 0 forced to replan mid-block (e.g. external reset of its plan)
+    policy._action_buffer[0].clear()
+    policy.get_action(_step_info(1, n_envs=2, action=action))
+
+    rec = solver.received[-1]
+    assert rec['pixels'].shape[0] == 1
+    # env 0 has entries for steps 0 and 1 only: one strided frame (step 1),
+    # padded by repetition; no executed blocks yet -> zeros
+    torch.testing.assert_close(rec['pixels'][0, :, 0, 0, 0], torch.ones(3))
+    torch.testing.assert_close(rec['action_history'], torch.zeros(1, 2, 4))
+    # env 1 kept draining its plan
+    assert len(policy._action_buffer[1]) == 4

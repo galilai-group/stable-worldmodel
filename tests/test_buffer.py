@@ -124,15 +124,15 @@ class TestGet:
         buf = HistoryBuffer(n_envs=2, max_len=5)
         assert buf.get(1) is None
 
-    def test_warmup_returns_partial(self):
-        """During warm-up, get(n) returns the largest k <= n that fits."""
+    def test_warmup_pads_with_oldest(self):
+        """During warm-up, get(n) left-pads by repeating the oldest entry."""
         buf = HistoryBuffer(n_envs=2, max_len=5)
         buf.append({'x': np.array([[[1.0]], [[2.0]]])})
         out = buf.get(3)
         assert out is not None
-        assert out['x'].shape == (2, 1, 1)
-        np.testing.assert_array_equal(out['x'][0, :, 0], [1.0])
-        np.testing.assert_array_equal(out['x'][1, :, 0], [2.0])
+        assert out['x'].shape == (2, 3, 1)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [1.0, 1.0, 1.0])
+        np.testing.assert_array_equal(out['x'][1, :, 0], [2.0, 2.0, 2.0])
 
     def test_one_env_empty_returns_none(self):
         """If any single env has zero entries, get returns None."""
@@ -160,32 +160,33 @@ class TestGet:
         np.testing.assert_array_equal(out['x'][0, :, 0], [0.0, 2.0])
 
     def test_action_block_warmup(self):
-        """get(n) auto-grows: with k=(min_len-1)//action_block + 1 strides."""
+        """Only one strided sample fits two entries at stride 2: the newest
+        is real, the missing older one is padded by repeating it."""
         buf = HistoryBuffer(n_envs=1, max_len=10, action_block=2)
         for i in range(2):
             buf.append({'x': np.full((1, 1, 1), i, dtype=np.float32)})
         out = buf.get(2)
         assert out is not None
-        assert out['x'].shape == (1, 1, 1)
-        np.testing.assert_array_equal(out['x'][0, :, 0], [1.0])
+        assert out['x'].shape == (1, 2, 1)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [1.0, 1.0])
 
     def test_warmup_only_oldest(self):
-        """With one entry, get(3) returns just that entry (k=1)."""
+        """With one entry, get(3) repeats that entry three times."""
         buf = HistoryBuffer(n_envs=1, max_len=10)
         buf.append({'x': np.array([[[5.0]]])})
         out = buf.get(3)
         assert out is not None
-        assert out['x'].shape == (1, 1, 1)
-        np.testing.assert_array_equal(out['x'][0, :, 0], [5.0])
+        assert out['x'].shape == (1, 3, 1)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [5.0, 5.0, 5.0])
 
     def test_warmup_partial(self):
-        """With two entries, get(3) returns the two in chronological order."""
+        """With two entries, get(3) pads once and keeps chronological order."""
         buf = HistoryBuffer(n_envs=1, max_len=10)
         buf.append({'x': np.array([[[1.0]]])})
         buf.append({'x': np.array([[[2.0]]])})
         out = buf.get(3)
-        assert out['x'].shape == (1, 2, 1)
-        np.testing.assert_array_equal(out['x'][0, :, 0], [1.0, 2.0])
+        assert out['x'].shape == (1, 3, 1)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [1.0, 1.0, 2.0])
 
     def test_per_env_independent(self):
         buf = HistoryBuffer(n_envs=2, max_len=5)
@@ -195,6 +196,40 @@ class TestGet:
         out = buf.get(3)
         np.testing.assert_array_equal(out['x'][0, :, 0], [0.0, 1.0, 2.0])
         np.testing.assert_array_equal(out['x'][1, :, 0], [0.0, 10.0, 20.0])
+
+    def test_desynced_envs_do_not_couple(self):
+        """A freshly-reset env is padded from its own entries; the other
+        env's full history is untouched (no global-min truncation)."""
+        buf = HistoryBuffer(n_envs=2, max_len=5)
+        for i in range(2):
+            arr = np.array([[[float(i)]], [[float(i * 10)]]])
+            buf.append({'x': arr})
+        buf.reset([0])
+        buf.append({'x': np.array([[[7.0]], [[20.0]]])})
+        out = buf.get(3)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [7.0, 7.0, 7.0])
+        np.testing.assert_array_equal(out['x'][1, :, 0], [0.0, 10.0, 20.0])
+
+    def test_env_ids_selects_and_orders_rows(self):
+        buf = HistoryBuffer(n_envs=3, max_len=5)
+        for i in range(2):
+            arr = np.array(
+                [[[float(i)]], [[float(i + 10)]], [[float(i + 20)]]]
+            )
+            buf.append({'x': arr})
+        out = buf.get(2, env_ids=[2, 0])
+        assert out['x'].shape == (2, 2, 1)
+        np.testing.assert_array_equal(out['x'][0, :, 0], [20.0, 21.0])
+        np.testing.assert_array_equal(out['x'][1, :, 0], [0.0, 1.0])
+
+    def test_env_ids_ignores_other_envs_emptiness(self):
+        """get(..., env_ids=...) only requires the selected envs non-empty."""
+        buf = HistoryBuffer(n_envs=2, max_len=5)
+        buf.append({'x': np.array([[[1.0]], [[2.0]]])})
+        buf.reset([0])
+        assert buf.get(1) is None
+        out = buf.get(1, env_ids=[1])
+        np.testing.assert_array_equal(out['x'][0, :, 0], [2.0])
 
     def test_torch_preserved(self):
         buf = HistoryBuffer(n_envs=2, max_len=5)
@@ -252,78 +287,99 @@ class TestGet:
 
 class TestBlockKeys:
     def test_blocked_shape(self):
-        """Block key output is (n_envs, k, action_block * D)."""
+        """Block key output is (n_envs, n - 1, action_block * D)."""
         buf = HistoryBuffer(
             n_envs=2, max_len=10, action_block=2, block_keys=('a',)
         )
-        for i in range(4):
+        for i in range(5):
             buf.append({'a': np.full((2, 1, 3), i, dtype=np.float32)})
-        out = buf.get(2)
+        out = buf.get(3)
         assert out['a'].shape == (2, 2, 6)
 
-    def test_blocked_window_chronological(self):
-        """Each block concatenates raw entries oldest -> newest."""
+    def test_blocked_leaving_frame_alignment(self):
+        """Block i holds the entries strictly between strided frames i and
+        i+1 (the actions leaving frame i), chronological within the block.
+
+        Entry j carries the action executed *entering* step j, so with
+        frames at entries 0, 2, 4 the blocks are entries (1, 2) and (3, 4).
+        """
         buf = HistoryBuffer(
             n_envs=1, max_len=10, action_block=2, block_keys=('a',)
         )
-        for i in range(4):
-            buf.append({'a': np.array([[[float(i)]]])})
-        out = buf.get(2)
-        assert out['a'].shape == (1, 2, 2)
-        np.testing.assert_array_equal(out['a'][0, 0], [0.0, 1.0])
-        np.testing.assert_array_equal(out['a'][0, 1], [2.0, 3.0])
-
-    def test_blocked_warmup_requires_full_window(self):
-        """k for blocked keys is min_len // action_block (full windows)."""
-        buf = HistoryBuffer(
-            n_envs=1, max_len=10, action_block=2, block_keys=('a',)
-        )
-        buf.append({'a': np.array([[[1.0]]])})
-        assert buf.get(2) is None
-        buf.append({'a': np.array([[[2.0]]])})
-        out = buf.get(2)
-        assert out is not None
-        assert out['a'].shape == (1, 1, 2)
-        np.testing.assert_array_equal(out['a'][0, 0], [1.0, 2.0])
-
-    def test_blocked_only_when_action_block_gt_one(self):
-        """With action_block=1, block_keys behaves like a normal key."""
-        buf = HistoryBuffer(
-            n_envs=1, max_len=10, action_block=1, block_keys=('a',)
-        )
-        for i in range(2):
-            buf.append({'a': np.array([[[float(i)]]])})
-        out = buf.get(2)
-        assert out['a'].shape == (1, 2, 1)
-        np.testing.assert_array_equal(out['a'][0, :, 0], [0.0, 1.0])
-
-    def test_blocked_mixed_with_regular_keys(self):
-        """Block keys and regular keys coexist with consistent k."""
-        buf = HistoryBuffer(
-            n_envs=1, max_len=10, action_block=2, block_keys=('a',)
-        )
-        for i in range(4):
+        for i in range(5):
             buf.append(
                 {
                     'a': np.array([[[float(i)]]]),
                     'o': np.array([[[float(i * 10)]]]),
                 }
             )
-        out = buf.get(2)
+        out = buf.get(3)
+        np.testing.assert_array_equal(out['o'][0, :, 0], [0.0, 20.0, 40.0])
         assert out['a'].shape == (1, 2, 2)
-        assert out['o'].shape == (1, 2, 1)
-        np.testing.assert_array_equal(out['o'][0, :, 0], [10.0, 30.0])
+        np.testing.assert_array_equal(out['a'][0, 0], [1.0, 2.0])
+        np.testing.assert_array_equal(out['a'][0, 1], [3.0, 4.0])
+
+    def test_blocked_warmup_zero_pads(self):
+        """Missing leaving-blocks are zero-padded on the left; the first
+        real block appears once two strided frames exist."""
+        buf = HistoryBuffer(
+            n_envs=1, max_len=10, action_block=2, block_keys=('a',)
+        )
+        buf.append({'a': np.array([[[1.0]]])})
+        out = buf.get(2)
+        assert out is not None
+        assert out['a'].shape == (1, 1, 2)
+        np.testing.assert_array_equal(out['a'][0, 0], [0.0, 0.0])
+
+        buf.append({'a': np.array([[[2.0]]])})
+        buf.append({'a': np.array([[[3.0]]])})
+        out = buf.get(2)
+        np.testing.assert_array_equal(out['a'][0, 0], [2.0, 3.0])
+
+    def test_blocked_with_action_block_one(self):
+        """The leaving-block convention holds at action_block=1: n frames
+        come with n-1 single-action blocks (the entries between them)."""
+        buf = HistoryBuffer(
+            n_envs=1, max_len=10, action_block=1, block_keys=('a',)
+        )
+        for i in range(2):
+            buf.append({'a': np.array([[[float(i)]]])})
+        out = buf.get(2)
+        assert out['a'].shape == (1, 1, 1)
+        np.testing.assert_array_equal(out['a'][0, :, 0], [1.0])
+
+    def test_blocked_omitted_at_n_one(self):
+        """With a single frame there is nothing between frames."""
+        buf = HistoryBuffer(
+            n_envs=1, max_len=10, action_block=2, block_keys=('a',)
+        )
+        buf.append({'a': np.array([[[1.0]]]), 'o': np.array([[[2.0]]])})
+        out = buf.get(1)
+        assert 'a' not in out
+        assert out['o'].shape == (1, 1, 1)
+
+    def test_blocked_nan_zeroed(self):
+        """NaN actions (the reset-entry echo) never leak into blocks."""
+        buf = HistoryBuffer(
+            n_envs=1, max_len=10, action_block=2, block_keys=('a',)
+        )
+        buf.append({'a': np.array([[[np.nan]]])})
+        buf.append({'a': np.array([[[np.nan]]])})
+        buf.append({'a': np.array([[[3.0]]])})
+        out = buf.get(2)
+        np.testing.assert_array_equal(out['a'][0, 0], [0.0, 3.0])
 
     def test_blocked_torch(self):
         buf = HistoryBuffer(
             n_envs=1, max_len=10, action_block=2, block_keys=('a',)
         )
-        for i in range(4):
+        for i in range(5):
             buf.append({'a': torch.tensor([[[float(i)]]])})
-        out = buf.get(2)
+        out = buf.get(3)
         assert isinstance(out['a'], torch.Tensor)
         assert out['a'].shape == (1, 2, 2)
-        torch.testing.assert_close(out['a'][0, 0], torch.tensor([0.0, 1.0]))
+        torch.testing.assert_close(out['a'][0, 0], torch.tensor([1.0, 2.0]))
+        torch.testing.assert_close(out['a'][0, 1], torch.tensor([3.0, 4.0]))
 
 
 class TestReset:

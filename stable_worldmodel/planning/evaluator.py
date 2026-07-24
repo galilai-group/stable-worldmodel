@@ -36,6 +36,7 @@ def default_goal_encode(model: Dynamics, info_dict: dict) -> torch.Tensor:
             goal[k[len('goal_') :]] = goal.pop(k)
 
     goal.pop('action')
+    goal.pop('action_history', None)  # past blocks are context, not goal
     goal = model.encode(goal)
     return goal['emb']
 

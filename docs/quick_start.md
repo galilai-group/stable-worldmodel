@@ -393,7 +393,10 @@ results = world.evaluate(episodes=50, seed=0)
 
 ### Observation history
 
-Set `history_len > 1` to plan with past observations. `WorldModelPolicy` then maintains a per-env [`HistoryBuffer`](api/buffer.md) that stores the last few prepared `info` dicts and surfaces them, strided by `action_block`, every time the solver is called. Actions are aggregated as macro-blocks of length `action_block` so the planner sees one block per stride point. Make sure your world model was trained on the same history layout.
+Set `history_len > 1` to plan with past observations. `WorldModelPolicy` then maintains a per-env [`HistoryBuffer`](api/buffer.md) over its `history_keys` (default `('pixels',)`) plus the executed actions. At every replan the world model receives the frames at the last `history_len` block boundaries as `pixels` `(B, H, C, h, w)`, and the `H - 1` executed action blocks *between* those frames (solver space, flattened per block) under `info['action_history']` — the same `(frame[t], action-block leaving frame[t])` pairing the models are trained on. Solver candidates stay strictly future. Match `history_len` to your model's training `history_size` (3 for the shipped LeWM/PLDM/PreJEPA configs); Markovian models like TD-MPC2 only support the default of 1.
+
+!!! warning "Episode-start warm-up"
+    During the first `(history_len - 1) * action_block` env steps of each episode the model is fed **partially synthetic context**: missing frames are copies of the episode's first frame, with zero action blocks between them (as if the env had been stationary before the episode began). All context is real after that window.
 
 ## And then?
 
