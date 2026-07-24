@@ -5,9 +5,10 @@ from collections import deque
 import gymnasium as gym
 import numpy as np
 import pytest
+import torch
 
 from stable_worldmodel.world.env_pool import EnvPool
-from stable_worldmodel.world.world import World
+from stable_worldmodel.world.world import World, _extract_init_goal
 
 
 class CounterEnv(gym.Env):
@@ -512,3 +513,285 @@ class TestWorldMisc:
         world.envs = pool
         world.close()
         assert len(close_calls) == 3
+
+
+class EpisodeDataEnv(CounterEnv):
+    """CounterEnv exposing episode-scoped data snapshotted at reset."""
+
+    def __init__(self, max_steps: int = 3, tag: str = 'env'):
+        super().__init__(max_steps)
+        self._tag = tag
+        self._reset_count = 0
+        self._episode_data = None
+
+    def reset(self, *, seed=None, options=None):
+        out = super().reset(seed=seed, options=options)
+        self._reset_count += 1
+        self._episode_data = {
+            'model_xml': f'<{self._tag} reset="{self._reset_count}"/>',
+            'reset_idx': self._reset_count,
+        }
+        return out
+
+    def get_episode_data(self):
+        return self._episode_data
+
+
+class FlatPixelsEpisodeDataEnv(EpisodeDataEnv):
+    """Emits HWC image infos (no leading time dim), like real wrapped envs —
+    the shape the lance JPEG encoder expects per step."""
+
+    def _make_info(self, terminated):
+        info = super()._make_info(terminated)
+        info['pixels'] = np.full((3, 3, 3), self._step_count, dtype=np.uint8)
+        info['goal'] = np.zeros((3, 3, 3), dtype=np.uint8)
+        return info
+
+
+class DatasetResetEnv(CounterEnv):
+    """CounterEnv implementing the dataset-restore API; records the rows."""
+
+    def __init__(self, max_steps: int = 3):
+        super().__init__(max_steps)
+        self.received = []
+
+    def reset_options_from_dataset(self, init_row, goal_row):
+        self.received.append((init_row, goal_row))
+        return {}
+
+
+class FakeEvalDataset:
+    """Two-episode dataset with per-episode-varying ``states`` dims plus
+    episode-scoped blobs, mimicking the robocasa lance layout."""
+
+    column_names = ['pixels', 'proprio', 'states', 'seed']
+    episode_column_names = ['model_xml', 'ep_meta']
+
+    def __init__(self):
+        self.lengths = np.array([6, 6])
+        self._state_dims = {0: 4, 1: 7}
+
+    def load_chunk(self, episodes_idx, start, end):
+        chunks = []
+        for ep, s, e in zip(episodes_idx, start, end):
+            ep, n = int(ep), int(e - s)
+            chunks.append(
+                {
+                    'pixels': torch.full(
+                        (n, 3, 3, 3), ep + 1, dtype=torch.uint8
+                    ),
+                    'proprio': (
+                        torch.arange(n * 2, dtype=torch.float32).reshape(n, 2)
+                        + 10.0 * ep
+                    ),
+                    'states': torch.full(
+                        (n, self._state_dims[ep]),
+                        float(ep),
+                        dtype=torch.float32,
+                    ),
+                    'seed': torch.full((n, 1), 100.0 + ep),
+                }
+            )
+        return chunks
+
+    def get_episode_data(self, episodes_idx=None):
+        idxs = (
+            [int(i) for i in episodes_idx]
+            if episodes_idx is not None
+            else [0, 1]
+        )
+        return {
+            'model_xml': [f'<scene {i}/>' for i in idxs],
+            'ep_meta': [f'meta-{i}'.encode() for i in idxs],
+        }
+
+
+def _make_world_with(env_fns):
+    pool = EnvPool(env_fns)
+    world = object.__new__(World)
+    world.envs = pool
+    world.policy = None
+    world.infos = {}
+    world.rewards = None
+    world.terminateds = None
+    world.truncateds = None
+    policy = RecordingPolicy()
+    world.policy = policy
+    policy.set_env(world.envs)
+    return world
+
+
+class TestExtractInitGoal:
+    def test_rows_content(self):
+        ds = FakeEvalDataset()
+        init_rows, goal_rows, videos = _extract_init_goal(
+            ds, [0, 1], [0, 0], 3
+        )
+
+        assert len(init_rows) == len(goal_rows) == 2
+        # Per-episode `states` dims stay per-row — no stacking heuristics.
+        assert init_rows[0]['states'].shape == (4,)
+        assert init_rows[1]['states'].shape == (7,)
+        # Episode-scoped columns land in the init rows only.
+        assert init_rows[0]['model_xml'] == '<scene 0/>'
+        assert init_rows[1]['ep_meta'] == b'meta-1'
+        assert set(goal_rows[0]) == {
+            'goal',
+            'goal_proprio',
+            'goal_states',
+            'goal_seed',
+        }
+        # init = first chunk step, goal = last (start + goal_offset).
+        np.testing.assert_array_equal(init_rows[0]['proprio'], [0.0, 1.0])
+        np.testing.assert_array_equal(goal_rows[0]['goal_proprio'], [6.0, 7.0])
+        np.testing.assert_array_equal(init_rows[1]['proprio'], [10.0, 11.0])
+        # pixels permuted to HWC; one panel video per episode.
+        assert init_rows[0]['pixels'].shape == (3, 3, 3)
+        assert len(videos) == 2
+        assert videos[0].shape == (4, 3, 3, 3)
+
+
+class TestEvaluateFromDataset:
+    def test_method_path_receives_rows(self):
+        world = _make_world_with(
+            [lambda: DatasetResetEnv(3) for _ in range(2)]
+        )
+        results = world.evaluate(
+            dataset=FakeEvalDataset(),
+            episodes_idx=[0, 1],
+            start_steps=[0, 0],
+            goal_offset=3,
+            eval_budget=5,
+        )
+
+        assert results['seeds'] == [100, 101]
+        assert results['success_rate'] == 100.0
+        for i in range(2):
+            env = world.envs.envs[i]
+            assert len(env.received) == 1
+            init_row, goal_row = env.received[0]
+            assert init_row['model_xml'] == f'<scene {i}/>'
+            assert init_row['ep_meta'] == f'meta-{i}'.encode()
+            assert init_row['states'].shape == ((4,) if i == 0 else (7,))
+            assert goal_row['goal_states'].shape == ((4,) if i == 0 else (7,))
+
+    def test_infos_broadcast_rules(self):
+        world = _make_world_with(
+            [lambda: DatasetResetEnv(3) for _ in range(2)]
+        )
+        world.evaluate(
+            dataset=FakeEvalDataset(),
+            episodes_idx=[0, 1],
+            start_steps=[0, 0],
+            goal_offset=3,
+            eval_budget=5,
+        )
+
+        # Uniform goal columns are injected and re-applied every step.
+        assert world.infos['goal'].shape == (2, 1, 3, 3, 3)
+        assert int(world.infos['goal'][0].max()) == 1
+        assert int(world.infos['goal'][1].max()) == 2
+        assert world.infos['goal_proprio'].shape == (2, 1, 2)
+        # Ragged and episode-scoped columns never reach the infos.
+        assert 'goal_states' not in world.infos
+        assert 'states' not in world.infos
+        assert 'model_xml' not in world.infos
+        assert 'ep_meta' not in world.infos
+
+    def test_callables_path_gets_merged_row(self):
+        received = []
+
+        class CallableEnv(CounterEnv):
+            def _set_state(self, state=None, goal_proprio=None):
+                received.append((np.asarray(state), np.asarray(goal_proprio)))
+
+        world = _make_world_with([lambda: CallableEnv(3) for _ in range(2)])
+        callables = [
+            {
+                'method': '_set_state',
+                'args': {
+                    'state': {'in_dataset': True, 'value': 'proprio'},
+                    'goal_proprio': {
+                        'in_dataset': True,
+                        'value': 'goal_proprio',
+                    },
+                },
+            }
+        ]
+        world.evaluate(
+            dataset=FakeEvalDataset(),
+            episodes_idx=[0, 1],
+            start_steps=[0, 0],
+            goal_offset=3,
+            eval_budget=5,
+            callables=callables,
+        )
+
+        assert len(received) == 2
+        np.testing.assert_array_equal(received[0][0], [0.0, 1.0])
+        np.testing.assert_array_equal(received[0][1], [6.0, 7.0])
+        np.testing.assert_array_equal(received[1][0], [10.0, 11.0])
+        np.testing.assert_array_equal(received[1][1], [16.0, 17.0])
+
+
+class TestCollectEpisodeData:
+    def _world(self, tags, max_steps=2):
+        return _make_world_with(
+            [lambda t=t: EpisodeDataEnv(max_steps, tag=t) for t in tags]
+        )
+
+    def test_capture_is_pre_auto_reset(self):
+        from stable_worldmodel.data import EPISODE_DATA_KEY, ReplayBuffer
+
+        world = self._world(['env0', 'env1'])
+        buf = ReplayBuffer(max_steps=64)
+        world.collect(writer=buf, episodes=4, seed=0, progress=False)
+
+        assert buf.num_episodes == 4
+        data = buf.get_episode_data()
+        # Both envs finish on the same step; each snapshot must belong to
+        # the episode that just finished (resets 1 then 2), not to the
+        # auto-reset that immediately follows (which would read 2,2,3,3).
+        assert data['reset_idx'] == [1, 1, 2, 2]
+        assert data['model_xml'] == [
+            '<env0 reset="1"/>',
+            '<env1 reset="1"/>',
+            '<env0 reset="2"/>',
+            '<env1 reset="2"/>',
+        ]
+        # The snapshot rides the reserved key, never the per-step columns.
+        assert 'model_xml' not in buf.column_names
+        assert EPISODE_DATA_KEY not in buf.column_names
+
+    def test_collect_to_lance_and_evaluate(self, tmp_path):
+        from stable_worldmodel.data import LanceDataset
+
+        world = _make_world_with(
+            [
+                lambda t=t: FlatPixelsEpisodeDataEnv(2, tag=t)
+                for t in ('env0', 'env1')
+            ]
+        )
+        out = tmp_path / 'demo.lance'
+        world.collect(path=str(out), episodes=2, seed=0, progress=False)
+
+        ds = LanceDataset(path=str(out))
+        assert ds.episode_column_names == ['model_xml', 'reset_idx']
+        assert ds.get_episode_data()['reset_idx'] == [1, 1]
+
+        eval_world = _make_world_with(
+            [lambda: DatasetResetEnv(2) for _ in range(2)]
+        )
+        results = eval_world.evaluate(
+            dataset=ds,
+            episodes_idx=[0, 1],
+            start_steps=[0, 0],
+            goal_offset=1,
+            eval_budget=4,
+        )
+
+        assert results['success_rate'] == 100.0
+        for i in range(2):
+            init_row, _ = eval_world.envs.envs[i].received[0]
+            assert init_row['model_xml'] == f'<env{i} reset="1"/>'
+            assert int(init_row['reset_idx']) == 1

@@ -59,6 +59,28 @@ class Dataset:
         """Names of the columns stored in the dataset."""
         raise NotImplementedError
 
+    @property
+    def episode_column_names(self) -> list[str]:
+        """Names of episode-scoped columns (one value per episode, not per
+        step). Empty for datasets without episode-scoped data."""
+        return []
+
+    def get_episode_data(
+        self, episodes_idx: np.ndarray | list[int] | None = None
+    ) -> dict[str, list]:
+        """Episode-scoped values for the requested episodes.
+
+        Args:
+            episodes_idx: Episode indices, in any order and with duplicates
+                allowed. ``None`` selects all episodes.
+
+        Returns:
+            ``{name: [value, ...]}`` with one entry per requested episode,
+            in request order. Empty when the dataset has no episode-scoped
+            data.
+        """
+        return {}
+
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         raise NotImplementedError
 
@@ -182,6 +204,32 @@ class MergeDataset:
         return cols
 
     @property
+    def episode_column_names(self) -> list[str]:
+        seen: set[str] = set()
+        cols = []
+        for ds in self.datasets:
+            for c in getattr(ds, 'episode_column_names', []):
+                if c not in seen:
+                    seen.add(c)
+                    cols.append(c)
+        return cols
+
+    def get_episode_data(
+        self, episodes_idx: np.ndarray | list[int] | None = None
+    ) -> dict[str, list]:
+        """Union of the sub-datasets' episode data; on a name collision the
+        first dataset wins (mirrors the per-step column policy)."""
+        out: dict[str, list] = {}
+        for ds in self.datasets:
+            getter = getattr(ds, 'get_episode_data', None)
+            if getter is None:
+                continue
+            for k, v in getter(episodes_idx).items():
+                if k not in out:
+                    out[k] = v
+        return out
+
+    @property
     def lengths(self) -> np.ndarray:
         """Episode lengths, taken from the first dataset."""
         return self.datasets[0].lengths
@@ -261,6 +309,48 @@ class ConcatDataset:
                     seen.add(c)
                     cols.append(c)
         return cols
+
+    @property
+    def episode_column_names(self) -> list[str]:
+        seen: set[str] = set()
+        cols = []
+        for ds in self.datasets:
+            for c in getattr(ds, 'episode_column_names', []):
+                if c not in seen:
+                    seen.add(c)
+                    cols.append(c)
+        return cols
+
+    def get_episode_data(
+        self, episodes_idx: np.ndarray | list[int] | None = None
+    ) -> dict[str, list]:
+        """Episode data gathered across sub-datasets, mapped through the
+        global→local episode index. Episodes from sub-datasets missing a
+        key are filled with ``None``."""
+        cols = self.episode_column_names
+        if not cols:
+            return {}
+        if episodes_idx is None:
+            episodes_idx = np.arange(int(self._ep_cum[-1]))
+        episodes_idx = np.asarray(episodes_idx, dtype=np.int64).reshape(-1)
+
+        ds_indices = np.searchsorted(
+            self._ep_cum[1:], episodes_idx, side='right'
+        )
+        local_eps = episodes_idx - self._ep_cum[ds_indices]
+
+        out: dict[str, list] = {k: [None] * len(episodes_idx) for k in cols}
+        for ds_idx in range(len(self.datasets)):
+            mask = ds_indices == ds_idx
+            if not np.any(mask):
+                continue
+            getter = getattr(self.datasets[ds_idx], 'get_episode_data', None)
+            data = getter(local_eps[mask]) if getter is not None else {}
+            positions = np.where(mask)[0]
+            for k, vals in data.items():
+                for pos, v in zip(positions, vals):
+                    out[k][int(pos)] = v
+        return out
 
     def __len__(self) -> int:
         return self._cum[-1]
@@ -458,6 +548,16 @@ class GoalDataset:
     def column_names(self):
         """Columns of the wrapped dataset (goal columns are added per item)."""
         return self.dataset.column_names
+
+    @property
+    def episode_column_names(self) -> list[str]:
+        return getattr(self.dataset, 'episode_column_names', [])
+
+    def get_episode_data(
+        self, episodes_idx: np.ndarray | list[int] | None = None
+    ) -> dict[str, list]:
+        getter = getattr(self.dataset, 'get_episode_data', None)
+        return getter(episodes_idx) if getter is not None else {}
 
     def _sample_goal_kind(self) -> str:
         r = self.rng.random()

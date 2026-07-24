@@ -15,6 +15,7 @@ episode boundaries.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -23,7 +24,7 @@ from typing import Any
 import numpy as np
 
 from .dataset import Dataset
-from .format import get_format
+from .format import EPISODE_DATA_KEY, get_format, split_episode_data
 
 
 Sampler = Callable[[int, 'ReplayBuffer', int, int], Any]
@@ -98,6 +99,9 @@ class ReplayBuffer(Dataset):
         self._head: int = 0
         self._size: int = 0
         self._episodes: deque[tuple[int, int]] = deque()
+        # Episode-scoped data, one dict per stored episode ({} when absent);
+        # kept aligned with `_episodes` through append/evict/clear.
+        self._episode_meta: deque[dict] = deque()
         self._sample_step: int = 0
         self._clip_starts: np.ndarray | None = None
         self._clip_starts_span: int | None = None
@@ -112,10 +116,11 @@ class ReplayBuffer(Dataset):
         """Append one completed episode, every column must already span the full episode."""
         if not ep_data:
             return
+        ep_data, episode_data = split_episode_data(ep_data)
         if self.key_filter is not None:
             ep_data = self.key_filter(ep_data)
-            if not ep_data:
-                return
+        if not ep_data:
+            return
         per_step, ep_len = self._coerce_episode(ep_data)
         if ep_len == 0:
             return
@@ -126,7 +131,7 @@ class ReplayBuffer(Dataset):
             )
         self._ensure_allocated(per_step)
         self._evict_to_fit(ep_len)
-        self._append(per_step, ep_len)
+        self._append(per_step, ep_len, episode_data)
 
     def write_episodes(self, episodes: Iterable[dict]) -> None:
         for ep in episodes:
@@ -135,6 +140,33 @@ class ReplayBuffer(Dataset):
     @property
     def column_names(self) -> list[str]:
         return list(self._cols)
+
+    @property
+    def episode_column_names(self) -> list[str]:
+        seen: set[str] = set()
+        cols: list[str] = []
+        for extra in self._episode_meta:
+            for k in extra:
+                if k not in seen:
+                    seen.add(k)
+                    cols.append(k)
+        return cols
+
+    def get_episode_data(
+        self, episodes_idx: np.ndarray | list[int] | None = None
+    ) -> dict[str, list]:
+        cols = self.episode_column_names
+        if not cols:
+            return {}
+        metas = list(self._episode_meta)
+        if episodes_idx is None:
+            idxs: Any = range(len(metas))
+        else:
+            idxs = [
+                int(i)
+                for i in np.asarray(episodes_idx, dtype=np.int64).reshape(-1)
+            ]
+        return {k: [metas[i].get(k) for i in idxs] for k in cols}
 
     @property
     def num_episodes(self) -> int:
@@ -249,12 +281,16 @@ class ReplayBuffer(Dataset):
     def episodes(self) -> Iterable[dict]:
         """Yield current episodes as ``{col: list[np.ndarray]}`` dicts —
         the per-step-list shape that ``World.collect`` produces and any
-        registered :class:`Writer` accepts."""
-        for ring_start, ep_len in list(self._episodes):
+        registered :class:`Writer` accepts. Episodes stored with
+        episode-scoped data carry it under ``EPISODE_DATA_KEY``."""
+        for (ring_start, ep_len), extra in zip(
+            list(self._episodes), list(self._episode_meta)
+        ):
             positions = (ring_start + np.arange(ep_len)) % self.max_steps
-            yield {
-                col: list(arr[positions]) for col, arr in self._cols.items()
-            }
+            ep = {col: list(arr[positions]) for col, arr in self._cols.items()}
+            if extra:
+                ep[EPISODE_DATA_KEY] = dict(extra)
+            yield ep
 
     def dump(
         self,
@@ -263,16 +299,36 @@ class ReplayBuffer(Dataset):
         mode: str = 'overwrite',
         **kwargs: Any,
     ) -> None:
-        """Persist current contents through the registered writer for ``format``."""
+        """Persist current contents through the registered writer for ``format``.
+
+        Episode-scoped data is forwarded when the target format supports it
+        (``Format.supports_episode_data``) and dropped with a warning
+        otherwise.
+        """
         fmt = get_format(format)
+        episodes: Iterable[dict] = self.episodes()
+        if any(self._episode_meta) and not getattr(
+            fmt, 'supports_episode_data', False
+        ):
+            logging.warning(
+                "ReplayBuffer.dump: format '%s' does not support episode "
+                'data; dropping it (columns %s).',
+                format,
+                self.episode_column_names,
+            )
+            episodes = (
+                {k: v for k, v in ep.items() if k != EPISODE_DATA_KEY}
+                for ep in episodes
+            )
         with fmt.open_writer(path, mode=mode, **kwargs) as writer:
-            writer.write_episodes(self.episodes())
+            writer.write_episodes(episodes)
 
     def clear(self) -> None:
         """Drop all stored episodes; reuse allocated arrays."""
         self._head = 0
         self._size = 0
         self._episodes.clear()
+        self._episode_meta.clear()
         self._invalidate_clip_cache()
 
     def _coerce_episode(
@@ -327,16 +383,23 @@ class ReplayBuffer(Dataset):
         evicted_any = False
         while self._size + ep_len > self.max_steps and self._episodes:
             _, evicted = self._episodes.popleft()
+            self._episode_meta.popleft()
             self._size -= evicted
             evicted_any = True
         if evicted_any:
             self._invalidate_clip_cache()
 
-    def _append(self, per_step: dict[str, np.ndarray], ep_len: int) -> None:
+    def _append(
+        self,
+        per_step: dict[str, np.ndarray],
+        ep_len: int,
+        episode_data: dict | None = None,
+    ) -> None:
         positions = (self._head + np.arange(ep_len)) % self.max_steps
         for col, arr in per_step.items():
             self._cols[col][positions] = arr
         self._episodes.append((self._head, ep_len))
+        self._episode_meta.append(dict(episode_data or {}))
         self._head = (self._head + ep_len) % self.max_steps
         self._size += ep_len
         self._invalidate_clip_cache()

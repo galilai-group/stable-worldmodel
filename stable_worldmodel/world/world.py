@@ -275,6 +275,17 @@ class World:
         squeezed. Columns starting with ``_`` (e.g. ``_needs_flush``)
         are skipped.
 
+        Envs exposing ``get_episode_data()`` on the unwrapped env (a
+        ``{name: str | bytes | np.ndarray}`` mapping snapshotted at reset —
+        values constant within an episode, e.g. a scene XML) have it
+        attached to each finished episode under
+        :data:`~stable_worldmodel.data.EPISODE_DATA_KEY`. It bypasses the
+        batched info dict entirely, so blobs never ride ``world.infos``.
+        Episode data requires a destination that supports it (the
+        ``'lance'`` / ``'lance_video'`` formats or a
+        :class:`~stable_worldmodel.data.ReplayBuffer`); other writers are
+        not episode-data-aware.
+
         Args:
             path: Output path (file or directory, depending on the format).
                 Parent dirs are auto-created. Mutually exclusive with
@@ -293,7 +304,7 @@ class World:
         """
         from tqdm import tqdm
 
-        from stable_worldmodel.data.format import get_format
+        from stable_worldmodel.data.format import EPISODE_DATA_KEY, get_format
 
         if (path is None) == (writer is None):
             raise ValueError(
@@ -345,6 +356,18 @@ class World:
                     buffers[env_idx].clear()
                     if 'action' in ep:
                         ep['action'].append(ep['action'].pop(0))
+                    # `_run_iter` yields done envs before the auto-reset, so
+                    # the env still holds the snapshot of the episode that
+                    # just finished.
+                    ep_data_fn = getattr(
+                        self.envs.envs[env_idx].unwrapped,
+                        'get_episode_data',
+                        None,
+                    )
+                    if ep_data_fn is not None:
+                        ep_extra = ep_data_fn()
+                        if ep_extra:
+                            ep[EPISODE_DATA_KEY] = dict(ep_extra)
                     pbar.update(1)
                     yield ep
 
@@ -513,38 +536,81 @@ class World:
         n = len(episodes_idx)
         assert n == self.num_envs
 
-        init_state, goal_state, dataset_videos = _extract_init_goal(
+        init_rows, goal_rows, dataset_videos = _extract_init_goal(
             dataset,
             episodes_idx,
             start_steps,
             goal_offset,
         )
+        episode_cols = set(
+            getattr(dataset, 'episode_column_names', None) or []
+        )
 
-        self.reset(seed=init_state.get('seed'))
+        seeds = None
+        if init_rows and 'seed' in init_rows[0]:
+            seeds = [
+                int(np.asarray(row['seed']).reshape(-1)[0])
+                for row in init_rows
+            ]
 
-        if callables:
-            merged = {**init_state, **goal_state}
-            for i in range(n):
-                env_init = {k: v[i] for k, v in merged.items()}
-                _apply_callables(
-                    self.envs.envs[i].unwrapped, callables, env_init
+        # Prefer the env's own dataset->reset-options converter when present;
+        # it returns the per-env `options` (e.g. `{'state': ...}`) that reset()
+        # consumes, so a single batched reset restores every env. Envs without
+        # the method fall back to the legacy `callables` config: a plain reset
+        # followed by per-env method calls on the unwrapped env.
+        has_method = hasattr(
+            self.envs.envs[0].unwrapped, 'reset_options_from_dataset'
+        )
+        if has_method:
+            opts_list = [
+                self.envs.envs[i].unwrapped.reset_options_from_dataset(
+                    init_rows[i], goal_rows[i]
                 )
+                for i in range(n)
+            ]
+            self.reset(seed=seeds, options=opts_list)
+        else:
+            self.reset(seed=seeds)
+            if callables:
+                for i in range(n):
+                    env_init = {**init_rows[i], **goal_rows[i]}
+                    _apply_callables(
+                        self.envs.envs[i].unwrapped, callables, env_init
+                    )
 
+        # Inject dataset values into the batched infos: columns whose
+        # per-episode values share one shape are stacked to (N, ...) and
+        # broadcast over the time dim. Episode-scoped columns are excluded
+        # by name and columns with per-episode shapes are skipped — those
+        # exist for the env resets, not for the planner infos.
+        goal_keys = set(goal_rows[0]) if goal_rows else set()
         shape_prefix = self.infos['pixels'].shape[:2]
-        for src, dst_prefix in [(init_state, ''), (goal_state, '')]:
-            for k, v in src.items():
-                key = dst_prefix + k if dst_prefix else k
-                if key in self.infos or key in goal_state:
-                    self.infos[key] = np.broadcast_to(
-                        v[:, None, ...], shape_prefix + v.shape[1:]
-                    ).copy()
+        for rows in (init_rows, goal_rows):
+            if not rows:
+                continue
+            for key in rows[0]:
+                if key == 'action' or key in episode_cols:
+                    continue
+                if key not in self.infos and key not in goal_keys:
+                    continue
+                vals = [row[key] for row in rows]
+                if not all(isinstance(v, np.ndarray) for v in vals):
+                    continue
+                if len({v.shape for v in vals}) > 1:
+                    continue
+                stacked = np.stack(vals)
+                self.infos[key] = np.broadcast_to(
+                    stacked[:, None, ...], shape_prefix + stacked.shape[1:]
+                ).copy()
 
-        goal_snapshot = {k: self.infos[k].copy() for k in goal_state}
+        goal_snapshot = {
+            k: self.infos[k].copy() for k in goal_keys if k in self.infos
+        }
 
         results = {
             'success_rate': 0.0,
             'episode_successes': np.zeros(n, dtype=bool),
-            'seeds': init_state.get('seed'),
+            'seeds': seeds,
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
@@ -568,24 +634,42 @@ class World:
                 {
                     'agent': frames,
                     'dataset': dataset_videos,
-                    'goal': goal_state['goal'],
+                    'goal': [row['goal'] for row in goal_rows],
                 },
             )
         return results
 
 
 def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
+    """Build per-episode init/goal rows for a dataset-driven evaluation.
+
+    Returns ``(init_rows, goal_rows, dataset_videos)``:
+
+    - ``init_rows[i]``: the requested episode's first-step value per
+      per-step column, plus the episode-scoped columns (constants like a
+      scene XML — reported by ``dataset.episode_column_names``).
+    - ``goal_rows[i]``: the last chunk step per per-step column, remapped to
+      ``'goal'`` for ``pixels`` and ``'goal_<col>'`` otherwise.
+    - ``dataset_videos[i]``: the ``pixels`` window, for the eval panel video.
+    """
     ep_idx_arr = np.array(episodes_idx)
     start_arr = np.array(start_steps)
     data = dataset.load_chunk(
         ep_idx_arr, start_arr, start_arr + goal_offset + 1
     )
 
-    init_lists: dict[str, list] = {}
-    goal_lists: dict[str, list] = {}
+    episode_cols = list(getattr(dataset, 'episode_column_names', None) or [])
+    episode_data = (
+        dataset.get_episode_data(episodes_idx) if episode_cols else {}
+    )
+
+    init_rows: list[dict] = []
+    goal_rows: list[dict] = []
     dataset_videos: list = []
 
-    for ep in data:
+    for i, ep in enumerate(data):
+        init_row: dict = {}
+        goal_row: dict = {}
         for col in dataset.column_names:
             if col.startswith('goal'):
                 continue
@@ -595,17 +679,16 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
             if not isinstance(val, (torch.Tensor, np.ndarray)):
                 continue
             arr = val.numpy() if isinstance(val, torch.Tensor) else val
-            init_lists.setdefault(col, []).append(arr[0])
-            goal_lists.setdefault(col, []).append(arr[-1])
+            init_row[col] = arr[0]
+            goal_row['goal' if col == 'pixels' else f'goal_{col}'] = arr[-1]
             if col == 'pixels':
                 dataset_videos.append(arr)
+        for col in episode_cols:
+            init_row[col] = episode_data[col][i]
+        init_rows.append(init_row)
+        goal_rows.append(goal_row)
 
-    init_state = {k: np.stack(v) for k, v in init_lists.items()}
-    goal_state = {}
-    for k, v in goal_lists.items():
-        goal_state['goal' if k == 'pixels' else f'goal_{k}'] = np.stack(v)
-
-    return init_state, goal_state, dataset_videos
+    return init_rows, goal_rows, dataset_videos
 
 
 def _apply_callables(env, callables, init_state):

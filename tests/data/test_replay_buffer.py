@@ -3,13 +3,17 @@ Dataset and a Writer."""
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytest
 import torch
 
 from stable_worldmodel.data import (
+    EPISODE_DATA_KEY,
     FolderDataset,
     HDF5Dataset,
+    LanceDataset,
     ReplayBuffer,
 )
 from stable_worldmodel.data.dataset import Dataset
@@ -685,6 +689,96 @@ class TestDump:
         for ep in eps:
             assert isinstance(ep['action'], list)
             assert all(isinstance(x, np.ndarray) for x in ep['action'])
+
+
+class TestEpisodeData:
+    def _ep(self, n_steps: int, tag: int, *, seed: int = 0) -> dict:
+        ep = _episode(n_steps, seed=seed)
+        ep[EPISODE_DATA_KEY] = {'model_xml': f'<scene {tag}/>', 'idx': tag}
+        return ep
+
+    def test_store_and_read(self):
+        buf = ReplayBuffer(max_steps=100)
+        buf.write_episode(self._ep(5, 0))
+        buf.write_episode(self._ep(4, 1, seed=1))
+
+        assert buf.episode_column_names == ['model_xml', 'idx']
+        assert buf.get_episode_data()['idx'] == [0, 1]
+        assert buf.get_episode_data([1, 0, 1])['idx'] == [1, 0, 1]
+        # The reserved key never becomes a per-step column.
+        assert EPISODE_DATA_KEY not in buf.column_names
+        assert 'model_xml' not in buf.column_names
+
+    def test_split_happens_before_coercion(self):
+        buf = ReplayBuffer(max_steps=10)
+        with pytest.raises(ValueError, match='scalar'):
+            buf.write_episode({'action': 42, EPISODE_DATA_KEY: {'x': 1}})
+
+    def test_evict_keeps_alignment(self):
+        buf = ReplayBuffer(max_steps=8)
+        for tag in range(3):
+            buf.write_episode(self._ep(4, tag, seed=tag))
+        # 3 * 4 steps > 8 -> the oldest episode was evicted with its data.
+        assert buf.num_episodes == 2
+        assert buf.get_episode_data()['idx'] == [1, 2]
+
+    def test_clear_drops_episode_data(self):
+        buf = ReplayBuffer(max_steps=100)
+        buf.write_episode(self._ep(5, 0))
+        buf.clear()
+        assert buf.episode_column_names == []
+        assert buf.get_episode_data() == {}
+        buf.write_episode(_episode(5))
+        assert buf.get_episode_data() == {}
+
+    def test_episodes_reattach_key(self):
+        buf = ReplayBuffer(max_steps=100)
+        buf.write_episode(self._ep(5, 0))
+        buf.write_episode(_episode(4, seed=1))
+
+        eps = list(buf.episodes())
+        assert eps[0][EPISODE_DATA_KEY] == {
+            'model_xml': '<scene 0/>',
+            'idx': 0,
+        }
+        assert EPISODE_DATA_KEY not in eps[1]
+
+    def test_mixed_meta_none_fill(self):
+        buf = ReplayBuffer(max_steps=100)
+        buf.write_episode(self._ep(5, 0))
+        buf.write_episode(_episode(4, seed=1))
+        assert buf.get_episode_data()['idx'] == [0, None]
+
+    def test_dump_to_lance_forwards(self, tmp_path):
+        buf = ReplayBuffer(max_steps=100)
+        buf.write_episode(self._ep(5, 0))
+        buf.write_episode(self._ep(4, 1, seed=1))
+
+        out = tmp_path / 'dump.lance'
+        buf.dump(out, format='lance')
+
+        ds = LanceDataset(path=out)
+        assert ds.lengths.tolist() == [5, 4]
+        assert ds.get_episode_data()['idx'] == [0, 1]
+        assert ds.get_episode_data()['model_xml'] == [
+            '<scene 0/>',
+            '<scene 1/>',
+        ]
+
+    def test_dump_to_folder_drops_with_warning(self, tmp_path, caplog):
+        buf = ReplayBuffer(max_steps=100)
+        buf.write_episode(self._ep(5, 0))
+
+        out = tmp_path / 'folder_out'
+        with caplog.at_level(logging.WARNING):
+            buf.dump(out, format='folder')
+        assert any(
+            'does not support episode data' in rec.getMessage()
+            for rec in caplog.records
+        )
+        # The folder writer never saw the reserved key and reloads cleanly.
+        ds = FolderDataset(path=out, num_steps=1)
+        np.testing.assert_array_equal(ds.lengths, [5])
 
 
 class TestClear:

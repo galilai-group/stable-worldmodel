@@ -11,10 +11,12 @@ a window needs. The idea is borrowed from the ``lerobot-lancedb`` plugin's
 window model and to data that arrives as raw frames (so we encode the MP4
 ourselves instead of copying source files).
 
-Two-table layout::
+Two-table layout (plus the optional episode-data side table shared with the
+plain lance format)::
 
     <table>.lance/          # frames table: episode_idx, step_idx, tabular cols
     <table>_videos.lance/   # one row per (episode, image col); video_bytes blob
+    <table>_episodes.lance/ # one row per episode: episode-scoped data
 
 Trade-off vs the frame-level Lance format: far smaller on disk (video codec
 beats per-frame JPEG) at the cost of a seek + decode per window. Because swm
@@ -25,6 +27,7 @@ drawn from the same episode.
 from __future__ import annotations
 
 import io
+import logging
 import os
 import tempfile
 from collections import OrderedDict
@@ -41,12 +44,15 @@ import pyarrow as pa
 from stable_worldmodel.data.format import (
     Format,
     register_format,
+    split_episode_data,
     validate_write_mode,
 )
 from stable_worldmodel.data.formats.lance import (
     LanceDataset,
+    _episode_rows_table,
     _force_forkserver,
     _is_image_name,
+    _settle_episode_keys,
     _to_lance_name,
 )
 
@@ -247,7 +253,7 @@ class LanceVideoDataset(LanceDataset):
             cands = [
                 t
                 for t in sorted(p.glob('*.lance'))
-                if not t.stem.endswith('_videos')
+                if not t.stem.endswith(('_videos', '_episodes'))
             ]
             if len(cands) == 1:
                 return str(p), cands[0].stem
@@ -423,6 +429,9 @@ class LanceVideoWriter:
     are encoded to MP4 and stored in the ``_videos`` table as blob-v2
     ``large_binary``. Everything else lands in the frames table as fixed-size
     float32 lists, exactly like :class:`~stable_worldmodel.data.formats.lance.LanceWriter`.
+    Episode-scoped data (the ``EPISODE_DATA_KEY`` entry of an episode dict)
+    goes to a ``<table>_episodes`` side table with the same layout and key-set
+    consistency rules as the plain lance format.
 
     Video blobs are compressed and buffered until close (raw frames are encoded
     and discarded per episode, so memory stays bounded to the codec output).
@@ -456,6 +465,7 @@ class LanceVideoWriter:
 
         Path(self.uri).mkdir(parents=True, exist_ok=True)
         self.videos_name = f'{self.table_name}_videos'
+        self.episodes_name = f'{self.table_name}_episodes'
         self.fps = fps
         self.codec = codec
         self.connect_kwargs = connect_kwargs or {}
@@ -470,6 +480,9 @@ class LanceVideoWriter:
         self._ep_idx = 0
         self._frames_batches: list[pa.RecordBatch] = []
         self._video_rows: list[tuple[int, str, bytes]] = []
+        self._episode_rows: list[dict] = []
+        self._ep_keys: tuple[str, ...] | None = None
+        self._ep_schema: pa.Schema | None = None
 
     def __enter__(self):
         self._db = lancedb.connect(self.uri, **self.connect_kwargs)
@@ -485,8 +498,20 @@ class LanceVideoWriter:
                 self._db.drop_table(self.table_name)
                 if self.videos_name in existing:
                     self._db.drop_table(self.videos_name)
+                if self.episodes_name in existing:
+                    self._db.drop_table(self.episodes_name)
             else:
                 self._load_existing_state()
+        elif self.episodes_name in existing:
+            # Frames table gone but its side table survived (e.g. an
+            # interrupted overwrite): the orphan can only desync the new
+            # session, so drop it.
+            logging.warning(
+                'LanceVideoWriter: dropping orphaned episode-data table '
+                "'%s' (no frames table found).",
+                self.episodes_name,
+            )
+            self._db.drop_table(self.episodes_name)
         return self
 
     def __exit__(self, *exc):
@@ -515,6 +540,13 @@ class LanceVideoWriter:
             .column('video_key')
             .to_pylist()
         }
+        if self.episodes_name in self._db.list_tables().tables:
+            self._ep_schema = self._db.open_table(self.episodes_name).schema
+            self._ep_keys = tuple(
+                sorted(n for n in self._ep_schema.names if n != 'episode_idx')
+            )
+        else:
+            self._ep_keys = ()
         self._appending = True
 
     def write_episode(self, ep_data: dict) -> None:
@@ -533,6 +565,19 @@ class LanceVideoWriter:
 
     def _consume_episodes(self, episodes) -> None:
         for ep_data in episodes:
+            ep_data, ep_extra = split_episode_data(ep_data)
+            self._ep_keys = _settle_episode_keys(
+                self._ep_keys,
+                ep_extra,
+                appending=self._appending,
+                writer_name='LanceVideoWriter',
+                table_name=self.table_name,
+                episodes_table_name=self.episodes_name,
+            )
+            if ep_extra:
+                self._episode_rows.append(
+                    {'episode_idx': self._ep_idx, **ep_extra}
+                )
             if self._frames_schema is None:
                 self._init_schema(ep_data)
             elif not self._rename_map:
@@ -661,6 +706,15 @@ class LanceVideoWriter:
             self._db.create_table(
                 self.videos_name, data=videos_batch, schema=videos_schema
             )
+        if self._episode_rows:
+            rows, self._episode_rows = self._episode_rows, []
+            tbl, self._ep_schema = _episode_rows_table(rows, self._ep_schema)
+            if self.episodes_name in self._db.list_tables().tables:
+                self._db.open_table(self.episodes_name).add(tbl)
+            else:
+                self._db.create_table(
+                    self.episodes_name, data=tbl, schema=self._ep_schema
+                )
         self._frames_batches.clear()
         self._video_rows.clear()
 
@@ -668,6 +722,7 @@ class LanceVideoWriter:
 @register_format
 class LanceVideo(Format):
     name = 'lance_video'
+    supports_episode_data = True
 
     @classmethod
     def detect(cls, path) -> bool:

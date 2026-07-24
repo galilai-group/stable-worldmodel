@@ -254,7 +254,9 @@ def convert(
     Reads each episode from *source* and writes it through the writer of
     *dest_format*. Format detection follows the same rules as
     :func:`load_dataset` — autodetect by default, or pass ``source_format``
-    explicitly.
+    explicitly. Episode-scoped data is carried through when the destination
+    format supports it (``Format.supports_episode_data``) and dropped with
+    a warning otherwise.
 
     Args:
         source (str | Path): Path or identifier accepted by :func:`load_dataset`.
@@ -270,10 +272,21 @@ def convert(
         from stable_worldmodel.data import convert
         convert('data.lance', 'data_video', dest_format='video')
     """
-    from stable_worldmodel.data.format import get_format
+    from stable_worldmodel.data.format import EPISODE_DATA_KEY, get_format
 
     src = load_dataset(source, cache_dir=cache_dir, format=source_format)
     writer_cls = get_format(dest_format)
+
+    ep_cols = list(getattr(src, 'episode_column_names', None) or [])
+    carry_episode_data = bool(ep_cols)
+    if carry_episode_data and not getattr(
+        writer_cls, 'supports_episode_data', False
+    ):
+        logging.warning(
+            f"convert: destination format '{dest_format}' does not support "
+            f'episode data; dropping episode columns {ep_cols}.'
+        )
+        carry_episode_data = False
 
     iterator = range(len(src.lengths))
     if progress:
@@ -282,7 +295,11 @@ def convert(
     def episodes():
         for ep_idx in iterator:
             ep = src.load_episode(ep_idx)
-            yield _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+            step_ep = _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+            if carry_episode_data:
+                extra = src.get_episode_data([ep_idx])
+                step_ep[EPISODE_DATA_KEY] = {k: v[0] for k, v in extra.items()}
+            yield step_ep
 
     with writer_cls.open_writer(dest, **dest_kwargs) as writer:
         writer.write_episodes(episodes())
@@ -330,7 +347,7 @@ def merge(
         from stable_worldmodel.data import merge
         merge(['shard0', 'shard1', 'shard2'], 'combined', dest_format='lance')
     """
-    from stable_worldmodel.data.format import get_format
+    from stable_worldmodel.data.format import EPISODE_DATA_KEY, get_format
 
     sources = list(sources)
     if len(sources) < 2:
@@ -345,18 +362,19 @@ def merge(
 
     # Pre-flight column check. Within a single writer session the schema is
     # fixed by the first episode and a later mismatch surfaces only as an
-    # opaque Arrow key error, so compare column sets up front to fail fast with
-    # an actionable message before any data is written.
+    # opaque Arrow key error, so compare column sets (per-step and
+    # episode-scoped) up front to fail fast with an actionable message
+    # before any data is written.
     reference = None
+    ep_reference: set[str] = set()
     for i, source in enumerate(sources):
-        cols = set(
-            load_dataset(
-                source, cache_dir=cache_dir, format=_fmt(i)
-            ).column_names
-        )
+        ds = load_dataset(source, cache_dir=cache_dir, format=_fmt(i))
+        cols = set(ds.column_names)
+        ep_cols = set(getattr(ds, 'episode_column_names', None) or [])
         if reference is None:
-            reference, ref_source = cols, source
-        elif cols != reference:
+            reference, ep_reference, ref_source = cols, ep_cols, source
+            continue
+        if cols != reference:
             missing = sorted(reference - cols)
             extra = sorted(cols - reference)
             raise ValueError(
@@ -364,6 +382,23 @@ def merge(
                 f'missing {missing}; unexpected {extra}. '
                 'All sources must share the same columns.'
             )
+        if ep_cols != ep_reference:
+            raise ValueError(
+                f'merge: episode-data column mismatch between {ref_source!r} '
+                f'and {source!r}: missing {sorted(ep_reference - ep_cols)}; '
+                f'unexpected {sorted(ep_cols - ep_reference)}. '
+                'All sources must share the same episode-data columns.'
+            )
+
+    carry_episode_data = bool(ep_reference)
+    if carry_episode_data and not getattr(
+        writer_cls, 'supports_episode_data', False
+    ):
+        logging.warning(
+            f"merge: destination format '{dest_format}' does not support "
+            f'episode data; dropping episode columns {sorted(ep_reference)}.'
+        )
+        carry_episode_data = False
 
     def episodes():
         for i, source in enumerate(sources):
@@ -373,7 +408,13 @@ def merge(
                 iterator = tqdm(iterator, desc=f'Merging {source}')
             for ep_idx in iterator:
                 ep = src.load_episode(ep_idx)
-                yield _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+                step_ep = _episode_to_step_lists(ep, int(src.lengths[ep_idx]))
+                if carry_episode_data:
+                    extra = src.get_episode_data([ep_idx])
+                    step_ep[EPISODE_DATA_KEY] = {
+                        k: v[0] for k, v in extra.items()
+                    }
+                yield step_ep
 
     with writer_cls.open_writer(dest, mode=mode, **dest_kwargs) as writer:
         writer.write_episodes(episodes())

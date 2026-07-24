@@ -9,6 +9,7 @@ from .normalization import (
 from .utils import column_normalizer
 from .buffer import ReplayBuffer, classic_filter
 from .format import (
+    EPISODE_DATA_KEY,
     FORMATS,
     WRITE_MODES,
     Format,
@@ -17,6 +18,7 @@ from .format import (
     get_format,
     list_formats,
     register_format,
+    split_episode_data,
     validate_write_mode,
 )
 
@@ -52,6 +54,7 @@ except ImportError:
 
 
 __all__ = [
+    'EPISODE_DATA_KEY',
     'FORMATS',
     'Format',
     'FolderDataset',
@@ -73,5 +76,6 @@ __all__ = [
     'get_scaler',
     'list_formats',
     'register_format',
+    'split_episode_data',
     'validate_write_mode',
 ]
