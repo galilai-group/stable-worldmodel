@@ -55,10 +55,14 @@ Datasets and checkpoints are stored under `$STABLEWM_HOME` (defaults to `~/.stab
 ```python
 import stable_worldmodel as swm
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
-from stable_worldmodel.solver import CEMSolver
+from stable_worldmodel.planning import (
+    CEMSolver,
+    GoalMSE,
+    ShootingCostEvaluator,
+)
 
 # 1. Collect a dataset
-world = swm.World("swm/PushT-v1", num_envs=8)
+world = swm.World("swm/PushT-v1", num_envs=8, image_shape=(64, 64))
 world.set_policy(your_expert_policy)
 world.collect("data/pusht_demo.lance", episodes=100, seed=0)
 
@@ -67,8 +71,12 @@ dataset = swm.data.load_dataset("data/pusht_demo.lance", num_steps=16)
 world_model = ...  # your model
 
 # 3. Evaluate with model-predictive control
-solver = CEMSolver(model=world_model, num_samples=300)
-policy = WorldModelPolicy(solver=solver, config=PlanConfig(horizon=10))
+cost = ShootingCostEvaluator(model=world_model, objective=GoalMSE())
+solver = CEMSolver(cost=cost, num_samples=300)
+policy = WorldModelPolicy(
+    solver=solver,
+    config=PlanConfig(horizon=10, receding_horizon=1),
+)
 
 world.set_policy(policy)
 results = world.evaluate(episodes=50)
