@@ -39,6 +39,7 @@ train = [
     "transformers>=4.50.0",
     "stable-pretraining>=0.1.8",
     "datasets>=2.20.0",
+    "hydra-core",
     "hydra-submitit-launcher",
     "wandb",
 ]
