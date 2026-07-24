@@ -977,10 +977,10 @@ def test_history_stacks_block_boundary_frames_and_executed_blocks():
 
     assert len(solver.received) == 2
 
-    # episode start: repeat-oldest frame padding + zero action blocks
+    # episode start: a single real frame, no padding, no action history
     first = solver.received[0]
-    torch.testing.assert_close(first['pixels'][0, :, 0, 0, 0], torch.zeros(3))
-    torch.testing.assert_close(first['action_history'], torch.zeros(1, 2, 4))
+    torch.testing.assert_close(first['pixels'][0, :, 0, 0, 0], torch.zeros(1))
+    assert 'action_history' not in first
 
     # second replan: frames at block boundaries 2, 4, 6
     second = solver.received[1]
@@ -994,9 +994,10 @@ def test_history_stacks_block_boundary_frames_and_executed_blocks():
     torch.testing.assert_close(second['action_history'][0], plan0[1:3])
 
 
-def test_history_flush_resets_to_padded_reset_frame():
+def test_history_flush_resets_to_single_reset_frame():
     """_needs_flush clears the history; the reset frame enters exactly once
-    and the immediate replan is padded from it with zero action history."""
+    and the immediate replan sees only that frame, with no stale context
+    and no action history."""
     policy, solver = _history_policy()
 
     action = None
@@ -1010,10 +1011,9 @@ def test_history_flush_resets_to_padded_reset_frame():
     assert len(policy._history_buffer._buffers[0]) == 1
     rec = solver.received[-1]
     torch.testing.assert_close(
-        rec['pixels'][0, :, 0, 0, 0], torch.full((3,), 99.0)
+        rec['pixels'][0, :, 0, 0, 0], torch.full((1,), 99.0)
     )
-    torch.testing.assert_close(rec['action_history'], torch.zeros(1, 2, 4))
-    assert not torch.isnan(rec['action_history']).any()
+    assert 'action_history' not in rec
 
 
 def test_history_dead_env_not_replanned():
@@ -1026,7 +1026,8 @@ def test_history_dead_env_not_replanned():
 
     rec = solver.received[0]
     assert rec['pixels'].shape[0] == 1
-    assert rec['action_history'].shape == (1, 2, 4)
+    assert rec['pixels'].shape[1] == 1  # first plan: 1-frame context
+    assert 'action_history' not in rec
 
 
 def test_history_selective_replan_uses_env_own_history():
@@ -1042,9 +1043,68 @@ def test_history_selective_replan_uses_env_own_history():
 
     rec = solver.received[-1]
     assert rec['pixels'].shape[0] == 1
-    # env 0 has entries for steps 0 and 1 only: one strided frame (step 1),
-    # padded by repetition; no executed blocks yet -> zeros
-    torch.testing.assert_close(rec['pixels'][0, :, 0, 0, 0], torch.ones(3))
-    torch.testing.assert_close(rec['action_history'], torch.zeros(1, 2, 4))
+    # env 0 has entries for steps 0 and 1 only: one strided frame (step 1)
+    # and no executed blocks yet -> 1-frame context, no action history
+    torch.testing.assert_close(rec['pixels'][0, :, 0, 0, 0], torch.ones(1))
+    assert 'action_history' not in rec
     # env 1 kept draining its plan
     assert len(policy._action_buffer[1]) == 4
+
+
+def test_history_context_grows_without_padding():
+    """Early replans receive only the real frames accumulated so far: the
+    context grows 1 -> history_len across block boundaries, with no
+    synthetic frames and an action history of matching length."""
+    solver = RecordingBlockSolver()
+    config = PlanConfig(
+        horizon=4,
+        receding_horizon=1,
+        history_len=3,
+        action_block=2,
+    )
+    policy = WorldModelPolicy(solver=solver, config=config)
+    policy.set_env(_history_env())
+
+    action = None
+    for step in range(7):  # replans every 2 steps: 0, 2, 4, 6
+        action = policy.get_action(_step_info(step, action=action))
+
+    frames = [rec['pixels'][0, :, 0, 0, 0] for rec in solver.received]
+    torch.testing.assert_close(frames[0], torch.tensor([0.0]))
+    torch.testing.assert_close(frames[1], torch.tensor([0.0, 2.0]))
+    torch.testing.assert_close(frames[2], torch.tensor([0.0, 2.0, 4.0]))
+    torch.testing.assert_close(frames[3], torch.tensor([2.0, 4.0, 6.0]))
+
+    assert 'action_history' not in solver.received[0]
+    assert solver.received[1]['action_history'].shape == (1, 1, 4)
+    assert solver.received[2]['action_history'].shape == (1, 2, 4)
+    assert solver.received[3]['action_history'].shape == (1, 2, 4)
+
+
+def test_history_mixed_fill_batch_pads_only_short_env():
+    """When a replan batch mixes a freshly reset env with a full-history
+    env, the context length follows the fullest env and only the short
+    env is padded (repeat-oldest frames, zero action blocks)."""
+    policy, solver = _history_policy(n_envs=2)
+
+    action = None
+    for step in range(7):
+        action = policy.get_action(_step_info(step, n_envs=2, action=action))
+
+    # env 0 resets (flush); env 1 is forced to replan alongside it
+    policy._action_buffer[1].clear()
+    info = _step_info(99, n_envs=2)
+    info['_needs_flush'] = np.array([True, False])
+    policy.get_action(info)
+
+    rec = solver.received[-1]
+    assert rec['pixels'].shape[0] == 2
+    # short env: its single real frame repeated, zero action blocks
+    torch.testing.assert_close(
+        rec['pixels'][0, :, 0, 0, 0], torch.full((3,), 99.0)
+    )
+    torch.testing.assert_close(rec['action_history'][0], torch.zeros(2, 4))
+    # full env: real strided frames from its own past
+    torch.testing.assert_close(
+        rec['pixels'][1, :, 0, 0, 0], torch.tensor([3.0, 5.0, 99.0])
+    )
