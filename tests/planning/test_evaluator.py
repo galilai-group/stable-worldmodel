@@ -150,6 +150,28 @@ def test_encode_goal_none_skips_goal_encoding():
     assert cost.shape == (B, S)
 
 
+def test_goal_encode_drops_action_history():
+    """Executed past actions are planning context, not goal content: the
+    goal-encode dict must never carry ``action_history``."""
+    torch.manual_seed(0)
+    model = FakeLeWM()
+    info = _make_info_dict()
+    info['action_history'] = torch.randn(B, S, T - 1, A)
+    ac = _make_action_candidates()
+
+    seen = []
+    orig_encode = model.encode
+
+    def spy(goal_dict):
+        seen.append(set(goal_dict))
+        return orig_encode(goal_dict)
+
+    model.encode = spy  # type: ignore[method-assign]
+    cost = ShootingCostEvaluator(model, GoalMSE()).get_cost(_clone(info), ac)
+    assert cost.shape == (B, S)
+    assert seen and all('action_history' not in keys for keys in seen)
+
+
 # ---------------------------------------------------------------------------
 # Constraints: feature-detected via attribute presence
 # ---------------------------------------------------------------------------

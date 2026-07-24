@@ -33,6 +33,7 @@ _LAZY_ATTRS = {
 
 if TYPE_CHECKING:
     from stable_worldmodel import (
+        buffer,
         data,
         planning,
         policy,
@@ -49,6 +50,7 @@ __all__ = [
     'World',
     'PlanConfig',
     'pretraining',
+    'buffer',
     'data',
     'envs',
     'planning',

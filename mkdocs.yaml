@@ -39,6 +39,7 @@ nav:
   - API:
       - api/world.md
       - api/policy.md
+      - api/buffer.md
       - api/solver.md
       - api/planning.md
       - api/spaces.md

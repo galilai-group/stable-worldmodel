@@ -91,12 +91,17 @@ class Dynamics(Protocol):
 
         Args:
             info_dict: Dictionary containing environment state information.
-            action_candidates: Tensor of proposed action sequences of shape
-                ``(B, S, H, action_dim)``.
+                ``pixels`` holds ``H`` context frames ``(B, S, H, C, h, w)``;
+                when ``H > 1`` the executed action blocks between those
+                frames must be provided as ``action_history`` of shape
+                ``(B, S, H - 1, action_dim)``.
+            action_candidates: Tensor of proposed strictly-future action
+                sequences of shape ``(B, S, horizon, action_dim)``.
 
         Returns:
             The dictionary populated with rollout outputs (e.g.
-            ``predicted_emb`` of shape ``(B, S, T-1, dim)``).
+            ``predicted_emb`` of shape ``(B, S, H + horizon, dim)``, whose
+            first ``H`` entries are the encoded context frames).
         """
         ...
 

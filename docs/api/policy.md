@@ -65,6 +65,12 @@ policy = FeedForwardPolicy(
 !!! note "Protocol"
     All policies must implement the `get_action(obs, **kwargs)` method. The `World` class automatically calls `set_env()` when a policy is attached.
 
+!!! note "Planning with observation history"
+    With `PlanConfig(history_len > 1)`, `WorldModelPolicy` keeps a per-env [`HistoryBuffer`](buffer.md) over its `history_keys` (default `('pixels',)`) plus the executed actions. At each replan the solver's info dict carries the frames at the last `history_len` block boundaries (`pixels` gains a real time dim) and the executed action blocks between them under `action_history` (solver space, one flattened block of `action_block` env actions per step). Candidates remain strictly future — see the [rollout contract](planning.md#the-rollout-contract). Markovian `Costable` models (TD-MPC2) only support the default `history_len=1`.
+
+!!! warning "Episode-start warm-up feeds synthetic context"
+    For the first `(history_len - 1) * action_block` env steps of each episode there is not enough real history yet, and the world model receives **fake repeated frames**: the missing context slots are filled with copies of the episode's first frame, with zero action blocks between them (as if the env had been stationary before the episode began). All context is real after that window. See the [buffer warm-up docs](buffer.md#warm-up) for the rationale.
+
 ::: stable_worldmodel.policy.PlanConfig
     options:
         heading_level: 2

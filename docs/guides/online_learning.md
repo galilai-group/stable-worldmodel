@@ -60,6 +60,9 @@ batch = buf.sample(batch_size=64)  # {col: (64, history_len, ...)} numpy arrays
 buf.dump('runs/replay.h5', format='hdf5')
 ```
 
+!!! note "`ReplayBuffer.history_len` vs `PlanConfig.history_len`"
+    These are different axes: `ReplayBuffer.history_len` is the length of the training clips sampled from stored episodes, while [`PlanConfig.history_len`](../api/policy.md) is the number of past observation frames the planner feeds the world model at inference time. Matching them (e.g. both 3, at the same frameskip/`action_block`) keeps the model's planning-time context identical to its training context.
+
 ## **[ Filling the Buffer ]**
 
 The buffer implements the same `Writer` protocol as `HDF5Writer`, `FolderWriter`, etc. — `write_episode(ep_dict)` plus the `with`-statement entry/exit hooks. So anywhere a `Writer` fits, the buffer fits.
