@@ -1,6 +1,6 @@
 [project]
 name = "stable-worldmodel"
-version = "0.0.6"
+version = "0.1.1"
 description = "World Model Research Made Simple"
 readme="README.md"
 license="MIT"
@@ -28,6 +28,7 @@ dependencies = [
   "tqdm",
   "typer",
   "rich",
+  "hydra-core",
 ]
 
 [project.scripts]
@@ -51,23 +52,31 @@ env = [
     "minigrid",
     "gymnasium[all]",
     "gymnasium-robotics",
-    "opencv-python",
+    "opencv-python-headless",
     "stable_baselines3>=2.0.0",
     "craftax>=1.5.0",
     "ale-py",
 ]
 
 format = [
-    "lerobot>=0.5.0; python_version >= '3.12'",
     "h5py",
     "hdf5plugin",
-    "decord",
+    "torchcodec",
     "imageio[ffmpeg]",
+]
+
+lerobot = [
+    "lerobot>=0.5.0; python_version >= '3.12'",
+]
+
+all = [
+    "stable-worldmodel[train,env,format]",
 ]
 
 [dependency-groups]
 dev = [
   "ipdb",
+  "pre-commit",
   "pytest",
   "pytest-cov>=7.0.0",
   "ruff",
@@ -75,7 +84,7 @@ dev = [
   "mkdocs-shadcn",
   "pymdown-extensions",
   "pillow",
-  "decord",
+  "torchcodec",
   "imageio[ffmpeg]",
   "mkdocstrings[python]",
 ]

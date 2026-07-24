@@ -5,10 +5,10 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import PlanConfig
-from stable_worldmodel.solver.cem import CEMSolver
-from stable_worldmodel.solver.gd import GradientSolver
-from stable_worldmodel.solver.icem import ICEMSolver
-from stable_worldmodel.solver.mppi import MPPISolver
+from stable_worldmodel.planning.solver.cem import CEMSolver
+from stable_worldmodel.planning.solver.gd import GradientSolver
+from stable_worldmodel.planning.solver.icem import ICEMSolver
+from stable_worldmodel.planning.solver.mppi import MPPISolver
 
 
 class DummyCostModel:
@@ -30,8 +30,8 @@ class DummyCostModel:
 def test_cem_solver_init():
     """Test CEMSolver initialization."""
     model = DummyCostModel()
-    solver = CEMSolver(model=model, n_steps=10, num_samples=100)
-    assert solver.model is model
+    solver = CEMSolver(cost=model, n_steps=10, num_samples=100)
+    assert solver.cost is model
     assert solver.n_steps == 10
     assert solver.num_samples == 100
 
@@ -39,7 +39,7 @@ def test_cem_solver_init():
 def test_cem_solver_configure():
     """Test CEMSolver configuration."""
     model = DummyCostModel()
-    solver = CEMSolver(model=model, n_steps=10)
+    solver = CEMSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(4, 2), dtype=np.float32
     )
@@ -56,7 +56,7 @@ def test_cem_solver_configure():
 def test_cem_solver_configure_discrete_warning(caplog):
     """Test CEMSolver warns on discrete action space."""
     model = DummyCostModel()
-    solver = CEMSolver(model=model, n_steps=10)
+    solver = CEMSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Discrete(5)
     config = PlanConfig(horizon=5, receding_horizon=3)
 
@@ -69,7 +69,7 @@ def test_cem_solver_configure_discrete_warning(caplog):
 def test_cem_solver_init_action_distrib():
     """Test CEMSolver action distribution initialization."""
     model = DummyCostModel()
-    solver = CEMSolver(model=model, n_steps=10)
+    solver = CEMSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 3), dtype=np.float32
     )
@@ -84,7 +84,7 @@ def test_cem_solver_init_action_distrib():
 def test_cem_solver_init_action_distrib_with_init():
     """Test CEMSolver action distribution with initial actions."""
     model = DummyCostModel()
-    solver = CEMSolver(model=model, n_steps=10)
+    solver = CEMSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 3), dtype=np.float32
     )
@@ -100,7 +100,7 @@ def test_cem_solver_call():
     """Test CEMSolver __call__ method."""
     model = DummyCostModel()
     solver = CEMSolver(
-        model=model, n_steps=2, num_samples=50, batch_size=2, topk=10
+        cost=model, n_steps=2, num_samples=50, batch_size=2, topk=10
     )
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 2), dtype=np.float32
@@ -124,9 +124,9 @@ def test_icem_solver_init():
     """Test ICEMSolver initialization."""
     model = DummyCostModel()
     solver = ICEMSolver(
-        model=model, n_steps=10, num_samples=100, noise_beta=2.0
+        cost=model, n_steps=10, num_samples=100, noise_beta=2.0
     )
-    assert solver.model is model
+    assert solver.cost is model
     assert solver.n_steps == 10
     assert solver.num_samples == 100
     assert solver.noise_beta == 2.0
@@ -137,7 +137,7 @@ def test_icem_solver_init():
 def test_icem_solver_configure():
     """Test ICEMSolver configuration."""
     model = DummyCostModel()
-    solver = ICEMSolver(model=model, n_steps=10)
+    solver = ICEMSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(4, 2), dtype=np.float32
     )
@@ -156,7 +156,7 @@ def test_icem_solver_configure():
 def test_icem_solver_init_action_distrib():
     """Test ICEMSolver action distribution initialization."""
     model = DummyCostModel()
-    solver = ICEMSolver(model=model, n_steps=10)
+    solver = ICEMSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 3), dtype=np.float32
     )
@@ -172,7 +172,7 @@ def test_icem_solver_call():
     """Test ICEMSolver __call__ method."""
     model = DummyCostModel()
     solver = ICEMSolver(
-        model=model, n_steps=2, num_samples=50, batch_size=2, topk=10
+        cost=model, n_steps=2, num_samples=50, batch_size=2, topk=10
     )
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 2), dtype=np.float32
@@ -191,7 +191,7 @@ def test_icem_solver_white_noise_fallback():
     """Test ICEMSolver with beta=0 (white noise, equivalent to standard CEM)."""
     model = DummyCostModel()
     solver = ICEMSolver(
-        model=model,
+        cost=model,
         n_steps=2,
         num_samples=50,
         batch_size=2,
@@ -219,8 +219,8 @@ def test_icem_solver_white_noise_fallback():
 def test_mppi_solver_init():
     """Test MPPISolver initialization."""
     model = DummyCostModel()
-    solver = MPPISolver(model=model, n_steps=10, temperature=0.5)
-    assert solver.model is model
+    solver = MPPISolver(cost=model, n_steps=10, temperature=0.5)
+    assert solver.cost is model
     assert solver.n_steps == 10
     assert solver.temperature == 0.5
 
@@ -228,7 +228,7 @@ def test_mppi_solver_init():
 def test_mppi_solver_configure():
     """Test MPPISolver configuration."""
     model = DummyCostModel()
-    solver = MPPISolver(model=model, n_steps=10)
+    solver = MPPISolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(4, 2), dtype=np.float32
     )
@@ -245,7 +245,7 @@ def test_mppi_solver_configure():
 def test_mppi_solver_init_action_distrib():
     """Test MPPISolver action distribution initialization."""
     model = DummyCostModel()
-    solver = MPPISolver(model=model, n_steps=10)
+    solver = MPPISolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 3), dtype=np.float32
     )
@@ -260,7 +260,7 @@ def test_mppi_solver_init_action_distrib():
 def test_mppi_solver_call():
     """Test MPPISolver __call__ method."""
     model = DummyCostModel()
-    solver = MPPISolver(model=model, n_steps=2, num_samples=10, batch_size=2)
+    solver = MPPISolver(cost=model, n_steps=2, num_samples=10, batch_size=2)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 2), dtype=np.float32
     )
@@ -282,8 +282,8 @@ def test_mppi_solver_call():
 def test_gradient_solver_init():
     """Test GradientSolver initialization."""
     model = DummyCostModel()
-    solver = GradientSolver(model=model, n_steps=10)
-    assert solver.model is model
+    solver = GradientSolver(cost=model, n_steps=10)
+    assert solver.cost is model
     assert solver.n_steps == 10
     assert solver._configured is False
 
@@ -291,7 +291,7 @@ def test_gradient_solver_init():
 def test_gradient_solver_configure():
     """Test GradientSolver configuration."""
     model = DummyCostModel()
-    solver = GradientSolver(model=model, n_steps=10)
+    solver = GradientSolver(cost=model, n_steps=10)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(4, 2), dtype=np.float32
     )
@@ -308,7 +308,7 @@ def test_gradient_solver_configure():
 def test_gradient_solver_init_action():
     """Test GradientSolver action initialization."""
     model = DummyCostModel()
-    solver = GradientSolver(model=model, n_steps=10, num_samples=3)
+    solver = GradientSolver(cost=model, n_steps=10, num_samples=3)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 3), dtype=np.float32
     )
@@ -328,9 +328,7 @@ def test_gradient_solver_init_action():
 def test_gradient_solver_call():
     """Test GradientSolver __call__ method."""
     model = DummyCostModel()
-    solver = GradientSolver(
-        model=model, n_steps=2, num_samples=2, batch_size=2
-    )
+    solver = GradientSolver(cost=model, n_steps=2, num_samples=2, batch_size=2)
     action_space = gym_spaces.Box(
         low=-1, high=1, shape=(2, 2), dtype=np.float32
     )

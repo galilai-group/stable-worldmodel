@@ -162,7 +162,9 @@ def get_iql_model(cfg):
     - predict_values(embedding, embedding_goal): predict values
     """
 
-    model = swm.policy.AutoActionableModel(cfg.world_model.model_name)
+    # Load a pretrained checkpoint (folder with weights.pt + config.json) from
+    # $STABLEWM_HOME/checkpoints/
+    model = swm.wm.utils.load_pretrained(cfg.world_model.model_name)
     model = model.to(cfg.get('device', 'cpu'))
     model = model.eval()
 

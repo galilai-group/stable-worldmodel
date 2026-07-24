@@ -2,11 +2,11 @@
 
 defaults:
   - launcher: local
-  - _self_
+  - data: pusht
+  - _self_ # applied last so the `data:` overrides below win over data/pusht.yaml
 
 
 output_model_name: dinogcbc
-dataset_name: pusht_expert_train.h5
 
 trainer:
   max_epochs: 100
@@ -24,13 +24,10 @@ seed: 42
 image_size: 224
 patch_size: 14
 
-n_steps: ${eval:'${dinowm.num_preds} + ${dinowm.history_size} - 1'}
-frameskip: 1
-
-dinowm:
+wm:
   history_size: 3
   num_preds: 1
-  use_proprio_encoder: false  # Set to true to able proprioception encoder
+  use_proprio_encoder: false  # Set to true to enable the proprioception encoder
   proprio_dim: 4
   proprio_embed_dim: 10
   action_dim: 2
@@ -44,12 +41,37 @@ predictor:
   dropout: 0.0
   emb_dropout: 0.0
 
-# Encoder configuration
-# Options: 'dino' (pretrained frozen DINO) or 'vit_tiny' (trainable ViT tiny from scratch)
-encoder_type: dino
+# --- Model (instantiable node, saved as config.json / loaded via load_pretrained) ---
+# Frozen pretrained encoder + trainable action predictor (see scripts/train/prejepa.py
+# for the same frozen-encoder pattern). `num_patches`/`dim`/`out_dim` are filled at
+# runtime from the encoder and dataset in gcbc.py. Swap `encoder.name` (or this whole
+# node) to use a different backbone.
+model:
+  _target_: stable_worldmodel.wm.gcrl.gcrl.GCRL
+  history_size: ${wm.history_size}
+  encoder:
+    _target_: stable_worldmodel.wm.prejepa.module.create_backbone
+    name: facebook/dinov2-small
+  action_predictor:
+    _target_: stable_worldmodel.wm.gcrl.module.Predictor
+    num_patches: ???
+    num_frames: ${wm.history_size}
+    dim: ???
+    out_dim: ???
+    depth: ${predictor.depth}
+    heads: ${predictor.heads}
+    mlp_dim: ${predictor.mlp_dim}
+    dim_head: ${predictor.dim_head}
+    dropout: ${predictor.dropout}
+    emb_dropout: ${predictor.emb_dropout}
+
+# Override the shared data/pusht.yaml node to keep gcbc's data behavior
+# (single-step actions and gcbc's window). Dataset name/keys are inherited from
+# data/pusht.yaml (lance dataset, loads pixels/action/proprio/state).
+data:
+  dataset:
+    frameskip: 1
+    num_steps: ${eval:'${wm.num_preds} + ${wm.history_size} - 1'}
 
 predictor_lr: 1e-4
 proprio_encoder_lr: 1e-4
-encoder_lr: 1e-4
-
-dump_object: True

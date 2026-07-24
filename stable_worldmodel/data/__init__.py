@@ -42,6 +42,14 @@ try:
 except ImportError:
     pass
 
+try:
+    from .formats.lance_video import (  # noqa: F401
+        LanceVideoDataset,
+        LanceVideoWriter,
+    )
+except ImportError:
+    pass
+
 
 __all__ = [
     'FORMATS',

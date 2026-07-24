@@ -91,6 +91,56 @@ def test_image_column_autodetected(tmp_path):
     assert ds.image_columns == {'pixels'}
 
 
+def test_string_column_roundtrip(tmp_path):
+    """A per-episode-constant string column survives a write/read round-trip."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'lang.lance'
+    tasks = ['pick up the cube', 'open the drawer']
+    with LanceWriter(out) as w:
+        for ep_idx, ep_len in enumerate((4, 3)):
+            w.write_episode(
+                {
+                    'action': [
+                        rng.standard_normal(2).astype(np.float32)
+                        for _ in range(ep_len)
+                    ],
+                    'task': [tasks[ep_idx]] * ep_len,
+                }
+            )
+
+    ds = LanceDataset(path=out)
+    assert 'task' in ds.column_names
+    assert ds.image_columns == set()
+    assert ds[0]['task'] == tasks[0]
+    # offsets[1] == 4 -> first row of the second episode
+    assert ds[4]['task'] == tasks[1]
+
+
+def test_string_column_append(tmp_path):
+    """A string column can be appended to an existing table with the same schema."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'lang.lance'
+
+    def _ep(ep_len, task):
+        return {
+            'action': [
+                rng.standard_normal(2).astype(np.float32)
+                for _ in range(ep_len)
+            ],
+            'task': [task] * ep_len,
+        }
+
+    with LanceWriter(out) as w:
+        w.write_episode(_ep(4, 'first'))
+    with LanceWriter(out) as w:  # mode='append' default
+        w.write_episode(_ep(3, 'second'))
+
+    ds = LanceDataset(path=out)
+    assert ds.lengths.tolist() == [4, 3]
+    assert ds[0]['task'] == 'first'
+    assert ds[4]['task'] == 'second'
+
+
 def test_dot_rename(tmp_path):
     """HDF5-style dotted column names are renamed to underscores transparently."""
     rng = np.random.default_rng(0)

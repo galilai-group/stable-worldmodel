@@ -147,7 +147,7 @@ For model-based control or planning, use `WorldModelPolicy` which wraps a [solve
 
 ```python
 from stable_worldmodel.policy import WorldModelPolicy, PlanConfig
-from stable_worldmodel.solver import CEMSolver
+from stable_worldmodel.planning import CEMSolver
 
 # Configure planning parameters
 config = PlanConfig(
@@ -161,7 +161,7 @@ world_model = ...           # load your model
 
 # Create a planning policy with a solver and your trained model
 policy = WorldModelPolicy(
-    solver=CEMSolver(model=world_model, num_samples=300),
+    solver=CEMSolver(cost=world_model, num_samples=300),
     config=config
 )
 world.set_policy(policy)
@@ -260,7 +260,7 @@ swm.data.load_dataset(
 ```
 
 !!! info "LeRobot Support"
-    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[format]'`.
+    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[lerobot]'`.
 
 The returned dataset is compatible with PyTorch `DataLoader` for batched training.
 
@@ -362,12 +362,12 @@ The returned dictionary contains:
 Use a trained world model for planning with solvers like CEM or MPPI:
 
 ```python
-from stable_worldmodel.solver import CEMSolver
+from stable_worldmodel.planning import CEMSolver
 from stable_worldmodel.policy import PlanConfig, WorldModelPolicy
 
 # Create solver with your trained model
 solver = CEMSolver(
-    model=cost_model,       # Your trained world model
+    cost=cost_model,       # Your trained world model
     num_samples=300,
     n_steps=30,
     device='cuda'

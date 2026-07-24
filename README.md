@@ -6,8 +6,10 @@
   <a href="https://galilai-group.github.io/stable-worldmodel/"><img alt="Documentation" src="https://img.shields.io/badge/Docs-blue.svg"/></a>
   <a href="https://github.com/galilai-group/stable-worldmodel"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/galilai-group/stable-worldmodel/tests.yaml?label=Tests"/></a>
   <a href="https://pypi.python.org/pypi/stable-worldmodel/#history"><img alt="PyPI" src="https://img.shields.io/pypi/v/stable-worldmodel.svg"/></a>
+  <a href="https://arxiv.org/abs/2605.21800v1" target="_blank" style="margin: 2px;"><img alt="ArXiv" src="https://img.shields.io/badge/arXiv-2605.21800-b5212f?logo=arxiv" style="display: inline-block; vertical-align: middle;"/></a>
   <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"/></a>
   <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"/></a>
+  <a href="https://colab.research.google.com/github/galilai-group/stable-worldmodel/blob/main/scripts/notebooks/train_from_hf_buckets.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg"/></a>
 </p>
 
 <p align="center">
@@ -16,6 +18,7 @@
   <a href="#environments"><b>Environments</b></a> ·
   <a href="#solvers-and-baselines"><b>Solvers & Baselines</b></a> ·
   <a href="https://galilai-group.github.io/stable-worldmodel/"><b>Documentation</b></a> ·
+  <a href="https://arxiv.org/abs/2605.21800v1"><b>Paper</b></a> ·
   <a href="#citation"><b>Citation</b></a>
 </p>
 
@@ -28,8 +31,11 @@
 From PyPI:
 
 ```bash
-pip install stable-worldmodel
+pip install stable-worldmodel            # base only
+pip install 'stable-worldmodel[all]'     # + training, environments, and data formats
 ```
+
+LeRobot dataset support is a separate opt-in extra (requires Python 3.12+): `pip install 'stable-worldmodel[lerobot]'`.
 
 From source (development):
 
@@ -37,7 +43,7 @@ From source (development):
 git clone https://github.com/galilai-group/stable-worldmodel
 cd stable-worldmodel
 uv venv --python=3.10 && source .venv/bin/activate
-uv sync --all-extras --group dev
+uv sync --extra all --group dev
 ```
 
 Datasets and checkpoints are stored under `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). Override the variable to point at your preferred storage location.
@@ -69,7 +75,7 @@ results = world.evaluate(episodes=50)
 print(f"Success Rate: {results['success_rate']:.1f}%")
 ```
 
-Reference implementations are provided in [`scripts/train/`](scripts/train): [`lewm.py`](scripts/train/lewm.py) implements [LeWM](https://le-wm.github.io/), and [`prejepa.py`](scripts/train/prejepa.py) reproduces [DINO-WM](https://arxiv.org/abs/2411.04983).
+Reference implementations are provided in [`scripts/train/`](scripts/train): [`lewm.py`](scripts/train/lewm.py) implements [LeWM](https://le-wm.github.io/), and [`prejepa.py`](scripts/train/prejepa.py) reproduces [DINO-WM](https://arxiv.org/abs/2411.04983). To train directly from HuggingFace object storage with no local dataset download, see the [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/galilai-group/stable-worldmodel/blob/main/scripts/notebooks/train_from_hf_buckets.ipynb) notebook.
 
 <p align="center">
   <img src="docs/assets/lewm-gpu-usage.png" alt="GPU utilization comparison" width="60%">
@@ -278,16 +284,16 @@ The full documentation lives at [galilai-group.github.io/stable-worldmodel](http
 ## Citation
 
 ```bibtex
-@misc{maes_lelidec2026swm-1,
-  title  = {stable-worldmodel-v1: Reproducible World Modeling Research and Evaluation},
-  author = {Lucas Maes and Quentin Le Lidec and Dan Haramati and
-            Nassim Massaudi and Damien Scieur and Yann LeCun and
-            Randall Balestriero},
+@misc{maes_lld2026swm,
+  title  = {stable-worldmodel: A Platform for Reproducible World Modeling Research and Evaluation},
+  author = {Lucas Maes and Quentin Le Lidec and Luiz Facury and Nassim Massaudi and
+            Ayush Chaurasia and Francesco Capuano and Richard Gao and Taj Gillin and
+            Dan Haramati and Damien Scieur and Yann LeCun and Randall Balestriero},
   year   = {2026},
-  eprint = {2602.08968},
+  eprint = {2605.21800},
   archivePrefix = {arXiv},
-  primaryClass = {cs.AI},
-  url    = {https://arxiv.org/abs/2602.08968},
+  primaryClass = {cs.LG},
+  url    = {https://arxiv.org/abs/2605.21800},
 }
 ```
 

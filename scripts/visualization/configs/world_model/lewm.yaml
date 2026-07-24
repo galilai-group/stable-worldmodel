@@ -1,1 +1,17 @@
-checkpoint_path: ~/.stable_worldmodel/lewm-pusht
+defaults:
+  - _self_
+
+# Pretrained LeWM checkpoint (folder with weights.pt + config.json) under
+# $STABLEWM_HOME/checkpoints/. Loaded via swm.wm.utils.load_pretrained.
+model_name: lewm-pusht
+
+history_size: 3
+num_preds: 1
+
+# Visualize the full model embedding (`emb`). Set true to use only the
+# vision-backbone CLS embedding instead.
+backbone_only: false
+
+# No extra (proprio/action) normalization needed: the LeWM `emb` output
+# depends only on the (ImageNet-normalized) pixels.
+encoding: {}

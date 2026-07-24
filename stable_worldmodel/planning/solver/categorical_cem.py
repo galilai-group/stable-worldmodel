@@ -1,12 +1,9 @@
-"""Categorical Cross Entropy Method solver for discrete action spaces."""
-
 import time
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
 
 from .callbacks import Callback
 from .solver import Costable
@@ -20,7 +17,7 @@ class CategoricalCEMSolver:
     from the top-K elites' empirical frequencies.
 
     Args:
-        model: World model implementing the Costable protocol.
+        cost: Cost object to plan against (a Costable, e.g. a ShootingCostEvaluator).
         batch_size: Number of environments to process in parallel.
         num_samples: Number of action candidates to sample per iteration.
         n_steps: Number of CEM iterations.
@@ -34,7 +31,7 @@ class CategoricalCEMSolver:
 
     def __init__(
         self,
-        model: Costable,
+        cost: Costable,
         batch_size: int = 1,
         num_samples: int = 300,
         n_steps: int = 30,
@@ -45,7 +42,7 @@ class CategoricalCEMSolver:
         seed: int = 1234,
         callbacks: list[Callback] | None = None,
     ) -> None:
-        self.model = model
+        self.cost = cost
         self.batch_size = batch_size
         self.num_samples = num_samples
         self.n_steps = n_steps
@@ -56,7 +53,7 @@ class CategoricalCEMSolver:
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
         self.callbacks = list(callbacks) if callbacks else []
         try:
-            self._dtype = next(model.parameters()).dtype
+            self._dtype = next(cost.parameters()).dtype
         except (AttributeError, StopIteration):
             self._dtype = torch.float32
 
@@ -64,18 +61,29 @@ class CategoricalCEMSolver:
         self, *, action_space: gym.Space, n_envs: int, config: Any
     ) -> None:
         """Configure the solver with environment specifications."""
-        assert isinstance(action_space, Discrete), (
-            f'Action space must be Discrete, got {type(action_space)}'
+
+        assert isinstance(
+            action_space, gym.spaces.MultiDiscrete
+        ) or isinstance(action_space, gym.spaces.Discrete), (
+            f'Action space must be MultiDiscrete or Discrete, got {type(action_space)}'
         )
         self._action_space = action_space
         self._n_envs = n_envs
         self._config = config
-        self._base_simplex_dim = int(action_space.n)
+        self._base_simplex_dim = (
+            int(action_space.nvec[0])
+            if isinstance(action_space, gym.spaces.MultiDiscrete)
+            else int(action_space.n)
+        )
         self._configured = True
 
     @property
     def n_envs(self) -> int:
         return self._n_envs
+
+    @property
+    def action_dim(self) -> int:
+        return self._base_simplex_dim
 
     @property
     def action_block(self) -> int:
@@ -204,7 +212,7 @@ class CategoricalCEMSolver:
                     self.action_simplex_dim,
                 )
 
-                costs = self.model.get_cost(expanded_infos, candidates)
+                costs = self.cost.get_cost(expanded_infos, candidates)
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Expected cost to be a torch.Tensor, got {type(costs)}'

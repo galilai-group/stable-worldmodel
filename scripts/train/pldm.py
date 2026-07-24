@@ -211,13 +211,13 @@ def run(cfg):
     with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
 
-    object_dump_callback = SaveCkptCallback(
-        run_name=cfg.output_model_name, cfg=cfg, epoch_interval=5
+    save_ckpt_callback = SaveCkptCallback(
+        run_name=cfg.output_model_name, cfg=cfg.model, epoch_interval=5
     )
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback],
+        callbacks=[save_ckpt_callback],
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,

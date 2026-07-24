@@ -26,6 +26,29 @@ world.reset(seed=0)
 ```
 ///
 
+/// tab | Env without pixels (audio / state-only)
+```python
+import stable_worldmodel as swm
+
+# For envs with no rendered observation (e.g. audio), skip pixel
+# rendering with add_pixels=False. `image_shape` is then optional and
+# no `pixels` key is added; the raw observation is lifted into info.
+world = swm.World(
+    env_name="swm/YourEnv-v0",   # your non-pixel env
+    num_envs=4,
+    add_pixels=False,
+)
+world.set_policy(policy)
+
+world.reset(seed=0)
+# world.infos has no "pixels"; the observation is under
+# "observation" (or your env's own dict keys).
+```
+
+Video recording (`evaluate(video=...)`) renders from the `pixels` key, so
+it is unavailable when `add_pixels=False`.
+///
+
 /// tab | Collect a dataset
 ```python
 import stable_worldmodel as swm

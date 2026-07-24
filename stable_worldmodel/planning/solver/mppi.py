@@ -1,4 +1,4 @@
-"""Cross Entropy Method solver for model-based planning."""
+"""Model Predictive Path Integral solver for model-based planning."""
 
 import time
 from typing import Any
@@ -9,48 +9,48 @@ import torch
 from gymnasium.spaces import Box
 from loguru import logger as logging
 
-from stable_worldmodel.solver.utils import prepare_init_action
-from .callbacks import Callback
+from .utils import prepare_init_action
 from .solver import Costable
 
 
-class CEMSolver:
-    """Cross Entropy Method solver for action optimization.
+class MPPISolver:
+    """Model Predictive Path Integral solver for action optimization.
 
     Args:
-        model: World model implementing the Costable protocol.
+        cost: Cost object to plan against (a Costable, e.g. a ShootingCostEvaluator).
         batch_size: Number of environments to process in parallel.
         num_samples: Number of action candidates to sample per iteration.
-        var_scale: Initial variance scale for the action distribution.
-        n_steps: Number of CEM iterations.
-        topk: Number of elite samples to keep for distribution update.
+        var_scale: Initial variance scale for action noise.
+        n_steps: Number of MPPI iterations.
+        topk: Number of elite samples for weighted averaging.
+        temperature: Temperature parameter for softmax weighting.
         device: Device for tensor computations.
         seed: Random seed for reproducibility.
     """
 
     def __init__(
         self,
-        model: Costable,
+        cost: Costable,
         batch_size: int = 1,
         num_samples: int = 300,
-        var_scale: float = 1,
+        var_scale: float = 1.0,
         n_steps: int = 30,
         topk: int = 30,
+        temperature: float = 0.5,
         device: str | torch.device = 'cpu',
         seed: int = 1234,
-        callbacks: list[Callback] | None = None,
     ) -> None:
-        self.model = model
+        self.cost = cost
         self.batch_size = batch_size
-        self.var_scale = var_scale
         self.num_samples = num_samples
-        self.n_steps = n_steps
         self.topk = topk
+        self.var_scale = var_scale
+        self.n_steps = n_steps
+        self.temperature = temperature
         self.device = device
         self.torch_gen = torch.Generator(device=device).manual_seed(seed)
-        self.callbacks = list(callbacks) if callbacks else []
         try:
-            self._dtype = next(model.parameters()).dtype
+            self._dtype = next(cost.parameters()).dtype
         except (AttributeError, StopIteration):
             self._dtype = torch.float32
 
@@ -66,7 +66,7 @@ class CEMSolver:
 
         if not isinstance(action_space, Box):
             logging.warning(
-                f'Action space is discrete, got {type(action_space)}. CEMSolver may not work as expected.'
+                f'Action space is discrete, got {type(action_space)}. MPPISolver may not work as expected.'
             )
 
     @property
@@ -119,12 +119,12 @@ class CEMSolver:
     def solve(
         self, info_dict: dict, init_action: torch.Tensor | None = None
     ) -> dict:
-        """Solve the planning problem using Cross Entropy Method."""
+        """Solve the planning problem using MPPI."""
         start_time = time.time()
         outputs = {
             'costs': [],
-            'mean': [],  # History of means
-            'var': [],  # History of vars
+            'mean': [],
+            'var': [],
         }
 
         # Batch size is taken from info_dict so callers can solve for a subset of envs
@@ -132,7 +132,7 @@ class CEMSolver:
 
         # -- warm-start from actor if model is Actionable, else zero-pad
         init_action = prepare_init_action(
-            self.model,
+            self.cost,
             info_dict,
             init_action,
             self.horizon,
@@ -145,9 +145,6 @@ class CEMSolver:
         mean = mean.to(self.device)
         var = var.to(self.device)
 
-        for cb in self.callbacks:
-            cb.reset()
-
         # --- Iterate over batches ---
         for start_idx in range(0, total_envs, self.batch_size):
             end_idx = min(start_idx + self.batch_size, total_envs)
@@ -157,7 +154,6 @@ class CEMSolver:
             batch_mean = mean[start_idx:end_idx]
             batch_var = var[start_idx:end_idx]
 
-            # Expand Info Dict for current batch
             expanded_infos = {}
             for k, v in info_dict.items():
                 v_batch = v[start_idx:end_idx]
@@ -169,9 +165,7 @@ class CEMSolver:
                         v_batch.to(device=self.device, dtype=target_dtype)
                         .unsqueeze(1)
                         .expand(
-                            current_bs,
-                            self.num_samples,
-                            *v_batch.shape[1:],
+                            current_bs, self.num_samples, *v_batch.shape[1:]
                         )
                     )
                 elif isinstance(v, np.ndarray):
@@ -183,12 +177,9 @@ class CEMSolver:
             # Optimization Loop
             final_batch_cost = None
 
-            for cb in self.callbacks:
-                cb.start_batch()
-
             for step in range(self.n_steps):
-                # Sample action sequences: (Batch, Num_Samples, Horizon, Dim)
-                candidates = torch.randn(
+                # Sample noise: (Batch, Num_Samples, Horizon, Dim)
+                noise = torch.randn(
                     current_bs,
                     self.num_samples,
                     self.horizon,
@@ -198,16 +189,15 @@ class CEMSolver:
                     dtype=self.dtype,
                 )
 
-                # Scale and shift: (Batch, N, H, D) * (Batch, 1, H, D) + (Batch, 1, H, D)
-                candidates = candidates * batch_var.unsqueeze(
+                # MPPI Logic: candidates = mean + noise * sigma
+                candidates = batch_mean.unsqueeze(
                     1
-                ) + batch_mean.unsqueeze(1)
+                ) + noise * batch_var.unsqueeze(1)
 
-                # Force the first sample to be the current mean
+                # Force the first sample to be the current mean (Zero noise)
                 candidates[:, 0] = batch_mean
 
-                # Evaluate candidates
-                costs = self.model.get_cost(expanded_infos, candidates)
+                costs = self.cost.get_cost(expanded_infos, candidates)
 
                 assert isinstance(costs, torch.Tensor), (
                     f'Expected cost to be a torch.Tensor, got {type(costs)}'
@@ -220,51 +210,47 @@ class CEMSolver:
                     f'Expected cost to be of shape ({current_bs}, {self.num_samples}), got {costs.shape}'
                 )
 
-                # Select Top-K
-                # topk_vals: (Batch, K), topk_inds: (Batch, K)
-                topk_vals, topk_inds = torch.topk(
-                    costs, k=self.topk, dim=1, largest=False
-                )
-
-                # Gather Top-K Candidates
-                # We need to select the specific candidates corresponding to topk_inds
-                batch_indices = (
-                    torch.arange(current_bs, device=self.device)
-                    .unsqueeze(1)
-                    .expand(-1, self.topk)
-                )
-
-                # Indexing: candidates[batch_idx, sample_idx]
-                # Result shape: (Batch, K, Horizon, Dim)
-                topk_candidates = candidates[batch_indices, topk_inds]
-
-                # Update Mean and Variance based on Top-K
-                prev_mean = batch_mean
-                prev_var = batch_var
-                batch_mean = topk_candidates.mean(dim=1)
-                batch_var = topk_candidates.std(dim=1)
-
-                for cb in self.callbacks:
-                    cb(
-                        step=step,
-                        candidates=candidates,
-                        costs=costs,
-                        topk_vals=topk_vals,
-                        topk_inds=topk_inds,
-                        topk_candidates=topk_candidates,
-                        mean=batch_mean,
-                        var=batch_var,
-                        prev_mean=prev_mean,
-                        prev_var=prev_var,
+                # Select Elites (Optional, based on topk)
+                if self.topk is not None and self.topk < self.num_samples:
+                    # topk_vals: (Batch, K), topk_inds: (Batch, K)
+                    topk_vals, topk_inds = torch.topk(
+                        costs, k=self.topk, dim=1, largest=False
                     )
 
-                # Update final cost for logging
-                # We average the cost of the top elites
-                final_batch_cost = topk_vals.mean(dim=1).cpu().tolist()
+                    # Gather Top-K Candidates
+                    batch_indices = (
+                        torch.arange(current_bs, device=self.device)
+                        .unsqueeze(1)
+                        .expand(-1, self.topk)
+                    )
+                    # (Batch, K, Horizon, Dim)
+                    relevant_candidates = candidates[batch_indices, topk_inds]
+                    relevant_costs = topk_vals
+                else:
+                    relevant_candidates = candidates
+                    relevant_costs = costs
+
+                # MPPI Weighting: Softmax(-cost / temperature)
+                # Stabilize softmax by subtracting min cost
+                min_cost = relevant_costs.min(dim=1, keepdim=True)[0]
+                scaled_costs = relevant_costs - min_cost
+                weights = torch.softmax(
+                    -scaled_costs / self.temperature, dim=1
+                )  # (Batch, K)
+
+                # Update Mean: weighted sum of candidates
+                # Reshape weights for broadcasting: (Batch, K, 1, 1)
+                weights_expanded = weights.unsqueeze(-1).unsqueeze(-1)
+                batch_mean = (weights_expanded * relevant_candidates).sum(
+                    dim=1
+                )
+
+                # Store average cost of the utilized samples for logging
+                final_batch_cost = relevant_costs.mean(dim=1).cpu().tolist()
 
             # Write results back to global storage
             mean[start_idx:end_idx] = batch_mean
-            var[start_idx:end_idx] = batch_var
+            # We do not update var in standard MPPI
 
             # Store history/metadata
             outputs['costs'].extend(final_batch_cost)
@@ -273,11 +259,5 @@ class CEMSolver:
         outputs['mean'] = [mean.detach().cpu()]
         outputs['var'] = [var.detach().cpu()]
 
-        if self.callbacks:
-            outputs['callbacks'] = {}
-            for cb in self.callbacks:
-                cb.end_solve()
-                outputs['callbacks'][cb.output_key] = cb.history
-
-        print(f'CEM solve time: {time.time() - start_time:.4f} seconds')
+        print(f'MPPI solve time: {time.time() - start_time:.4f} seconds')
         return outputs

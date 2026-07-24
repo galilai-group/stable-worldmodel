@@ -25,7 +25,10 @@ from stable_worldmodel.data import (
 from stable_worldmodel.data.formats.folder import Folder, FolderWriter
 from stable_worldmodel.data.formats.hdf5 import HDF5, HDF5Writer
 from stable_worldmodel.data.formats.lerobot import LeRobot
-from stable_worldmodel.data.formats.video import Video, VideoWriter
+from stable_worldmodel.data.formats.video import (
+    Video,
+    VideoWriter,
+)
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -212,6 +215,33 @@ class TestHDF5Writer:
         ep0 = ds.load_episode(0)
         assert ep0['pixels'].shape == (5, 3, 8, 8)  # NCHW
         assert ep0['proprio'].shape == (5, 4)
+
+    def test_string_column_roundtrip(self, tmp_path):
+        # A per-step text column (e.g. a `lang_instr` caption) must be stored as
+        # a variable-length UTF-8 string and decode back to a python `str` on
+        # read — the reader already collapses string columns to one value per
+        # sampled window (see HDF5Dataset._load_slice).
+        out = tmp_path / 'data.h5'
+        eps = [
+            {
+                'action': [np.zeros(2, np.float32) for _ in range(n)],
+                'lang_instr': [f'push the T to goal {i}'] * n,
+            }
+            for i, n in enumerate((5, 7))
+        ]
+        with HDF5Writer(out) as w:
+            for ep in eps:
+                w.write_episode(ep)
+
+        with h5py.File(out, 'r') as f:
+            assert h5py.check_string_dtype(f['lang_instr'].dtype)
+            assert f['lang_instr'].shape == (12,)  # flat, one string per step
+
+        ds = HDF5Dataset(path=out)
+        assert list(ds.lengths) == [5, 7]
+        assert 'lang_instr' in ds.column_names
+        assert ds.load_episode(0)['lang_instr'] == 'push the T to goal 0'
+        assert ds.load_episode(1)['lang_instr'] == 'push the T to goal 1'
 
     def test_open_writer_via_format(self, tmp_path, two_episodes):
         out = tmp_path / 'data.h5'
@@ -507,9 +537,15 @@ class TestVideoWriter:
             np.load(out / 'ep_len.npz')['arr_0'], np.array([8, 10], np.int32)
         )
 
-    def test_decord_roundtrip(self, tmp_path):
-        if importlib.util.find_spec('decord') is None:
-            pytest.skip('decord not available')
+    def test_torchcodec_roundtrip(self, tmp_path):
+        # find_spec only checks the package is installed, not that
+        # libtorchcodec can load its FFmpeg shared libraries — that load
+        # raises (not ImportError) on environments without a matching FFmpeg,
+        # so guard the actual import and skip on any failure.
+        try:
+            from torchcodec.decoders import VideoDecoder  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f'torchcodec unavailable ({exc})')
 
         out = tmp_path / 'video_ds'
         eps = [self._video_episode(8), self._video_episode(10)]

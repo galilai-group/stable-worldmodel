@@ -8,15 +8,12 @@ import torch
 from gymnasium import spaces as gym_spaces
 
 from stable_worldmodel.policy import (
-    AutoActionableModel,
-    AutoCostModel,
     BasePolicy,
     ExpertPolicy,
     FeedForwardPolicy,
     PlanConfig,
     RandomPolicy,
     WorldModelPolicy,
-    _load_model_with_attribute,
 )
 
 
@@ -114,19 +111,19 @@ def test_random_policy_get_action():
 
 
 def test_random_policy_set_seed():
-    """Test RandomPolicy.set_seed method."""
-    policy = RandomPolicy(seed=42)
+    """Test that set_env auto-applies the constructor seed to the action space."""
+    policy = RandomPolicy(seed=123)
     mock_env = MagicMock()
     policy.set_env(mock_env)
-    policy.set_seed(123)
     mock_env.action_space.seed.assert_called_once_with(123)
 
 
-def test_random_policy_set_seed_no_env():
-    """Test RandomPolicy.set_seed when env is None."""
-    policy = RandomPolicy(seed=42)
-    # Should not raise
-    policy.set_seed(123)
+def test_random_policy_set_env_no_seed_skips_seeding():
+    """Test that set_env does not seed the action space when seed is None."""
+    policy = RandomPolicy()
+    mock_env = MagicMock()
+    policy.set_env(mock_env)
+    mock_env.action_space.seed.assert_not_called()
 
 
 ###########################
@@ -662,7 +659,7 @@ class MockSolverWithWarmStart:
         return self._config.horizon
 
     def solve(self, info_dict: dict, init_action=None) -> dict:
-        from stable_worldmodel.solver.utils import prepare_init_action
+        from stable_worldmodel.planning.solver.utils import prepare_init_action
 
         init_action = prepare_init_action(
             self.model,
@@ -781,135 +778,3 @@ def test_worldmodel_policy_no_warmstart_without_actionable():
 
     assert solver.received_init_action.shape == (1, 5, 2)
     assert solver.received_init_action.eq(0).all()
-
-
-###########################
-## Auto Loading Tests    ##
-###########################
-
-
-class MockModuleWithGetAction(torch.nn.Module):
-    """Mock module with get_action method."""
-
-    def __init__(self):
-        super().__init__()
-        self.linear = torch.nn.Linear(4, 2)
-
-    def get_action(self, info):
-        return torch.zeros(2)
-
-
-class MockModuleWithGetCost(torch.nn.Module):
-    """Mock module with get_cost method."""
-
-    def __init__(self):
-        super().__init__()
-        self.linear = torch.nn.Linear(4, 1)
-
-    def get_cost(self, info):
-        return torch.zeros(1)
-
-
-class MockParentModule(torch.nn.Module):
-    """Mock parent module containing child with attribute."""
-
-    def __init__(self, child):
-        super().__init__()
-        self.encoder = torch.nn.Linear(10, 10)
-        self.child = child
-
-
-@pytest.fixture
-def mock_checkpoint_dir(tmp_path):
-    """Create a temporary checkpoint directory."""
-    return tmp_path
-
-
-def test_load_model_with_attribute_direct(mock_checkpoint_dir):
-    """Test _load_model_with_attribute finds attribute directly from directory."""
-    model = MockModuleWithGetAction()
-    ckpt_path = mock_checkpoint_dir / 'direct_object.ckpt'
-    torch.save(model, ckpt_path)
-
-    # Pass directory - it will find the *_object.ckpt file
-    result = _load_model_with_attribute(str(mock_checkpoint_dir), 'get_action')
-    assert hasattr(result, 'get_action')
-
-
-def test_load_model_with_attribute_nested(mock_checkpoint_dir):
-    """Test _load_model_with_attribute finds nested attribute."""
-    child = MockModuleWithGetAction()
-    parent = MockParentModule(child)
-    # Create a subdirectory for this test
-    nested_dir = mock_checkpoint_dir / 'nested_test'
-    nested_dir.mkdir()
-    ckpt_path = nested_dir / 'model_object.ckpt'
-    torch.save(parent, ckpt_path)
-
-    result = _load_model_with_attribute(str(nested_dir), 'get_action')
-    assert hasattr(result, 'get_action')
-
-
-def test_load_model_with_attribute_from_dir(mock_checkpoint_dir):
-    """Test _load_model_with_attribute loads from directory."""
-    model = MockModuleWithGetAction()
-    subdir = mock_checkpoint_dir / 'from_dir'
-    subdir.mkdir()
-    ckpt_path = subdir / 'model_object.ckpt'
-    torch.save(model, ckpt_path)
-
-    result = _load_model_with_attribute(str(subdir), 'get_action')
-    assert hasattr(result, 'get_action')
-
-
-def test_load_model_with_attribute_not_found(mock_checkpoint_dir):
-    """Test _load_model_with_attribute raises when attribute not found."""
-    model = torch.nn.Linear(4, 2)  # No get_action
-    subdir = mock_checkpoint_dir / 'no_attr'
-    subdir.mkdir()
-    ckpt_path = subdir / 'test_object.ckpt'
-    torch.save(model, ckpt_path)
-
-    with pytest.raises(
-        RuntimeError, match="No module with 'get_action' found"
-    ):
-        _load_model_with_attribute(str(subdir), 'get_action')
-
-
-def test_load_model_with_attribute_cache_dir(mock_checkpoint_dir):
-    """Test _load_model_with_attribute uses cache_dir."""
-    model = MockModuleWithGetAction()
-    run_name = 'my_model'
-    run_dir = mock_checkpoint_dir / run_name
-    run_dir.mkdir()
-    ckpt_path = run_dir / 'epoch_0_object.ckpt'
-    torch.save(model, ckpt_path)
-
-    result = _load_model_with_attribute(
-        run_name, 'get_action', cache_dir=mock_checkpoint_dir
-    )
-    assert hasattr(result, 'get_action')
-
-
-def test_auto_actionable_model(mock_checkpoint_dir):
-    """Test AutoActionableModel function."""
-    model = MockModuleWithGetAction()
-    subdir = mock_checkpoint_dir / 'actionable'
-    subdir.mkdir()
-    ckpt_path = subdir / 'test_object.ckpt'
-    torch.save(model, ckpt_path)
-
-    result = AutoActionableModel(str(subdir))
-    assert hasattr(result, 'get_action')
-
-
-def test_auto_cost_model(mock_checkpoint_dir):
-    """Test AutoCostModel function."""
-    model = MockModuleWithGetCost()
-    subdir = mock_checkpoint_dir / 'costable'
-    subdir.mkdir()
-    ckpt_path = subdir / 'test_object.ckpt'
-    torch.save(model, ckpt_path)
-
-    result = AutoCostModel(str(subdir))
-    assert hasattr(result, 'get_cost')

@@ -19,9 +19,12 @@ from stable_worldmodel.data.formats.folder import FolderDataset
 
 
 class VideoDataset(FolderDataset):
-    """Loads frames from MP4 files (one per episode) using decord."""
+    """Loads frames from MP4 files (one per episode).
 
-    _decord: Any = None  # Lazy module reference
+    Frames are decoded with torchcodec's ``VideoDecoder``, which returns
+    ``uint8`` tensors laid out as ``(T, C, H, W)`` in RGB. This matches the
+    ``lance_video`` format so the two share a single decode backend.
+    """
 
     def __init__(
         self,
@@ -29,32 +32,27 @@ class VideoDataset(FolderDataset):
         video_keys: list[str] | None = None,
         **kw: Any,
     ) -> None:
-        # Probe decord up-front so we fail fast if it's missing, but don't
-        # rely on the cached reference surviving DataLoader worker spawn —
-        # _ensure_decord re-imports lazily inside the worker process.
-        self._ensure_decord()
-        super().__init__(name=name, folder_keys=video_keys or ['video'], **kw)
+        # Import up-front so we fail fast if torchcodec is not installed.
+        from torchcodec.decoders import VideoDecoder  # noqa: F401
 
-    @classmethod
-    def _ensure_decord(cls):
-        if cls._decord is None:
-            try:
-                import decord
-
-                decord.bridge.set_bridge('torch')
-                cls._decord = decord
-            except ImportError:
-                raise ImportError('VideoDataset requires decord')
-        return cls._decord
+        # video_keys=None lets FolderDataset auto-detect the video columns from
+        # the on-disk subdirectories (each holds one .mp4 per episode), so an
+        # image column named anything other than 'video' (e.g. 'pixels') is
+        # read back correctly instead of being mistaken for a tabular column.
+        super().__init__(name=name, folder_keys=video_keys, **kw)
 
     @lru_cache(maxsize=8)
     def _reader(self, ep_idx: int, key: str) -> Any:
-        return self._ensure_decord().VideoReader(
-            str(self.path / key / f'ep_{ep_idx}.mp4'), num_threads=1
-        )
+        from torchcodec.decoders import VideoDecoder
+
+        path = str(self.path / key / f'ep_{ep_idx}.mp4')
+        return VideoDecoder(path, seek_mode='approximate')
 
     def _load_file(self, ep_idx: int, step: int, key: str) -> np.ndarray:
-        return self._reader(ep_idx, key)[step].numpy()
+        # torchcodec yields (C, H, W); transpose to (H, W, C) to match the
+        # HWC numpy contract of the parent :class:`FolderDataset`.
+        frame = self._reader(ep_idx, key).get_frames_at(indices=[step]).data[0]
+        return frame.permute(1, 2, 0).numpy()
 
     def _load_slice(self, ep_idx: int, start: int, end: int) -> dict:
         g_start, g_end = (
@@ -64,10 +62,13 @@ class VideoDataset(FolderDataset):
         steps = {}
         for col in self._keys:
             if col in self.folder_keys:
-                frames = self._reader(ep_idx, col).get_batch(
-                    list(range(start, end, self.frameskip))
+                indices = list(range(start, end, self.frameskip))
+                # torchcodec returns (T, C, H, W) uint8 directly.
+                steps[col] = (
+                    self._reader(ep_idx, col)
+                    .get_frames_at(indices=indices)
+                    .data
                 )
-                steps[col] = frames.permute(0, 3, 1, 2)
             else:
                 data = self._cache[col][g_start:g_end]
                 if col != 'action':

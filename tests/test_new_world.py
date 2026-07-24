@@ -177,21 +177,24 @@ class TestRunAutoMode:
         def on_done(env_idx, ep_idx, w):
             pass
 
-        def on_step(w):
+        def on_step(w, mask):
             infos_after_reset.append(w.infos['state'][0].copy())
 
         world._run(
             episodes=2, seed=0, mode='auto', on_step=on_step, on_done=on_done
         )
 
-        # after reset, state should go back to low values
-        # episode 1: state goes 1, 2 (terminates)
-        # episode 2: state goes 1, 2 (terminates)
+        # on_step now also fires right after each reset (initial + auto),
+        # so the reset frame (state=0) is captured before the step frames.
+        # episode 1: reset (0), step 1, step 2 (terminates)
+        # episode 2: reset (0), step 1, step 2 (terminates)
         states = [s[0] for s in infos_after_reset]
-        assert states[0] == 1.0
-        assert states[1] == 2.0  # terminates
-        assert states[2] == 1.0  # reset happened, fresh env
-        assert states[3] == 2.0
+        assert states[0] == 0.0  # initial reset
+        assert states[1] == 1.0
+        assert states[2] == 2.0  # terminates
+        assert states[3] == 0.0  # reset happened, fresh env
+        assert states[4] == 1.0
+        assert states[5] == 2.0
 
 
 class TestRunWaitMode:
@@ -260,12 +263,14 @@ class TestRunCallbacks:
 
         step_count = [0]
 
-        def on_step(w):
+        def on_step(w, mask):
             step_count[0] += 1
 
         world._run(max_steps=3, mode='wait', seed=0, on_step=on_step)
 
-        assert step_count[0] == 3
+        # +1 for the initial reset (seed is passed) firing on_step once
+        # before the 3 step-loop iterations.
+        assert step_count[0] == 4
 
     def test_on_done_receives_correct_ep_idx(self):
         world = _make_world(num_envs=2, max_steps=2)
@@ -450,7 +455,7 @@ class TestSetPolicy:
                 self.seed = 1234
                 self.seed_calls = []
 
-            def set_seed(self, seed):
+            def _set_seed(self, seed):
                 self.seed_calls.append(seed)
 
         world = _make_world(num_envs=2)
