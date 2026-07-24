@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 import h5py
@@ -44,6 +44,7 @@ class HDF5Dataset(Dataset):
         cache_dir: str | Path | None = None,
         path: str | Path | None = None,
         storage_options: dict | None = None,
+        dense_columns: str | Collection[str] | None = None,
     ) -> None:
         if path is not None:
             raw = str(path)
@@ -68,7 +69,14 @@ class HDF5Dataset(Dataset):
                 self._cache[key] = f[key][:]
                 logging.info(f"Cached '{key}' from '{self.h5_path}'")
 
-        super().__init__(lengths, offsets, frameskip, num_steps, transform)
+        super().__init__(
+            lengths,
+            offsets,
+            frameskip,
+            num_steps,
+            transform,
+            dense_columns=dense_columns,
+        )
 
         if keys_to_merge:
             for target, source in keys_to_merge.items():
@@ -118,7 +126,7 @@ class HDF5Dataset(Dataset):
         for col in self._keys:
             src = self._cache if col in self._cache else self.h5_file
             data = src[col][g_start:g_end]
-            if col != 'action':
+            if col not in self.dense_columns:
                 data = data[:: self.frameskip]
 
             if data.dtype == np.object_ or data.dtype.kind in ('S', 'U'):
@@ -129,6 +137,7 @@ class HDF5Dataset(Dataset):
                 if data.ndim == 4 and data.shape[-1] in (1, 3):
                     steps[col] = steps[col].permute(0, 3, 1, 2)
 
+        self._validate_dense_values(steps)
         return self.transform(steps) if self.transform else steps
 
     def _get_col(self, col: str) -> np.ndarray:

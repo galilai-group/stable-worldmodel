@@ -156,14 +156,16 @@ import stable_worldmodel as swm
 dataset = swm.data.load_dataset(
     'tutorial_pusht.lance',
     num_steps=8,
-    frameskip=1,
-    keys_to_load=['pixels', 'action', 'state'],
+    frameskip=2,
+    keys_to_load=['pixels', 'action', 'state', 'reward'],
+    dense_columns=['reward'],
 )
 
 sample = dataset[0]
 print(sample.keys())
 print(sample['pixels'].shape)  # (T, C, H, W)
-print(sample['action'].shape)  # (T, action_dim)
+print(sample['action'].shape)  # (T, 2 * action_dim)
+print(sample['reward'].shape)  # (T, 2)
 ```
 
 Then use the dataset with a standard PyTorch `DataLoader`:
@@ -189,8 +191,15 @@ normal Python file under an `if __name__ == '__main__':` guard. For notebooks,
 REPLs, or heredoc snippets, set `num_workers=0`.
 
 `num_steps` is the temporal window returned by `__getitem__`. `frameskip`
-controls the stride between observation frames while keeping action sequences
-dense.
+controls the stride between sparse fields while keeping action sequences dense.
+Additional `dense_columns` retain every underlying value on a separate
+frameskip axis, including a singleton axis when `frameskip=1`. The loader does
+not aggregate rewards or other dense values; choose an explicit reduction such
+as `sample['reward'].sum(dim=1)` when that matches your training target.
+
+`load_chunk()` uses the same grouped shapes and requires chunk lengths divisible
+by `frameskip`. `load_episode()` preserves the existing flat, ungrouped episode
+behavior and should not be used when fixed-window dense grouping is required.
 
 ## Convert formats
 

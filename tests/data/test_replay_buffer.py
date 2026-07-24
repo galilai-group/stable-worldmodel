@@ -82,6 +82,23 @@ class TestInit:
         with pytest.raises(ValueError, match='must be positive'):
             ReplayBuffer(**kw)
 
+    def test_dense_columns_are_normalized_once_and_immutable(self):
+        requested = ['reward']
+        buf = ReplayBuffer(max_steps=10, dense_columns=requested)
+        requested.append('proprio')
+
+        assert buf.dense_columns == frozenset({'action', 'reward'})
+
+    def test_dense_columns_reject_non_string_members(self):
+        with pytest.raises(
+            TypeError,
+            match=(
+                '^dense_columns must be a string, a collection of strings, '
+                'or None$'
+            ),
+        ):
+            ReplayBuffer(max_steps=10, dense_columns=['reward', 1])
+
 
 class TestWriteEpisode:
     def test_lazy_allocation_from_first_episode(self):
@@ -131,6 +148,45 @@ class TestWriteEpisode:
         buf.write_episode({'action': np.zeros((0, 2), dtype=np.float32)})
         assert buf.num_episodes == 0
         assert buf.num_steps_stored == 0
+
+    def test_unknown_dense_column_rejects_first_write_atomically(self):
+        buf = ReplayBuffer(max_steps=20, dense_columns='rewad')
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                "^Unknown dense_columns: \\['rewad'\\]\\. Available columns: "
+                "\\['action', 'pixels', 'proprio', 'reward'\\]\\.$"
+            ),
+        ):
+            buf.write_episode(_episode(10))
+
+        assert buf._cols == {}
+        assert buf.num_episodes == 0
+
+    def test_dense_string_column_is_rejected(self):
+        ep = _episode(10)
+        ep['label'] = np.asarray(['task'] * 10, dtype=object)
+        buf = ReplayBuffer(max_steps=20, dense_columns='label')
+
+        with pytest.raises(
+            TypeError,
+            match=(
+                "^Dense column 'label' must contain array-like numeric, "
+                'boolean, or image values; string/object columns cannot be '
+                'dense\\.$'
+            ),
+        ):
+            buf.write_episode(ep)
+
+    def test_implicit_action_may_be_absent(self):
+        ep = _episode(10)
+        del ep['action']
+        buf = ReplayBuffer(max_steps=20, history_len=2)
+
+        buf.write_episode(ep)
+
+        assert 'action' not in buf[0]
 
     def test_rejects_scalar_column(self):
         buf = ReplayBuffer(max_steps=10)
@@ -411,6 +467,129 @@ class TestFrameskip:
         assert item['action'].shape == (4, 4)
         expected = ep['action'][0:8].reshape(4, 4)
         np.testing.assert_array_equal(item['action'], expected)
+
+    def test_selected_column_kept_dense_and_grouped(self):
+        buf = ReplayBuffer(
+            max_steps=200,
+            history_len=4,
+            frameskip=2,
+            dense_columns='reward',
+        )
+        ep = _episode(20, seed=0)
+        ep['reward'] = np.arange(20, dtype=np.float32)
+        buf.write_episode(ep)
+
+        item = buf[0]
+        assert item['reward'].shape == (4, 2)
+        np.testing.assert_array_equal(
+            item['reward'], ep['reward'][:8].reshape(4, 2)
+        )
+        np.testing.assert_array_equal(
+            item['proprio'], ep['proprio'][[0, 2, 4, 6]]
+        )
+
+    def test_dense_column_keeps_block_axis_at_frameskip_one(self):
+        buf = ReplayBuffer(
+            max_steps=20,
+            history_len=3,
+            dense_columns=['reward'],
+        )
+        ep = _episode(10, seed=0)
+        buf.write_episode(ep)
+
+        assert buf[0]['reward'].shape == (3, 1)
+
+    def test_boolean_dense_column(self):
+        buf = ReplayBuffer(
+            max_steps=20,
+            history_len=3,
+            frameskip=2,
+            dense_columns='terminated',
+        )
+        ep = _episode(10)
+        ep['terminated'] = np.arange(10) % 3 == 0
+        buf.write_episode(ep)
+
+        terminated = buf[0]['terminated']
+        assert terminated.dtype == np.bool_
+        np.testing.assert_array_equal(
+            terminated, ep['terminated'][:6].reshape(3, 2)
+        )
+
+    def test_transform_sees_rows_before_grouping(self):
+        calls = []
+
+        def inspect_rows(clip):
+            calls.append({key: value.shape for key, value in clip.items()})
+            return clip
+
+        buf = ReplayBuffer(
+            max_steps=30,
+            history_len=3,
+            frameskip=2,
+            dense_columns='reward',
+            transform=inspect_rows,
+        )
+        buf.write_episode(_episode(12))
+
+        item = buf[0]
+
+        assert calls == [
+            {
+                'action': (6, 2),
+                'proprio': (3, 4),
+                'reward': (6,),
+                'pixels': (3, 8, 8, 3),
+            }
+        ]
+        assert item['action'].shape == (3, 4)
+        assert item['reward'].shape == (3, 2)
+
+        calls.clear()
+        buf.sample(batch_size=1)
+        buf.load_chunk(np.array([0]), np.array([0]), np.array([6]))
+        assert calls == []
+
+    def test_transform_cannot_silently_change_dense_row_count(self):
+        def drop_reward_row(clip):
+            clip['reward'] = clip['reward'][:-1]
+            return clip
+
+        buf = ReplayBuffer(
+            max_steps=20,
+            history_len=2,
+            frameskip=2,
+            dense_columns='reward',
+            transform=drop_reward_row,
+        )
+        buf.write_episode(_episode(10))
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                "^Dense column 'reward' has 3 rows before grouping; expected "
+                '4 \\(num_steps=2, frameskip=2\\)$'
+            ),
+        ):
+            _ = buf[0]
+
+    def test_load_chunk_matches_clip_sampling(self):
+        buf = ReplayBuffer(
+            max_steps=200,
+            history_len=4,
+            frameskip=2,
+            dense_columns=['reward'],
+        )
+        ep = _episode(20, seed=0)
+        ep['reward'] = np.arange(20, dtype=np.float32)
+        buf.write_episode(ep)
+
+        chunk = buf.load_chunk(np.array([0]), np.array([0]), np.array([8]))[0]
+        for key, expected in buf[0].items():
+            np.testing.assert_array_equal(chunk[key], expected)
+
+        with pytest.raises(ValueError, match='divisible by frameskip'):
+            buf.load_chunk(np.array([0]), np.array([0]), np.array([7]))
 
     def test_sample_with_frameskip(self):
         buf = ReplayBuffer(max_steps=200, history_len=3, frameskip=4)

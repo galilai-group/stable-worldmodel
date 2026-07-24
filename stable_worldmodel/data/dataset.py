@@ -11,11 +11,33 @@ This module is the cross-cutting layer:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 import numpy as np
 import torch
+
+
+def _normalize_dense_columns(
+    dense_columns: str | Collection[str] | None,
+) -> frozenset[str]:
+    """Return the requested dense columns plus the implicit action column."""
+    if dense_columns is None:
+        columns: tuple[object, ...] = ()
+    elif isinstance(dense_columns, str):
+        columns = (dense_columns,)
+    elif isinstance(dense_columns, Collection):
+        columns = tuple(dense_columns)
+    else:
+        raise TypeError(
+            'dense_columns must be a string, a collection of strings, or None'
+        )
+
+    if any(not isinstance(column, str) for column in columns):
+        raise TypeError(
+            'dense_columns must be a string, a collection of strings, or None'
+        )
+    return frozenset((*columns, 'action'))
 
 
 class Dataset:
@@ -28,9 +50,16 @@ class Dataset:
     Args:
         lengths: Episode lengths.
         offsets: Episode start offsets in the underlying flat storage.
-        frameskip: Stride between observation samples.
+        frameskip: Stride between samples for non-dense columns.
         num_steps: Number of observation steps per sample.
-        transform: Optional dict-in / dict-out transform applied per sample.
+        transform: Optional dict-in / dict-out transform applied after rows
+            are selected and before dense rows are grouped.
+        dense_columns: Additional columns to sample at every underlying row.
+            Dense columns are grouped into ``(num_steps, frameskip, ...)``;
+            ``action`` is always dense and retains its existing flattened
+            ``(num_steps, frameskip * action_dim)`` representation. Names
+            must refer to numeric, boolean, tensor, or image columns. Values
+            such as rewards are never aggregated automatically.
     """
 
     def __init__(
@@ -40,6 +69,7 @@ class Dataset:
         frameskip: int = 1,
         num_steps: int = 1,
         transform: Callable[[dict], dict] | None = None,
+        dense_columns: str | Collection[str] | None = None,
     ) -> None:
         self.lengths = lengths
         self.offsets = offsets
@@ -47,6 +77,8 @@ class Dataset:
         self.num_steps = num_steps
         self.span = num_steps * frameskip
         self.transform = transform
+        self.dense_columns = _normalize_dense_columns(dense_columns)
+        self._dense_columns_validated = False
         self.clip_indices = [
             (ep, start)
             for ep, length in enumerate(lengths)
@@ -72,14 +104,16 @@ class Dataset:
             idx: Clip index into ``clip_indices``.
 
         Returns:
-            Dict of per-column tensors for the clip; ``action`` is reshaped
-            to ``(num_steps, -1)`` so skipped actions stay grouped per step.
+            Dict of per-column tensors. Sparse columns have shape
+            ``(num_steps, ...)``, ``action`` has shape
+            ``(num_steps, frameskip * action_dim)``, and other dense columns
+            have shape ``(num_steps, frameskip, ...)``. The dense singleton
+            axis is retained when ``frameskip=1``.
         """
+        self._validate_dense_columns()
         ep_idx, start = self.clip_indices[idx]
         steps = self._load_slice(ep_idx, start, start + self.span)
-        if 'action' in steps:
-            steps['action'] = steps['action'].reshape(self.num_steps, -1)
-        return steps
+        return self._reshape_clip(steps, self.num_steps)
 
     def load_chunk(
         self, episodes_idx: np.ndarray, start: np.ndarray, end: np.ndarray
@@ -93,27 +127,111 @@ class Dataset:
 
         Returns:
             One dict of per-column tensors per requested slice, in order;
-            ``action`` is reshaped to ``((end - start) // frameskip, -1)``.
+            shapes follow :meth:`__getitem__`. Each requested length must be
+            divisible by ``frameskip`` so dense rows group without a partial
+            final block.
         """
+        self._validate_dense_columns()
         chunk = []
         for ep, s, e in zip(episodes_idx, start, end):
-            steps = self._load_slice(ep, s, e)
-            if 'action' in steps:
-                steps['action'] = steps['action'].reshape(
-                    (e - s) // self.frameskip, -1
+            length = int(e - s)
+            if length % self.frameskip:
+                raise ValueError(
+                    'Dataset.load_chunk: chunk length must be divisible by '
+                    f'frameskip (length={length}, frameskip={self.frameskip})'
                 )
-            chunk.append(steps)
+            steps = self._load_slice(ep, s, e)
+            chunk.append(self._reshape_clip(steps, length // self.frameskip))
         return chunk
+
+    def _reshape_clip(self, steps: dict, num_steps: int) -> dict:
+        self._validate_dense_values(steps)
+        expected_rows = num_steps * self.frameskip
+        for col, data in steps.items():
+            if col not in self.dense_columns:
+                continue
+            if data.ndim == 0:
+                raise ValueError(
+                    f"Dense column '{col}' must have a leading row dimension "
+                    f'before grouping; got shape {tuple(data.shape)}'
+                )
+            if data.shape[0] != expected_rows:
+                raise ValueError(
+                    f"Dense column '{col}' has {data.shape[0]} rows before "
+                    f'grouping; expected {expected_rows} '
+                    f'(num_steps={num_steps}, frameskip={self.frameskip})'
+                )
+            if col == 'action':
+                steps[col] = data.reshape(num_steps, -1)
+            else:
+                steps[col] = data.reshape(
+                    num_steps, self.frameskip, *data.shape[1:]
+                )
+        return steps
+
+    def _validate_dense_columns(
+        self, available_columns: Collection[str] | None = None
+    ) -> None:
+        """Validate dense names after a reader's public schema is complete."""
+        if self._dense_columns_validated:
+            return
+        available = set(
+            self.column_names
+            if available_columns is None
+            else available_columns
+        )
+        unknown = self.dense_columns - available - {'action'}
+        if unknown:
+            raise ValueError(
+                f'Unknown dense_columns: {sorted(unknown)}. Available '
+                f'columns: {sorted(available)}.'
+            )
+        self._dense_columns_validated = True
+
+    def _validate_dense_value(self, col: str, data: Any) -> None:
+        """Reject dense values that cannot be grouped into numeric tensors."""
+        if col not in self.dense_columns:
+            return
+        if isinstance(data, (str, bytes, bytearray, memoryview)):
+            raise TypeError(
+                f"Dense column '{col}' must contain array-like numeric, "
+                'boolean, or image values; string/object columns cannot '
+                'be dense.'
+            )
+        if isinstance(data, np.ndarray):
+            if data.dtype.kind not in 'buifc':
+                raise TypeError(
+                    f"Dense column '{col}' must contain array-like numeric, "
+                    'boolean, or image values; string/object columns cannot '
+                    'be dense.'
+                )
+            return
+        if isinstance(data, torch.Tensor):
+            return
+        raise TypeError(
+            f"Dense column '{col}' must be a NumPy array or PyTorch tensor; "
+            f'got {type(data).__name__}.'
+        )
+
+    def _validate_dense_values(self, steps: dict) -> None:
+        for col, data in steps.items():
+            self._validate_dense_value(col, data)
 
     def load_episode(self, episode_idx: int) -> dict:
         """Load a full episode as a dict of per-column tensors.
+
+        Fixed-window dense grouping is intentionally not applied here.
+        Reader-specific sampling and transform behavior is preserved, so use
+        :meth:`__getitem__` or :meth:`load_chunk` when grouped dense shapes
+        are required.
 
         Args:
             episode_idx: Index of the episode to load.
 
         Returns:
-            Dict of per-column tensors covering every step of the episode.
+            Dict of ungrouped per-column values for the episode.
         """
+        self._validate_dense_columns()
         return self._load_slice(episode_idx, 0, self.lengths[episode_idx])
 
     def get_col_data(self, col: str) -> np.ndarray:

@@ -98,6 +98,28 @@ def test_roundtrip_shapes_and_alignment(tmp_path):
     assert abs(levels[0] - 10) < 4 and abs(levels[2] - 22) < 4
 
 
+def test_dense_columns(tmp_path):
+    out = tmp_path / 'dense'
+    _write(out)
+    ds = LanceVideoDataset(
+        out,
+        num_steps=3,
+        frameskip=2,
+        keys_to_load=['pixels', 'action', 'proprio'],
+        dense_columns=['pixels', 'proprio'],
+    )
+
+    item = ds[0]
+    assert item['pixels'].shape == (3, 2, 3, 32, 32)
+    assert item['proprio'].shape == (3, 2, 3)
+    assert item['action'].shape == (3, 4)
+
+    batched = ds.__getitems__([0])[0]
+    for key, expected in item.items():
+        assert batched[key].shape == expected.shape
+        assert np.array_equal(batched[key].numpy(), expected.numpy())
+
+
 def test_tabular_parity_with_frame_lance(tmp_path):
     """Tabular columns must round-trip bit-identically to the frame format."""
     eps = _write(tmp_path / 'vid')

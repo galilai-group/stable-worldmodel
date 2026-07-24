@@ -62,7 +62,8 @@ class VideoDataset(FolderDataset):
         steps = {}
         for col in self._keys:
             if col in self.folder_keys:
-                indices = list(range(start, end, self.frameskip))
+                step = 1 if col in self.dense_columns else self.frameskip
+                indices = list(range(start, end, step))
                 # torchcodec returns (T, C, H, W) uint8 directly.
                 steps[col] = (
                     self._reader(ep_idx, col)
@@ -71,7 +72,7 @@ class VideoDataset(FolderDataset):
                 )
             else:
                 data = self._cache[col][g_start:g_end]
-                if col != 'action':
+                if col not in self.dense_columns:
                     data = data[:: self.frameskip]
 
                 if data.dtype == np.object_ or data.dtype.kind in ('S', 'U'):
@@ -82,6 +83,7 @@ class VideoDataset(FolderDataset):
                 else:
                     steps[col] = torch.from_numpy(data)
 
+        self._validate_dense_values(steps)
         return self.transform(steps) if self.transform else steps
 
 

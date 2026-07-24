@@ -307,11 +307,12 @@ class LanceVideoDataset(LanceDataset):
         return dec
 
     def _decode_video_window(
-        self, ep_idx: int, vkey: str, local_start: int, num_steps: int
+        self, ep_idx: int, vkey: str, local_start: int, length: int
     ) -> torch.Tensor:
         self._ensure_videos_open()
         dec = self._decoder_for(ep_idx, vkey)
-        indices = [local_start + k * self.frameskip for k in range(num_steps)]
+        step = 1 if vkey in self.dense_columns else self.frameskip
+        indices = list(range(local_start, local_start + length, step))
         return dec.get_frames_at(indices=indices).data  # (T, C, H, W) uint8
 
     def _process_batch(
@@ -320,19 +321,15 @@ class LanceVideoDataset(LanceDataset):
         if g_end is None:
             g_end = g_start + self.span
         local_start = g_start - int(self.offsets[ep_idx])
-        # Number of frame-skipped frames spanning [g_start, g_end). For a
-        # fixed window this is `num_steps`, but `load_episode` passes a
-        # full-episode slice — decode every frame it covers, matching the
-        # frame-skipped tabular columns instead of truncating to one window.
-        num_steps = -(-(g_end - g_start) // self.frameskip)
         steps: dict[str, Any] = {}
         for col in self._keys:
             if col in self._video_keys:
                 steps[col] = self._decode_video_window(
-                    ep_idx, col, local_start, num_steps
+                    ep_idx, col, local_start, g_end - g_start
                 )
             else:
                 steps[col] = self._process_col(col, batch, g_start, g_end)
+        self._validate_dense_values(steps)
         return steps
 
     def __getitems__(self, indices: list[int]) -> list[dict]:
@@ -346,6 +343,8 @@ class LanceVideoDataset(LanceDataset):
         difference between video throughput trailing the JPEG format by ~4×
         (per-window) versus ~1.2× (batched).
         """
+        self._validate_dense_columns()
+
         # Lay out window rows; fetch all tabular columns in one shot.
         all_rows: list[int] = []
         row_offsets: list[int] = []
@@ -378,10 +377,9 @@ class LanceVideoDataset(LanceDataset):
             self._ensure_videos_open()
             plan: dict[tuple[int, str], list[tuple[int, list[int]]]] = {}
             for i, (ep_idx, _g, start) in enumerate(sample_meta):
-                idxs = [
-                    start + k * self.frameskip for k in range(self.num_steps)
-                ]
                 for vkey in self._video_keys:
+                    step = 1 if vkey in self.dense_columns else self.frameskip
+                    idxs = list(range(start, start + self.span, step))
                     plan.setdefault((ep_idx, vkey), []).append((i, idxs))
             for (ep_idx, vkey), items in plan.items():
                 dec = self._decoder_for(ep_idx, vkey)
@@ -408,11 +406,10 @@ class LanceVideoDataset(LanceDataset):
                     steps[col] = self._process_col(
                         col, sub_batch, g_start, g_start + self.span
                     )
+            self._validate_dense_values(steps)
             if self.transform:
                 steps = self.transform(steps)
-            if 'action' in steps:
-                steps['action'] = steps['action'].reshape(self.num_steps, -1)
-            results.append(steps)
+            results.append(self._reshape_clip(steps, self.num_steps))
         return results
 
 
