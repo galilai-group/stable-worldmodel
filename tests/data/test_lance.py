@@ -1,13 +1,19 @@
-"""Tests for the Lance format: writer round-trip, detection, batched fetch."""
+"""Tests for the Lance format: writer round-trip, detection, batched fetch,
+and the episode-data side table."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+import lancedb
+import pyarrow as pa
+
 from stable_worldmodel.data import (
+    EPISODE_DATA_KEY,
     GoalDataset,
     LanceDataset,
     LanceWriter,
@@ -91,54 +97,234 @@ def test_image_column_autodetected(tmp_path):
     assert ds.image_columns == {'pixels'}
 
 
-def test_string_column_roundtrip(tmp_path):
-    """A per-episode-constant string column survives a write/read round-trip."""
+def test_per_step_string_column_dropped(tmp_path, caplog):
+    """Per-step strings are not supported: the writer warns and drops them."""
     rng = np.random.default_rng(0)
     out = tmp_path / 'lang.lance'
-    tasks = ['pick up the cube', 'open the drawer']
-    with LanceWriter(out) as w:
-        for ep_idx, ep_len in enumerate((4, 3)):
+    with caplog.at_level(logging.WARNING):
+        with LanceWriter(out) as w:
             w.write_episode(
                 {
                     'action': [
                         rng.standard_normal(2).astype(np.float32)
-                        for _ in range(ep_len)
+                        for _ in range(4)
                     ],
-                    'task': [tasks[ep_idx]] * ep_len,
+                    'task': ['pick up the cube'] * 4,
                 }
             )
+    assert any('per-step string' in rec.getMessage() for rec in caplog.records)
 
     ds = LanceDataset(path=out)
-    assert 'task' in ds.column_names
-    assert ds.image_columns == set()
-    assert ds[0]['task'] == tasks[0]
-    # offsets[1] == 4 -> first row of the second episode
-    assert ds[4]['task'] == tasks[1]
+    assert 'task' not in ds.column_names
+    assert ds.lengths.tolist() == [4]
 
 
-def test_string_column_append(tmp_path):
-    """A string column can be appended to an existing table with the same schema."""
+def _episode_with_data(rng, ep_len: int, extra: dict | None) -> dict:
+    ep = {
+        'pixels': [
+            rng.integers(0, 255, (8, 8, 3), dtype=np.uint8)
+            for _ in range(ep_len)
+        ],
+        'action': [
+            rng.standard_normal(2).astype(np.float32) for _ in range(ep_len)
+        ],
+    }
+    if extra is not None:
+        ep[EPISODE_DATA_KEY] = extra
+    return ep
+
+
+def _demo_extra(idx: int, state_dim: int) -> dict:
+    return {
+        'model_xml': f'<scene idx="{idx}"/>',
+        'ep_meta': f'meta-{idx}'.encode(),
+        'lang_ok': idx % 2 == 0,
+        'n_obj': 10 + idx,
+        'scale': 0.5 + idx,
+        'states': np.arange(state_dim, dtype=np.float32) + idx,
+    }
+
+
+def test_episode_data_roundtrip(tmp_path):
+    """str/bytes/scalar/ndarray episode values round-trip through the
+    ``<table>_episodes`` side table, per-episode array dims may differ."""
     rng = np.random.default_rng(0)
-    out = tmp_path / 'lang.lance'
-
-    def _ep(ep_len, task):
-        return {
-            'action': [
-                rng.standard_normal(2).astype(np.float32)
-                for _ in range(ep_len)
-            ],
-            'task': [task] * ep_len,
-        }
-
+    out = tmp_path / 'demo.lance'
     with LanceWriter(out) as w:
-        w.write_episode(_ep(4, 'first'))
-    with LanceWriter(out) as w:  # mode='append' default
-        w.write_episode(_ep(3, 'second'))
+        w.write_episodes(
+            [
+                _episode_with_data(rng, 4, _demo_extra(0, state_dim=5)),
+                _episode_with_data(rng, 3, _demo_extra(1, state_dim=8)),
+            ]
+        )
 
     ds = LanceDataset(path=out)
     assert ds.lengths.tolist() == [4, 3]
-    assert ds[0]['task'] == 'first'
-    assert ds[4]['task'] == 'second'
+    assert ds.image_columns == {'pixels'}
+    assert sorted(ds.column_names) == ['action', 'pixels']
+    assert ds.episode_column_names == sorted(_demo_extra(0, 1))
+
+    data = ds.get_episode_data()
+    assert data['model_xml'] == ['<scene idx="0"/>', '<scene idx="1"/>']
+    assert data['ep_meta'] == [b'meta-0', b'meta-1']
+    assert data['lang_ok'] == [True, False]
+    assert data['n_obj'] == [10, 11]
+    assert data['scale'] == [0.5, 1.5]
+    assert [v.shape for v in data['states']] == [(5,), (8,)]
+    np.testing.assert_array_equal(
+        data['states'][1], np.arange(8, dtype=np.float32) + 1
+    )
+
+    # Request order is preserved, duplicates allowed.
+    dup = ds.get_episode_data([1, 0, 1])
+    assert dup['n_obj'] == [11, 10, 11]
+
+
+def test_episode_data_dir_open_ignores_sibling(tmp_path):
+    """Opening by directory resolves the frames table, not the
+    ``*_episodes.lance`` sibling."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 3, _demo_extra(0, 4)))
+    assert (tmp_path / 'demo_episodes.lance').is_dir()
+
+    ds = LanceDataset(path=tmp_path)
+    assert ds.table_name == 'demo'
+    assert ds.get_episode_data()['n_obj'] == [10]
+
+    fmt = detect_format(tmp_path)
+    assert fmt is not None and fmt.name == 'lance'
+
+
+def test_episode_data_append(tmp_path):
+    """Appending a session with the same episode-data keys extends the
+    side table in lockstep with the frames."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 4, _demo_extra(0, 5)))
+    with LanceWriter(out) as w:  # mode='append' default
+        w.write_episode(_episode_with_data(rng, 3, _demo_extra(1, 6)))
+
+    ds = LanceDataset(path=out)
+    assert ds.lengths.tolist() == [4, 3]
+    data = ds.get_episode_data()
+    assert data['n_obj'] == [10, 11]
+    assert [v.shape for v in data['states']] == [(5,), (6,)]
+
+
+def test_episode_data_append_without_data_raises(tmp_path):
+    """A table with a side table refuses episodes lacking episode data."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 4, _demo_extra(0, 5)))
+    with LanceWriter(out) as w:
+        with pytest.raises(ValueError, match='episode-data key mismatch'):
+            w.write_episode(_episode_with_data(rng, 3, None))
+
+
+def test_episode_data_key_drift_raises(tmp_path):
+    """Every episode must carry the same episode-data keys."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 4, {'model_xml': '<scene/>'}))
+        with pytest.raises(ValueError, match='episode-data key mismatch'):
+            w.write_episode(
+                _episode_with_data(rng, 3, {'other_key': '<scene/>'})
+            )
+
+
+def test_episode_data_append_to_legacy_table_raises(tmp_path):
+    """Appending episode data to a table without a side table errors and
+    points at regenerating the dataset."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 4, None))
+    with LanceWriter(out) as w:
+        with pytest.raises(ValueError, match='Regenerate'):
+            w.write_episode(
+                _episode_with_data(rng, 3, {'model_xml': '<scene/>'})
+            )
+
+
+def test_no_episode_data_no_side_table(tmp_path):
+    """A session without episode data creates no side table and the reader
+    reports empty episode data."""
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(3,))
+    assert not (tmp_path / 'demo_episodes.lance').exists()
+
+    ds = LanceDataset(path=out)
+    assert ds.episode_column_names == []
+    assert ds.get_episode_data() == {}
+
+
+def test_overwrite_drops_side_table(tmp_path):
+    """mode='overwrite' drops the side table together with the frames."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 4, _demo_extra(0, 5)))
+    with LanceWriter(out, mode='overwrite') as w:
+        w.write_episode(_episode_with_data(rng, 3, None))
+
+    assert not (tmp_path / 'demo_episodes.lance').exists()
+    ds = LanceDataset(path=out)
+    assert ds.lengths.tolist() == [3]
+    assert ds.episode_column_names == []
+
+
+def _write_legacy_string_table(uri: Path, table: str) -> None:
+    """Old layout: a per-step ``pa.string`` column with the blob on row 0."""
+    n = 4
+    db = lancedb.connect(str(uri))
+    tbl = pa.table(
+        {
+            'episode_idx': pa.array([0] * n, type=pa.int32()),
+            'step_idx': pa.array(list(range(n)), type=pa.int32()),
+            'model_xml': pa.array(
+                ['<xml/>'] + [''] * (n - 1), type=pa.string()
+            ),
+            'action': pa.array(
+                [[0.0, 0.0]] * n, type=pa.list_(pa.float32(), 2)
+            ),
+        }
+    )
+    db.create_table(table, data=tbl)
+
+
+def test_legacy_string_table_read_raises(tmp_path):
+    """The reader refuses legacy tables with per-step string columns and
+    explains the new layout."""
+    _write_legacy_string_table(tmp_path, 'legacy')
+    with pytest.raises(ValueError, match='legacy layout'):
+        LanceDataset(path=tmp_path / 'legacy.lance')
+
+
+def test_legacy_string_table_append_raises(tmp_path):
+    """The writer refuses to append to legacy tables with per-step string
+    columns."""
+    _write_legacy_string_table(tmp_path, 'legacy')
+    writer = LanceWriter(tmp_path / 'legacy.lance')  # mode='append' default
+    with pytest.raises(ValueError, match='legacy layout'):
+        writer.__enter__()
+
+
+def test_goal_dataset_forwards_episode_data(tmp_path):
+    """GoalDataset passes the episode-data API through to the wrapped
+    dataset."""
+    rng = np.random.default_rng(0)
+    out = tmp_path / 'demo.lance'
+    with LanceWriter(out) as w:
+        w.write_episode(_episode_with_data(rng, 4, _demo_extra(0, 5)))
+
+    goal_ds = GoalDataset(LanceDataset(path=out))
+    assert goal_ds.episode_column_names == sorted(_demo_extra(0, 1))
+    assert goal_ds.get_episode_data([0])['model_xml'] == ['<scene idx="0"/>']
 
 
 def test_dot_rename(tmp_path):

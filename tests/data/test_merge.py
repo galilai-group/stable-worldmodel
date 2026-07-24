@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from stable_worldmodel.data import (
+    EPISODE_DATA_KEY,
     LanceDataset,
     LanceWriter,
     detect_format,
@@ -166,3 +167,61 @@ def test_merge_transcodes_to_another_format(tmp_path):
     ep_len = np.load(out / 'ep_len.npz')['arr_0']
     assert ep_len.tolist() == [3, 4, 5]
     assert detect_format(out) is not None
+
+
+def _write_shard_with_episode_data(
+    out: Path, *, ep_lengths: tuple[int, ...], marker: int
+) -> None:
+    rng = np.random.default_rng(marker)
+    with LanceWriter(out) as w:
+        for ep_local, ep_len in enumerate(ep_lengths):
+            w.write_episode(
+                {
+                    'pixels': [
+                        rng.integers(0, 255, (8, 8, 3), dtype=np.uint8)
+                        for _ in range(ep_len)
+                    ],
+                    'action': [
+                        np.array([marker + ep_local, s], dtype=np.float32)
+                        for s in range(ep_len)
+                    ],
+                    EPISODE_DATA_KEY: {
+                        'model_xml': f'<scene {marker + ep_local}/>'
+                    },
+                }
+            )
+
+
+def test_merge_carries_episode_data(tmp_path):
+    """Merging lance shards preserves per-episode data in source order."""
+    a = tmp_path / 'a.lance'
+    b = tmp_path / 'b.lance'
+    _write_shard_with_episode_data(a, ep_lengths=(3, 4), marker=100)
+    _write_shard_with_episode_data(b, ep_lengths=(5,), marker=200)
+
+    out = tmp_path / 'merged.lance'
+    merge([str(a), str(b)], str(out), dest_format='lance', progress=False)
+
+    ds = LanceDataset(path=out)
+    assert ds.lengths.tolist() == [3, 4, 5]
+    assert ds.get_episode_data()['model_xml'] == [
+        '<scene 100/>',
+        '<scene 101/>',
+        '<scene 200/>',
+    ]
+
+
+def test_merge_episode_column_mismatch_raises(tmp_path):
+    """Sources must agree on episode-data columns before any data is written."""
+    a = tmp_path / 'a.lance'
+    b = tmp_path / 'b.lance'
+    _write_shard_with_episode_data(a, ep_lengths=(3,), marker=100)
+    _write_shard(b, ep_lengths=(4,), marker=200, cols=('pixels', 'action'))
+
+    with pytest.raises(ValueError, match='episode-data column mismatch'):
+        merge(
+            [str(a), str(b)],
+            str(tmp_path / 'm.lance'),
+            dest_format='lance',
+            progress=False,
+        )

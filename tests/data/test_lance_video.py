@@ -22,7 +22,11 @@ try:
 except Exception as exc:  # noqa: BLE001
     pytest.skip(f'torchcodec unavailable ({exc})', allow_module_level=True)
 
+import lancedb  # noqa: E402
+import pyarrow as pa  # noqa: E402
+
 from stable_worldmodel.data import (  # noqa: E402
+    EPISODE_DATA_KEY,
     LanceDataset,
     LanceVideoDataset,
     LanceVideoWriter,
@@ -312,3 +316,126 @@ def test_ranged_decode_reads_partial_blob(tmp_path, monkeypatch):
     assert sum(fetched) < blob_size, (
         f'ranged reader fetched {sum(fetched)} of {blob_size} bytes'
     )
+
+
+def _eps_with_data(ep_lengths=(8, 6, 10)):
+    eps = [{k: list(v) for k, v in ep.items()} for ep in _episodes(ep_lengths)]
+    for i, ep in enumerate(eps):
+        ep[EPISODE_DATA_KEY] = {
+            'model_xml': f'<scene {i}/>',
+            'states': np.arange(3 + i, dtype=np.float32),
+        }
+    return eps
+
+
+def test_episode_data_roundtrip(tmp_path):
+    """Episode data written through the lance_video writer lands in the
+    ``<table>_episodes`` side table and reads back via the inherited API."""
+    out = tmp_path / 'set'
+    with LanceVideoWriter(out) as w:
+        w.write_episodes(_eps_with_data())
+
+    assert (out / 'set_episodes.lance').is_dir()
+    ds = LanceVideoDataset(out)
+    assert ds.lengths.tolist() == [8, 6, 10]
+    assert ds.episode_column_names == ['model_xml', 'states']
+    data = ds.get_episode_data()
+    assert data['model_xml'] == ['<scene 0/>', '<scene 1/>', '<scene 2/>']
+    assert [v.shape for v in data['states']] == [(3,), (4,), (5,)]
+    assert ds.get_episode_data([2, 0])['model_xml'] == [
+        '<scene 2/>',
+        '<scene 0/>',
+    ]
+
+
+def test_episode_data_append_across_sessions(tmp_path):
+    out = tmp_path / 'set'
+    eps = _eps_with_data()
+    with LanceVideoWriter(out) as w:
+        w.write_episodes(eps[:1])
+    with LanceVideoWriter(out) as w:  # mode='append' default
+        w.write_episodes(eps[1:])
+
+    ds = LanceVideoDataset(out)
+    assert ds.lengths.tolist() == [8, 6, 10]
+    assert ds.get_episode_data()['model_xml'] == [
+        '<scene 0/>',
+        '<scene 1/>',
+        '<scene 2/>',
+    ]
+
+
+def test_episode_data_key_mismatch_raises(tmp_path):
+    out = tmp_path / 'set'
+    eps = _eps_with_data(ep_lengths=(4, 4))
+    eps[1][EPISODE_DATA_KEY] = {'other_key': 'x'}
+    with pytest.raises(ValueError, match='episode-data key mismatch'):
+        with LanceVideoWriter(out) as w:
+            w.write_episodes(eps)
+
+
+def test_episode_data_overwrite_drops_side_table(tmp_path):
+    out = tmp_path / 'set'
+    with LanceVideoWriter(out) as w:
+        w.write_episodes(_eps_with_data(ep_lengths=(4,)))
+    plain = [{k: list(v) for k, v in ep.items()} for ep in _episodes((6,))]
+    with LanceVideoWriter(out, mode='overwrite') as w:
+        w.write_episodes(plain)
+
+    assert not (out / 'set_episodes.lance').exists()
+    ds = LanceVideoDataset(out)
+    assert ds.lengths.tolist() == [6]
+    assert ds.episode_column_names == []
+
+
+def test_convert_lance_to_lance_video_carries_episode_data(tmp_path):
+    from stable_worldmodel.data import EPISODE_DATA_KEY as EDK, convert
+
+    src = tmp_path / 'src.lance'
+    rng = np.random.default_rng(0)
+    with LanceWriter(src) as w:
+        for i in range(2):
+            w.write_episode(
+                {
+                    'pixels': [
+                        np.full((32, 32, 3), 10 + 3 * t, dtype=np.uint8)
+                        for t in range(5)
+                    ],
+                    'action': [
+                        rng.standard_normal(2).astype(np.float32)
+                        for _ in range(5)
+                    ],
+                    EDK: {'model_xml': f'<scene {i}/>'},
+                }
+            )
+
+    dest = tmp_path / 'vidset'
+    convert(str(src), str(dest), dest_format='lance_video', progress=False)
+
+    ds = LanceVideoDataset(dest)
+    assert ds.lengths.tolist() == [5, 5]
+    assert ds.get_episode_data()['model_xml'] == ['<scene 0/>', '<scene 1/>']
+
+
+def test_resolver_ignores_episodes_sibling(tmp_path):
+    """A ``<table>_episodes.lance`` sibling must not confuse frames-table
+    resolution, and the inherited reader picks up the episode data."""
+    out = tmp_path / 'set'
+    _write(out)
+
+    db = lancedb.connect(str(out))
+    db.create_table(
+        'set_episodes',
+        data=pa.table(
+            {
+                'episode_idx': pa.array([0, 1, 2], type=pa.int32()),
+                'model_xml': pa.array(['<a/>', '<b/>', '<c/>']),
+            }
+        ),
+    )
+
+    assert detect_format(out).name == 'lance_video'
+    ds = LanceVideoDataset(out)
+    assert ds.lengths.tolist() == [8, 6, 10]
+    assert ds.episode_column_names == ['model_xml']
+    assert ds.get_episode_data([2, 0])['model_xml'] == ['<c/>', '<a/>']
