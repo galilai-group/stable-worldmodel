@@ -373,6 +373,7 @@ class LanceDataset(Dataset):
 
         self._episode_columns: list[str] = []
         self._episode_data_cache: dict[str, list] | None = None
+        self._episode_row_order_cache: np.ndarray | None = None
         if self._episodes_table_name in db.list_tables().tables:
             ep_schema = db.open_table(self._episodes_table_name).schema
             self._episode_columns = [
@@ -435,48 +436,99 @@ class LanceDataset(Dataset):
     def episode_column_names(self) -> list[str]:
         return list(self._episode_columns)
 
+    #: Episode-data columns of these types hold arbitrary user payloads
+    #: (scene files, serialized states, arrays). They are fetched per
+    #: request instead of cached whole, so worker RSS stays bounded by the
+    #: episodes actually touched — not by ``n_episodes x payload size``.
+    @staticmethod
+    def _is_heavy_episode_type(ptype) -> bool:
+        return (
+            pa.types.is_binary(ptype)
+            or pa.types.is_large_binary(ptype)
+            or pa.types.is_list(ptype)
+            or pa.types.is_large_list(ptype)
+            or pa.types.is_fixed_size_list(ptype)
+        )
+
     def get_episode_data(
         self, episodes_idx: np.ndarray | list[int] | None = None
     ) -> dict[str, list]:
         if not self._episode_columns:
             return {}
-        if self._episode_data_cache is None:
-            self._episode_data_cache = self._load_episode_table()
+        order = self._episode_row_order()
         if episodes_idx is None:
-            idxs: Any = range(len(self.lengths))
+            idxs = np.arange(len(self.lengths), dtype=np.int64)
         else:
-            idxs = [
-                int(i)
-                for i in np.asarray(episodes_idx, dtype=np.int64).reshape(-1)
-            ]
-        return {
-            k: [vals[i] for i in idxs]
-            for k, vals in self._episode_data_cache.items()
-        }
+            idxs = np.asarray(episodes_idx, dtype=np.int64).reshape(-1)
 
-    def _load_episode_table(self) -> dict[str, list]:
-        db = lancedb.connect(self.uri, **self.connect_kwargs)
-        tbl = db.open_table(self._episodes_table_name).to_lance().to_table()
-        n = len(self.lengths)
-        ep_ids = tbl.column('episode_idx').to_numpy(zero_copy_only=False)
-        if tbl.num_rows != n or not np.array_equal(
-            np.sort(ep_ids), np.arange(n)
-        ):
-            raise ValueError(
-                f"Lance episode-data table '{self._episodes_table_name}' at "
-                f"'{self.uri}' has {tbl.num_rows} rows for {n} episodes — "
-                'the dataset is inconsistent (partial write?). Rebuild it.'
-            )
-        order = np.argsort(ep_ids)
+        ds = (
+            lancedb.connect(self.uri, **self.connect_kwargs)
+            .open_table(self._episodes_table_name)
+            .to_lance()
+        )
+        schema = ds.schema
+        light = [
+            c
+            for c in self._episode_columns
+            if not self._is_heavy_episode_type(schema.field(c).type)
+        ]
+        heavy = [c for c in self._episode_columns if c not in light]
+
         out: dict[str, list] = {}
-        for name in self._episode_columns:
-            col = tbl.column(name)
-            raw = col.to_pylist()
-            out[name] = [
-                self._decode_episode_value(raw[int(i)], col.type)
-                for i in order
-            ]
+        if light:
+            # Cheap scalar/string columns: load once, cache in episode
+            # order (a few bytes per episode).
+            if self._episode_data_cache is None:
+                tbl = ds.to_table(columns=['episode_idx', *light])
+                cache: dict[str, list] = {}
+                for name in light:
+                    col = tbl.column(name)
+                    raw = col.to_pylist()
+                    cache[name] = [
+                        self._decode_episode_value(raw[int(i)], col.type)
+                        for i in order
+                    ]
+                self._episode_data_cache = cache
+            out.update(
+                {
+                    k: [vals[int(i)] for i in idxs]
+                    for k, vals in self._episode_data_cache.items()
+                }
+            )
+        if heavy:
+            # Payload columns: fetch exactly the requested episodes' rows.
+            rows = order[idxs]
+            tbl = ds.take(rows.tolist(), columns=heavy)
+            for name in heavy:
+                col = tbl.column(name)
+                raw = col.to_pylist()
+                out[name] = [
+                    self._decode_episode_value(v, col.type) for v in raw
+                ]
         return out
+
+    def _episode_row_order(self) -> np.ndarray:
+        """Physical side-table row per ordinal episode (validated once)."""
+        if self._episode_row_order_cache is None:
+            db = lancedb.connect(self.uri, **self.connect_kwargs)
+            ds = db.open_table(self._episodes_table_name).to_lance()
+            ep_ids = (
+                ds.to_table(columns=['episode_idx'])
+                .column('episode_idx')
+                .to_numpy(zero_copy_only=False)
+            )
+            n = len(self.lengths)
+            if len(ep_ids) != n or not np.array_equal(
+                np.sort(ep_ids), np.arange(n)
+            ):
+                raise ValueError(
+                    f"Lance episode-data table '{self._episodes_table_name}'"
+                    f" at '{self.uri}' has {len(ep_ids)} rows for {n} "
+                    'episodes — the dataset is inconsistent (partial '
+                    'write?). Rebuild it.'
+                )
+            self._episode_row_order_cache = np.argsort(ep_ids)
+        return self._episode_row_order_cache
 
     @staticmethod
     def _decode_episode_value(value, ptype) -> Any:
@@ -494,6 +546,7 @@ class LanceDataset(Dataset):
         # Episode blobs (e.g. scene XMLs) can be large; workers reload the
         # tiny side table lazily instead of shipping the cache in the pickle.
         state['_episode_data_cache'] = None
+        state['_episode_row_order_cache'] = None
         # spt.Module sets `dataset._trainer = trainer` on every dataset to
         # inject `global_step` / `current_epoch` into samples. The trainer
         # transitively reaches `train_dataloader._iterator` (a

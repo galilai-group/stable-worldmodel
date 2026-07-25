@@ -199,3 +199,40 @@ def test_format_flag():
     supported = {'lance', 'lance_video'}
     for name in list_formats():
         assert get_format(name).supports_episode_data is (name in supported)
+
+
+def test_heavy_episode_columns_not_cached(tmp_path):
+    """bytes/array episode columns are fetched per request, never cached —
+    worker RSS must not scale with n_episodes x payload size."""
+    import numpy as np
+
+    from stable_worldmodel.data import LanceDataset, LanceWriter
+
+    eps = []
+    for i in range(4):
+        eps.append(
+            {
+                'pixels': [np.zeros((8, 8, 3), dtype=np.uint8)] * 3,
+                'action': [np.zeros(2, dtype=np.float32)] * 3,
+                '_episode_data': {
+                    'scene': f'scene-{i}'.encode() * 1000,  # heavy: bytes
+                    'env_id': f'env-{i}',  # light: str
+                    'params': np.full(4, float(i), np.float32),  # heavy: array
+                },
+            }
+        )
+    with LanceWriter(tmp_path / 'd', 't') as w:
+        for ep in eps:
+            w.write_episode(ep)
+
+    ds = LanceDataset(path=str(tmp_path / 'd' / 't.lance'))
+    out = ds.get_episode_data([2, 0, 2])
+    assert out['env_id'] == ['env-2', 'env-0', 'env-2']
+    assert out['scene'][0] == b'scene-2' * 1000
+    assert np.allclose(out['params'][1], 0.0)
+    # light column cached; heavy columns absent from the cache
+    assert ds._episode_data_cache is not None
+    assert set(ds._episode_data_cache) == {'env_id'}
+    # second call (cache warm) still correct for heavy columns
+    again = ds.get_episode_data([1])
+    assert again['scene'][0] == b'scene-1' * 1000
