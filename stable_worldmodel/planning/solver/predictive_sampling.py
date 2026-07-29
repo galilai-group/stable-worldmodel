@@ -100,7 +100,9 @@ class PredictiveSamplingSolver:
         if remaining > 0:
             device = nominal.device
             pad = torch.zeros(
-                [n_envs, remaining, self.action_dim], dtype=self.dtype
+                [n_envs, remaining, self.action_dim],
+                dtype=self.dtype,
+                device=device,
             )
             nominal = torch.cat([nominal, pad], dim=1).to(device)
 

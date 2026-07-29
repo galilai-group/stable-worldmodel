@@ -137,7 +137,12 @@ class LagrangianSolver(torch.nn.Module):
 
         remaining = self.horizon - actions.shape[1]
         if remaining > 0:
-            new_actions = torch.zeros(self._n_envs, remaining, self.action_dim)
+            new_actions = torch.zeros(
+                self._n_envs,
+                remaining,
+                self.action_dim,
+                device=actions.device,
+            )
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
         actions = actions.unsqueeze(1).repeat_interleave(

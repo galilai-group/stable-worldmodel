@@ -109,7 +109,9 @@ class CEMSolver:
         if remaining > 0:
             device = mean.device
             new_mean = torch.zeros(
-                [n_envs, remaining, self.action_dim], dtype=self.dtype
+                [n_envs, remaining, self.action_dim],
+                dtype=self.dtype,
+                device=device,
             )
             mean = torch.cat([mean, new_mean], dim=1).to(device)
 

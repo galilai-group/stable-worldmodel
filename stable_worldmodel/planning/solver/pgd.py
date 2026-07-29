@@ -123,7 +123,10 @@ class PGDSolver(torch.nn.Module):
 
         if remaining > 0:
             new_actions = torch.zeros(
-                self._n_envs, remaining, self.action_simplex_dim
+                self._n_envs,
+                remaining,
+                self.action_simplex_dim,
+                device=actions.device,
             )
             actions = torch.cat([actions, new_actions], dim=1).to(self.device)
 
