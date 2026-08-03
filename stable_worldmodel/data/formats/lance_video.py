@@ -461,39 +461,58 @@ class LanceVideoDataset(LanceDataset):
     def _decoder_for(self, ep_idx: int, vkey: str):
         return self._decoder_entry(ep_idx, vkey)[0]
 
-    def _source_entry(self, ep_idx: int, vkey: str):
-        """Cache entry ``[decoder_or_None, source, midx]`` for one episode
-        video, creating the source WITHOUT any fetch. New indexed entries
-        need their header ranges fetched (see :meth:`_header_ranges`)
-        before a decoder can be built from memory; the batched path folds
-        those into its single fetch wave."""
+    def _source_entries(self, keys: list[tuple[int, str]]) -> dict:
+        """Cache entries ``[decoder_or_None, source, midx]`` for many episode
+        videos, opening every cold blob in ONE ``take_blobs`` call (the call
+        is a network round trip per invocation, not per row — one per batch
+        instead of one per cold episode). Sources are created WITHOUT any
+        data fetch; new indexed entries need their header ranges fetched
+        (see :meth:`_header_ranges`) before a decoder can be built from
+        memory — the batched path folds those into its single fetch wave.
+
+        Returned entries are pinned by the caller's dict for the duration of
+        the batch, so mid-batch cache eviction (possible whenever a batch
+        touches more episodes than ``decoder_cache_size``) cannot invalidate
+        in-flight work.
+        """
         cache = self._decoder_cache
-        key = (ep_idx, vkey)
-        entry = cache.get(key)
-        if entry is not None:
-            cache.move_to_end(key)
-            return entry
-        row = self._blob_row[key]
-        blob = self._videos_ds.take_blobs(
-            blob_column='video_bytes', indices=[row]
-        )[0]
-        midx = self._video_index.get(key)
-        if midx is not None:
-            blob.seek(0, 2)
-            size = blob.tell()
-            blob.seek(0)
-            src = _SparseBlobIO(blob, size)
-        else:
-            # No GOP index: the decoder discovers byte ranges by seeking
-            # through a buffered view (streaming fallback).
-            src = io.BufferedReader(
-                _SeekableBlob(blob), buffer_size=self._blob_buffer_size
+        out: dict = {}
+        cold: list[tuple[int, str]] = []
+        for key in keys:
+            entry = cache.get(key)
+            if entry is not None:
+                cache.move_to_end(key)
+                out[key] = entry
+            else:
+                cold.append(key)
+        if cold:
+            blobs = self._videos_ds.take_blobs(
+                blob_column='video_bytes',
+                indices=[self._blob_row[k] for k in cold],
             )
-        entry = [None, src, midx]
-        cache[key] = entry
-        while len(cache) > self._decoder_cache_size:
-            cache.popitem(last=False)
-        return entry
+            for key, blob in zip(cold, blobs):
+                midx = self._video_index.get(key)
+                if midx is not None:
+                    blob.seek(0, 2)
+                    size = blob.tell()
+                    blob.seek(0)
+                    src = _SparseBlobIO(blob, size)
+                else:
+                    # No GOP index: the decoder discovers byte ranges by
+                    # seeking through a buffered view (streaming fallback).
+                    src = io.BufferedReader(
+                        _SeekableBlob(blob),
+                        buffer_size=self._blob_buffer_size,
+                    )
+                entry = [None, src, midx]
+                cache[key] = entry
+                out[key] = entry
+            while len(cache) > self._decoder_cache_size:
+                cache.popitem(last=False)
+        return out
+
+    def _source_entry(self, ep_idx: int, vkey: str):
+        return self._source_entries([(ep_idx, vkey)])[(ep_idx, vkey)]
 
     @staticmethod
     def _finalize_decoder(entry):
@@ -603,13 +622,12 @@ class LanceVideoDataset(LanceDataset):
             # Without the API (or without a GOP index) each source falls
             # back to its own ranged fetches on a thread pool.
             unions: dict[tuple[int, str], list[int]] = {}
-            entries: dict[tuple[int, str], list] = {}
+            entries = self._source_entries(list(plan.keys()))
             gap_lists: list[tuple[tuple[int, str], Any, list]] = []
             for (ep_idx, vkey), items in plan.items():
                 union = sorted({j for _, idxs in items for j in idxs})
                 unions[(ep_idx, vkey)] = union
-                entry = self._source_entry(ep_idx, vkey)
-                entries[(ep_idx, vkey)] = entry
+                entry = entries[(ep_idx, vkey)]
                 _dec, src, midx = entry
                 if midx is None:
                     continue

@@ -454,3 +454,25 @@ def test_batched_fetch_falls_back_without_wave_api(tmp_path, monkeypatch):
     got = ds2.__getitems__([0, len(ds2) - 1])
     for a, b in zip(want, got):
         assert torch.equal(a['pixels'], b['pixels'])
+
+
+def test_batched_blob_open_is_one_call(tmp_path, monkeypatch):
+    """Cold episodes in a batch open their blobs in ONE take_blobs call —
+    one request per batch, not per episode (HF bucket gateways enforce
+    request quotas that per-episode opens exhaust)."""
+    from lance.dataset import LanceDataset as _LD
+
+    _write(tmp_path / 'd')
+    calls = []
+    orig = _LD.take_blobs
+
+    def counting(self, *a, **kw):
+        idxs = kw.get('indices') or (a[1] if len(a) > 1 else None)
+        calls.append(len(idxs) if idxs is not None else 1)
+        return orig(self, *a, **kw)
+
+    monkeypatch.setattr(_LD, 'take_blobs', counting)
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    out = ds.__getitems__([0, len(ds) - 1])  # two distinct cold episodes
+    assert len(out) == 2
+    assert calls == [2]  # one call, both rows
