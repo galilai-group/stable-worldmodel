@@ -360,13 +360,13 @@ def test_planned_decode_reads_partial_blob(tmp_path, monkeypatch):
         w.write_episodes([ep])
 
     fetched = []
-    orig_ensure = lv._SparseBlobIO.ensure
+    orig_add = lv._SparseBlobIO.add_chunk
 
-    def counting_ensure(self, ranges):
-        fetched.extend(max(0, e - s) for s, e in ranges)
-        return orig_ensure(self, ranges)
+    def counting_add(self, start, data):
+        fetched.append(len(data))
+        return orig_add(self, start, data)
 
-    monkeypatch.setattr(lv._SparseBlobIO, 'ensure', counting_ensure)
+    monkeypatch.setattr(lv._SparseBlobIO, 'add_chunk', counting_add)
 
     ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
     item = ds.__getitems__([0])[0]
@@ -416,3 +416,41 @@ def test_append_to_legacy_videos_table_without_index(tmp_path):
 
     ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
     assert len(ds.offsets) == 4  # 3 original + 1 appended episodes
+
+
+def test_batched_fetch_is_one_wave(tmp_path, monkeypatch):
+    """A batch touching several episodes fetches all planned ranges in a
+    single read_blob_ranges call (pylance >= 9)."""
+    from lance.dataset import LanceDataset as _LD
+
+    _write(tmp_path / 'd')
+    calls = []
+    orig = _LD.read_blob_ranges
+
+    def counting(self, column, requests, **kw):
+        calls.append(len(requests))
+        return orig(self, column, requests, **kw)
+
+    monkeypatch.setattr(_LD, 'read_blob_ranges', counting)
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    out = ds.__getitems__([0, len(ds) - 1])  # two distinct episodes
+    assert len(out) == 2
+    assert len(calls) == 1 and calls[0] >= 2  # one wave, many ranges
+
+
+def test_batched_fetch_falls_back_without_wave_api(tmp_path, monkeypatch):
+    """Without read_blob_ranges the batch fetch degrades to per-source
+    ranged reads with identical results."""
+    import torch
+
+    from lance.dataset import LanceDataset as _LD
+
+    _write(tmp_path / 'd')
+    ds = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    want = ds.__getitems__([0, len(ds) - 1])
+
+    monkeypatch.delattr(_LD, 'read_blob_ranges')
+    ds2 = LanceVideoDataset(tmp_path / 'd', num_steps=4)
+    got = ds2.__getitems__([0, len(ds2) - 1])
+    for a, b in zip(want, got):
+        assert torch.equal(a['pixels'], b['pixels'])

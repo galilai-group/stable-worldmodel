@@ -120,6 +120,32 @@ def _encode_video(frames, fps: int, codec: str) -> bytes:
 
 #: bytes of file head (ftyp/probe data) prefetched with the moov box.
 _HEADER_PREFETCH = 64 * 1024
+#: slack past the moov box: ffmpeg reads the following box header (mdat)
+#: during open — without this, every cold open costs one fallback round trip.
+_MOOV_SLACK = 64 * 1024
+#: first-packet region prefetched on open: ffmpeg probes the start of the
+#: first sample when building its stream context.
+_FIRST_PACKET_PREFETCH = 256 * 1024
+#: gap (bytes) under which adjacent planned ranges are merged into one
+#: request — fewer round trips for the same bytes.
+_SPAN_MERGE_GAP = 64 * 1024
+
+
+def _merge_spans(
+    ranges: list[tuple[int, int]], gap: int = _SPAN_MERGE_GAP
+) -> list[tuple[int, int]]:
+    """Coalesce overlapping/nearby ``[start, end)`` spans."""
+    if not ranges:
+        return []
+    ranges = sorted(ranges)
+    out = [ranges[0]]
+    for start, end in ranges[1:]:
+        last_start, last_end = out[-1]
+        if start <= last_end + gap:
+            out[-1] = (last_start, max(last_end, end))
+        else:
+            out.append((start, end))
+    return out
 
 
 class _SparseBlobIO(io.RawIOBase):
@@ -139,10 +165,12 @@ class _SparseBlobIO(io.RawIOBase):
         self._starts: list[int] = []  # sorted chunk starts
         self._bufs: list[bytes] = []  # parallel chunk payloads
 
-    def ensure(self, ranges: list[tuple[int, int]]) -> None:
-        """Fetch any uncovered parts of ``ranges`` (``[start, end)``)."""
+    def missing(self, ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        """Uncovered gaps of ``ranges`` (``[start, end)``), clamped to the
+        blob size."""
         import bisect
 
+        gaps: list[tuple[int, int]] = []
         for start, end in ranges:
             end = min(end, self._size)
             pos = max(start, 0)
@@ -155,11 +183,23 @@ class _SparseBlobIO(io.RawIOBase):
                 gap_end = (
                     min(end, self._starts[j]) if j < len(self._starts) else end
                 )
-                data = self._blob.read_range(pos, gap_end - pos)
-                k = bisect.bisect_right(self._starts, pos)
-                self._starts.insert(k, pos)
-                self._bufs.insert(k, data)
+                gaps.append((pos, gap_end))
                 pos = gap_end
+        return gaps
+
+    def add_chunk(self, start: int, data: bytes) -> None:
+        """Insert an externally fetched chunk (must cover only bytes the
+        source did not already hold — i.e. a gap from :meth:`missing`)."""
+        import bisect
+
+        k = bisect.bisect_right(self._starts, start)
+        self._starts.insert(k, start)
+        self._bufs.insert(k, data)
+
+    def ensure(self, ranges: list[tuple[int, int]]) -> None:
+        """Fetch any uncovered parts of ``ranges`` (``[start, end)``)."""
+        for pos, gap_end in self.missing(ranges):
+            self.add_chunk(pos, self._blob.read_range(pos, gap_end - pos))
 
     def readinto(self, b) -> int:
         import bisect
@@ -385,6 +425,7 @@ class LanceVideoDataset(LanceDataset):
         state = super().__getstate__()
         state['_videos_ds'] = None
         state['_decoder_cache'] = None
+        state['_decode_pool'] = None
         return state
 
     def _ensure_videos_open(self) -> None:
@@ -394,20 +435,38 @@ class LanceVideoDataset(LanceDataset):
             )
             self._decoder_cache = OrderedDict()
 
+    def _get_decode_pool(self):
+        """Persistent per-worker pool for parallel per-episode decodes
+        (torchcodec releases the GIL while decoding)."""
+        if getattr(self, '_decode_pool', None) is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            self._decode_pool = ThreadPoolExecutor(
+                max_workers=min(8, os.cpu_count() or 4)
+            )
+        return self._decode_pool
+
+    @staticmethod
+    def _header_ranges(midx: Mp4Index) -> list[tuple[int, int]]:
+        """Byte ranges a decoder touches at open: file head (ftyp/probe),
+        moov + the following box header, and the first-packet region."""
+        m0, m1 = midx.moov_range
+        first = midx.gop_byte_offset[0]
+        return [
+            (0, _HEADER_PREFETCH),
+            (m0, m1 + _MOOV_SLACK),
+            (first, first + _FIRST_PACKET_PREFETCH),
+        ]
+
     def _decoder_for(self, ep_idx: int, vkey: str):
         return self._decoder_entry(ep_idx, vkey)[0]
 
-    def _decoder_entry(self, ep_idx: int, vkey: str):
-        """Return ``(decoder, source, index_or_none)`` for one episode video.
-
-        With a GOP index, the source is a :class:`_SparseBlobIO` primed with
-        the container header — callers ``ensure()`` the GOP ranges they need
-        (batched, so a whole DataLoader batch prefetches concurrently).
-        Without one, it falls back to the buffered streaming reader and the
-        decoder discovers byte ranges by seeking.
-        """
-        from torchcodec.decoders import VideoDecoder
-
+    def _source_entry(self, ep_idx: int, vkey: str):
+        """Cache entry ``[decoder_or_None, source, midx]`` for one episode
+        video, creating the source WITHOUT any fetch. New indexed entries
+        need their header ranges fetched (see :meth:`_header_ranges`)
+        before a decoder can be built from memory; the batched path folds
+        those into its single fetch wave."""
         cache = self._decoder_cache
         key = (ep_idx, vkey)
         entry = cache.get(key)
@@ -424,21 +483,38 @@ class LanceVideoDataset(LanceDataset):
             size = blob.tell()
             blob.seek(0)
             src = _SparseBlobIO(blob, size)
-            # container header: file head (ftyp/probe) + moov sample tables
-            src.ensure([(0, _HEADER_PREFETCH), midx.moov_range])
         else:
-            # Ranged reads: the decoder pulls only the byte ranges it
-            # needs through a buffered seekable view of the blob, instead
-            # of downloading the whole episode MP4.
+            # No GOP index: the decoder discovers byte ranges by seeking
+            # through a buffered view (streaming fallback).
             src = io.BufferedReader(
                 _SeekableBlob(blob), buffer_size=self._blob_buffer_size
             )
-        dec = VideoDecoder(src, seek_mode='approximate')
-        entry = (dec, src, midx)
+        entry = [None, src, midx]
         cache[key] = entry
         while len(cache) > self._decoder_cache_size:
             cache.popitem(last=False)
         return entry
+
+    @staticmethod
+    def _finalize_decoder(entry):
+        """Create the torchcodec decoder for ``entry`` if not built yet.
+        For indexed sources the header ranges must already be buffered (or
+        creation costs fallback round trips — still correct)."""
+        if entry[0] is None:
+            from torchcodec.decoders import VideoDecoder
+
+            entry[0] = VideoDecoder(entry[1], seek_mode='approximate')
+        return entry[0]
+
+    def _decoder_entry(self, ep_idx: int, vkey: str):
+        """Return ``(decoder, source, index_or_none)``, fetching whatever
+        the decoder needs on the spot (single-window path)."""
+        entry = self._source_entry(ep_idx, vkey)
+        _dec, src, midx = entry
+        if entry[0] is None and midx is not None:
+            src.ensure(_merge_spans(self._header_ranges(midx)))
+        dec = self._finalize_decoder(entry)
+        return dec, src, midx
 
     def _decode_video_window(
         self, ep_idx: int, vkey: str, local_start: int, num_steps: int
@@ -519,18 +595,27 @@ class LanceVideoDataset(LanceDataset):
                 ]
                 for vkey in self._video_keys:
                     plan.setdefault((ep_idx, vkey), []).append((i, idxs))
-            # Open all decoders (header-only I/O with a GOP index), plan the
-            # byte ranges each episode's windows need, and prefetch every
-            # episode's ranges concurrently before any decoding starts.
+            # Plan every byte the batch needs — header ranges for episodes
+            # whose decoder isn't built yet, plus each episode's window GOP
+            # ranges — and fetch ALL of it in ONE planned call
+            # (read_blob_ranges, pylance >= 9). On high-latency links this
+            # collapses ~ranges x RTT of serialized waiting into ~1 x RTT.
+            # Without the API (or without a GOP index) each source falls
+            # back to its own ranged fetches on a thread pool.
             unions: dict[tuple[int, str], list[int]] = {}
-            prefetch: list[tuple[Any, list[tuple[int, int]]]] = []
+            entries: dict[tuple[int, str], list] = {}
+            gap_lists: list[tuple[tuple[int, str], Any, list]] = []
             for (ep_idx, vkey), items in plan.items():
                 union = sorted({j for _, idxs in items for j in idxs})
                 unions[(ep_idx, vkey)] = union
-                _dec, src, midx = self._decoder_entry(ep_idx, vkey)
+                entry = self._source_entry(ep_idx, vkey)
+                entries[(ep_idx, vkey)] = entry
+                _dec, src, midx = entry
                 if midx is None:
                     continue
                 ranges = []
+                if entry[0] is None:
+                    ranges += self._header_ranges(midx)
                 run_start = prev = union[0]
                 for j in union[1:] + [None]:
                     if j is not None and j == prev + 1:
@@ -539,24 +624,55 @@ class LanceVideoDataset(LanceDataset):
                     ranges.extend(midx.ranges_for_frames(run_start, prev + 1))
                     if j is not None:
                         run_start = prev = j
-                prefetch.append((src, ranges))
-            if len(prefetch) > 1:
+                gaps = src.missing(_merge_spans(ranges))
+                if gaps:
+                    gap_lists.append(((ep_idx, vkey), src, gaps))
+
+            wave = getattr(self._videos_ds, 'read_blob_ranges', None)
+            if gap_lists and wave is not None:
+                requests = []
+                owners = []
+                for key, src, gaps in gap_lists:
+                    row = self._blob_row[key]
+                    for start, end in gaps:
+                        requests.append((row, start, end - start))
+                        owners.append((src, start))
+                fetched = wave(
+                    'video_bytes',
+                    requests,
+                    selector='indices',
+                    preserve_order=True,
+                )
+                for (src, start), (_r, _o, data) in zip(owners, fetched):
+                    src.add_chunk(start, data)
+            elif len(gap_lists) > 1:
                 from concurrent.futures import ThreadPoolExecutor
 
                 with ThreadPoolExecutor(
-                    max_workers=min(16, len(prefetch))
+                    max_workers=min(16, len(gap_lists))
                 ) as ex:
-                    list(ex.map(lambda t: t[0].ensure(t[1]), prefetch))
-            elif prefetch:
-                prefetch[0][0].ensure(prefetch[0][1])
+                    list(ex.map(lambda t: t[1].ensure(t[2]), gap_lists))
+            elif gap_lists:
+                gap_lists[0][1].ensure(gap_lists[0][2])
 
-            for (ep_idx, vkey), items in plan.items():
-                dec = self._decoder_entry(ep_idx, vkey)[0]
-                union = unions[(ep_idx, vkey)]
+            # Decode per episode in parallel (torchcodec releases the GIL);
+            # decoder creation rides in the task so cold moov parses also
+            # overlap. Entries are pinned by the local dict for the batch.
+            def _decode_one(key):
+                dec = self._finalize_decoder(entries[key])
+                union = unions[key]
                 frames = dec.get_frames_at(indices=union).data
+                return key, union, frames
+
+            if len(plan) > 1:
+                pool = self._get_decode_pool()
+                decoded = list(pool.map(_decode_one, plan.keys()))
+            else:
+                decoded = [_decode_one(k) for k in plan.keys()]
+            for key, union, frames in decoded:
                 pos = {ix: j for j, ix in enumerate(union)}
-                for sample_i, idxs in items:
-                    video_out[(sample_i, vkey)] = frames[
+                for sample_i, idxs in plan[key]:
+                    video_out[(sample_i, key[1])] = frames[
                         [pos[j] for j in idxs]
                     ]
 
