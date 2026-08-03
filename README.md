@@ -37,6 +37,9 @@ pip install 'stable-worldmodel[all]'     # + training, environments, and data fo
 
 LeRobot dataset support is a separate opt-in extra (requires Python 3.12+): `pip install 'stable-worldmodel[lerobot]'`.
 
+MineRL/BASALT conversion is also opt-in because MineRL carries a Minecraft
+runtime: `pip install 'stable-worldmodel[minerl]'`.
+
 From source (development):
 
 ```bash
@@ -108,6 +111,27 @@ swm.data.convert("data/pusht.lance", "data/pusht_video",
 ```
 
 Every writer accepts a `mode` kwarg (`'append'` (default), `'overwrite'`, `'error'`); re-running `world.collect` extends the existing dataset rather than failing.
+
+### MineRL / BASALT demonstrations
+
+The optional MineRL converter streams each demonstration into the default
+Lance layout without an intermediate video export. Each row contains
+first-person RGB `observation`, a deterministic flattened `action` vector,
+`reward`, `done`, `episode_id`, and `timestep` — the transition fields needed
+by an action-conditioned world model.
+
+```bash
+swm convert-minerl data/basalt_find_cave.lance \
+    --environment MineRLBasaltFindCave-v0 \
+    --data-dir /path/to/minerl-data
+```
+
+The output is a regular SWM Lance dataset:
+
+```python
+dataset = swm.data.load_dataset("data/basalt_find_cave.lance", num_steps=16)
+sample = dataset[0]  # observation, action, reward, done, episode_id, timestep
+```
 
 <details>
 <summary><b>Throughput & storage benchmarks</b></summary>

@@ -68,6 +68,12 @@ lerobot = [
     "lerobot>=0.5.0; python_version >= '3.12'",
 ]
 
+# MineRL is kept separate from ``env`` because it bundles a Minecraft client
+# and legacy Gym integrations. The converter imports it lazily.
+minerl = [
+    "minerl",
+]
+
 all = [
     "stable-worldmodel[train,env,format]",
 ]

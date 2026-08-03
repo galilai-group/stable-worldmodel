@@ -8,6 +8,7 @@ from .normalization import (
 )
 from .utils import column_normalizer
 from .buffer import ReplayBuffer, classic_filter
+from .converters import MineRLConversionSummary, convert_minerl
 from .format import (
     EPISODE_DATA_KEY,
     FORMATS,
@@ -64,6 +65,7 @@ __all__ = [
     'LanceDataset',
     'LanceWriter',
     'LeRobotAdapter',
+    'MineRLConversionSummary',
     'PercentileScaler',
     'ReplayBuffer',
     'WRITE_MODES',
@@ -71,6 +73,7 @@ __all__ = [
     'ZScoreScaler',
     'classic_filter',
     'column_normalizer',
+    'convert_minerl',
     'detect_format',
     'get_format',
     'get_scaler',

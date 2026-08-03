@@ -828,6 +828,41 @@ def convert(
     print(f'[green]Done.[/green] Output: {dest_path}')
 
 
+@app.command('convert-minerl')
+def convert_minerl(
+    output: Annotated[
+        str,
+        typer.Argument(help='Destination Lance path.'),
+    ],
+    environment: Annotated[
+        str,
+        typer.Option('--environment', '-e', help='MineRL task/environment ID.'),
+    ],
+    data_dir: Annotated[
+        str | None,
+        typer.Option('--data-dir', help='Root containing MineRL trajectories.'),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option('--overwrite', help='Replace an existing destination.'),
+    ] = False,
+):
+    """Convert MineRL/BASALT demonstrations to an SWM Lance dataset."""
+    from stable_worldmodel.data.converters import convert_minerl as run
+
+    summary = run(
+        output,
+        environment=environment,
+        data_dir=data_dir,
+        mode='overwrite' if overwrite else 'error',
+    )
+    print(
+        f'[green]Done.[/green] {summary.trajectories} trajectories, '
+        f'{summary.transitions} transitions, action_dim={summary.action_dim}.\n'
+        f'Output: {summary.output_path}'
+    )
+
+
 @app.command()
 def merge(
     sources: Annotated[
