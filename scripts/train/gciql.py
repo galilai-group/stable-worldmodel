@@ -7,8 +7,6 @@ import stable_pretraining as spt
 import torch
 from einops import rearrange, repeat
 from lightning.pytorch.callbacks import Callback
-from stable_worldmodel.data import column_normalizer as get_column_normalizer
-from stable_worldmodel.wm.utils import save_pretrained
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger as logging
 from omegaconf import OmegaConf
@@ -16,6 +14,8 @@ from torch.utils.data import DataLoader
 from transformers import AutoModel
 
 import stable_worldmodel as swm
+from stable_worldmodel.data import column_normalizer as get_column_normalizer
+from stable_worldmodel.wm.utils import save_pretrained
 
 # TODO for now we use AWR to extract a policy from the learned value function.
 # we should implement DDPG style training from the learnt critic as well.
@@ -871,6 +871,9 @@ def run(cfg):
     gciql_critics_model = get_gciql_critics_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir(sub_folder='checkpoints')
+    value_ckpt_path = cache_dir / (
+        f'{cfg.output_model_name}_value_weights.ckpt'
+    )
 
     if cfg.get('train_value', True):
         dump_object_callback = SaveCkptCallback(
@@ -892,7 +895,7 @@ def run(cfg):
             trainer=trainer,
             module=gciql_critics_model,
             data=data,
-            ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
+            ckpt_path=value_ckpt_path if value_ckpt_path.exists() else None,
         )
         manager()
 
@@ -906,11 +909,11 @@ def run(cfg):
     )
     data = get_data(cfg, goal_probabilities=goal_probs)
 
-    # load value function weights
-    checkpoint = torch.load(
-        f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
-    )
-    gciql_critics_model.load_state_dict(checkpoint['state_dict'])
+    # A freshly trained critic is already available in memory. Only load a
+    # checkpoint when value training was explicitly skipped.
+    if not cfg.get('train_value', True):
+        checkpoint = torch.load(value_ckpt_path)
+        gciql_critics_model.load_state_dict(checkpoint['state_dict'])
 
     gciql_actor_model = get_gciql_actor_model(cfg, gciql_critics_model)
 
@@ -928,11 +931,14 @@ def run(cfg):
         enable_checkpointing=True,
     )
 
+    policy_ckpt_path = cache_dir / (
+        f'{cfg.output_model_name}_policy_weights.ckpt'
+    )
     manager = spt.Manager(
         trainer=trainer,
         module=gciql_actor_model,
         data=data,
-        ckpt_path=f'{cache_dir}/{cfg.output_model_name}_policy_weights.ckpt',
+        ckpt_path=policy_ckpt_path if policy_ckpt_path.exists() else None,
     )
     manager()
 
