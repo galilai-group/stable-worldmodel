@@ -212,20 +212,20 @@ class ExpertPolicy(BasePolicy):
 
         return p_stack
 
-    def get_action(self, info_dict, **kwargs):
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
         assert 'privileged/target_task' in info_dict, (
             "'privileged/target_task' must be provided in info_dict"
         )
 
         envs = [e.unwrapped for e in self.env.envs]
-        act_shape = self.env.action_space.shape
-        actions = np.zeros(act_shape, dtype=np.float32)
+        env_indices, actions = self._ready_envs(envs, env_mask)
 
-        for i, env in enumerate(envs):
+        for row, i in enumerate(env_indices):
+            env = envs[i]
             # extract env-relevant info
             info = {
-                k: v[i][0]
+                k: v[row][0]
                 for k, v in info_dict.items()
                 if not k.startswith('_')
             }
@@ -257,7 +257,7 @@ class ExpertPolicy(BasePolicy):
                         0, [xi, xi, xi, xi * 3, xi * 10], action.shape
                     )
             action = np.clip(action, -1, 1)
-            actions[i] = action
+            actions[row] = action
 
             # Set a new task when the current subtask is done.
             if self._agents[i].done:

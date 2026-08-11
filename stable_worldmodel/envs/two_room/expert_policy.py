@@ -39,7 +39,7 @@ class ExpertPolicy(BasePolicy):
     def set_env(self, env):
         self.env = env
 
-    def get_action(self, info_dict, **kwargs):
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
         assert 'state' in info_dict, "'state' must be provided in info_dict"
         assert 'goal_state' in info_dict, (
@@ -58,15 +58,20 @@ class ExpertPolicy(BasePolicy):
                 envs = [base_env]
                 is_vectorized = False
 
-        actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
+        if is_vectorized:
+            env_indices, actions = self._ready_envs(envs, env_mask)
+        else:
+            env_indices = np.arange(1)
+            actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
 
-        for i, env in enumerate(envs):
+        for row, i in enumerate(env_indices):
+            env = envs[i]
             if is_vectorized:
                 agent_pos = np.asarray(
-                    info_dict['state'][i], dtype=np.float32
+                    info_dict['state'][row], dtype=np.float32
                 ).squeeze()
                 goal_pos = np.asarray(
-                    info_dict['goal_state'][i], dtype=np.float32
+                    info_dict['goal_state'][row], dtype=np.float32
                 ).squeeze()
             else:
                 agent_pos = np.asarray(
@@ -165,7 +170,7 @@ class ExpertPolicy(BasePolicy):
                 direction = np.zeros_like(direction, dtype=np.float32)
 
             if is_vectorized:
-                actions[i] = direction.astype(np.float32)
+                actions[row] = direction.astype(np.float32)
             else:
                 actions = direction.astype(np.float32)
 

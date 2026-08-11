@@ -1,11 +1,14 @@
 """Tests for EnvPool — self-contained, no real envs needed."""
 
+import threading
+
 import gymnasium as gym
 import numpy as np
 import pytest
 import torch
 
 from stable_worldmodel.world.env_pool import (
+    AsyncEnvPool,
     EnvPool,
     _broadcast_arg,
     _stack_fresh,
@@ -56,6 +59,26 @@ class CounterEnv(gym.Env):
 
 def _make_pool(n: int = 3, max_steps: int = 5) -> EnvPool:
     return EnvPool([lambda ms=max_steps: CounterEnv(ms) for _ in range(n)])
+
+
+class ThreadRecordingEnv(CounterEnv):
+    """Counter env that records which thread ran each of its operations.
+
+    Stands in for an env holding a thread-affine resource such as a GPU
+    rendering context, without needing a GPU.
+    """
+
+    def __init__(self, max_steps: int = 100):
+        super().__init__(max_steps)
+        self.thread_ids: set[int] = set()
+
+    def reset(self, *, seed=None, options=None):
+        self.thread_ids.add(threading.get_ident())
+        return super().reset(seed=seed, options=options)
+
+    def step(self, action):
+        self.thread_ids.add(threading.get_ident())
+        return super().step(action)
 
 
 # -- EnvPool properties ---------------------------------------------------
@@ -638,4 +661,71 @@ def test_interleaved_termination_and_reset():
     assert rewards[1] == 0.0  # not stepped
     assert infos['state'][0] == 1.0
     assert infos['state'][1] == 2.0  # stale from before
+    pool.close()
+
+
+# -- Thread affinity ------------------------------------------------------
+
+
+def _make_thread_pool(n: int = 4) -> AsyncEnvPool:
+    return AsyncEnvPool([ThreadRecordingEnv for _ in range(n)])
+
+
+def _drain(pool: AsyncEnvPool) -> None:
+    while pool.has_pending:
+        pool.wait_ready()
+
+
+def test_async_env_stays_on_one_thread():
+    """Each env must be touched by exactly one thread, ever."""
+    pool = _make_thread_pool(4)
+    actions = np.zeros((4, 2))
+
+    pool.reset(seed=0)
+    for _ in range(5):
+        pool.submit_step(np.arange(4), actions)
+        _drain(pool)
+    pool.step(actions)
+
+    for env_idx, env in enumerate(pool.envs):
+        assert len(env.thread_ids) == 1, (
+            f'env {env_idx} was touched by {len(env.thread_ids)} threads: '
+            f'{sorted(env.thread_ids)}'
+        )
+    pool.close()
+
+
+def test_async_envs_run_on_distinct_threads():
+    """Affinity must not collapse the pool onto a single worker."""
+    pool = _make_thread_pool(4)
+
+    pool.reset(seed=0)
+    pool.submit_step(np.arange(4), np.zeros((4, 2)))
+    _drain(pool)
+
+    threads = {next(iter(env.thread_ids)) for env in pool.envs}
+    assert len(threads) == 4
+    pool.close()
+
+
+def test_async_env_thread_is_not_the_caller():
+    """Blocking operations dispatch to the worker, not the calling thread."""
+    pool = _make_thread_pool(2)
+
+    pool.reset(seed=0)
+
+    for env in pool.envs:
+        assert threading.get_ident() not in env.thread_ids
+    pool.close()
+
+
+def test_sync_pool_runs_on_the_calling_thread():
+    """The dispatch hook must leave the synchronous pool's behaviour alone."""
+    pool = EnvPool([ThreadRecordingEnv for _ in range(2)])
+
+    pool.reset(seed=0)
+    pool.step(np.zeros((2, 2)))
+
+    for env in pool.envs:
+        assert env.thread_ids == {threading.get_ident()}
     pool.close()

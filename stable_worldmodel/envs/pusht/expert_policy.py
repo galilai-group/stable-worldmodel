@@ -61,15 +61,7 @@ class WeakPolicy(BasePolicy):
             else:
                 envs = [base_env]
 
-        if env_mask is None:
-            env_indices = np.arange(len(envs))
-            actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
-        else:
-            env_indices = np.flatnonzero(env_mask)
-            single_shape = envs[0].action_space.shape
-            actions = np.zeros(
-                (len(env_indices), *single_shape), dtype=np.float32
-            )
+        env_indices, actions = self._ready_envs(envs, env_mask)
 
         for row, env_idx in enumerate(env_indices):
             env = envs[env_idx]

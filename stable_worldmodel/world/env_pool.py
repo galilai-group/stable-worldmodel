@@ -95,6 +95,22 @@ class EnvPool:
         """Variation space for a single env (alias of ``variation_space``)."""
         return self.variation_space
 
+    def _call_env(self, env_idx: int, fn, *args, **kwargs):
+        """Run one env's operation and return its result.
+
+        Every env access goes through this hook so subclasses can control
+        which thread touches which env. The base pool calls straight
+        through.
+
+        Args:
+            env_idx: Index of the env ``fn`` belongs to.
+            fn: Bound env method to invoke.
+            *args: Positional arguments for ``fn``.
+            **kwargs: Keyword arguments for ``fn``.
+        """
+        del env_idx
+        return fn(*args, **kwargs)
+
     def reset(
         self,
         seed: int | list[int | None] | None = None,
@@ -118,7 +134,9 @@ class EnvPool:
         for i, env in enumerate(self.envs):
             if mask is not None and not mask[i]:
                 continue
-            _, per_env_infos[i] = env.reset(seed=seeds[i], options=opts[i])
+            _, per_env_infos[i] = self._call_env(
+                i, env.reset, seed=seeds[i], options=opts[i]
+            )
             if seeds[i] is not None:
                 self.seeds[i] = seeds[i]
 
@@ -150,8 +168,8 @@ class EnvPool:
         for i, env in enumerate(self.envs):
             if mask is not None and not mask[i]:
                 continue
-            _, rewards[i], terminateds[i], truncateds[i], info = env.step(
-                actions[i]
+            _, rewards[i], terminateds[i], truncateds[i], info = (
+                self._call_env(i, env.step, actions[i])
             )
             _write_env_info(self._stacked_infos, i, info)
 
@@ -197,14 +215,22 @@ class AsyncEnvPool(EnvPool):
     The regular :meth:`reset` and :meth:`step` methods remain available as
     blocking compatibility operations. Asynchronous callers use
     :meth:`submit_step`, :meth:`submit_reset`, and :meth:`wait_ready`.
+
+    Each environment is owned by one worker thread, and both the blocking
+    and asynchronous entry points dispatch to it, so environments holding
+    thread-affine resources such as GPU rendering contexts are safe to use.
     """
 
     def __init__(self, env_fns: list):
         super().__init__(env_fns)
-        self._executor = ThreadPoolExecutor(
-            max_workers=self.num_envs,
-            thread_name_prefix='swm-env',
-        )
+        # One worker per env: an env must always be touched from one thread.
+        self._executors = [
+            ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix=f'swm-env{i}',
+            )
+            for i in range(self.num_envs)
+        ]
         self._pending: dict[Future, _PendingOperation] = {}
         self._busy = np.zeros(self.num_envs, dtype=bool)
         self._closed = False
@@ -233,6 +259,16 @@ class AsyncEnvPool(EnvPool):
     ) -> tuple[None, np.ndarray, np.ndarray, np.ndarray, dict]:
         self._ensure_idle()
         return super().step(actions, mask=mask)
+
+    def _call_env(self, env_idx: int, fn, *args, **kwargs):
+        """Run a blocking operation on the env's own worker thread.
+
+        Without this the blocking :meth:`reset` and :meth:`step` would run
+        on the caller's thread, which for a rendering env binds its context
+        there and breaks every later asynchronous operation.
+        """
+        future = self._executors[env_idx].submit(fn, *args, **kwargs)
+        return future.result()
 
     def submit_step(self, env_indices, actions: np.ndarray) -> None:
         """Submit one action for every selected environment.
@@ -341,7 +377,8 @@ class AsyncEnvPool(EnvPool):
         if self._closed:
             return
         self._closed = True
-        self._executor.shutdown(wait=True, cancel_futures=True)
+        for executor in self._executors:
+            executor.shutdown(wait=True, cancel_futures=True)
         self._pending.clear()
         self._busy[:] = False
         super().close()
@@ -356,7 +393,7 @@ class AsyncEnvPool(EnvPool):
 
         self._busy[env_idx] = True
         try:
-            future = self._executor.submit(fn, env_idx, *args)
+            future = self._executors[env_idx].submit(fn, env_idx, *args)
         except Exception:
             self._busy[env_idx] = False
             raise

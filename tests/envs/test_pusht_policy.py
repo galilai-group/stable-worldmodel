@@ -221,3 +221,55 @@ def test_weak_policy_get_action_with_env_mask_returns_selected_rows():
     assert actions.dtype == np.float32
     assert np.all(actions >= -1)
     assert np.all(actions <= 1)
+
+
+def test_weak_policy_with_env_mask_maps_rows_to_their_own_envs():
+    """Each returned row must be computed from its own env."""
+
+    class MockPushTEnv:
+        def __init__(self, block_pos):
+            self.spec = SimpleNamespace(id='swm/PushT-v0')
+            self.action_space = gym.spaces.Box(
+                low=-1, high=1, shape=(2,), dtype=np.float32
+            )
+            self.action_scale = 10.0
+            self.agent = SimpleNamespace(
+                position=np.zeros(2, dtype=np.float32)
+            )
+            self.block = SimpleNamespace(
+                position=SimpleNamespace(x=block_pos[0], y=block_pos[1])
+            )
+
+        @property
+        def unwrapped(self):
+            return self
+
+    # Distinct blocks, so a row taken from the wrong env is visible.
+    envs = [
+        MockPushTEnv((1.0, 1.0)),
+        MockPushTEnv((2.0, 2.0)),
+        MockPushTEnv((3.0, 3.0)),
+    ]
+    vec_env = MagicMock()
+    vec_env.spec = None
+    vec_env.envs = envs
+    vec_env.action_space = gym.spaces.Box(
+        low=-1, high=1, shape=(3, 2), dtype=np.float32
+    )
+
+    policy = WeakPolicy(dist_constraint=1e-9, seed=0)
+    policy.set_env(vec_env)
+
+    mask = np.array([False, True, True])
+    actions = policy.get_action({}, env_mask=mask)
+
+    assert actions.shape == (2, 2)
+    for row, env_idx in enumerate(np.flatnonzero(mask)):
+        env = envs[env_idx]
+        expected = (
+            np.array(
+                [env.block.position.x, env.block.position.y], dtype=np.float32
+            )
+            / env.action_scale
+        )
+        np.testing.assert_allclose(actions[row], expected, atol=1e-5)

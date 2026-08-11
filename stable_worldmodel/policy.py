@@ -102,6 +102,38 @@ class BasePolicy:
         Stateless policies do not need to override this hook.
         """
 
+    def _ready_envs(
+        self,
+        envs: list,
+        env_mask: AsyncEnvMask | None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Resolve an async mask to env indices and an action buffer.
+
+        Per-env policies iterate ``enumerate(env_indices)`` and carry two
+        indices: the position in the loop addresses the narrowed info and the
+        returned actions, while the value is the absolute env index that
+        ``envs`` and any per-environment state are keyed by. Conflating them
+        is what breaks a policy under narrowing.
+
+        Args:
+            envs: Every env in the pool, in absolute index order.
+            env_mask: Boolean mask over the pool, or ``None`` for all envs.
+
+        Returns:
+            The absolute indices to act for, and a zeroed action buffer with
+            one row per index.
+        """
+        if env_mask is None:
+            return (
+                np.arange(len(envs)),
+                np.zeros(self.env.action_space.shape, dtype=np.float32),
+            )
+
+        env_indices = np.flatnonzero(env_mask)
+        single_shape = envs[0].action_space.shape
+        actions = np.zeros((len(env_indices), *single_shape), dtype=np.float32)
+        return env_indices, actions
+
     def set_env(self, env: Any) -> None:
         """Associate this policy with an environment.
 

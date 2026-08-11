@@ -564,7 +564,7 @@ class ExpertPolicy(BasePolicy):
         elif len(self.controllers) > count:
             self.controllers = self.controllers[:count]
 
-    def get_action(self, info_dict, **kwargs):
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
         """
         Returns:
             action: numpy array of shape (7,) containing:
@@ -578,12 +578,18 @@ class ExpertPolicy(BasePolicy):
         batched = obs.ndim > 1
         obs_batch = obs if batched else obs[None, :]
 
-        self._ensure_controller_count(obs_batch.shape[0])
+        # Sized by the pool: this call's batch would drop the other envs'.
+        if env_mask is None:
+            env_indices = np.arange(obs_batch.shape[0])
+            self._ensure_controller_count(obs_batch.shape[0])
+        else:
+            env_indices = np.flatnonzero(env_mask)
+            self._ensure_controller_count(len(env_mask))
 
         actions = []
-        for idx, single_obs in enumerate(obs_batch):
-            state_dict = parse_observation(single_obs, 'quaternion')
-            controller = self.controllers[idx]
+        for row, i in enumerate(env_indices):
+            state_dict = parse_observation(obs_batch[row], 'quaternion')
+            controller = self.controllers[i]
             action = controller.compute_control(state_dict)
             controller.post_step_update()
             actions.append(action)

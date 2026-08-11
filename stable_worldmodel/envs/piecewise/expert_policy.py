@@ -30,7 +30,7 @@ class ExpertPolicy(BasePolicy):
     def set_env(self, env):
         self.env = env
 
-    def get_action(self, info_dict, **kwargs):
+    def get_action(self, info_dict, *, env_mask=None, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
         assert 'state' in info_dict, "'state' must be provided in info_dict"
         assert 'goal_state' in info_dict, (
@@ -49,15 +49,20 @@ class ExpertPolicy(BasePolicy):
                 envs = [base_env]
                 is_vectorized = False
 
-        actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
+        if is_vectorized:
+            env_indices, actions = self._ready_envs(envs, env_mask)
+        else:
+            env_indices = np.arange(1)
+            actions = np.zeros(self.env.action_space.shape, dtype=np.float32)
 
-        for i, env in enumerate(envs):
+        for row, i in enumerate(env_indices):
+            env = envs[i]
             if is_vectorized:
                 agent_pos = np.asarray(
-                    info_dict['state'][i], dtype=np.float32
+                    info_dict['state'][row], dtype=np.float32
                 ).squeeze()
                 goal_pos = np.asarray(
-                    info_dict['goal_state'][i], dtype=np.float32
+                    info_dict['goal_state'][row], dtype=np.float32
                 ).squeeze()
             else:
                 agent_pos = np.asarray(
@@ -80,7 +85,7 @@ class ExpertPolicy(BasePolicy):
             action = (goal_pos - agent_pos - bias) / speed
 
             if is_vectorized:
-                actions[i] = action
+                actions[row] = action
             else:
                 actions = action
 
@@ -98,13 +103,24 @@ class ExpertPolicy(BasePolicy):
                 < self.action_repeat_prob
             )
             if is_vectorized:
-                actions[repeat_mask] = self._last_action[repeat_mask]
+                # `_last_action` spans the pool; `repeat_mask` only this call.
+                previous = self._last_action[env_indices]
+                actions[repeat_mask] = previous[repeat_mask]
             else:
                 if repeat_mask:
                     actions = self._last_action
 
         actions = np.clip(actions, -1.0, 1.0).astype(np.float32)
-        self._last_action = actions
+        if is_vectorized:
+            if self._last_action is None or self._last_action.shape[0] != len(
+                envs
+            ):
+                self._last_action = np.zeros(
+                    (len(envs), *actions.shape[1:]), dtype=np.float32
+                )
+            self._last_action[env_indices] = actions
+        else:
+            self._last_action = actions
         return actions
 
 
