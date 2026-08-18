@@ -1,0 +1,10 @@
+defaults:
+  - _self_
+  - launcher: local
+
+seed: 42
+env_name: ALE/Breakout-v5
+episodes: 500
+num_envs: 4
+max_episode_steps: 27000
+cache_dir: null
