@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - launcher/local
+
+hydra:
+  output_subdir: null
+  mode: MULTIRUN
+  run:
+    dir: .
+
+env_name: swm/WireHarness-v0
+cache_dir: null
+expert_ckpt_path: ~/.stable_worldmodel/checkpoints/wire_harness
+noise_std: 0.0
+device: cuda
+
+world:
+  num_envs: 8
+  max_episode_steps: 300
+  image_shape: [176, 320]   # keeps the native 640x352 aspect (no squashing)
+  add_pixels: true
+  goal_conditioned: false
+  camera_view: top
+
+num_workers: 4
+seed: 3072
+num_traj: 1000
+
+options: null
