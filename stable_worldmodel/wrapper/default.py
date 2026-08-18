@@ -260,10 +260,17 @@ class EverythingToInfoWrapper(gym.Wrapper):
                 'variation option must be a list or tuple containing variation names to sample, found: '
                 f'{type(var_opt)}'
             )
-            if len(var_opt) == 1 and var_opt[0] == 'all':
-                self._variations_watch = (
-                    self.env.unwrapped.variation_space.names()
+            # variation_space may be None (e.g. DMControl exposes no factors of
+            # variation), in which case watching variations is impossible.
+            var_space = self.env.get_wrapper_attr('variation_space')
+            if var_space is None:
+                raise ValueError(
+                    f'variation watching was requested (variation={var_opt!r}) '
+                    f'but {type(self.env.unwrapped).__name__} has no '
+                    'variation_space.'
                 )
+            if len(var_opt) == 1 and var_opt[0] == 'all':
+                self._variations_watch = var_space.names()
             else:
                 self._variations_watch = var_opt
 
@@ -271,7 +278,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
             var_key = f'variation.{key}'
             assert var_key not in info
             subvar_space = get_in(
-                self.env.unwrapped.variation_space, key.split('.')
+                self.env.get_wrapper_attr('variation_space'), key.split('.')
             )
             info[var_key] = subvar_space.value
 
@@ -316,7 +323,7 @@ class EverythingToInfoWrapper(gym.Wrapper):
             var_key = f'variation.{key}'
             assert var_key not in info
             subvar_space = get_in(
-                self.env.unwrapped.variation_space, key.split('.')
+                self.env.get_wrapper_attr('variation_space'), key.split('.')
             )
             info[var_key] = subvar_space.value
 

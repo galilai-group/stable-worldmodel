@@ -830,7 +830,7 @@ def test_everything_to_info_wrapper_with_variation_single(minimal_env):
     mock_variation_space = MagicMock()
     mock_variation_space.__getitem__ = MagicMock(return_value=mock_subvar)
     minimal_env.unwrapped = MagicMock()
-    minimal_env.unwrapped.variation_space = mock_variation_space
+    minimal_env.get_wrapper_attr = MagicMock(return_value=mock_variation_space)
 
     wrapped_env = wrapper.EverythingToInfoWrapper(minimal_env)
 
@@ -861,7 +861,7 @@ def test_everything_to_info_wrapper_with_variation_all(minimal_env):
     mock_variation_space.names.return_value = ['color', 'size']
     mock_variation_space.__getitem__ = MagicMock(return_value=mock_subvar)
     minimal_env.unwrapped = MagicMock()
-    minimal_env.unwrapped.variation_space = mock_variation_space
+    minimal_env.get_wrapper_attr = MagicMock(return_value=mock_variation_space)
 
     wrapped_env = wrapper.EverythingToInfoWrapper(minimal_env)
 
@@ -891,7 +891,7 @@ def test_everything_to_info_wrapper_with_variation_multiple(minimal_env):
     mock_variation_space = MagicMock()
     mock_variation_space.__getitem__ = MagicMock(return_value=mock_subvar)
     minimal_env.unwrapped = MagicMock()
-    minimal_env.unwrapped.variation_space = mock_variation_space
+    minimal_env.get_wrapper_attr = MagicMock(return_value=mock_variation_space)
 
     wrapped_env = wrapper.EverythingToInfoWrapper(minimal_env)
 
@@ -923,7 +923,7 @@ def test_everything_to_info_wrapper_variation_persists_in_step(minimal_env):
     mock_variation_space = MagicMock()
     mock_variation_space.__getitem__ = MagicMock(return_value=mock_subvar)
     minimal_env.unwrapped = MagicMock()
-    minimal_env.unwrapped.variation_space = mock_variation_space
+    minimal_env.get_wrapper_attr = MagicMock(return_value=mock_variation_space)
 
     wrapped_env = wrapper.EverythingToInfoWrapper(minimal_env)
 
@@ -940,6 +940,27 @@ def test_everything_to_info_wrapper_variation_persists_in_step(minimal_env):
     # Check that variation key is still tracked in step
     assert 'variation.color' in result[4]
     assert result[4]['variation.color'] == 75
+
+
+def test_everything_to_info_wrapper_variation_none_raises(minimal_env):
+    """Requesting variations on an env with no variation_space (e.g. DMControl
+    sets ``variation_space = None``) raises a clear error rather than an opaque
+    ``'NoneType' has no attribute 'names'``."""
+    import numpy as np
+
+    # Fresh info dict per call (reset mutates it before the guard fires).
+    minimal_env.reset.side_effect = lambda *a, **k: (np.array([1, 2, 3]), {})
+    minimal_env.action_space = MagicMock()
+    minimal_env.action_space.sample = MagicMock(return_value=0.5)
+    # DMControl-style: get_wrapper_attr resolves variation_space to None.
+    minimal_env.get_wrapper_attr = MagicMock(return_value=None)
+
+    wrapped_env = wrapper.EverythingToInfoWrapper(minimal_env)
+
+    with pytest.raises(ValueError, match='no.*variation_space'):
+        wrapped_env.reset(options={'variation': ['all']})
+    with pytest.raises(ValueError, match='no.*variation_space'):
+        wrapped_env.reset(options={'variation': ['color']})
 
 
 #########################
