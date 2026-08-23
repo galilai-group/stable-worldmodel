@@ -9,6 +9,9 @@ from stable_worldmodel.planning.solver.cem import CEMSolver
 from stable_worldmodel.planning.solver.gd import GradientSolver
 from stable_worldmodel.planning.solver.icem import ICEMSolver
 from stable_worldmodel.planning.solver.mppi import MPPISolver
+from stable_worldmodel.planning.solver.predictive_sampling import (
+    PredictiveSamplingSolver,
+)
 
 
 class DummyCostModel:
@@ -20,6 +23,17 @@ class DummyCostModel:
         # Quadratic cost: sum over horizon and action dims
         cost = action_candidates.pow(2).sum(dim=(-1, -2))
         return cost
+
+
+class RecordingBoundsCost:
+    """Cost that records every candidate and favors large invalid actions."""
+
+    def __init__(self):
+        self.candidates = []
+
+    def get_cost(self, info_dict, action_candidates):
+        self.candidates.append(action_candidates.detach().clone())
+        return -action_candidates.square().sum(dim=(-1, -2))
 
 
 ###########################
@@ -272,6 +286,58 @@ def test_mppi_solver_call():
 
     assert 'actions' in outputs
     assert outputs['actions'].shape == (2, 3, 2)
+
+
+def test_sampling_solvers_respect_action_space_bounds():
+    """Sampling solvers must not evaluate or return invalid Box actions."""
+    low = np.array([[0.2, -0.4], [0.2, -0.4]], dtype=np.float32)
+    high = np.array([[0.3, -0.2], [0.3, -0.2]], dtype=np.float32)
+    action_space = gym_spaces.Box(low=low, high=high, dtype=np.float32)
+    config = PlanConfig(horizon=3, receding_horizon=1, action_block=2)
+    info_dict = {'pixels': torch.zeros(2, 1, 1)}
+    expected_low = torch.tensor([0.2, -0.4, 0.2, -0.4])
+    expected_high = torch.tensor([0.3, -0.2, 0.3, -0.2])
+
+    costs = [RecordingBoundsCost() for _ in range(3)]
+    solvers = (
+        CEMSolver(
+            cost=costs[0],
+            n_steps=2,
+            num_samples=32,
+            batch_size=2,
+            topk=4,
+            var_scale=5.0,
+            seed=0,
+        ),
+        MPPISolver(
+            cost=costs[1],
+            n_steps=2,
+            num_samples=32,
+            batch_size=2,
+            topk=4,
+            var_scale=5.0,
+            seed=0,
+        ),
+        PredictiveSamplingSolver(
+            cost=costs[2],
+            num_samples=32,
+            batch_size=2,
+            noise_scale=5.0,
+            seed=0,
+        ),
+    )
+
+    for solver, cost in zip(solvers, costs, strict=True):
+        solver.configure(action_space=action_space, n_envs=2, config=config)
+        outputs = solver(info_dict)
+
+        assert cost.candidates
+        for candidates in cost.candidates:
+            assert torch.all(candidates >= expected_low)
+            assert torch.all(candidates <= expected_high)
+
+        assert torch.all(outputs['actions'] >= expected_low)
+        assert torch.all(outputs['actions'] <= expected_high)
 
 
 ###########################
