@@ -247,7 +247,10 @@ class CEMSolver:
                 prev_mean = batch_mean
                 prev_var = batch_var
                 batch_mean = topk_candidates.mean(dim=1)
-                batch_var = topk_candidates.std(dim=1)
+                # The elites are the population used to parameterize the next
+                # sampling distribution. Population std is also defined when
+                # a caller intentionally keeps a single elite (topk=1).
+                batch_var = topk_candidates.std(dim=1, correction=0)
 
                 for cb in self.callbacks:
                     cb(

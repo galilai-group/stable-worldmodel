@@ -211,6 +211,31 @@ def test_icem_solver_white_noise_fallback():
     assert outputs['actions'].shape == (2, 3, 2)
 
 
+def test_cem_solvers_single_elite_have_finite_variance():
+    """A one-elite update must not poison the next distribution with NaNs."""
+    action_space = gym_spaces.Box(
+        low=-1, high=1, shape=(1, 2), dtype=np.float32
+    )
+    config = PlanConfig(horizon=3, receding_horizon=1)
+    info_dict = {'pixels': torch.zeros(1, 1, 3, 8, 8)}
+
+    for solver_cls in (CEMSolver, ICEMSolver):
+        solver = solver_cls(
+            cost=DummyCostModel(),
+            n_steps=2,
+            num_samples=8,
+            batch_size=1,
+            topk=1,
+            seed=0,
+        )
+        solver.configure(action_space=action_space, n_envs=1, config=config)
+
+        outputs = solver(info_dict)
+
+        assert torch.isfinite(outputs['actions']).all()
+        assert torch.isfinite(outputs['var'][0]).all()
+
+
 ###########################
 ## MPPISolver Tests      ##
 ###########################
