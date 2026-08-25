@@ -56,6 +56,8 @@ env = [
     "minigrid",
     "gymnasium[all]",
     "gymnasium-robotics",
+    # gymnasium-robotics 1.4.2 fails its joint-type checks with MuJoCo 3.12.
+    "mujoco<3.12",
     "opencv-python-headless",
     "stable_baselines3>=2.0.0",
     "craftax>=1.5.0",
