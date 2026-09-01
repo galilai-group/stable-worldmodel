@@ -422,7 +422,7 @@ def tdmpc2_forward(self, batch, stage, cfg):
         q_indices = random.sample(range(cfg.wm.num_q), 2)
         q_pi_avg = (qs_pi[q_indices[0]] + qs_pi[q_indices[1]]) / 2.0
 
-        if t == 0:
+        if t == 0 and stage == 'train':
             self.model.scale.update(q_pi_avg)
         q_pi_normalized = self.model.scale(q_pi_avg)
 
