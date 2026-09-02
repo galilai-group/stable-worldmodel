@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from stable_worldmodel.wm.tdmpc2 import TDMPC2, tdmpc2_forward
@@ -59,10 +60,17 @@ def _make_batch(cfg):
     }
 
 
+def _target_q_state(model):
+    return torch.cat(
+        [p.detach().flatten() for p in model.target_qs.parameters()]
+    ).clone()
+
+
 def test_validation_forward_keeps_running_scale_frozen():
     cfg = _make_config()
     model = TDMPC2(cfg)
     scale_before = model.scale.value.clone()
+    target_q_before = _target_q_state(model)
 
     output = tdmpc2_forward(
         _ForwardContext(model),
@@ -72,19 +80,25 @@ def test_validation_forward_keeps_running_scale_frozen():
     )
 
     assert torch.equal(model.scale.value, scale_before)
+    assert torch.equal(_target_q_state(model), target_q_before)
     assert torch.isfinite(output['loss'])
 
 
-def test_training_forward_updates_running_scale():
+# 'fit' is what stable_pretraining.Module.training_step passes; 'train' is
+# what the online loop in scripts/expert/tdmpc2_online.py passes.
+@pytest.mark.parametrize('stage', ['train', 'fit'])
+def test_training_forward_updates_running_scale(stage):
     cfg = _make_config()
     model = TDMPC2(cfg)
     scale_before = model.scale.value.clone()
+    target_q_before = _target_q_state(model)
 
     tdmpc2_forward(
         _ForwardContext(model),
         _make_batch(cfg),
-        stage='train',
+        stage=stage,
         cfg=cfg,
     )
 
     assert not torch.equal(model.scale.value, scale_before)
+    assert not torch.equal(_target_q_state(model), target_q_before)

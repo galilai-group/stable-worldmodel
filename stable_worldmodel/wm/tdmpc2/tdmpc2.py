@@ -335,7 +335,10 @@ def tdmpc2_forward(self, batch, stage, cfg):
 
     Args:
         batch: Dict with keys matching cfg.wm.encoding plus 'action' and 'reward'.
-        stage: 'train' or 'validate'. Controls target-network soft update.
+        stage: 'fit' (stable-pretraining) or 'train' (online loop) for a
+            training update; anything else ('validate', 'test', 'predict') is
+            treated as evaluation and leaves the running scale and the
+            target-network EMA untouched.
         cfg: OmegaConf config with wm.* hyperparameters.
 
     Returns:
@@ -422,7 +425,7 @@ def tdmpc2_forward(self, batch, stage, cfg):
         q_indices = random.sample(range(cfg.wm.num_q), 2)
         q_pi_avg = (qs_pi[q_indices[0]] + qs_pi[q_indices[1]]) / 2.0
 
-        if t == 0 and stage == 'train':
+        if t == 0 and stage in ('train', 'fit'):
             self.model.scale.update(q_pi_avg)
         q_pi_normalized = self.model.scale(q_pi_avg)
 
@@ -456,7 +459,7 @@ def tdmpc2_forward(self, batch, stage, cfg):
         prog_bar=True,
     )
 
-    if stage == 'train':
+    if stage in ('train', 'fit'):
         for q, t_q in zip(self.model.qs, self.model.target_qs):
             for p, p_t in zip(q.parameters(), t_q.parameters()):
                 p_t.data.lerp_(p.data, cfg.wm.tau)
