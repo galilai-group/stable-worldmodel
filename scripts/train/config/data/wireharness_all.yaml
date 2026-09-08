@@ -1,0 +1,18 @@
+dataset:
+  num_steps: ${eval:'${wm.num_preds} + ${wm.history_size}'}
+  frameskip: 5
+  # All-combinations training: the per-stage datasets + the chained rollouts
+  # (config->config transitions) are concatenated into ONE training set, so a
+  # single LeWM learns the dynamics across every target configuration.
+  name:
+    - stage_0.lance
+    - stage_1.lance
+    - stage_2.lance
+    - stage_3.lance
+    - stage_4.lance
+    - chained_all.lance
+  keys_to_load:
+    - pixels
+    - action
+  keys_to_cache:
+    - action
