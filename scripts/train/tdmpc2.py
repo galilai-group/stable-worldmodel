@@ -243,20 +243,20 @@ def run(cfg):
     with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
 
-    logger = None
+    wandb_logger = None
     if cfg.wandb.enable:
-        logger = WandbLogger(
+        wandb_logger = WandbLogger(
             name=f'{model_cfg.wm.name}_{cfg.dataset_name}_{subdir}',
             project=cfg.wandb.project,
             resume='allow' if subdir else None,
             id=subdir or None,
             log_model=False,
         )
-        logger.log_hyperparams(OmegaConf.to_container(cfg))
+        wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        logger=logger,
+        logger=wandb_logger,
         callbacks=[
             SaveCkptCallback(run_name=cfg.output_model_name, cfg=cfg.model)
         ],

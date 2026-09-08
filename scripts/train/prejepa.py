@@ -288,10 +288,10 @@ def run(cfg):
     with open(run_dir / 'config.yaml', 'w') as f:
         OmegaConf.save(cfg, f)
 
-    logger = None
+    wandb_logger = None
     if cfg.wandb.enabled:
-        logger = WandbLogger(**cfg.wandb.config)
-        logger.log_hyperparams(OmegaConf.to_container(cfg))
+        wandb_logger = WandbLogger(**cfg.wandb.config)
+        wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
 
     trainer = pl.Trainer(
         **cfg.trainer,
@@ -304,7 +304,7 @@ def run(cfg):
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),
         ],
         num_sanity_val_steps=1,
-        logger=logger,
+        logger=wandb_logger,
         enable_checkpointing=True,
     )
 
