@@ -1,0 +1,64 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: atari
+
+output_model_name: diamond_atari
+subdir: diamond_atari_run
+
+seed: 42
+env_name: ALE/Breakout-v5
+episodes: 500
+num_envs: 4
+train_split: 0.95
+
+img_size: 64
+
+trainer:
+  max_epochs: 100
+  devices: auto
+  accelerator: auto
+  precision: bf16
+
+loader:
+  batch_size: 32
+  num_workers: 4
+  drop_last: True
+  persistent_workers: True
+  prefetch_factor: 2
+  pin_memory: True
+  shuffle: True
+
+optimizer:
+  type: AdamW
+  lr: 1e-4
+  weight_decay: 1e-2
+
+wm:
+  history_size: 4
+
+model:
+  _target_: stable_worldmodel.wm.diamond.module.EDMModel
+  in_ch: 3
+  base_ch: 64
+  cond_dim: 256
+  history_frames: 4
+
+action_encoder:
+  _target_: stable_worldmodel.wm.diamond.module.DiscreteActionEncoder
+  num_actions: 18
+  emb_dim: 256
+
+data:
+  dataset:
+    name: atari_breakout.lance
+    keys_to_load:
+      - pixels
+      - action
+      - reward
+      - terminal
+    keys_to_cache:
+      - action
+
+wandb:
+  enabled: False

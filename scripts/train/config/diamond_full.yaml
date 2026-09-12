@@ -1,0 +1,84 @@
+defaults:
+  - _self_
+  - launcher: local
+
+output_model_name: diamond_full
+subdir: diamond_full_run
+seed: 42
+
+# --- Env ---
+env_name: ALE/Breakout-v5
+action_dim: 18
+img_size: 64
+frame_stack: 4
+max_episode_steps: 27000
+
+# --- Training ---
+epochs: 1000
+steps_per_epoch: 100
+train_steps: 400
+batch_size: 32
+lr: 1e-4
+gamma: 0.985
+lam: 0.95
+entropy_weight: 0.001
+epsilon: 0.01
+grad_clip: 1.0
+
+# --- World Model (diffusion) ---
+wm:
+  history_size: 4
+  imagination_horizon: 15
+  n_denoise_train: 3
+
+model:
+  _target_: stable_worldmodel.wm.diamond.module.EDMModel
+  in_ch: 3
+  base_ch: 64
+  cond_dim: 256
+  history_frames: 4
+
+action_encoder:
+  _target_: stable_worldmodel.wm.diamond.module.DiscreteActionEncoder
+  num_actions: 18
+  emb_dim: 256
+
+reward_term:
+  in_channels: 3
+  action_dim: 18
+  cond_dim: 128
+  lstm_dim: 512
+
+actor_critic:
+  in_channels: 3
+  action_dim: 18
+  lstm_dim: 512
+
+# --- Replay Buffer ---
+buffer:
+  max_steps: 500000
+  frameskip: 1
+
+# --- Solver (MPC evaluation) ---
+solver:
+  _target_: stable_worldmodel.solver.CategoricalCEMSolver
+  num_samples: 200
+  n_steps: 1
+  topk: 10
+  smoothing: 0.0
+  alpha: 0.0
+
+plan:
+  horizon: 15
+  receding_horizon: 1
+  history_len: 4
+  action_block: 1
+  warm_start: false
+
+# --- Checkpointing / Logging ---
+log_every: 10
+eval_every: 50
+checkpoint_dir: checkpoints/diamond_full
+
+wandb:
+  enabled: false
