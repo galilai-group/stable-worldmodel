@@ -221,6 +221,30 @@ class TDMPC2(nn.Module):
             trajs.append(torch.stack(traj, dim=1))  # (B, horizon, action_dim)
         return torch.stack(trajs).mean(0)  # (B, horizon, action_dim)
 
+    def _prepare_observations(self, info_dict: dict) -> dict:
+        """Assemble goal-conditioned observations for planning.
+
+        ``encode`` still accepts preprocessed training batches. Planning
+        receives observations normalized by the policy using saved training
+        statistics, with a separate ``goal_<key>`` for goal-conditioned
+        offline models. Online/legacy models keep their existing contract.
+        """
+        device = next(self.parameters()).device
+        obs_dict = {
+            key: info_dict[key].to(device) for key in self.cfg.wm.encoding
+        }
+        preprocessing = self.cfg.get('preprocessing')
+        if preprocessing is None:
+            return obs_dict
+
+        goal_key = preprocessing.get('goal_obs_key')
+        if goal_key is not None:
+            obs_dict[goal_key] = torch.cat(
+                [obs_dict[goal_key], info_dict[f'goal_{goal_key}'].to(device)],
+                dim=-1,
+            )
+        return obs_dict
+
     def get_action(
         self,
         info_dict: dict,
@@ -245,10 +269,11 @@ class TDMPC2(nn.Module):
             Action tensor of shape (B, horizon, action_dim).
         """
         device = next(self.parameters()).device
-        encoding_keys = list(self.cfg.wm.get('encoding', {}).keys())
-
-        obs_dict = {key: info_dict[key].to(device) for key in encoding_keys}
+        obs_dict = self._prepare_observations(info_dict)
         z = self.encode(obs_dict)
+        # World observations include a length-one history dimension.
+        if z.ndim == 3 and z.shape[1] == 1:
+            z = z.squeeze(1)
 
         if prefix_actions is not None:
             for t in range(prefix_actions.shape[1]):
@@ -275,11 +300,13 @@ class TDMPC2(nn.Module):
         Returns:
             Cost tensor of shape (B, N). Lower is better.
         """
-        device = action_candidates.device
-        encoding_keys = list(self.cfg.wm.get('encoding', {}).keys())
-
-        obs_dict = {key: info_dict[key].to(device) for key in encoding_keys}
+        obs_dict = self._prepare_observations(info_dict)
         z = self.encode(obs_dict)
+        # Solvers add the candidate dimension before World's history dim.
+        if z.ndim == 4 and z.shape[2] == 1:
+            z = z.squeeze(2)
+        elif z.ndim == 3 and z.shape[1] == 1:
+            z = z.squeeze(1)
 
         B, N, H, A = action_candidates.shape
 
