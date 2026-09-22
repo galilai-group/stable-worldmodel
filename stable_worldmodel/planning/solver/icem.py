@@ -222,12 +222,13 @@ class ICEMSolver:
                 self.action_dim,
                 self.horizon,
             )
-            freqs = torch.fft.rfftfreq(self.horizon, device=self.device).to(
-                self.dtype
-            )
-            freqs[0] = 1.0
-            noise_scale = freqs.pow(-self.noise_beta / 2)
-            noise_scale[0] = noise_scale[1]
+            if self.horizon > 1:
+                freqs = torch.fft.rfftfreq(
+                    self.horizon, device=self.device
+                ).to(self.dtype)
+                freqs[0] = 1.0
+                noise_scale = freqs.pow(-self.noise_beta / 2)
+                noise_scale[0] = noise_scale[1]
 
             for cb in self.callbacks:
                 cb.start_batch()

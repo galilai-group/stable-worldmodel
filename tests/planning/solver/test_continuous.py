@@ -1,6 +1,7 @@
 """Tests for continuous solvers (CEM, MPPI, GD, Nevergrad)."""
 
 import numpy as np
+import pytest
 import torch
 from gymnasium import spaces as gym_spaces
 
@@ -209,6 +210,42 @@ def test_icem_solver_white_noise_fallback():
 
     assert 'actions' in outputs
     assert outputs['actions'].shape == (2, 3, 2)
+
+
+@pytest.mark.parametrize('horizon', [1, 2])
+@pytest.mark.parametrize('return_mean', [True, False])
+@pytest.mark.parametrize('noise_beta', [0.0, 2.0])
+def test_icem_solver_short_horizon(horizon, return_mean, noise_beta):
+    """Single-step planning must reach the white-noise fallback."""
+    n_envs, action_block = 3, 2
+    solver = ICEMSolver(
+        cost=DummyCostModel(),
+        n_steps=2,
+        num_samples=16,
+        batch_size=2,
+        topk=4,
+        noise_beta=noise_beta,
+        return_mean=return_mean,
+        seed=0,
+    )
+    action_space = gym_spaces.Box(
+        low=-1, high=1, shape=(n_envs, 2), dtype=np.float32
+    )
+    config = PlanConfig(
+        horizon=horizon, receding_horizon=1, action_block=action_block
+    )
+    solver.configure(action_space=action_space, n_envs=n_envs, config=config)
+
+    outputs = solver({'pixels': torch.zeros(n_envs, 1, 3, 8, 8)})
+
+    expected_shape = (n_envs, horizon, 2 * action_block)
+    for tensor in (outputs['actions'], outputs['mean'][0], outputs['var'][0]):
+        assert tensor.shape == expected_shape
+        assert torch.isfinite(tensor).all()
+    assert len(outputs['costs']) == n_envs
+    assert np.isfinite(outputs['costs']).all()
+    assert (outputs['actions'].abs() <= 1).all()
+    assert (outputs['var'][0] > 0).all()
 
 
 def test_cem_solvers_single_elite_have_finite_variance():
