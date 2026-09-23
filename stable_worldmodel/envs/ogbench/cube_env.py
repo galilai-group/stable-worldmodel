@@ -789,6 +789,8 @@ class CubeEnv(ManipSpaceEnv):
                   directly (overrides sampled values when provided).
                 - 'state': Optional simulator state override. Accepts either a
                   dict with 'qpos' and 'qvel' entries, or a (qpos, qvel) tuple.
+                - 'render_goal': Whether to render the goal state to pixels and
+                  expose it as ``info['goal']``. Defaults to True in task mode.
             *args: Variable length argument list passed to parent reset.
             **kwargs: Arbitrary keyword arguments passed to parent reset.
 
@@ -811,6 +813,11 @@ class CubeEnv(ManipSpaceEnv):
                 obs, info = env.reset(options={'variation': ['cube.color', 'camera.angle_delta']})
         """
         options = options or {}
+
+        if self._mode == 'task':
+            # Render the goal state by default so test-time evaluation
+            # without a dataset gets goal pixels in the info dict.
+            options.setdefault('render_goal', True)
 
         swm_spaces.reset_variation_space(
             self.variation_space,
@@ -1401,7 +1408,9 @@ class CubeEnv(ManipSpaceEnv):
         Returns:
             dict: Dictionary containing:
                 - All keys from compute_ob_info() (proprioception and object states)
-                - 'goal': Goal observation (task mode only)
+                - 'target': Goal observation (task mode only)
+                - 'goal': Rendered goal image (task mode, when goal rendering
+                  is enabled at reset)
                 - 'success': Boolean indicating current success status
 
         Note:
@@ -1411,6 +1420,9 @@ class CubeEnv(ManipSpaceEnv):
         reset_info['env_name'] = self.env_name
         reset_info['target'] = self._cur_goal_ob
         reset_info['success'] = self._success
+        goal = getattr(self, '_cur_goal_rendered', None)
+        if goal is not None:
+            reset_info['goal'] = goal
         return reset_info
 
     def get_step_info(self):
@@ -1422,7 +1434,9 @@ class CubeEnv(ManipSpaceEnv):
         Returns:
             dict: Dictionary containing:
                 - All keys from compute_ob_info() (proprioception and object states)
-                - 'goal': Goal observation (task mode only)
+                - 'target': Goal observation (task mode only)
+                - 'goal': Rendered goal image (task mode, when goal rendering
+                  is enabled at reset)
                 - 'success': Boolean indicating whether task is completed
 
         Note:
@@ -1432,6 +1446,9 @@ class CubeEnv(ManipSpaceEnv):
         ob_info['env_name'] = self.env_name
         ob_info['target'] = self._cur_goal_ob
         ob_info['success'] = self._success
+        goal = getattr(self, '_cur_goal_rendered', None)
+        if goal is not None:
+            ob_info['goal'] = goal
         return ob_info
 
     def add_object_info(self, ob_info):

@@ -166,6 +166,7 @@ class MazeEnv(gym.Wrapper):
         self._mjcf_model = mjcf.from_path(self.env.fullpath)
         self._dirty = False
         self._mjcf_tempdir = None
+        self._goal_rendered = None
         # OGBench enables pixel floor encoding at construction time for
         # pixel observations.
         self._pixel_encoding_runtime_state = (
@@ -294,11 +295,15 @@ class MazeEnv(gym.Wrapper):
                   Pass ``['all']`` to resample every variation.
                 - ``'variation_values'``: Dict mapping variation key paths
                   to explicit values, overriding sampled values.
+                - ``'render_goal'``: Whether to render the goal state to
+                  pixels and expose it as ``info['goal']`` at reset and on
+                  every step. Defaults to True.
 
         Returns:
             tuple: ``(observation, info)`` from the underlying env reset.
         """
         options = options or {}
+        options.setdefault('render_goal', True)
 
         swm_spaces.reset_variation_space(
             self.variation_space,
@@ -312,7 +317,13 @@ class MazeEnv(gym.Wrapper):
             self.compile_model()
 
         obs, info = self.env.reset(seed=seed, options=options)
+        # OGBench's `goal` is a goal observation (a state vector for
+        # ob_type='states'); the SWM convention expects `goal` to hold
+        # goal pixels, so replace it with the rendered goal image.
         info.pop('goal', None)
+        self._goal_rendered = info.pop('goal_rendered', None)
+        if self._goal_rendered is not None:
+            info['goal'] = self._goal_rendered
         info['env_name'] = self.env_name
 
         if options.get('state') is not None:
@@ -333,6 +344,8 @@ class MazeEnv(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         info['env_name'] = self.env_name
+        if self._goal_rendered is not None:
+            info['goal'] = self._goal_rendered
         return obs, reward, terminated, truncated, info
 
     def set_state(self, qpos, qvel):
