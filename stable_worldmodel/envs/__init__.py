@@ -180,6 +180,27 @@ for _swm_id, _gym_id in [
         kwargs={'env_id': _gym_id, 'flatten': False},
     )
 
+_METAWORLD_ENTRY = (
+    'stable_worldmodel.envs.metaworld.metaworld_env:MetaWorldWrapper'
+)
+
+# Meta-World MT10: the canonical ten-task Sawyer manipulation benchmark.
+for _swm_id, _task in [
+    ('swm/MetaWorldReach-v0', 'reach-v3'),
+    ('swm/MetaWorldPush-v0', 'push-v3'),
+    ('swm/MetaWorldPickPlace-v0', 'pick-place-v3'),
+    ('swm/MetaWorldDoorOpen-v0', 'door-open-v3'),
+    ('swm/MetaWorldDrawerOpen-v0', 'drawer-open-v3'),
+    ('swm/MetaWorldDrawerClose-v0', 'drawer-close-v3'),
+    ('swm/MetaWorldButtonPressTopdown-v0', 'button-press-topdown-v3'),
+    ('swm/MetaWorldPegInsertSide-v0', 'peg-insert-side-v3'),
+    ('swm/MetaWorldWindowOpen-v0', 'window-open-v3'),
+    ('swm/MetaWorldWindowClose-v0', 'window-close-v3'),
+]:
+    register(
+        id=_swm_id, entry_point=_METAWORLD_ENTRY, kwargs={'env_name': _task}
+    )
+
 ############
 # DISCRETE #
 ############
