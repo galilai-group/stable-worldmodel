@@ -809,19 +809,16 @@ def get_gciql_actor_model(cfg, trained_critics_model):
 # Training Setup
 # ============================================================================
 def setup_pl_logger(cfg, postfix=''):
-    if not cfg.wandb.enable:
+    if not cfg.wandb.enabled:
         return None
 
-    wandb_run_id = cfg.wandb.get('run_id', None)
-    wandb_logger = WandbLogger(
-        name=f'dino_gciql{postfix}',
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        resume='allow' if wandb_run_id else None,
-        id=wandb_run_id,
-        log_model=False,
-    )
+    # The value and policy stages are logged as two separate W&B runs.
+    wandb_kwargs = OmegaConf.to_container(cfg.wandb.config, resolve=True)
+    wandb_kwargs['name'] = f'{wandb_kwargs["name"]}{postfix}'
+    if wandb_kwargs.get('id') is not None:
+        wandb_kwargs['id'] = f'{wandb_kwargs["id"]}{postfix}'
 
+    wandb_logger = WandbLogger(**wandb_kwargs)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
     return wandb_logger
 

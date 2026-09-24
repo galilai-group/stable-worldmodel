@@ -724,19 +724,16 @@ def get_hilp_actor_model(cfg, trained_value_model):
 # Training Setup
 # ============================================================================
 def setup_pl_logger(cfg, postfix=''):
-    if not cfg.wandb.enable:
+    if not cfg.wandb.enabled:
         return None
 
-    wandb_run_id = cfg.wandb.get('run_id', None)
-    wandb_logger = WandbLogger(
-        name=f'dino_hilp{postfix}',
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        resume='allow' if wandb_run_id else None,
-        id=wandb_run_id,
-        log_model=False,
-    )
+    # The value and policy stages are logged as two separate W&B runs.
+    wandb_kwargs = OmegaConf.to_container(cfg.wandb.config, resolve=True)
+    wandb_kwargs['name'] = f'{wandb_kwargs["name"]}{postfix}'
+    if wandb_kwargs.get('id') is not None:
+        wandb_kwargs['id'] = f'{wandb_kwargs["id"]}{postfix}'
 
+    wandb_logger = WandbLogger(**wandb_kwargs)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
     return wandb_logger
 
@@ -784,6 +781,9 @@ def run(cfg):
     hilp_value_model = get_hilp_value_model(cfg)
 
     cache_dir = swm.data.utils.get_cache_dir(sub_folder='checkpoints')
+    value_ckpt_path = cache_dir / (
+        f'{cfg.output_model_name}_value_weights.ckpt'
+    )
 
     if cfg.get('train_value', True):
         dump_object_callback = SaveCkptCallback(
@@ -805,18 +805,18 @@ def run(cfg):
             trainer=trainer,
             module=hilp_value_model,
             data=data,
-            ckpt_path=f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt',
+            ckpt_path=value_ckpt_path if value_ckpt_path.exists() else None,
         )
         manager()
 
     # Extract policy from trained value function
     wandb_logger_policy = setup_pl_logger(cfg, postfix='_policy')
 
-    # load value function weights
-    checkpoint = torch.load(
-        f'{cache_dir}/{cfg.output_model_name}_value_weights.ckpt'
-    )
-    hilp_value_model.load_state_dict(checkpoint['state_dict'])
+    # A freshly trained value function is already available in memory. Only
+    # load a checkpoint when value training was explicitly skipped.
+    if not cfg.get('train_value', True):
+        checkpoint = torch.load(value_ckpt_path)
+        hilp_value_model.load_state_dict(checkpoint['state_dict'])
 
     hilp_actor_model = get_hilp_actor_model(cfg, hilp_value_model)
 
@@ -834,11 +834,14 @@ def run(cfg):
         enable_checkpointing=True,
     )
 
+    policy_ckpt_path = cache_dir / (
+        f'{cfg.output_model_name}_policy_weights.ckpt'
+    )
     manager = spt.Manager(
         trainer=trainer,
         module=hilp_actor_model,
         data=data,
-        ckpt_path=f'{cache_dir}/{cfg.output_model_name}_policy_weights.ckpt',
+        ckpt_path=policy_ckpt_path if policy_ckpt_path.exists() else None,
     )
     manager()
 

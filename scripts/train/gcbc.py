@@ -259,19 +259,10 @@ def get_gcbc_policy(cfg):
 # Training Setup
 # ============================================================================
 def setup_pl_logger(cfg):
-    if not cfg.wandb.enable:
+    if not cfg.wandb.enabled:
         return None
 
-    wandb_run_id = cfg.wandb.get('run_id', None)
-    wandb_logger = WandbLogger(
-        name='dino_gcbc',
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        resume='allow' if wandb_run_id else None,
-        id=wandb_run_id,
-        log_model=False,
-    )
-
+    wandb_logger = WandbLogger(**cfg.wandb.config)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
     return wandb_logger
 
@@ -334,11 +325,12 @@ def run(cfg):
         enable_checkpointing=True,
     )
 
+    ckpt_path = cache_dir / f'{cfg.output_model_name}_weights.ckpt'
     manager = spt.Manager(
         trainer=trainer,
         module=gcbc_policy,
         data=data,
-        ckpt_path=f'{cache_dir}/{cfg.output_model_name}_weights.ckpt',
+        ckpt_path=ckpt_path if ckpt_path.exists() else None,
     )
     manager()
 
