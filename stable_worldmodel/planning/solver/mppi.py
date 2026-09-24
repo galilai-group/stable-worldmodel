@@ -66,10 +66,21 @@ class MPPISolver:
         self._action_dim = int(np.prod(action_space.shape[1:]))
         self._configured = True
 
-        if not isinstance(action_space, Box):
+        if isinstance(action_space, Box):
+            # Candidates flatten action_block into the last dimension, so
+            # repeat the per-step bounds to match that layout.
+            self._action_low = torch.tensor(
+                action_space.low[0], device=self.device, dtype=self.dtype
+            ).repeat(self._config.action_block)
+            self._action_high = torch.tensor(
+                action_space.high[0], device=self.device, dtype=self.dtype
+            ).repeat(self._config.action_block)
+        else:
             logger.warning(
                 f'Action space is discrete, got {type(action_space)}. MPPISolver may not work as expected.'
             )
+            self._action_low = None
+            self._action_high = None
 
     @property
     def n_envs(self) -> int:
@@ -201,6 +212,11 @@ class MPPISolver:
 
                 # Force the first sample to be the current mean (Zero noise)
                 candidates[:, 0] = batch_mean
+
+                if self._action_low is not None:
+                    candidates = candidates.clamp(
+                        self._action_low, self._action_high
+                    )
 
                 costs = self.cost.get_cost(expanded_infos, candidates)
 
