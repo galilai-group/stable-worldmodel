@@ -48,10 +48,9 @@ import torch
 
 from stable_worldmodel.policy import Policy
 
-from .env_pool import EnvPool
 from ..plot import save_panel_videos, save_video
 from ..wrapper import MegaWrapper
-
+from .env_pool import EnvPool
 
 RESET_MODES = ('auto', 'wait')
 
@@ -238,6 +237,12 @@ class World:
         Returns:
             A dict with ``'success_rate'`` (percent), ``'episode_successes'``
             (per-episode bool/uint array), and ``'seeds'`` used for reset.
+            Dataset-driven mode also returns ``'steps_to_success'``: an
+            int64 array in ``episodes_idx`` order, containing the number of
+            env steps completed before first success, or -1 if none was
+            observed. Counting starts at 1; reset observations are not
+            checked for success. With ``reset_mode='auto'``, counts span
+            resets within the evaluation; resets themselves add no steps.
         """
         if dataset is not None:
             mode = reset_mode or 'wait'
@@ -382,6 +387,7 @@ class World:
         mode: str = 'auto',
         on_step=None,
         on_done=None,
+        on_transition=None,
     ) -> None:
         """Drive the policy. Thin wrapper around :meth:`_run_iter` that
         invokes ``on_done(env_idx, ep_idx, world)`` for each completion."""
@@ -392,6 +398,7 @@ class World:
             options=options,
             mode=mode,
             on_step=on_step,
+            on_transition=on_transition,
         ):
             if on_done:
                 on_done(env_idx, ep_count, self)
@@ -404,6 +411,7 @@ class World:
         options: dict | None = None,
         mode: str = 'auto',
         on_step=None,
+        on_transition=None,
     ):
         """Drive the policy and yield ``(env_idx, ep_count)`` on each
         episode completion. Letting callers consume completions as a
@@ -414,6 +422,10 @@ class World:
         observation as well as stepped ones. ``mask`` marks which envs the
         call reflects — all envs for a real step, just the reset ones for
         an auto-reset.
+
+        ``on_transition(world, mask)`` fires only after an env step, before
+        ``on_step`` and completion handling. Its mask marks the envs that
+        actually executed an action; reset observations do not trigger it.
         """
         assert mode in RESET_MODES, f'reset_mode must be one of {RESET_MODES}'
 
@@ -439,6 +451,8 @@ class World:
                 self.envs.step(actions, mask=mask)
             )
 
+            if on_transition:
+                on_transition(self, mask=alive)
             if on_step:
                 on_step(self, mask=mask if mask is not None else alive)
 
@@ -611,8 +625,17 @@ class World:
             'success_rate': 0.0,
             'episode_successes': np.zeros(n, dtype=bool),
             'seeds': seeds,
+            'steps_to_success': np.full(n, -1, dtype=np.int64),
         }
+        steps = np.zeros(n, dtype=np.int64)
         frames: dict[int, list] = defaultdict(list) if video else None
+
+        def on_transition(world, mask):
+            steps[mask] += 1
+            first_success = (
+                mask & world.terminateds & (results['steps_to_success'] == -1)
+            )
+            results['steps_to_success'][first_success] = steps[first_success]
 
         def on_step(world, mask):
             world.infos.update(deepcopy(goal_snapshot))
@@ -623,7 +646,12 @@ class World:
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
 
-        self._run(max_steps=eval_budget, mode=mode, on_step=on_step)
+        self._run(
+            max_steps=eval_budget,
+            mode=mode,
+            on_step=on_step,
+            on_transition=on_transition,
+        )
 
         results['success_rate'] = (
             float(results['episode_successes'].sum()) / n * 100.0
