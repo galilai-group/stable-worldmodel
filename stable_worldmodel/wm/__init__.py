@@ -5,3 +5,5 @@ from .utils import *  # noqa: F403
 from .gcrl import *  # noqa: F403
 from .prejepa import *  # noqa: F403
 from .lewm import *  # noqa: F403
+from .pldm import *  # noqa: F403
+from .diamond import *  # noqa: F403
