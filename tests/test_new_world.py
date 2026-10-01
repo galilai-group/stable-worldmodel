@@ -439,6 +439,54 @@ class TestEvaluate:
         assert len(results['episode_successes']) == 2
 
 
+class TestEvaluateVideo:
+    """Video capture must follow the ``on_step`` mask like ``collect`` does.
+
+    ``_run_iter`` fires ``on_step(world, mask)`` after masked steps (wait
+    mode) and after per-env auto-resets, with ``mask`` marking the envs the
+    call reflects. Capturing a frame for every env on each call duplicates
+    the frozen frame of envs the call did not touch.
+    """
+
+    @pytest.fixture
+    def saved(self, monkeypatch):
+        calls = {}
+
+        def fake_save_video(path, frames):
+            calls[path.name] = len(frames)
+
+        monkeypatch.setattr(
+            'stable_worldmodel.world.world.save_video', fake_save_video
+        )
+        return calls
+
+    def test_auto_reset_does_not_duplicate_other_envs_frames(
+        self, saved, tmp_path
+    ):
+        # env0 ends at step 2 and auto-resets while env1 is still running.
+        world = _make_world_with(
+            [lambda: CounterEnv(2), lambda: CounterEnv(3)]
+        )
+        world.evaluate(episodes=2, seed=0, video=tmp_path)
+
+        # one frame for the reset observation plus one per step
+        assert saved['episode_0.mp4'] == 3
+        assert saved['episode_1.mp4'] == 4
+
+    def test_wait_mode_does_not_write_video_for_finished_envs(
+        self, saved, tmp_path
+    ):
+        world = _make_world_with(
+            [lambda: CounterEnv(2), lambda: CounterEnv(4)]
+        )
+        world.evaluate(episodes=2, seed=0, video=tmp_path, reset_mode='wait')
+
+        assert saved['episode_0.mp4'] == 3
+        assert saved['episode_1.mp4'] == 5
+        # both episodes completed and were saved; nothing is left over
+        assert not [k for k in saved if k.startswith('episode_remaining')]
+
+
 class TestSetPolicy:
     def test_set_policy(self):
         world = _make_world(num_envs=2)
