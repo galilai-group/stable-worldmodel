@@ -90,6 +90,27 @@ def test_writer_roundtrip(tmp_path):
     assert sample['proprio'].shape == (1, 3)
 
 
+def test_load_chunk_does_not_cross_episode_boundary(tmp_path):
+    """A slice of episode ``ep`` must never contain another episode's rows.
+
+    Rows are stored flat, so a window running past ``lengths[ep]`` lands on
+    the next episode's first steps. ``ReplayBuffer._load_slice`` rejects
+    such a window with ``IndexError``; the on-disk readers must too instead
+    of silently returning the neighbour's data.
+    """
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(5, 4, 6))
+    ds = LanceDataset(path=out)
+
+    # a window ending exactly at the episode end is still valid
+    (chunk,) = ds.load_chunk(np.array([0]), np.array([3]), np.array([5]))
+    assert chunk['proprio'].shape == (2, 3)
+
+    # episode 0 holds rows 0..4; this window asks for steps 3..7
+    with pytest.raises(IndexError):
+        ds.load_chunk(np.array([0]), np.array([3]), np.array([8]))
+
+
 def test_image_column_autodetected(tmp_path):
     out = tmp_path / 'demo.lance'
     _write_demo(out)
