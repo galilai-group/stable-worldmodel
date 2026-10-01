@@ -50,7 +50,10 @@ data = [
 ]
 
 env = [
-    "pygame",
+    # gymnasium[all] and minigrid depend on pygame-ce, which installs into the
+    # same `pygame` package directory as pygame; only one of them can be
+    # installed at a time.
+    "pygame-ce",
     "pymunk",
     "shapely",
     "ogbench",
@@ -101,6 +104,12 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+# craftax still depends on pygame. Drop that edge so uv installs only
+# pygame-ce (craftax only imports pygame in its interactive play scripts).
+# The never-true marker removes the dependency on every uv version.
+override-dependencies = ["pygame; sys_platform == 'never'"]
 
 [tool.uv.build-backend]
 module-root = "."
