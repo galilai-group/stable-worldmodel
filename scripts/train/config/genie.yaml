@@ -1,0 +1,122 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: pusht_genie
+
+output_model_name: genie
+subdir: ${hydra:job.id}
+
+phase: tokenizer                  # tokenizer | joint
+tokenizer_ckpt: null              # required when phase=joint
+
+num_workers: 6
+train_split: 0.95
+seed: 3072
+img_size: 64
+
+# Joint phase
+mask_floor: 0.15
+mask_ceiling: 0.7
+act_enc_weight: 1.0
+
+trainer:
+  max_epochs: 20
+  devices: auto
+  accelerator: gpu
+  precision: bf16
+  gradient_clip_val: 3.0
+
+loader:
+  batch_size: 64
+  num_workers: ${num_workers}
+  drop_last: True
+  persistent_workers: True
+  prefetch_factor: 3
+  pin_memory: True
+  shuffle: True
+
+optimizer:
+  type: AdamW
+  lr: 1e-4
+  weight_decay: 0.01
+
+# Shared dims used by multiple submodules.
+temporal_dim: 8
+d_model: 192
+num_heads: 6
+num_layers: 3
+vq_embed_dim: 32
+tokenizer_codes: 256
+lam_codes: 64
+tokenizer_patch_size: 4
+lam_patch_size: 8
+
+# Decoupled dynamics dims.
+dyn_d_model: 256
+dyn_num_layers: 6
+dyn_num_heads: 8
+
+# A small partial helper to build ST_Transformer instances.
+_st_factory: &st_factory
+  _target_: stable_worldmodel.wm.genie.module.ST_Transformer
+  num_layers: ${num_layers}
+  num_heads: ${num_heads}
+  d_model: ${d_model}
+  temporal_dim: ${temporal_dim}
+
+_dyn_st_factory: &dyn_st_factory
+  _target_: stable_worldmodel.wm.genie.module.ST_Transformer
+  num_layers: ${dyn_num_layers}
+  num_heads: ${dyn_num_heads}
+  d_model: ${dyn_d_model}
+  temporal_dim: ${temporal_dim}
+
+model:
+  _target_: stable_worldmodel.wm.genie.Genie
+  tokenizer:
+    _target_: stable_worldmodel.wm.genie.module.ST_ViViT
+    encoder: *st_factory
+    decoder: *st_factory
+    vq:
+      _target_: stable_worldmodel.wm.genie.module.VectorQuantizer
+      num_codes: ${tokenizer_codes}
+      embed_dim: ${vq_embed_dim}
+    patch_size: ${tokenizer_patch_size}
+    height: ${img_size}
+    width: ${img_size}
+    channels: 3
+    temporal_dim: ${temporal_dim}
+    d_model: ${d_model}
+  lam:
+    _target_: stable_worldmodel.wm.genie.module.LAM
+    encoder: *st_factory
+    decoder: *st_factory
+    vq:
+      _target_: stable_worldmodel.wm.genie.module.VectorQuantizer
+      num_codes: ${lam_codes}
+      embed_dim: ${vq_embed_dim}
+    patch_size: ${lam_patch_size}
+    height: ${img_size}
+    width: ${img_size}
+    channels: 3
+    temporal_dim: ${temporal_dim}
+    d_model: ${d_model}
+  dynamics:
+    _target_: stable_worldmodel.wm.genie.module.ST_MaskGIT
+    decoder: *dyn_st_factory
+    spatial_dim: ${eval:'(${img_size} // ${tokenizer_patch_size}) ** 2'}
+    temporal_dim: ${temporal_dim}
+    d_model: ${dyn_d_model}
+    image_vocab_size: ${tokenizer_codes}
+    action_embed_dim: ${vq_embed_dim}
+  action_encoder:
+    _target_: stable_worldmodel.wm.genie.module.ActionEncoder
+    input_dim: ???                # filled at runtime: frameskip * action_dim
+    emb_dim: ${vq_embed_dim}
+    hidden_dim: 128
+
+wandb:
+  enabled: true
+  config:
+    project: genie-cluster
+    name: ${output_model_name}-${phase}
