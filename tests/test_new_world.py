@@ -650,6 +650,40 @@ class TestExtractInitGoal:
         assert len(videos) == 2
         assert videos[0].shape == (4, 3, 3, 3)
 
+    def test_goal_past_episode_end_is_rejected(self, tmp_path):
+        """``start + goal_offset`` beyond the episode must fail loudly.
+
+        Lance rows are stored flat, so without a bounds check the goal row
+        is silently taken from the *next* episode and the eval runs against
+        a goal the episode never reached.
+        """
+        from stable_worldmodel.data import LanceDataset, LanceWriter
+
+        out = tmp_path / 'demo.lance'
+        with LanceWriter(out) as w:
+            for ep in range(2):
+                w.write_episode(
+                    {
+                        'pixels': [
+                            np.full((3, 3, 3), ep + 1, dtype=np.uint8)
+                            for _ in range(5)
+                        ],
+                        'action': [
+                            np.zeros(2, dtype=np.float32) for _ in range(5)
+                        ],
+                        'proprio': [
+                            np.full(2, 10.0 * ep + t, dtype=np.float32)
+                            for t in range(5)
+                        ],
+                    }
+                )
+        ds = LanceDataset(path=out)
+        assert ds.lengths.tolist() == [5, 5]
+
+        # episode 0 has steps 0..4; start 3 + offset 4 = step 7 does not exist
+        with pytest.raises((IndexError, ValueError)):
+            _extract_init_goal(ds, [0], [3], 4)
+
 
 class TestEvaluateFromDataset:
     def test_method_path_receives_rows(self):

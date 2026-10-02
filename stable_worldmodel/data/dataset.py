@@ -116,9 +116,18 @@ class Dataset:
         Returns:
             One dict of per-column tensors per requested slice, in order;
             ``action`` is reshaped to ``((end - start) // frameskip, -1)``.
+
+        Raises:
+            IndexError: If a slice falls outside its episode, i.e. unless
+                ``0 <= start <= end <= lengths[ep]``.
         """
         chunk = []
         for ep, s, e in zip(episodes_idx, start, end):
+            ep_len = self.lengths[ep]
+            if not 0 <= s <= e <= ep_len:
+                raise IndexError(
+                    f'slice [{s}:{e}] out of episode {ep} of length {ep_len}'
+                )
             steps = self._load_slice(ep, s, e)
             if 'action' in steps:
                 steps['action'] = steps['action'].reshape(

@@ -273,6 +273,20 @@ def test_hdf5_dataset_load_chunk(sample_h5_file):
     assert isinstance(chunk[1]['action'], torch.Tensor)
 
 
+def test_hdf5_dataset_load_chunk_rejects_slice_past_episode_end(
+    sample_h5_file,
+):
+    """A slice running past its episode must raise, not read the next one."""
+    cache_dir, name = sample_h5_file
+    dataset = HDF5Dataset(name, cache_dir=str(cache_dir))
+
+    # episode 0 has steps 0..9; steps 8..11 would spill into episode 1
+    with pytest.raises(IndexError):
+        dataset.load_chunk(np.array([0]), np.array([8]), np.array([12]))
+    with pytest.raises(IndexError):
+        dataset.load_chunk(np.array([1]), np.array([-1]), np.array([2]))
+
+
 def test_hdf5_dataset_transform(sample_h5_file):
     """Test HDF5Dataset with transform function."""
     cache_dir, name = sample_h5_file
