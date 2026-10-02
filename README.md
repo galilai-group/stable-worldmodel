@@ -41,7 +41,7 @@ default dataset format. It is a separate extra so that consumers who only need t
 solvers and world model — e.g. embedding `stable_worldmodel.planning` in a robotics
 image — are not forced to install ~410 MB of native wheels they never import.
 
-LeRobot dataset support is a separate opt-in extra (requires Python 3.12+): `pip install 'stable-worldmodel[lerobot]'`.
+LeRobot dataset support is a separate opt-in extra (requires Python 3.12+): `pip install 'stable-worldmodel[lerobot]'`. It installs `lerobot[dataset]`, which LeRobot needs to read Parquet data and decode video.
 
 From source (development):
 
@@ -51,6 +51,8 @@ cd stable-worldmodel
 uv venv --python=3.10 && source .venv/bin/activate
 uv sync --extra all --group dev
 ```
+
+The `all` extra does not include LeRobot. For the LeRobot adapter, create the venv with `--python=3.12` and run `uv sync --extra all --extra lerobot --group dev`.
 
 Datasets and checkpoints are stored under `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). Override the variable to point at your preferred storage location.
 

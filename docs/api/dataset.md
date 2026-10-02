@@ -54,7 +54,7 @@ swm.data.convert('data/pusht.lance', 'data/pusht_video', dest_format='video', fp
 
 ```python
 ds = swm.data.load_dataset('lerobot://lerobot/pusht',
-                           primary_camera_key='observation.images.top',
+                           primary_camera_key='observation.image',
                            num_steps=8)
 ```
 
@@ -246,7 +246,7 @@ API as the native SWM datasets: by default the primary camera is mapped to
 ```python
 ds = swm.data.load_dataset(
     'lerobot://lerobot/pusht',
-    primary_camera_key='observation.images.top',  # → 'pixels'
+    primary_camera_key='observation.image',  # → 'pixels'
     num_steps=8,
     keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
     keys_to_cache=['action', 'proprio', 'ep_idx', 'step_idx'],
@@ -256,8 +256,10 @@ ds = swm.data.load_dataset(
 !!! info ""
     LeRobot support is feature-gated to **Python 3.12+** because the upstream
     `lerobot` package requires it. Install with
-    `pip install 'stable-worldmodel[lerobot]'`. There is no `lerobot` writer —
-    mapping arbitrary `World` info dicts onto LeRobot's schema is not supported.
+    `pip install 'stable-worldmodel[lerobot]'`. The extra also installs
+    `lerobot[dataset]`, which LeRobot needs to read Parquet data and decode
+    video. There is no `lerobot` writer: mapping arbitrary `World` info dicts
+    onto LeRobot's schema is not supported.
 ///
 
 /// tab | Goal-Conditioned

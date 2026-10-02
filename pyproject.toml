@@ -75,7 +75,9 @@ format = [
 ]
 
 lerobot = [
-    "lerobot>=0.5.0; python_version >= '3.12'",
+    # LeRobotDataset needs lerobot's `dataset` extra (datasets, av,
+    # pandas, torchcodec). That extra exists from lerobot 0.6.0 on.
+    "lerobot[dataset]>=0.6.0; python_version >= '3.12'",
 ]
 
 all = [

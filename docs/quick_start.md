@@ -253,14 +253,14 @@ swm.data.load_dataset('data/pusht_random_video', num_steps=4)
 # LeRobot Hub dataset
 swm.data.load_dataset(
     'lerobot://lerobot/pusht',
-    primary_camera_key='observation.images.top',  # → `pixels`
+    primary_camera_key='observation.image',  # → `pixels`
     num_steps=4,
     keys_to_load=['pixels', 'action', 'proprio', 'ep_idx', 'step_idx'],
 )
 ```
 
 !!! info "LeRobot Support"
-    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[lerobot]'`.
+    LeRobot support is read-only and requires Python 3.12+. Install with `pip install 'stable-worldmodel[lerobot]'`, which also installs `lerobot[dataset]`.
 
 The returned dataset is compatible with PyTorch `DataLoader` for batched training.
 
