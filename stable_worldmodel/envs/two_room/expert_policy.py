@@ -8,6 +8,12 @@ class ExpertPolicy(BasePolicy):
     Behavior:
       - If target is in other room: go to center of closest door that fits -> then go to target.
       - Otherwise: go directly to target.
+      - With ``action_repeat_prob``, repeat the previous clipped action,
+        independently for each environment.
+
+    ``step_idx == 0`` marks a new episode and prevents action repetition.
+    World supplies this field. When using a raw environment without it,
+    call ``set_env`` again after a reset to clear the previous action.
     """
 
     def __init__(
@@ -22,6 +28,9 @@ class ExpertPolicy(BasePolicy):
         super().__init__(**kwargs)
         self.type = 'expert'
         self.action_noise = float(action_noise)
+        self.action_repeat_prob = float(action_repeat_prob)
+        if not 0.0 <= self.action_repeat_prob <= 1.0:
+            raise ValueError('action_repeat_prob must be between 0 and 1')
         self.door_fit_margin = float(door_fit_margin)
         # If None, will default to ~3*scale per-env at runtime
         self.door_reach_tol = door_reach_tol
@@ -35,9 +44,11 @@ class ExpertPolicy(BasePolicy):
         """
         self.seed = seed
         self.rng = np.random.default_rng(seed)
+        self._last_action = None
 
     def set_env(self, env):
         self.env = env
+        self._last_action = None
 
     def get_action(self, info_dict, **kwargs):
         assert hasattr(self, 'env'), 'Environment not set for the policy'
@@ -175,7 +186,6 @@ class ExpertPolicy(BasePolicy):
             ).astype(np.float32)
 
         # action repeat stochasticity
-        self._last_action = getattr(self, '_last_action', None)
         if self._last_action is not None and self.action_repeat_prob > 0.0:
             repeat_mask = (
                 self.rng.uniform(
@@ -183,6 +193,14 @@ class ExpertPolicy(BasePolicy):
                 )
                 < self.action_repeat_prob
             )
+            if 'step_idx' in info_dict:
+                # Do not repeat for environments starting an episode.
+                repeat_mask &= (
+                    np.asarray(info_dict['step_idx']).reshape(
+                        repeat_mask.shape
+                    )
+                    > 0
+                )
             if is_vectorized:
                 actions[repeat_mask] = self._last_action[repeat_mask]
             else:
@@ -190,4 +208,6 @@ class ExpertPolicy(BasePolicy):
                     actions = self._last_action
 
         # Keep within action space
-        return np.clip(actions, -1.0, 1.0).astype(np.float32)
+        actions = np.clip(actions, -1.0, 1.0).astype(np.float32)
+        self._last_action = actions.copy()
+        return actions

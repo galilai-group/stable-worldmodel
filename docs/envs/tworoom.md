@@ -132,3 +132,14 @@ from stable_worldmodel.envs.two_room import ExpertPolicy
 policy = ExpertPolicy()
 world.set_policy(policy)
 ```
+
+Set `action_repeat_prob` to repeat the previous action with a given
+probability, sampled independently for each environment. For example,
+`ExpertPolicy(action_noise=0.2, action_repeat_prob=0.05, seed=42)` repeats
+the previous clipped action with a 5% probability. The default is `0.0`
+(no repetition).
+
+The first action after a `World` reset is always fresh. The policy uses
+`step_idx == 0` to detect this for each environment. If you use a raw
+environment without `step_idx`, call `policy.set_env(env)` again after
+resetting it to clear the previous action.
