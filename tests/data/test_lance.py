@@ -569,3 +569,23 @@ def test_convert_lance_to_folder_and_back(tmp_path):
     )
     ds = LanceDataset(path=back)
     assert ds.lengths.tolist() == [3, 4]
+
+
+def test_getitems_decodes_only_strided_frames(tmp_path):
+    out = tmp_path / 'demo.lance'
+    _write_demo(out, ep_lengths=(12, 10))
+    ds = LanceDataset(path=out, frameskip=3, num_steps=2)
+    decoded = []
+    decode = ds._decode_images
+    ds._decode_images = lambda blobs: (
+        decoded.append(len(blobs)) or decode(blobs)
+    )
+    indices = [0, 1, len(ds) - 1]
+    batch = ds.__getitems__(indices)
+    # windows start at rows 0, 1, 16 and keep every 3rd row:
+    # {0, 3}, {1, 4}, {16, 19}: 6 decodes, not the 13 rows the windows span
+    assert decoded == [6]
+    for i, idx in enumerate(indices):
+        np.testing.assert_array_equal(
+            batch[i]['pixels'].numpy(), ds[idx]['pixels'].numpy()
+        )
