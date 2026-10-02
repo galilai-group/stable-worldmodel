@@ -55,7 +55,7 @@ class SaveCkptCallback(Callback):
 
 
 def get_column_normalizer(dataset, source, target):
-    """Z-score normalization transform computed from the full dataset column."""
+    """Return a column's z-score transform and serializable training stats."""
     data = torch.from_numpy(dataset.get_col_data(source)[:])
     data = data[~torch.isnan(data).any(dim=1)]
     mean, std = (
@@ -67,8 +67,11 @@ def get_column_normalizer(dataset, source, target):
     def norm_fn(x):
         return ((x - mean.to(x.device)) / std.to(x.device)).float()
 
-    return spt.data.transforms.WrapTorchTransform(
-        norm_fn, source=source, target=target
+    return (
+        spt.data.transforms.WrapTorchTransform(
+            norm_fn, source=source, target=target
+        ),
+        {'mean': mean.tolist(), 'std': std.tolist()},
     )
 
 
@@ -166,6 +169,7 @@ def run(cfg):
                 model_cfg.extra_dims[key] = base_dataset.get_dim(key)
 
     transforms = []
+    statistics = {}
     if use_pixels:
         transforms.append(
             get_img_preprocessor('pixels', 'pixels', model_cfg.image_size)
@@ -177,6 +181,10 @@ def run(cfg):
             aug_clean = aug_data[~torch.isnan(aug_data).any(dim=1)]
             _mean = aug_clean.mean(0).clone()
             _std = aug_clean.std(0).clone() + 1e-2
+            statistics[key] = {
+                'mean': _mean.tolist(),
+                'std': _std.tolist(),
+            }
             transforms.append(
                 spt.data.transforms.WrapTorchTransform(
                     lambda x, m=_mean, s=_std: (
@@ -187,7 +195,18 @@ def run(cfg):
                 )
             )
         else:
-            transforms.append(get_column_normalizer(base_dataset, key, key))
+            transform, statistics[key] = get_column_normalizer(
+                base_dataset, key, key
+            )
+            transforms.append(transform)
+
+    # Save the exact training coordinates, including the augmented goal
+    # dimensions, in the instantiable model config written with each checkpoint.
+    with open_dict(cfg):
+        model_cfg.preprocessing = {
+            'goal_obs_key': goal_obs_key,
+            'statistics': statistics,
+        }
 
     base_dataset.transform = spt.data.transforms.Compose(*transforms)
 

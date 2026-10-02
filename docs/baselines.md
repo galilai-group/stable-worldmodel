@@ -99,6 +99,24 @@ $$ \text{cost} = -\left( G_{0:H} + \gamma^H \left( \bar{Q}(z_H, \mu_H) - c \cdot
 
 where $\bar{Q}$ and $\sigma_Q$ are the mean and standard deviation of the Q-ensemble, and $c$ controls the conservatism.
 
+### Offline training and evaluation preprocessing
+
+`scripts/train/tdmpc2.py` saves its observation means, standard deviations
+(including the training epsilon), and `goal_obs_key` in the model config
+alongside each checkpoint. For goal-conditioned training, the current-state
+and episode-final-goal dimensions have separate statistics.
+
+`scripts/plan/eval_wm.py` restores these statistics before converting inputs
+to the model dtype, then uses TD-MPC2's native planning cost. Set
+`plan_config.action_block=1` and keep `history_len=1`: this model plans
+individual actions from the current observation. Actions remain in the raw
+`[-1, 1]` coordinates used for training, without a fitted action scaler.
+
+Older offline checkpoints without `cfg.preprocessing` cannot recover the
+original coordinates from evaluation data. Supply the original training
+statistics and goal key, or retrain to produce a complete checkpoint. Direct
+use of online/legacy models with already-preprocessed inputs is unchanged.
+
 ### Benchmark
 
 | Environment | Success Rate | Checkpoint |

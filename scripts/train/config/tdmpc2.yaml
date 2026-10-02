@@ -37,6 +37,9 @@ temperature: 0.5
 # are filled in at runtime from the dataset. TDMPC2 builds its CNN/MLP submodules
 # internally, so `TDMPC2` is the only `_target_` needed. Saved via
 # `save_pretrained(config=cfg.model)` and reloaded by `load_pretrained`.
+# Training also fills `cfg.preprocessing` with the observation statistics
+# and goal_obs_key. Planning restores these statistics from the checkpoint;
+# it must not fit state or action scalers on the evaluation dataset.
 model:
   _target_: stable_worldmodel.wm.tdmpc2.TDMPC2
   _recursive_: false
