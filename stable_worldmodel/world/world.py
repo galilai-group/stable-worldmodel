@@ -491,7 +491,7 @@ class World:
 
         def on_step(world, mask):
             if frames is not None:
-                for i in range(world.num_envs):
+                for i in np.where(mask)[0]:
                     f = world.infos['pixels'][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
@@ -618,7 +618,7 @@ class World:
             world.infos.update(deepcopy(goal_snapshot))
             results['episode_successes'] |= world.terminateds
             if frames is not None:
-                for i in range(world.num_envs):
+                for i in np.where(mask)[0]:
                     f = world.infos['pixels'][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
