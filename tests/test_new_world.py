@@ -734,6 +734,172 @@ class TestEvaluateFromDataset:
         np.testing.assert_array_equal(received[1][1], [16.0, 17.0])
 
 
+class TestStepsToSuccess:
+    @staticmethod
+    def _evaluate(world, budget=5, mode='wait', episodes_idx=None):
+        if episodes_idx is None:
+            episodes_idx = list(range(world.num_envs))
+        return world.evaluate(
+            dataset=FakeEvalDataset(),
+            episodes_idx=episodes_idx,
+            start_steps=[0] * world.num_envs,
+            goal_offset=3,
+            eval_budget=budget,
+            reset_mode=mode,
+        )
+
+    def test_fast_and_slow_trials_preserve_order_and_old_results(self):
+        world = _make_world_with(
+            [lambda: DatasetResetEnv(2), lambda: DatasetResetEnv(5)]
+        )
+
+        results = self._evaluate(world, episodes_idx=[1, 0])
+
+        np.testing.assert_array_equal(results['steps_to_success'], [2, 5])
+        assert results['steps_to_success'].dtype == np.int64
+        np.testing.assert_array_equal(
+            results['episode_successes'], [True, True]
+        )
+        assert results['success_rate'] == 100.0
+        assert results['seeds'] == [101, 100]
+        # The first env remains frozen while the second finishes.
+        assert [env._step_count for env in world.envs.envs] == [2, 5]
+
+    @pytest.mark.parametrize(
+        ('success_step', 'budget', 'expected'),
+        [(1, 5, 1), (5, 5, 5), (6, 5, -1), (0, 5, 1), (1, 0, -1)],
+    )
+    def test_first_final_and_missing_success(
+        self, success_step, budget, expected
+    ):
+        world = _make_world_with([lambda: DatasetResetEnv(success_step)])
+
+        results = self._evaluate(world, budget=budget)
+
+        np.testing.assert_array_equal(results['steps_to_success'], [expected])
+        np.testing.assert_array_equal(
+            results['episode_successes'], [expected != -1]
+        )
+
+    @pytest.mark.parametrize('also_terminated', [False, True])
+    def test_truncation_is_not_success(self, also_terminated):
+        class TimeLimitEnv(DatasetResetEnv):
+            def step(self, action):
+                obs, reward, terminated, _, info = super().step(action)
+                truncated = self._step_count == 2
+                terminated = truncated and also_terminated
+                info['terminated'] = terminated
+                return obs, reward, terminated, truncated, info
+
+        world = _make_world_with(
+            [lambda: DatasetResetEnv(3), lambda: TimeLimitEnv(10)]
+        )
+
+        results = self._evaluate(world)
+
+        np.testing.assert_array_equal(
+            results['steps_to_success'], [3, 2 if also_terminated else -1]
+        )
+        np.testing.assert_array_equal(
+            results['episode_successes'], [True, also_terminated]
+        )
+        assert results['success_rate'] == (100.0 if also_terminated else 50.0)
+        assert [env._step_count for env in world.envs.envs] == [3, 2]
+
+    def test_auto_reset_counts_actions_and_keeps_first_success(self):
+        class RetryEnv(DatasetResetEnv):
+            def __init__(self):
+                super().__init__()
+                self.resets = 0
+                self.actions = 0
+
+            def reset(self, **kwargs):
+                self.resets += 1
+                return super().reset(**kwargs)
+
+            def step(self, action):
+                self.actions += 1
+                obs, reward, _, _, info = super().step(action)
+                # First attempt times out after 2 actions. The next succeeds
+                # after 3 more. Later successes must not replace that 5.
+                truncated = self.resets == 1 and self._step_count == 2
+                terminated = self.resets > 1 and self._step_count == 3
+                info['terminated'] = terminated
+                return obs, reward, terminated, truncated, info
+
+        world = _make_world_with([RetryEnv])
+
+        results = self._evaluate(world, budget=8, mode='auto')
+
+        np.testing.assert_array_equal(results['steps_to_success'], [5])
+        np.testing.assert_array_equal(results['episode_successes'], [True])
+        assert results['success_rate'] == 100.0
+        assert world.envs.envs[0].actions == 8
+        assert world.envs.envs[0].resets == 4
+
+    def test_repeated_evaluation_starts_fresh(self):
+        world = _make_world_with([lambda: DatasetResetEnv(3)])
+
+        first = self._evaluate(world)
+        failed = self._evaluate(world, budget=2)
+        last = self._evaluate(world)
+
+        np.testing.assert_array_equal(first['steps_to_success'], [3])
+        np.testing.assert_array_equal(failed['steps_to_success'], [-1])
+        np.testing.assert_array_equal(last['steps_to_success'], [3])
+
+
+class TestTransitionCallback:
+    def test_auto_reset_observations_only_reach_on_step(self):
+        world = _make_world_with([lambda: CounterEnv(2)])
+        events = []
+
+        def record(kind):
+            def callback(world, mask):
+                assert mask.tolist() == [True]
+                events.append((kind, int(world.infos['state'][0].item())))
+
+            return callback
+
+        world._run(
+            episodes=2,
+            seed=0,
+            mode='auto',
+            on_transition=record('action'),
+            on_step=record('observation'),
+        )
+
+        assert events == [
+            ('observation', 0),
+            ('action', 1),
+            ('observation', 1),
+            ('action', 2),
+            ('observation', 2),
+            ('observation', 0),
+            ('action', 1),
+            ('observation', 1),
+            ('action', 2),
+            ('observation', 2),
+            ('observation', 0),
+        ]
+
+    def test_transition_mask_excludes_frozen_envs(self):
+        world = _make_world_with(
+            [lambda: CounterEnv(1), lambda: CounterEnv(3)]
+        )
+        masks = []
+        world._run(
+            max_steps=5,
+            seed=0,
+            mode='wait',
+            on_transition=lambda world, mask: masks.append(mask.copy()),
+        )
+
+        np.testing.assert_array_equal(
+            masks, [[True, True], [False, True], [False, True]]
+        )
+
+
 class TestCollectEpisodeData:
     def _world(self, tags, max_steps=2):
         return _make_world_with(

@@ -334,6 +334,26 @@ For example, if `start_steps[i]=10` and `goal_offset=50`, env `i` starts at time
 !!! note ""
     The length of `episodes_idx` and `start_steps` must match `num_envs`, as each environment evaluates one configuration in parallel.
 
+Dataset-driven results also include `steps_to_success`, an `int64` array in
+`episodes_idx` order. Each value counts environment steps until the first
+success, starting at 1. A value of `-1` means no success was observed within
+the evaluation budget. Existing result fields are unchanged.
+
+```python
+steps = results['steps_to_success']  # e.g. [2, 5, -1, 8]
+successful = steps >= 1
+mean_steps = steps[successful].mean() if successful.any() else float('nan')
+success_at_5 = ((steps >= 1) & (steps <= 5)).mean() * 100
+```
+
+Report successful-only mean steps alongside success rate, so failures are not
+hidden. These counts measure executed environment steps, not planner calls or
+wall-clock time. A time limit alone is not success. Success is first checked
+after an action, so an initially satisfied goal does not produce a zero count.
+With `reset_mode='auto'`, counts accumulate across resets until the first
+success; reset observations add no steps, and later successes do not overwrite
+the first value.
+
 ### Episodic Evaluation
 
 Without a dataset, `evaluate()` runs `episodes` episodes with randomly sampled goals and auto-resets terminated envs (`reset_mode='auto'` by default).
