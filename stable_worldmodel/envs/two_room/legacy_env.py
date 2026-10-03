@@ -130,8 +130,8 @@ class TwoRoomEnv(gym.Env):
                             init_value=np.array(
                                 [50.0, 50.0], dtype=np.float32
                             ),
-                            constrain_fn=lambda x: not self.check_collide(
-                                x, entity='agent'
+                            constrain_fn=lambda x: (
+                                not self.check_collide(x, entity='agent')
                             ),
                         ),
                         'max_energy': swm_spaces.Discrete(
