@@ -52,6 +52,8 @@ uv venv --python=3.10 && source .venv/bin/activate
 uv sync --extra all --group dev
 ```
 
+The `env` extra uses `pygame-ce`, which installs into the same `pygame` directory as `pygame`. If `import pygame` fails in an environment that previously had both, run `uv sync --extra all --group dev --reinstall-package pygame-ce` (or `pip uninstall -y pygame pygame-ce && pip install pygame-ce` outside uv).
+
 Datasets and checkpoints are stored under `$STABLEWM_HOME` (defaults to `~/.stable_worldmodel/`). Override the variable to point at your preferred storage location.
 
 > The library is in active development. APIs may change between minor versions.
