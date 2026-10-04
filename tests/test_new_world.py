@@ -698,6 +698,30 @@ class TestEvaluateFromDataset:
         assert 'model_xml' not in world.infos
         assert 'ep_meta' not in world.infos
 
+    def test_env_goal_overridden_by_dataset_goal(self):
+        class EnvGoalEnv(DatasetResetEnv):
+            """Env that generates its own goal pixels, like the OGBench
+            envs do for dataset-free evaluation."""
+
+            def _make_info(self, terminated):
+                info = super()._make_info(terminated)
+                info['goal'] = np.full((1, 3, 3, 3), 9, dtype=np.uint8)
+                return info
+
+        world = _make_world_with([lambda: EnvGoalEnv(3) for _ in range(2)])
+        world.evaluate(
+            dataset=FakeEvalDataset(),
+            episodes_idx=[0, 1],
+            start_steps=[0, 0],
+            goal_offset=3,
+            eval_budget=5,
+        )
+
+        # The dataset goal (fill value ep+1) wins over the env-generated
+        # goal (fill value 9), on reset and on every subsequent step.
+        assert int(world.infos['goal'][0].max()) == 1
+        assert int(world.infos['goal'][1].max()) == 2
+
     def test_callables_path_gets_merged_row(self):
         received = []
 

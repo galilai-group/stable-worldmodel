@@ -316,6 +316,11 @@ class SceneEnv(ManipSpaceEnv):
     def reset(self, options=None, *args, **kwargs):
         options = options or {}
 
+        if self._mode == 'task':
+            # Render the goal state by default so test-time evaluation
+            # without a dataset gets goal pixels in the info dict.
+            options.setdefault('render_goal', True)
+
         swm_spaces.reset_variation_space(
             self.variation_space,
             seed=None,
@@ -1084,6 +1089,9 @@ class SceneEnv(ManipSpaceEnv):
         reset_info['env_name'] = self.env_name
         reset_info['target'] = self._cur_goal_ob
         reset_info['success'] = self._success
+        goal = getattr(self, '_cur_goal_rendered', None)
+        if goal is not None:
+            reset_info['goal'] = goal
         return reset_info
 
     def get_step_info(self):
@@ -1091,6 +1099,9 @@ class SceneEnv(ManipSpaceEnv):
         ob_info['env_name'] = self.env_name
         ob_info['target'] = self._cur_goal_ob
         ob_info['success'] = self._success
+        goal = getattr(self, '_cur_goal_rendered', None)
+        if goal is not None:
+            ob_info['goal'] = goal
         return ob_info
 
     def add_object_info(self, ob_info):
