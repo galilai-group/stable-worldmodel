@@ -6,6 +6,7 @@ defaults:
 
 
 output_model_name: dinoiql
+subdir: ${hydra:job.id}
 dataset_name: pusht_expert_train.h5
 
 trainer:
