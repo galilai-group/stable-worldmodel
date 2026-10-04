@@ -34,10 +34,11 @@ def get_img_preprocessor(source: str, target: str, img_size: int = 224):
 class SaveCkptCallback(Callback):
     """Callback to save model checkpoint after each epoch using save_pretrained."""
 
-    def __init__(self, run_name, cfg, epoch_interval: int = 1):
+    def __init__(self, run_name, cfg, preprocessing, epoch_interval: int = 1):
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
+        self.preprocessing = preprocessing
         self.epoch_interval = epoch_interval
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -57,6 +58,7 @@ class SaveCkptCallback(Callback):
             run_name=self.run_name,
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
+            preprocessing=self.preprocessing,
         )
 
 
@@ -116,16 +118,19 @@ def run(cfg):
     img_processor = get_img_preprocessor('pixels', 'pixels', cfg.img_size)
 
     extra_transforms = []
+    preprocessing = {}
     for col in cfg.data.dataset.keys_to_load:
         if col in ['pixels']:
             continue
         normalizer = get_column_normalizer(dataset, col, col)
         extra_transforms.append(normalizer)
+        preprocessing[col] = normalizer.lambd
 
     if hasattr(cfg.data.dataset, 'keys_to_merge'):
         for col in cfg.data.dataset.keys_to_merge:
             normalizer = get_column_normalizer(dataset, col, col)
             extra_transforms.append(normalizer)
+            preprocessing[col] = normalizer.lambd
 
     with open_dict(cfg):
         for col in cfg.data.dataset.keys_to_load:
@@ -214,7 +219,10 @@ def run(cfg):
         OmegaConf.save(cfg, f)
 
     save_ckpt_callback = SaveCkptCallback(
-        run_name=cfg.output_model_name, cfg=cfg.model, epoch_interval=5
+        run_name=cfg.output_model_name,
+        cfg=cfg.model,
+        preprocessing=preprocessing,
+        epoch_interval=5,
     )
 
     trainer = pl.Trainer(

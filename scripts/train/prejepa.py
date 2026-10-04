@@ -58,10 +58,11 @@ class VideoPipeline(spt.data.transforms.Transform):
 class SaveCkptCallback(Callback):
     """Callback to save model checkpoint after each epoch using save_pretrained."""
 
-    def __init__(self, run_name, cfg, epoch_interval=1):
+    def __init__(self, run_name, cfg, preprocessing, epoch_interval=1):
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
+        self.preprocessing = preprocessing
         self.epoch_interval = epoch_interval
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -79,6 +80,7 @@ class SaveCkptCallback(Callback):
             run_name=self.run_name,
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
+            preprocessing=self.preprocessing,
         )
 
 
@@ -180,10 +182,12 @@ def run(cfg):
         keys_to_cache=encoding_keys,
     )
 
-    normalizers = [
-        get_column_normalizer(dataset, col, col)
-        for col in cfg.wm.get('encoding', {})
-    ]
+    preprocessing = {}
+    normalizers = []
+    for col in cfg.wm.get('encoding', {}):
+        normalizer = get_column_normalizer(dataset, col, col)
+        normalizers.append(normalizer)
+        preprocessing[col] = normalizer.lambd
 
     if cfg.backbone.get('is_video_encoder', False):
         processor = AutoVideoProcessor.from_pretrained(cfg.backbone.name)
@@ -299,6 +303,7 @@ def run(cfg):
             SaveCkptCallback(
                 run_name=cfg.output_model_name,
                 cfg=cfg.model,
+                preprocessing=preprocessing,
                 epoch_interval=5,
             ),
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),

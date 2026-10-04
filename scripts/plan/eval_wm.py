@@ -5,6 +5,7 @@ import os
 os.environ['MUJOCO_GL'] = 'egl'
 
 import time
+import warnings
 from pathlib import Path
 
 import hydra
@@ -14,6 +15,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
+
 import stable_worldmodel as swm
 
 
@@ -63,6 +65,43 @@ def get_dataset(cfg, dataset_name):
     return dataset
 
 
+def get_policy_preprocessing(cfg, checkpoint_name, stats_dataset):
+    """Restore the model's training preprocessing for evaluation.
+
+    Modern checkpoints carry fitted preprocessing in ``preprocessing.json``.
+    Legacy checkpoints fall back to the historical behavior of fitting
+    scalers on the evaluation dataset, with an explicit warning because that
+    makes model coordinates evaluation-data dependent.
+    """
+    process = swm.wm.utils.load_preprocessing(checkpoint_name)
+
+    if process is None:
+        warnings.warn(
+            'Checkpoint has no saved training preprocessing; falling back '
+            'to fitting scalers on the evaluation dataset. This legacy '
+            'behavior makes evaluation depend on evaluation-set statistics.',
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        process = {}
+        for col in cfg.dataset.keys_to_cache:
+            if col == 'pixels':
+                continue
+            processor = preprocessing.StandardScaler()
+            col_data = stats_dataset.get_col_data(col)
+            col_data = col_data[~np.isnan(col_data).any(axis=1)]
+            processor.fit(col_data)
+            process[col] = processor
+    else:
+        process = dict(process)
+
+    for col, processor in list(process.items()):
+        if col != 'action' and not col.startswith('goal_'):
+            process.setdefault(f'goal_{col}', processor)
+
+    return process
+
+
 @hydra.main(version_base=None, config_path='./config', config_name='pusht')
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
@@ -89,19 +128,6 @@ def run(cfg: DictConfig):
         stats_dataset.get_col_data(col_name), return_index=True
     )
 
-    process = {}
-    for col in cfg.dataset.keys_to_cache:
-        if col in ['pixels']:
-            continue
-        processor = preprocessing.StandardScaler()
-        col_data = stats_dataset.get_col_data(col)
-        col_data = col_data[~np.isnan(col_data).any(axis=1)]
-        processor.fit(col_data)
-        process[col] = processor
-
-        if col != 'action':
-            process[f'goal_{col}'] = process[col]
-
     # -- run evaluation
     policy = cfg.get('policy', 'random')
 
@@ -124,6 +150,7 @@ def run(cfg: DictConfig):
             )
             model.predictor = torch.compile(model.predictor)
         config = swm.PlanConfig(**cfg.plan_config)
+        process = get_policy_preprocessing(cfg, cfg.policy, stats_dataset)
         objective = hydra.utils.instantiate(cfg.objective)
         cost = swm.planning.ShootingCostEvaluator(model, objective)
         solver = hydra.utils.instantiate(cfg.solver, cost=cost)

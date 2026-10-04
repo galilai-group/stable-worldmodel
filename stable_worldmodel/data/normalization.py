@@ -17,12 +17,13 @@ from typing import Any
 import numpy as np
 import torch
 
-
 __all__ = [
     'IdentityScaler',
     'PercentileScaler',
     'ZScoreScaler',
+    'deserialize_scaler',
     'get_scaler',
+    'serialize_scaler',
 ]
 
 
@@ -182,3 +183,63 @@ def get_scaler(method: str = 'zscore', **kwargs: Any):
             f'Expected one of {list(_SCALERS)}.'
         )
     return _SCALERS[method](**kwargs)
+
+
+def serialize_scaler(scaler) -> dict:
+    """Serialize a fitted scaler to a JSON-safe specification."""
+    if isinstance(scaler, IdentityScaler):
+        return {'method': 'none'}
+
+    if isinstance(scaler, ZScoreScaler):
+        if scaler.mean is None or scaler.std is None:
+            raise ValueError('Cannot serialize an unfitted ZScoreScaler')
+        return {
+            'method': 'zscore',
+            'mean': scaler.mean.tolist(),
+            'mean_dtype': str(scaler.mean.dtype),
+            'std': scaler.std.tolist(),
+            'std_dtype': str(scaler.std.dtype),
+            'eps': float(scaler.eps),
+        }
+
+    if isinstance(scaler, PercentileScaler):
+        if scaler.q_low is None or scaler.q_high is None:
+            raise ValueError('Cannot serialize an unfitted PercentileScaler')
+        return {
+            'method': 'percentile',
+            'low': float(scaler.low),
+            'high': float(scaler.high),
+            'q_low': scaler.q_low.tolist(),
+            'q_low_dtype': str(scaler.q_low.dtype),
+            'q_high': scaler.q_high.tolist(),
+            'q_high_dtype': str(scaler.q_high.dtype),
+            'eps': float(scaler.eps),
+        }
+
+    raise TypeError(f'Unsupported scaler type: {type(scaler).__name__}')
+
+
+def deserialize_scaler(spec: dict):
+    """Restore a scaler from a JSON-safe serialized specification."""
+    method = spec.get('method')
+
+    if method == 'none':
+        return IdentityScaler()
+
+    if method == 'zscore':
+        return ZScoreScaler(
+            mean=np.asarray(spec['mean'], dtype=spec.get('mean_dtype')),
+            std=np.asarray(spec['std'], dtype=spec.get('std_dtype')),
+            eps=spec.get('eps', 1e-8),
+        )
+
+    if method == 'percentile':
+        return PercentileScaler(
+            low=spec.get('low', 1.0),
+            high=spec.get('high', 99.0),
+            q_low=np.asarray(spec['q_low'], dtype=spec.get('q_low_dtype')),
+            q_high=np.asarray(spec['q_high'], dtype=spec.get('q_high_dtype')),
+            eps=spec.get('eps', 1e-8),
+        )
+
+    raise ValueError(f'Unknown serialized scaler method: {method!r}')

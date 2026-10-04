@@ -1,5 +1,6 @@
 """Tests for stable_worldmodel.data.normalization."""
 
+import json
 import pickle
 
 import numpy as np
@@ -10,9 +11,10 @@ from stable_worldmodel.data.normalization import (
     IdentityScaler,
     PercentileScaler,
     ZScoreScaler,
+    deserialize_scaler,
     get_scaler,
+    serialize_scaler,
 )
-
 
 # ─── IdentityScaler ───────────────────────────────────────────────────────────
 
@@ -226,3 +228,122 @@ def test_column_normalizer_applies_to_sample(stub_dataset):
     assert 'action_norm' in out
     # mean should be ~0 after z-score on a sample drawn from the fitted dist.
     assert abs(float(out['action_norm'].mean())) < 1.0
+
+
+#  JSON-safe serialization
+
+
+def test_identity_scaler_serialization_roundtrip():
+    scaler = IdentityScaler()
+    spec = serialize_scaler(scaler)
+
+    assert spec == {'method': 'none'}
+
+    restored = deserialize_scaler(spec)
+    assert isinstance(restored, IdentityScaler)
+
+    x = np.random.default_rng(10).normal(size=(8, 3))
+    np.testing.assert_array_equal(restored.transform(x), x)
+
+
+def test_zscore_scaler_serialization_roundtrip():
+    rng = np.random.default_rng(11)
+    x = rng.normal(loc=[3.0, -2.0], scale=[2.0, 4.0], size=(100, 2)).astype(
+        np.float32
+    )
+
+    scaler = ZScoreScaler(eps=1e-6).fit(x)
+    spec = serialize_scaler(scaler)
+
+    assert spec['method'] == 'zscore'
+    assert spec['eps'] == 1e-6
+    assert spec['mean_dtype'] == 'float32'
+    assert spec['std_dtype'] == 'float32'
+    assert isinstance(spec['mean'], list)
+    assert isinstance(spec['std'], list)
+
+    restored = deserialize_scaler(spec)
+
+    np.testing.assert_array_equal(restored.mean, scaler.mean)
+    np.testing.assert_array_equal(restored.std, scaler.std)
+    assert restored.mean.dtype == scaler.mean.dtype
+    assert restored.std.dtype == scaler.std.dtype
+    assert restored.eps == scaler.eps
+
+    probe = rng.normal(size=(10, 2)).astype(np.float32)
+    assert restored.transform(probe).dtype == scaler.transform(probe).dtype
+    np.testing.assert_allclose(
+        restored.transform(probe),
+        scaler.transform(probe),
+        rtol=0,
+        atol=0,
+    )
+
+
+def test_percentile_scaler_serialization_roundtrip():
+    rng = np.random.default_rng(12)
+    x = rng.normal(size=(200, 3)).astype(np.float32)
+
+    scaler = PercentileScaler(
+        low=5.0,
+        high=95.0,
+        eps=1e-7,
+    ).fit(x)
+
+    spec = serialize_scaler(scaler)
+
+    assert spec['method'] == 'percentile'
+    assert spec['low'] == 5.0
+    assert spec['high'] == 95.0
+    assert spec['eps'] == 1e-7
+    assert spec['q_low_dtype'] == str(scaler.q_low.dtype)
+    assert spec['q_high_dtype'] == str(scaler.q_high.dtype)
+    assert isinstance(spec['q_low'], list)
+    assert isinstance(spec['q_high'], list)
+
+    restored = deserialize_scaler(spec)
+
+    np.testing.assert_array_equal(restored.q_low, scaler.q_low)
+    np.testing.assert_array_equal(restored.q_high, scaler.q_high)
+    assert restored.q_low.dtype == scaler.q_low.dtype
+    assert restored.q_high.dtype == scaler.q_high.dtype
+    assert restored.low == scaler.low
+    assert restored.high == scaler.high
+    assert restored.eps == scaler.eps
+
+    probe = rng.normal(size=(10, 3)).astype(np.float32)
+    assert restored.transform(probe).dtype == scaler.transform(probe).dtype
+    np.testing.assert_allclose(
+        restored.transform(probe),
+        scaler.transform(probe),
+        rtol=0,
+        atol=0,
+    )
+
+
+@pytest.mark.parametrize(
+    'scaler',
+    [
+        IdentityScaler(),
+        ZScoreScaler().fit(np.random.default_rng(13).normal(size=(20, 2))),
+        PercentileScaler().fit(np.random.default_rng(14).normal(size=(20, 2))),
+    ],
+)
+def test_serialized_scaler_is_json_safe(scaler):
+    spec = serialize_scaler(scaler)
+
+    # Must not rely on pickle, NumPy-specific JSON encoders, or OmegaConf.
+    encoded = json.dumps(spec)
+    decoded = json.loads(encoded)
+
+    assert decoded == spec
+
+
+def test_deserialize_scaler_rejects_unknown_method():
+    with pytest.raises(ValueError, match='Unknown serialized scaler method'):
+        deserialize_scaler({'method': 'definitely-not-a-scaler'})
+
+
+def test_serialize_scaler_rejects_unknown_type():
+    with pytest.raises(TypeError, match='Unsupported scaler type'):
+        serialize_scaler(object())

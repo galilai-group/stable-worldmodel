@@ -1,15 +1,47 @@
 import json
 import logging
+import urllib.error
 import urllib.request
 from pathlib import Path
-import torch
 
+import torch
 from tqdm import tqdm
 
+from stable_worldmodel.data import ensure_dir_exists, get_cache_dir
+from stable_worldmodel.data.normalization import (
+    deserialize_scaler,
+    serialize_scaler,
+)
 from stable_worldmodel.utils import HF_BASE_URL
-from stable_worldmodel.data import get_cache_dir, ensure_dir_exists
 
 logger = logging.getLogger(__name__)
+
+_PREPROCESSING_FILENAME = 'preprocessing.json'
+_PREPROCESSING_VERSION = 1
+
+
+def _serialize_preprocessing(process: dict) -> dict:
+    return {
+        'version': _PREPROCESSING_VERSION,
+        'process': {
+            key: serialize_scaler(scaler) for key, scaler in process.items()
+        },
+    }
+
+
+def _deserialize_preprocessing(spec: dict) -> dict:
+    version = spec.get('version')
+    if version != _PREPROCESSING_VERSION:
+        raise ValueError(
+            f'Unsupported preprocessing version: {version!r}. '
+            f'Expected {_PREPROCESSING_VERSION}.'
+        )
+    process = spec.get('process')
+    if not isinstance(process, dict):
+        raise TypeError(
+            "Serialized preprocessing must contain a 'process' mapping."
+        )
+    return {key: deserialize_scaler(value) for key, value in process.items()}
 
 
 def save_pretrained(
@@ -19,6 +51,7 @@ def save_pretrained(
     config_key: str | None = None,
     filename: str = 'weights.pt',
     cache_dir: str = None,
+    preprocessing: dict | None = None,
 ):
     from omegaconf import OmegaConf
 
@@ -27,6 +60,11 @@ def save_pretrained(
 
     checkpoint_path = ckpt_dir / filename
     torch.save(model.state_dict(), checkpoint_path)
+
+    if preprocessing is not None:
+        preprocessing_path = ckpt_dir / _PREPROCESSING_FILENAME
+        with open(preprocessing_path, 'w') as f:
+            json.dump(_serialize_preprocessing(preprocessing), f, indent=2)
 
     if config is None:
         logger.warning('No config! Loading will have to be done manually.')
@@ -94,6 +132,33 @@ def load_pretrained(name: str, cache_dir: str = None, extra_args=None):
     model = instantiate(config)
     model.load_state_dict(state_dict)
     return model
+
+
+def load_preprocessing(name: str, cache_dir: str | None = None) -> dict | None:
+    """Load fitted preprocessing saved alongside a checkpoint.
+
+    Returns ``None`` for legacy checkpoints that do not contain a
+    ``preprocessing.json`` artifact.
+    """
+    cache_dir = get_cache_dir(cache_dir, sub_folder='checkpoints')
+    ensure_dir_exists(cache_dir)
+    checkpoint_path, _ = _resolve(name, cache_dir)
+    preprocessing_path = checkpoint_path.parent / _PREPROCESSING_FILENAME
+
+    hf_cache_name = f'models--{name.replace("/", "--")}'
+    if (
+        not preprocessing_path.exists()
+        and checkpoint_path.parent.name == hf_cache_name
+    ):
+        url = f'{HF_BASE_URL}/{name}/resolve/main/{_PREPROCESSING_FILENAME}'
+        _download_optional(url, preprocessing_path)
+
+    if not preprocessing_path.exists():
+        return None
+
+    with open(preprocessing_path) as f:
+        spec = json.load(f)
+    return _deserialize_preprocessing(spec)
 
 
 def _resolve(name: str, cache_dir: Path) -> tuple[Path, dict]:
@@ -176,6 +241,17 @@ def _download(url: str, dest: Path) -> None:
             bar.update(len(chunk))
 
 
+def _download_optional(url: str, dest: Path) -> bool:
+    try:
+        _download(url, dest)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        dest.unlink(missing_ok=True)
+        return False
+    return True
+
+
 def _load_config(folder: Path) -> dict:
     config_path = folder / 'config.json'
     if not config_path.exists():
@@ -184,4 +260,4 @@ def _load_config(folder: Path) -> dict:
         return json.load(f)
 
 
-__all__ = ['load_pretrained', 'save_pretrained']
+__all__ = ['load_preprocessing', 'load_pretrained', 'save_pretrained']

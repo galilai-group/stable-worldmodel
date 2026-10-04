@@ -319,3 +319,125 @@ def test_roundtrip_custom_filename(tmp_path):
         torch.testing.assert_close(
             original.state_dict()[key], loaded.state_dict()[key]
         )
+
+
+# ---------------------------------------------------------------------------
+# Fitted preprocessing artifact
+# ---------------------------------------------------------------------------
+
+
+def _make_preprocessing():
+    from stable_worldmodel.data import IdentityScaler, ZScoreScaler
+
+    values = torch.tensor(
+        [[-2.0, 1.0], [0.0, 5.0], [2.0, 9.0]], dtype=torch.float64
+    ).numpy()
+    state = ZScoreScaler(eps=1e-6).fit(values)
+    return {
+        'state': state,
+        'goal_state': state,
+        'action': IdentityScaler(),
+    }
+
+
+def test_save_pretrained_saves_preprocessing_json(tmp_path):
+    model = TinyModel()
+    save_pretrained(
+        model,
+        run_name='run1',
+        config=TINY_OMEGACONF,
+        cache_dir=tmp_path,
+        preprocessing=_make_preprocessing(),
+    )
+
+    saved = json.loads(
+        (_ckpt_root(tmp_path) / 'run1' / 'preprocessing.json').read_text()
+    )
+    assert saved['version'] == 1
+    assert set(saved['process']) == {'action', 'goal_state', 'state'}
+    assert saved['process']['action'] == {'method': 'none'}
+    assert saved['process']['state']['method'] == 'zscore'
+    assert saved['process']['state']['eps'] == 1e-6
+
+
+def test_load_preprocessing_roundtrip(tmp_path):
+    from stable_worldmodel.wm.utils import load_preprocessing
+
+    process = _make_preprocessing()
+    save_pretrained(
+        TinyModel(),
+        run_name='run1',
+        config=TINY_OMEGACONF,
+        cache_dir=tmp_path,
+        preprocessing=process,
+    )
+
+    restored = load_preprocessing('run1', cache_dir=tmp_path)
+    assert restored is not None
+    assert set(restored) == set(process)
+
+    probe = torch.tensor([[1.0, 7.0]], dtype=torch.float64).numpy()
+    for key in ('state', 'goal_state'):
+        torch.testing.assert_close(
+            torch.from_numpy(restored[key].transform(probe)),
+            torch.from_numpy(process[key].transform(probe)),
+            rtol=0,
+            atol=0,
+        )
+
+
+def test_load_preprocessing_returns_none_for_legacy_checkpoint(tmp_path):
+    from stable_worldmodel.wm.utils import load_preprocessing
+
+    _make_checkpoint(tmp_path, 'legacy', TinyModel())
+    assert load_preprocessing('legacy', cache_dir=tmp_path) is None
+
+
+def test_load_preprocessing_rejects_unknown_version(tmp_path):
+    from stable_worldmodel.wm.utils import load_preprocessing
+
+    run_dir = _make_checkpoint(tmp_path, 'bad_version', TinyModel())
+    (run_dir / 'preprocessing.json').write_text(
+        json.dumps({'version': 999, 'process': {}})
+    )
+
+    with pytest.raises(ValueError, match='Unsupported preprocessing version'):
+        load_preprocessing('bad_version', cache_dir=tmp_path)
+
+
+def test_load_preprocessing_rejects_non_mapping_process(tmp_path):
+    from stable_worldmodel.wm.utils import load_preprocessing
+
+    run_dir = _make_checkpoint(tmp_path, 'bad_process', TinyModel())
+    (run_dir / 'preprocessing.json').write_text(
+        json.dumps({'version': 1, 'process': []})
+    )
+
+    with pytest.raises(TypeError, match="'process' mapping"):
+        load_preprocessing('bad_process', cache_dir=tmp_path)
+
+
+def test_load_preprocessing_uncached_hf_fetches_artifact_once(tmp_path):
+    from stable_worldmodel.wm.utils import load_preprocessing
+
+    repo_id = 'myuser/myrepo'
+
+    def fake_download(_url, dest):
+        if dest.name == 'config.json':
+            dest.write_text(json.dumps(TINY_CONFIG))
+        else:
+            torch.save(TinyModel().state_dict(), dest)
+
+    with (
+        patch(
+            'stable_worldmodel.wm.utils._download',
+            side_effect=fake_download,
+        ),
+        patch(
+            'stable_worldmodel.wm.utils._download_optional',
+            return_value=False,
+        ) as optional_download,
+    ):
+        assert load_preprocessing(repo_id, cache_dir=tmp_path) is None
+
+    optional_download.assert_called_once()
