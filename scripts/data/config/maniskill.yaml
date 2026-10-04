@@ -1,0 +1,25 @@
+defaults:
+  - _self_
+  - launcher/local
+
+hydra:
+  output_subdir: null
+  mode: MULTIRUN
+  run:
+    dir: .
+
+cache_dir: null
+dataset_name: maniskill
+
+env_name: swm/MSPickCube-v0
+
+world:
+  num_envs: 8
+  max_episode_steps: 50
+  image_shape: [224, 224]
+
+num_workers: 4
+seed: 3072
+num_traj: 300
+
+options: null
