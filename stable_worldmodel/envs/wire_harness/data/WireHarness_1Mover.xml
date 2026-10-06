@@ -1,0 +1,76 @@
+<mujoco model="WireHarness1Mover">
+  <statistic center="0 0 .3" extent="1"/>
+  <visual>
+    <global elevation="-30"/>
+  </visual>
+
+  <compiler autolimits="true"/>
+  <size njmax="1000" nconmax="500"/>
+
+  <option gravity="0 0 -9.81"/>
+
+  <!-- Factor to reality: 150 mm in reality is 0.3 in Mujoco: 1mm = 0.002 -->
+
+  <worldbody>
+    <!-- Light source and ground plane -->
+    <light diffuse=".5 .5 .5" pos="0 0 30" dir="0 0 -1"/>
+    <geom type="plane" size="3.36 1.92 0.1" pos="3.36 1.92 0" rgba="0.9 0.9 0.9 1" name="ground"/>
+
+    <!-- Boundaries -->
+    <geom type="box" size=".01 1.92 0.08" pos="6.72 1.92 0.08" rgba="0.59 0.75 0.22 1" name="right_boundary"/>
+    <geom type="box" size="3.36 0.01 0.08" pos="3.36 3.84 0.08" rgba="0.59 0.75 0.22 1" name="upper_boundary"/>
+    <geom type="box" size="3.36 0.01 0.08" pos="3.36 0 0.08" rgba="0.59 0.75 0.22 1" name="lower_boundary"/>
+    <geom type="box" size="0.01 1.92 0.08" pos="0 1.92 0.08" rgba="0.59 0.75 0.22 1" name="left_boundary"/>
+
+    <!-- Platforms 1 - KS_MIKO_17RT -->
+    <body name="platform1" pos="4 3 0.01">
+      <joint name="slide_joint1x" type="slide" axis="1 0 0" damping=".1"/>
+      <joint name="slide_joint1y" type="slide" axis="0 1 0" damping=".1"/>
+      <!-- Mover -->
+      <geom type="box" size="0.15 0.15 0.01" rgba="1 0 0 1" name="mover1"/>                 <!-- Red platform-->
+      <site name="platform1_site" pos="0 0 0.01" type="sphere" size="0.01" rgba="0 0 1 1"/>
+      <!-- Plate under the module -->
+      <body pos="0 0 0.03" euler="0 0 0" name="plat1">
+        <geom type="box" size="0.08 .08 0.02" rgba="0.5 0.5 0.5 1" name="plate1"/>
+      </body>
+      <body name="mod1" pos="0 0 0.1" euler="0 0 0">                                        <!-- Module/ Box -->
+        <site name="marker_p1" pos="0 0 0" size="0.01"/>
+        <joint name="turn1" type="hinge" axis="0 0 1"/>
+        <geom type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1" name="module1"/>
+        <body name="p1cav1" pos="0 -0.05 0" euler="0 0 0">
+          <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav1"/>
+          <site name="markerp1c1" pos="0 0 0" size="0.01"/>
+        </body>
+        <body name="p1cav2" pos="-0.02 -0.05 0" euler="0 0 0">
+          <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav2"/>
+          <site name="markerp1c2" pos="0 0 0" size="0.01"/>
+        </body>
+        <body name="p1cav3" pos="0.02 -0.05 0" euler="0 0 0">
+          <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav3"/>
+          <site name="markerp1c3" pos="0 0 0" size="0.01"/>
+        </body>
+        <body name="p1cav4" pos="0 -0.05 0.02" euler="0 0 0">
+          <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav4"/>
+          <site name="markerp1c4" pos="0 0 0" size="0.01"/>
+        </body>
+        <body name="p1cav5" pos="-0.02 -0.05 0.02" euler="0 0 0">
+          <geom type="sphere" size="0.01" rgba="1 0 0 1" name="mod1_cav5"/>
+          <site name="markerp1c5" pos="0 0 0" size="0.01"/>
+        </body>
+      </body>
+    </body>
+
+  </worldbody>
+
+  <sensor>
+    <force name="force_p1" site="marker_p1"/>
+    <force name="force_p1cav1" site="markerp1c1"/>
+  </sensor>
+
+  <actuator>
+    <!-- Actuators for moving the platform -->
+    <motor joint="slide_joint1x" ctrlrange="-1 1" gear="10"/>
+    <motor joint="slide_joint1y" ctrlrange="-1 1" gear="10"/>
+  </actuator>
+
+</mujoco>

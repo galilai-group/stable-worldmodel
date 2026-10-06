@@ -1,0 +1,857 @@
+<?xml version="1.0" ?>
+<SimulationConfigurationBody>
+  <Body id="0" name="world">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="1" name="Wire1B_first">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="2" name="Wire1B_1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="3" name="Wire1B_2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="4" name="Wire1B_3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="5" name="Wire1B_4">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="6" name="Wire1B_5">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="7" name="Wire1B_6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="8" name="Wire1B_7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="9" name="Wire1B_8">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="10" name="Wire1B_last">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="11" name="Wire2B_first">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="12" name="Wire2B_1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="13" name="Wire2B_2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="14" name="Wire2B_3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="15" name="Wire2B_4">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="16" name="Wire2B_5">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="17" name="Wire2B_6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="18" name="Wire2B_7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="19" name="Wire2B_8">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="20" name="Wire2B_9">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="21" name="Wire2B_10">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="22" name="Wire2B_11">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="23" name="Wire2B_12">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="24" name="Wire2B_13">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="25" name="Wire2B_14">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="26" name="Wire2B_15">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="27" name="Wire2B_16">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="28" name="Wire2B_17">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="29" name="Wire2B_18">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="30" name="Wire2B_19">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="31" name="Wire2B_20">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="32" name="Wire2B_21">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="33" name="Wire2B_22">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="34" name="Wire2B_23">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="35" name="Wire2B_24">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="36" name="Wire2B_25">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="37" name="Wire2B_26">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="38" name="Wire2B_27">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="39" name="Wire2B_28">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="40" name="Wire2B_last">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="41" name="Wire3B_first">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="42" name="Wire3B_1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="43" name="Wire3B_2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="44" name="Wire3B_3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="45" name="Wire3B_4">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="46" name="Wire3B_5">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="47" name="Wire3B_6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="48" name="Wire3B_7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="49" name="Wire3B_8">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="50" name="Wire3B_9">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="51" name="Wire3B_10">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="52" name="Wire3B_11">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="53" name="Wire3B_12">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="54" name="Wire3B_13">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="55" name="Wire3B_14">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="56" name="Wire3B_15">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="57" name="Wire3B_16">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="58" name="Wire3B_17">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="59" name="Wire3B_18">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="60" name="Wire3B_19">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="61" name="Wire3B_20">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="62" name="Wire3B_21">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="63" name="Wire3B_22">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="64" name="Wire3B_23">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="65" name="Wire3B_24">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="66" name="Wire3B_25">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="67" name="Wire3B_26">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="68" name="Wire3B_27">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="69" name="Wire3B_28">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="70" name="Wire3B_last">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="71" name="Wire4B_first">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="72" name="Wire4B_1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="73" name="Wire4B_2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="74" name="Wire4B_3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="75" name="Wire4B_4">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="76" name="Wire4B_5">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="77" name="Wire4B_6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="78" name="Wire4B_7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="79" name="Wire4B_8">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="80" name="Wire4B_9">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="81" name="Wire4B_10">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="82" name="Wire4B_11">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="83" name="Wire4B_12">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="84" name="Wire4B_13">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="85" name="Wire4B_14">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="86" name="Wire4B_15">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="87" name="Wire4B_16">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="88" name="Wire4B_17">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="89" name="Wire4B_18">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="90" name="Wire4B_last">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="91" name="platform1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="92" name="plat1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="93" name="mod1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="94" name="p1cav1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="95" name="p1cav2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="96" name="p1cav3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="97" name="p1cav4">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="98" name="p1cav5">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="99" name="platform2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="100" name="plat2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="101" name="mod2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="102" name="p2cav1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="103" name="p2cav2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="104" name="p2cav3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="105" name="platform3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="106" name="plat3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="107" name="mod3">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="108" name="p3cav1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="109" name="p3cav2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="110" name="platform6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="111" name="plat6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="112" name="mod6">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="113" name="p6cav1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="114" name="p6cav2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="115" name="platform7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="116" name="plat7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="117" name="mod7">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="118" name="p7cav1">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="119" name="p7cav2">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="120" name="buendel1a">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+  <Body id="121" name="buendel1b">
+    <Position>0.0, 0.0, 0.0</Position>
+    <Rotation>0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0</Rotation>
+    <ExternalForces>0.0, 0.0, 0.0</ExternalForces>
+    <ExternalMoments>0.0, 0.0, 0.0</ExternalMoments>
+    <LinearVelocity>0.0, 0.0, 0.0, 0.0, 0.0, 0.0</LinearVelocity>
+  </Body>
+</SimulationConfigurationBody>
