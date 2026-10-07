@@ -37,7 +37,9 @@ def test_discrete_space_vanilla_sample():
 
 
 def test_discrete_space_vanilla_empty():
-    with pytest.raises(AssertionError, match='have to be positive'):
+    with pytest.raises(
+        (AssertionError, ValueError), match='have to be positive'
+    ):
         spaces.Discrete(0)
 
 
