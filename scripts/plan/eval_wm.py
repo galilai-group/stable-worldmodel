@@ -15,15 +15,16 @@ from omegaconf import DictConfig, OmegaConf
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 import stable_worldmodel as swm
+from stable_worldmodel.wm.tdmpc2 import TDMPC2
 
 
-def img_transform(cfg, dtype=torch.float32):
+def img_transform(cfg, dtype=torch.float32, image_size=None):
     transform = transforms.Compose(
         [
             transforms.ToImage(),
             transforms.ToDtype(dtype, scale=True),
             transforms.Normalize(**spt.data.dataset_stats.ImageNet),
-            transforms.Resize(size=cfg.eval.img_size),
+            transforms.Resize(size=image_size or cfg.eval.img_size),
         ]
     )
     return transform
@@ -63,6 +64,94 @@ def get_dataset(cfg, dataset_name):
     return dataset
 
 
+def make_model_policy(cfg, model, stats_dataset):
+    """Build the evaluation policy in the model's training coordinates."""
+    is_tdmpc2 = isinstance(model, TDMPC2)
+    if is_tdmpc2 and cfg.plan_config.get('action_block', 1) != 1:
+        raise ValueError(
+            'TD-MPC2 plans individual raw actions; set plan_config.action_block=1.'
+        )
+    if is_tdmpc2 and cfg.plan_config.get('history_len', 1) != 1:
+        raise ValueError(
+            'TD-MPC2 uses the current observation; set plan_config.history_len=1.'
+        )
+    if is_tdmpc2 and model.cfg.get('preprocessing') is None:
+        raise ValueError(
+            'This TD-MPC2 checkpoint has no saved training preprocessing. '
+            'Use a checkpoint with the original training statistics and '
+            'goal_obs_key in model.cfg.preprocessing; evaluation data '
+            'cannot recover these statistics.'
+        )
+
+    process = {}
+    if is_tdmpc2:
+        saved = model.cfg.preprocessing
+        for key, stats in saved.statistics.items():
+            mean = np.atleast_1d(np.asarray(stats['mean']))
+            std = np.atleast_1d(np.asarray(stats['std']))
+            if key == saved.goal_obs_key:
+                means = np.split(mean, 2)
+                scales = np.split(std, 2)
+                keys = (key, f'goal_{key}')
+            else:
+                means, scales, keys = [mean], [std], [key]
+            for column, column_mean, column_std in zip(keys, means, scales):
+                processor = preprocessing.StandardScaler()
+                processor.mean_ = column_mean
+                processor.scale_ = column_std
+                processor.n_features_in_ = len(column_mean)
+                process[column] = processor
+    else:
+        for col in cfg.dataset.keys_to_cache:
+            if col == 'pixels':
+                continue
+            processor = preprocessing.StandardScaler()
+            col_data = stats_dataset.get_col_data(col)
+            col_data = col_data[~np.isnan(col_data).any(axis=1)]
+            processor.fit(col_data)
+            process[col] = processor
+            if col != 'action':
+                process[f'goal_{col}'] = processor
+
+    transform = {}
+    if not is_tdmpc2 or model.use_pixels:
+        img_dtype = torch.bfloat16 if cfg.get('bf16', False) else torch.float32
+        image_size = model.cfg.image_size if is_tdmpc2 else None
+        transform = {
+            key: img_transform(cfg, img_dtype, image_size)
+            for key in ('pixels', 'goal')
+        }
+
+    if cfg.get('compile', False):
+        if is_tdmpc2:
+            model.get_cost = torch.compile(model.get_cost)
+        else:
+            encoder_attr = (
+                'backbone' if hasattr(model, 'backbone') else 'encoder'
+            )
+            setattr(
+                model,
+                encoder_attr,
+                torch.compile(getattr(model, encoder_attr)),
+            )
+            model.predictor = torch.compile(model.predictor)
+
+    if is_tdmpc2:
+        # Restore observation coordinates before solvers cast to model dtype.
+        # TD-MPC2 consumes raw actions, so no action inverse transform is used.
+        cost = model
+    else:
+        objective = hydra.utils.instantiate(cfg.objective)
+        cost = swm.planning.ShootingCostEvaluator(model, objective)
+    solver = hydra.utils.instantiate(cfg.solver, cost=cost)
+    return swm.policy.WorldModelPolicy(
+        solver=solver,
+        config=swm.PlanConfig(**cfg.plan_config),
+        process=process,
+        transform=transform,
+    )
+
+
 @hydra.main(version_base=None, config_path='./config', config_name='pusht')
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
@@ -75,32 +164,12 @@ def run(cfg: DictConfig):
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
     world = swm.World(**cfg.world, image_shape=(224, 224))
 
-    # create the transform
-    img_dtype = torch.bfloat16 if cfg.get('bf16', False) else torch.float32
-    transform = {
-        'pixels': img_transform(cfg, img_dtype),
-        'goal': img_transform(cfg, img_dtype),
-    }
-
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
     stats_dataset = dataset  # get_dataset(cfg, cfg.dataset.stats)
     col_name = episode_col(dataset)
     ep_indices, _ = np.unique(
         stats_dataset.get_col_data(col_name), return_index=True
     )
-
-    process = {}
-    for col in cfg.dataset.keys_to_cache:
-        if col in ['pixels']:
-            continue
-        processor = preprocessing.StandardScaler()
-        col_data = stats_dataset.get_col_data(col)
-        col_data = col_data[~np.isnan(col_data).any(axis=1)]
-        processor.fit(col_data)
-        process[col] = processor
-
-        if col != 'action':
-            process[f'goal_{col}'] = process[col]
 
     # -- run evaluation
     policy = cfg.get('policy', 'random')
@@ -113,23 +182,7 @@ def run(cfg: DictConfig):
         model = model.eval()
         model.requires_grad_(False)
         model.interpolate_pos_encoding = True
-        if cfg.get('compile', False):
-            encoder_attr = (
-                'backbone' if hasattr(model, 'backbone') else 'encoder'
-            )
-            setattr(
-                model,
-                encoder_attr,
-                torch.compile(getattr(model, encoder_attr)),
-            )
-            model.predictor = torch.compile(model.predictor)
-        config = swm.PlanConfig(**cfg.plan_config)
-        objective = hydra.utils.instantiate(cfg.objective)
-        cost = swm.planning.ShootingCostEvaluator(model, objective)
-        solver = hydra.utils.instantiate(cfg.solver, cost=cost)
-        policy = swm.policy.WorldModelPolicy(
-            solver=solver, config=config, process=process, transform=transform
-        )
+        policy = make_model_policy(cfg, model, stats_dataset)
 
     else:
         policy = swm.policy.RandomPolicy()
