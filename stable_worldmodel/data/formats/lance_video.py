@@ -1,9 +1,9 @@
-"""Lance video format: tabular frames + per-episode MP4 blobs (Lance blob v2).
+"""Lance video format: tabular frames + per-episode MP4 blobs.
 
 Where the :mod:`lance` format stores one JPEG per frame in a ``pa.binary``
 column, this format keeps image columns as **compressed video**: each episode
 is encoded to an MP4 and stored verbatim in a Lance ``large_binary`` column
-marked with the ``lance-encoding:blob`` metadata (blob v2). At read time
+marked with the legacy ``lance-encoding:blob`` metadata. At read time
 :py:meth:`lance.LanceDataset.take_blobs` streams the bytes without
 materializing them into Arrow buffers, and torchcodec decodes just the frames
 a window needs. The idea is borrowed from the ``lerobot-lancedb`` plugin's
@@ -426,7 +426,7 @@ class LanceVideoWriter:
     """Append episodes; image columns become one MP4 blob per episode.
 
     Image columns (names ``pixels`` / ``pixels_<view>`` or uint8 HxWxC arrays)
-    are encoded to MP4 and stored in the ``_videos`` table as blob-v2
+    are encoded to MP4 and stored in the ``_videos`` table as legacy blob
     ``large_binary``. Everything else lands in the frames table as fixed-size
     float32 lists, exactly like :class:`~stable_worldmodel.data.formats.lance.LanceWriter`.
     Episode-scoped data (the ``EPISODE_DATA_KEY`` entry of an episode dict)
@@ -704,7 +704,12 @@ class LanceVideoWriter:
                 schema=self._frames_schema,
             )
             self._db.create_table(
-                self.videos_name, data=videos_batch, schema=videos_schema
+                self.videos_name,
+                data=videos_batch,
+                schema=videos_schema,
+                # Legacy blob metadata is not writable in file format 2.2+.
+                # Keep the existing schema and streaming reader compatible.
+                storage_options={'new_table_data_storage_version': '2.1'},
             )
         if self._episode_rows:
             rows, self._episode_rows = self._episode_rows, []

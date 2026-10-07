@@ -201,7 +201,7 @@ class Embedder(nn.Module):
         """
         x: (B, T, D)
         """
-        x = x.float()
+        x = x.to(self.patch_embed.weight.dtype)
         x = x.permute(0, 2, 1)
         x = self.patch_embed(x)
         x = x.permute(0, 2, 1)
