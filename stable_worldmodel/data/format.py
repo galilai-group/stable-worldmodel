@@ -14,6 +14,8 @@ Read-only formats simply omit `open_writer`; write-only formats omit
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
@@ -111,6 +113,33 @@ def detect_format(path) -> type[Format] | None:
         if fmt.detect(path):
             return fmt
     return None
+
+
+# Suffixes handled by formats that only register when their extra is
+# installed. Used to make "No format detected" actionable when the path
+# plainly belongs to one of them (a fresh install without ``[format]`` hits
+# this on every ``.h5`` dataset).
+_SUFFIX_FORMATS = {
+    '.h5': 'hdf5',
+    '.hdf5': 'hdf5',
+    '.mp4': 'video',
+    '.mkv': 'video',
+    '.avi': 'video',
+}
+
+
+def unregistered_format_hint(path) -> str:
+    """Explain a failed auto-detection when the path's suffix belongs to a
+    format whose optional dependencies are missing; empty string otherwise."""
+    suffix = Path(path).suffix.lower()
+    name = _SUFFIX_FORMATS.get(suffix)
+    if name is None or name in FORMATS:
+        return ''
+    extra = _OPTIONAL_FORMAT_EXTRAS.get(name, 'format')
+    return (
+        f' The {name!r} format is not registered (its optional dependencies'
+        f' are missing): pip install "stable-worldmodel[{extra}]"'
+    )
 
 
 class Format:

@@ -85,6 +85,7 @@ def load_dataset(
         FORMATS,
         detect_format,
         get_format,
+        unregistered_format_hint,
     )
 
     name = str(name)
@@ -109,6 +110,7 @@ def load_dataset(
     if fmt is None:
         raise ValueError(
             f'No format detected for {path!r}; pass format= explicitly.'
+            + unregistered_format_hint(path)
         )
     return fmt.open_reader(path, **kwargs)
 

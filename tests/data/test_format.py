@@ -788,3 +788,20 @@ class TestCollectFormat:
                 world.collect(tmp_path / 'x', episodes=1, format='nonexistent')
         finally:
             world.envs.close()
+
+
+class TestUnregisteredFormatHint:
+    def test_hint_for_h5_when_hdf5_missing(self, monkeypatch, tmp_path):
+        from stable_worldmodel.data import format as fmt
+
+        monkeypatch.delitem(fmt.FORMATS, 'hdf5', raising=False)
+        hint = fmt.unregistered_format_hint(tmp_path / 'data.h5')
+        assert "'hdf5' format is not registered" in hint
+        assert 'stable-worldmodel[format]' in hint
+
+    def test_no_hint_when_format_registered_or_suffix_unknown(self, tmp_path):
+        from stable_worldmodel.data import format as fmt
+
+        if 'hdf5' in fmt.FORMATS:
+            assert fmt.unregistered_format_hint(tmp_path / 'data.h5') == ''
+        assert fmt.unregistered_format_hint(tmp_path / 'data.txt') == ''
