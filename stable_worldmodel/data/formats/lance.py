@@ -837,13 +837,24 @@ class LanceDataset(Dataset):
                 )
                 big_batch = unique_batch.take(gather)
 
-            # Decode each fetched image column once over the deduped rows;
-            # overlapping windows then gather shared frames instead of
-            # re-decoding the same blob per window.
+            # Decode each fetched image column once over the deduped rows a
+            # window actually keeps (every frameskip-th); overlapping windows
+            # then gather shared frames instead of re-decoding the same blob.
+            image_rows = sorted(
+                {
+                    r
+                    for _, g in sample_meta
+                    for r in range(g, g + self.span, self.frameskip)
+                }
+            )
+            image_pos = {row: i for i, row in enumerate(image_rows)}
+            image_batch = unique_batch.take(
+                pa.array([unique_pos[r] for r in image_rows], type=pa.int64())
+            )
             for col in self.image_columns:
                 if col in self._cache:
                     continue
-                blobs = self._extract_column(unique_batch, col)
+                blobs = self._extract_column(image_batch, col)
                 if isinstance(blobs, np.ndarray):
                     blobs = blobs.tolist()
                 decoded_images[col] = self._decode_images(blobs)
@@ -859,7 +870,7 @@ class LanceDataset(Dataset):
                 window_rows = range(
                     g_start, g_start + self.span, self.frameskip
                 )
-                gather_idx = [unique_pos[r] for r in window_rows]
+                gather_idx = [image_pos[r] for r in window_rows]
                 steps = self._process_batch(
                     ep_idx,
                     g_start,
