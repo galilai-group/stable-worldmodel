@@ -90,6 +90,23 @@ def test_writer_roundtrip(tmp_path):
     assert sample['proprio'].shape == (1, 3)
 
 
+def test_missing_keys_error_lists_available_columns(tmp_path):
+    # Regression for #316: requesting a column the table lacks (e.g. the
+    # released pusht_expert has no `reward`) must raise an error that names
+    # the available columns, not just the missing ones.
+    out = tmp_path / 'demo.lance'
+    _write_demo(out)
+
+    with pytest.raises(KeyError) as excinfo:
+        LanceDataset(path=out, keys_to_load=['action', 'reward'])
+
+    msg = str(excinfo.value)
+    assert 'reward' in msg
+    assert 'available columns' in msg.lower()
+    for col in ('action', 'pixels', 'proprio'):
+        assert col in msg
+
+
 def test_image_column_autodetected(tmp_path):
     out = tmp_path / 'demo.lance'
     _write_demo(out)

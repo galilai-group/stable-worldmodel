@@ -218,6 +218,26 @@ class TestHDF5Writer:
         assert ep0['pixels'].shape == (5, 3, 8, 8)  # NCHW
         assert ep0['proprio'].shape == (5, 4)
 
+    def test_missing_keys_to_load_error_lists_available_columns(
+        self, tmp_path, two_episodes
+    ):
+        # Regression for #316: requesting a column the file lacks (the
+        # released pusht_expert has no `reward`) must fail at open time with
+        # an error naming the available columns, not later with a bare
+        # h5py key error (or not at all).
+        out = tmp_path / 'missing_key.h5'
+        with HDF5Writer(out) as w:
+            for ep in two_episodes:
+                w.write_episode(ep)
+
+        with pytest.raises(KeyError) as excinfo:
+            HDF5Dataset(path=out, keys_to_load=['action', 'reward'])
+
+        msg = str(excinfo.value)
+        assert 'reward' in msg
+        assert 'available columns' in msg.lower()
+        assert 'action' in msg
+
     def test_string_column_roundtrip(self, tmp_path):
         # A per-step text column (e.g. a `lang_instr` caption) must be stored as
         # a variable-length UTF-8 string and decode back to a python `str` on

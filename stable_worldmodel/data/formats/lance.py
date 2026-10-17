@@ -394,7 +394,8 @@ class LanceDataset(Dataset):
         missing = [k for k in self._keys if k not in available]
         if missing:
             raise KeyError(
-                f"Columns {missing} missing from Lance table '{resolved_name}'"
+                f'Columns {missing} missing from Lance table '
+                f"'{resolved_name}'; available columns: {available}"
             )
 
         binary_cols = {

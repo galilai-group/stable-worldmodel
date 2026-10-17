@@ -60,9 +60,21 @@ class HDF5Dataset(Dataset):
 
         with self._open_h5() as f:
             lengths, offsets = f['ep_len'][:], f['ep_offset'][:]
-            self._keys = keys_to_load or [
+            available = [
                 k for k in f.keys() if k not in ('ep_len', 'ep_offset')
             ]
+            self._keys = keys_to_load or available
+            # Reject explicitly requested keys the file does not contain at
+            # all (index metadata like `ep_len` stays loadable, mirroring
+            # the pre-existing behavior), so the failure names the columns
+            # the file actually has instead of surfacing later as a bare
+            # h5py key error.
+            missing = [k for k in self._keys if k not in f.keys()]
+            if missing:
+                raise KeyError(
+                    f'Columns {missing} missing from HDF5 file '
+                    f"'{self.h5_path}'; available columns: {available}"
+                )
 
             for key in keys_to_cache or []:
                 self._cache[key] = f[key][:]
