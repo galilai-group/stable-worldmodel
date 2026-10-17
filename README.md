@@ -43,6 +43,11 @@ image — are not forced to install ~410 MB of native wheels they never import.
 
 LeRobot dataset support is a separate opt-in extra (requires Python 3.12+): `pip install 'stable-worldmodel[lerobot]'`.
 
+Single-environment extras install only what that environment imports, skipping the
+simulators whose native builds fail on some systems (`labmaze`, `box2d-py`):
+`pip install 'stable-worldmodel[env-tworoom]'` or `pip install 'stable-worldmodel[env-pusht]'`.
+`[env]` remains the full set.
+
 From source (development):
 
 ```bash

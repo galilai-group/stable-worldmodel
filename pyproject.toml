@@ -65,6 +65,24 @@ env = [
     "ale-py",
 ]
 
+# Per-environment extras: only what the environment imports, without the
+# simulators whose native builds fail on stock pip images (gymnasium[all]
+# pulls labmaze and box2d-py; ale-py and craftax are heavy too). `env` stays
+# the full set, so these are strictly optional subsets.
+env-tworoom = [
+    "pygame",
+    "pymunk",
+    "shapely",
+    "opencv-python-headless",
+]
+
+env-pusht = [
+    "pygame",
+    "pymunk",
+    "shapely",
+    "opencv-python-headless",
+]
+
 format = [
     "h5py",
     "hdf5plugin",
