@@ -177,12 +177,18 @@ class ReacherDMControlWrapper(DMControlWrapper):
 
     def reset(self, seed=None, options=None):
         obs, info = super().reset(seed=seed, options=options)
-        if self._task_name == 'qpos_match' and options is not None:
-            target_qpos = options.get('target_qpos')
+        if self._task_name == 'qpos_match':
+            target_qpos = (
+                None if options is None else options.get('target_qpos')
+            )
             if target_qpos is not None:
                 self.env.task.target_qpos = np.asarray(
                     target_qpos, dtype=np.float64
                 )
+            else:
+                # Clear any stale target from a previous episode so that a
+                # plain reset() never terminates on the old goal.
+                self.env.task.target_qpos = None
         return obs, info
 
     def _is_terminated(self, step) -> bool:

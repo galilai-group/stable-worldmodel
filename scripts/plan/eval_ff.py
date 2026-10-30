@@ -3,7 +3,8 @@
 import os
 
 
-os.environ['MUJOCO_GL'] = 'egl'
+# Respect a user-provided backend (e.g. 'glfw' on macOS, where EGL is unavailable).
+os.environ.setdefault('MUJOCO_GL', 'egl')
 
 
 import time
