@@ -13,7 +13,6 @@ from stable_worldmodel.envs.dmcontrol.custom_tasks.walker import (
 )
 from stable_worldmodel.envs.dmcontrol.dmcontrol import DMControlWrapper
 
-
 _CONTROL_TIMESTEP = 0.025
 _DEFAULT_TIME_LIMIT = 25
 
@@ -58,6 +57,9 @@ class WalkerDMControlWrapper(DMControlWrapper):
             model_dir=suite_dir,
             assets=assets or {},
         )
+        self._floor_position = np.asarray(
+            self._mjcf_model.find('geom', 'floor').pos, dtype=np.float32
+        ).copy()
         self.compile_model(seed=seed, environment_kwargs=environment_kwargs)
         super().__init__(self.env, 'walker')
         self.variation_space = swm_space.Dict(
@@ -302,17 +304,21 @@ class WalkerDMControlWrapper(DMControlWrapper):
         floor_geom.friction = new_friction
 
         # Modify floor rotation
-        floor_orientation_changed = False
         desired_angle = np.deg2rad(
             self.variation_space['floor']['rotation_y'].value[0]
         )
         c = np.cos(desired_angle)
         s = np.sin(desired_angle)
-        # rotate around y axis
         desired_zaxis = np.array([s, 0.0, c], dtype=np.float32)
-        if not np.allclose(floor_geom.zaxis, desired_zaxis):
-            floor_orientation_changed = True
+        x, y, z = self._floor_position
+        desired_position = np.array(
+            [c * x + s * z, y, -s * x + c * z], dtype=np.float32
+        )
+        floor_pose_changed = not np.allclose(
+            floor_geom.zaxis, desired_zaxis
+        ) or not np.allclose(floor_geom.pos, desired_position)
         floor_geom.zaxis = desired_zaxis
+        floor_geom.pos = desired_position
 
         mass_changed = False
         # Modify torso density
@@ -357,7 +363,7 @@ class WalkerDMControlWrapper(DMControlWrapper):
             or friction_changed
             or mass_changed
             or agent_color_changed
-            or floor_orientation_changed
+            or floor_pose_changed
         ):
             self.mark_dirty()
         return mjcf_model
