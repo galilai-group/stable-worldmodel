@@ -77,6 +77,22 @@ def _foreign_devices() -> list[str]:
 FOREIGN_DEVICES = _foreign_devices()
 
 
+def _make_solver(solver_cls, device: str, **kwargs):
+    """Build ``solver_cls`` to plan on ``device``.
+
+    The constructor seeds a ``torch.Generator`` on its device, and
+    ``init_action`` draws noise with that generator on ``self.device``, so a
+    real device must be passed to the constructor. ``torch.Generator``
+    rejects ``'meta'``, so a meta solver is built on the CPU and only its
+    ``.device`` (a plain attribute read later) is moved.
+    """
+    if device == 'meta':
+        solver = solver_cls(cost=DummyCost(), **kwargs)
+        solver.device = device
+        return solver
+    return solver_cls(cost=DummyCost(), device=device, **kwargs)
+
+
 def _box_setup(n_envs: int, horizon: int, action_dim: int):
     action_space = Box(low=-1, high=1, shape=(1, action_dim), dtype=np.float32)
     config = PlanConfig(
@@ -181,12 +197,10 @@ def test_gradient_based_init_action_warm_start_on_foreign_device(
     # avoids trying to materialize real data out of a data-less tensor (a
     # limitation of 'meta' as a CPU-only device stand-in, not something the
     # real bug depends on); on a real 'cuda' node this exercises exactly the
-    # warm-started-on-GPU scenario from the bug report. Constructed with the
-    # default 'cpu' device (torch.Generator rejects device='meta') and
-    # overridden after __init__, since `.device` is a plain attribute only
-    # consulted later.
-    solver = solver_cls(cost=DummyCost(), num_samples=3, **ctor_kwargs)
-    solver.device = other_device
+    # warm-started-on-GPU scenario from the bug report.
+    solver = _make_solver(
+        solver_cls, other_device, num_samples=3, **ctor_kwargs
+    )
     solver.configure(action_space=action_space, n_envs=n_envs, config=config)
 
     warm_start = torch.zeros(
@@ -212,8 +226,7 @@ def test_pgd_init_action_warm_start_on_foreign_device(other_device):
     n_envs, horizon, n_categories = 2, 5, 4
     action_space, config = _discrete_setup(n_envs, horizon, n_categories)
 
-    solver = PGDSolver(cost=DummyCost(), n_steps=3, num_samples=3)
-    solver.device = other_device
+    solver = _make_solver(PGDSolver, other_device, n_steps=3, num_samples=3)
     solver.configure(action_space=action_space, n_envs=n_envs, config=config)
 
     warm_start = torch.zeros(
