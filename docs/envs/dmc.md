@@ -604,8 +604,12 @@ uv add stable-baselines3
 
 ```python
 import os
+import sys
 
-os.environ['MUJOCO_GL'] = 'egl'
+# MuJoCo accepts the 'egl' backend only on Linux; on other platforms keep
+# whatever the user (or MuJoCo's default) chose.
+if sys.platform.startswith('linux'):
+    os.environ.setdefault('MUJOCO_GL', 'egl')
 
 import stable_worldmodel as swm
 from stable_worldmodel.envs.dmcontrol import ExpertPolicy
