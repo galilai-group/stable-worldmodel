@@ -53,6 +53,7 @@ from stable_worldmodel.data.formats.lance import (
     _force_forkserver,
     _is_image_name,
     _settle_episode_keys,
+    _split_lance_path,
     _to_lance_name,
 )
 
@@ -240,12 +241,10 @@ class LanceVideoDataset(LanceDataset):
 
     @staticmethod
     def _resolve(loc: str, table_name: str | None) -> tuple[str, str]:
-        stripped = loc.rstrip('/')
-        if stripped.lower().endswith('.lance'):
-            sep = stripped.rfind('/')
-            parent = stripped[:sep] if sep >= 0 else '.'
-            leaf = stripped[sep + 1 :] if sep >= 0 else stripped
-            return parent, leaf[: -len('.lance')]
+        split = _split_lance_path(loc)
+        if split is not None:
+            return split
+        stripped = loc.rstrip('/\\')
         if table_name is not None:
             return stripped, table_name
         p = Path(stripped)
@@ -448,7 +447,7 @@ class LanceVideoWriter:
         mode: str = 'append',
     ) -> None:
         validate_write_mode(mode)
-        loc = str(path).rstrip('/')
+        loc = str(path).rstrip('/\\')
         if table_name is not None:
             self.uri = loc
             self.table_name = table_name
@@ -731,7 +730,7 @@ class LanceVideo(Format):
 
     @classmethod
     def detect(cls, path) -> bool:
-        p = Path(str(path).rstrip('/'))
+        p = Path(str(path).rstrip('/\\'))
         return p.is_dir() and any(p.glob('*_videos.lance'))
 
     @classmethod
