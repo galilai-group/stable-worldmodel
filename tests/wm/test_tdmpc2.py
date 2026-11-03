@@ -1,3 +1,5 @@
+import random
+
 import pytest
 import torch
 
@@ -102,3 +104,27 @@ def test_training_forward_updates_running_scale(stage):
 
     assert not torch.equal(model.scale.value, scale_before)
     assert not torch.equal(_target_q_state(model), target_q_before)
+
+
+def test_forward_accepts_rewards_with_trailing_dim():
+    """Lance datasets give the scalar reward column shape (B, T, 1)."""
+    cfg = _make_config()
+    model = TDMPC2(cfg)
+    batch = _make_batch(cfg)
+
+    def loss(reward):
+        random.seed(0)
+        torch.manual_seed(0)
+        out = tdmpc2_forward(
+            _ForwardContext(model),
+            {**batch, 'reward': reward},
+            stage='validate',
+            cfg=cfg,
+        )
+        return out['loss']
+
+    flat = loss(batch['reward'])
+    with_dim = loss(batch['reward'].unsqueeze(-1))
+
+    assert torch.isfinite(with_dim)
+    assert torch.equal(with_dim, flat)

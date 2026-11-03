@@ -54,6 +54,10 @@ class SaveCkptCallback(Callback):
         )
 
 
+def _zscore(x, mean, std):
+    return ((x - mean.to(x.device)) / std.to(x.device)).float()
+
+
 def get_column_normalizer(dataset, source, target):
     """Z-score normalization transform computed from the full dataset column."""
     data = torch.from_numpy(dataset.get_col_data(source)[:])
@@ -64,11 +68,11 @@ def get_column_normalizer(dataset, source, target):
     )
     mean, std = mean.squeeze(), std.squeeze() + 1e-2
 
-    def norm_fn(x):
-        return ((x - mean.to(x.device)) / std.to(x.device)).float()
-
+    # A partial of a module-level function, not a closure: the transform
+    # lives on the dataset, which DataLoader workers started with `spawn`
+    # (the default on Windows and macOS) must be able to pickle.
     return spt.data.transforms.WrapTorchTransform(
-        norm_fn, source=source, target=target
+        partial(_zscore, mean=mean, std=std), source=source, target=target
     )
 
 
@@ -122,10 +126,10 @@ def run(cfg):
                 f'cfg.goal_obs_key="{goal_obs_key}" must be one of the encoding keys {encoding_keys}.'
             )
         _raw_obs = base_dataset.get_col_data(goal_obs_key)[:]
-        _ep_off = (
-            base_dataset.get_col_data('ep_offset')[:].flatten().astype(int)
-        )
-        _ep_len = base_dataset.get_col_data('ep_len')[:].flatten().astype(int)
+        # Every reader exposes episode boundaries as `offsets`/`lengths`;
+        # only HDF5 also stores them as `ep_offset`/`ep_len` columns.
+        _ep_off = np.asarray(base_dataset.offsets).flatten().astype(int)
+        _ep_len = np.asarray(base_dataset.lengths).flatten().astype(int)
         _goal_idx = np.clip(_ep_off + _ep_len - 1, 0, len(_raw_obs) - 1)
         goals_by_step = np.empty_like(_raw_obs)
         for _ep, (_off, _len) in enumerate(
@@ -179,9 +183,7 @@ def run(cfg):
             _std = aug_clean.std(0).clone() + 1e-2
             transforms.append(
                 spt.data.transforms.WrapTorchTransform(
-                    lambda x, m=_mean, s=_std: (
-                        (x - m.to(x.device)) / s.to(x.device)
-                    ).float(),
+                    partial(_zscore, mean=_mean, std=_std),
                     source=key,
                     target=key,
                 )
@@ -200,7 +202,7 @@ def run(cfg):
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=cfg.num_workers > 0,
     )
 
     val_loader = DataLoader(
@@ -208,7 +210,7 @@ def run(cfg):
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=cfg.num_workers > 0,
     )
 
     model = hydra.utils.instantiate(cfg.model)
