@@ -1,4 +1,6 @@
 import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -326,6 +328,56 @@ class TDMPC2(nn.Module):
         return -total_return.view(B, N)
 
 
+def uses_collect_reward_convention(reward, offsets) -> bool:
+    """Detect the reward convention of datasets recorded with ``World.collect``.
+
+    ``World.collect`` stores ``reward[t] = r(s_{t-1}, a_{t-1})`` and the
+    episode-wrapper writes ``np.nan`` at reset, so the first row of every
+    episode has a NaN reward. The online TD-MPC2 loop instead stores
+    ``r(s_t, a_t)`` on row ``t``. This function returns True only for the
+    collect convention, fingerprinted by a NaN reward on the first row of
+    every episode.
+
+    Args:
+        reward: Full reward column as a numpy array of shape ``(N,)`` or ``(N, dim)``.
+        offsets: Episode start offsets into the flat reward array.
+
+    Returns:
+        True if the first row of every episode has a NaN reward and there is
+        at least one episode; False otherwise.
+    """
+    reward = np.asarray(reward)
+    offsets = np.asarray(offsets).flatten().astype(int)
+    if offsets.size == 0 or reward.shape[0] == 0:
+        return False
+    return bool(np.isnan(reward[offsets]).all())
+
+
+def shift_reward_to_action_alignment(x: torch.Tensor) -> torch.Tensor:
+    """Shift a reward window so row ``t`` holds ``r(s_t, a_t)``.
+
+    Dataset clips never cross episode boundaries (clip starts are drawn from
+    ``range(length - span + 1)``), so shifting within the window is exact for
+    every row but the last one. The last row holds its own (always finite)
+    value; it is one step behind the final action, whose reward does not
+    exist because that action is never executed, and is never consumed by
+    :func:`tdmpc2_forward` (which reads shifted rows ``0..horizon-1``).
+
+    Args:
+        x: Reward window tensor of shape ``(T,)`` or ``(T, dim)``. A trailing
+            size-1 dim (Lance stores scalar columns as ``(T, 1)``) is dropped,
+            so ``tdmpc2_forward`` receives the ``(B, T)`` rewards it indexes.
+
+    Returns:
+        The shifted tensor.
+    """
+    if x.ndim > 1 and x.shape[-1] == 1:
+        x = x.squeeze(-1)
+    if x.shape[0] < 2:
+        return x
+    return torch.cat([x[1:], x[-1:]], dim=0)
+
+
 def tdmpc2_forward(self, batch, stage, cfg):
     """Forward pass and loss computation for TD-MPC2.
 
@@ -471,6 +523,8 @@ def tdmpc2_forward(self, batch, stage, cfg):
 __all__ = [
     'TDMPC2',
     'tdmpc2_forward',
+    'shift_reward_to_action_alignment',
+    'uses_collect_reward_convention',
     'two_hot',
     'two_hot_inv',
     'log_std',
