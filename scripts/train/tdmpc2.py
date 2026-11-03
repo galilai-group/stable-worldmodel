@@ -12,7 +12,11 @@ from omegaconf import OmegaConf, open_dict
 from torch.utils.data import DataLoader
 import numpy as np
 
-from stable_worldmodel.wm.tdmpc2 import tdmpc2_forward
+from stable_worldmodel.wm.tdmpc2 import (
+    shift_reward_to_action_alignment,
+    tdmpc2_forward,
+    uses_collect_reward_convention,
+)
 from stable_worldmodel.wm.utils import save_pretrained
 
 logger = logging.getLogger(__name__)
@@ -166,6 +170,27 @@ def run(cfg):
                 model_cfg.extra_dims[key] = base_dataset.get_dim(key)
 
     transforms = []
+
+    # Datasets recorded with World.collect store reward[t] = r(s_{t-1}, a_{t-1})
+    # with NaN on each episode's first row, while tdmpc2_forward trains
+    # reward_pred(z_t, a_t) against r(s_t, a_t) (issue #357). Shift the reward
+    # one row back within each episode so row t holds r(s_t, a_t).
+    if uses_collect_reward_convention(
+        base_dataset.get_col_data('reward')[:], base_dataset.offsets
+    ):
+        logger.info(
+            'Dataset rewards follow the World.collect convention '
+            '(r(s_{t-1}, a_{t-1}) with NaN on episode starts); shifting '
+            'rewards one row back within each episode to align with actions.'
+        )
+        transforms.append(
+            spt.data.transforms.WrapTorchTransform(
+                shift_reward_to_action_alignment,
+                source='reward',
+                target='reward',
+            )
+        )
+
     if use_pixels:
         transforms.append(
             get_img_preprocessor('pixels', 'pixels', model_cfg.image_size)
