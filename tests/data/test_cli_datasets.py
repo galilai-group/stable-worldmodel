@@ -190,6 +190,49 @@ def test_convert_missing_dataset_errors(cache_root):
     assert 'not found' in result.output.lower()
 
 
+@pytest.mark.parametrize(
+    'dest_format, output, on_disk',
+    [
+        ('hdf5', 'conv', 'conv.h5'),
+        ('hdf5', 'conv.h5', 'conv.h5'),
+        ('lance', 'conv', 'conv.lance'),
+        ('lance', 'conv.lance', 'conv.lance'),
+    ],
+)
+def test_convert_output_gets_format_suffix(
+    dest_format, output, on_disk, cache_root
+):
+    """``swm convert`` must write a file-or-table format where its readers
+    and ``inspect`` look: hdf5 at ``<name>.h5``, lance at ``<name>.lance``.
+    Without the suffix, hdf5 output was invisible to ``datasets``/``inspect``
+    and lance output failed in LanceWriter."""
+    if dest_format not in list_formats():
+        pytest.skip(f'format {dest_format!r} not registered')
+    _build_folder(cache_root, 'src')
+
+    result = runner.invoke(app, ['convert', 'src', output, '-f', dest_format])
+    assert result.exit_code == 0, result.output
+    assert (cache_root / on_disk).exists()
+
+    inspect = runner.invoke(app, ['inspect', 'conv'])
+    assert inspect.exit_code == 0, inspect.output
+    assert 'Episodes: 2' in inspect.output
+
+
+def test_merge_output_with_suffix_is_not_doubled(cache_root):
+    """``-o combined.lance`` names the dataset, not ``combined.lance.lance``."""
+    _needs('lancedb')
+    _build_lance(cache_root, 'shard0')
+    _build_lance(cache_root, 'shard1')
+
+    result = runner.invoke(
+        app, ['merge', 'shard0', 'shard1', '-o', 'combined.lance']
+    )
+    assert result.exit_code == 0, result.output
+    assert (cache_root / 'combined.lance').is_dir()
+    assert not (cache_root / 'combined.lance.lance').exists()
+
+
 def test_merge_combines_shards(cache_root):
     """``swm merge`` concatenates two shards into a single dataset that the
     listing and inspect then see, with the summed episode/step counts."""
