@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import logging
+import ntpath
 import os
 import re
 import warnings
@@ -82,6 +83,21 @@ def _to_lance_name(name: str) -> str:
 
 def _is_image_name(name: str) -> bool:
     return name == 'pixels' or name.startswith('pixels_')
+
+
+def _split_lance_path(loc: str) -> tuple[str, str] | None:
+    """Split ``<parent>/<name>.lance`` into ``(parent, name)``.
+
+    ``loc`` may be a URI (``s3://…``, ``hf://…``) whose ``//`` pathlib would
+    collapse, so this uses ``ntpath``: it splits on ``/`` and ``\\``, keeps
+    roots such as ``C:\\`` and ``/`` intact, and behaves the same on every
+    OS. Returns ``None`` when ``loc`` does not end in ``.lance``.
+    """
+    stripped = loc.rstrip('/\\')
+    if not stripped.lower().endswith('.lance'):
+        return None
+    parent, leaf = ntpath.split(stripped)
+    return parent or '.', leaf[: -len('.lance')]
 
 
 def _encode_frame(frame: np.ndarray, jpeg_quality: int) -> bytes:
@@ -569,15 +585,9 @@ class LanceDataset(Dataset):
         if table_name is not None:
             return loc, table_name
 
-        stripped = loc.rstrip('/')
-        if stripped.lower().endswith('.lance'):
-            sep = stripped.rfind('/')
-            parent, leaf = (
-                (stripped[:sep], stripped[sep + 1 :])
-                if sep >= 0
-                else ('.', stripped)
-            )
-            return parent, leaf[: -len('.lance')]
+        split = _split_lance_path(loc)
+        if split is not None:
+            return split
 
         # Directory holding a single *.lance subdir. `_episodes` /
         # `_videos` siblings are companion tables, never the frames table.
@@ -971,7 +981,7 @@ class LanceWriter:
         mode: str = 'append',
     ):
         validate_write_mode(mode)
-        loc = str(path).rstrip('/')
+        loc = str(path).rstrip('/\\')
         if table_name is None:
             if loc.lower().endswith('.lance'):
                 p = Path(loc)
@@ -1368,7 +1378,7 @@ class Lance(Format):
 
     @classmethod
     def detect(cls, path) -> bool:
-        s = str(path).rstrip('/')
+        s = str(path).rstrip('/\\')
         if s.lower().endswith('.lance'):
             return True
         p = Path(s)

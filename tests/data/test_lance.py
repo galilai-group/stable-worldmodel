@@ -16,6 +16,7 @@ from stable_worldmodel.data import (
     EPISODE_DATA_KEY,
     GoalDataset,
     LanceDataset,
+    LanceVideoDataset,
     LanceWriter,
     convert,
     detect_format,
@@ -71,6 +72,42 @@ def test_lance_detect(tmp_path):
     # Parent directory holding the .lance also detects.
     fmt_parent = detect_format(tmp_path)
     assert fmt_parent is not None and fmt_parent.name == 'lance'
+
+
+@pytest.mark.parametrize(
+    'loc, expected',
+    [
+        ('demo.lance', ('.', 'demo')),
+        ('data/demo.lance', ('data', 'demo')),
+        ('/home/me/data/demo.lance/', ('/home/me/data', 'demo')),
+        (r'C:\Users\me\data\demo.lance', (r'C:\Users\me\data', 'demo')),
+        ('C:\\Users\\me\\data\\demo.lance\\', (r'C:\Users\me\data', 'demo')),
+        ('C:/Users/me/data/demo.lance', ('C:/Users/me/data', 'demo')),
+        # A table at a root keeps the root, not a drive-relative 'C:' or ''.
+        ('/demo.lance', ('/', 'demo')),
+        (r'C:\demo.lance', ('C:\\', 'demo')),
+        (r'\\server\share\demo.lance', ('\\\\server\\share\\', 'demo')),
+        ('s3://bucket/data/demo.lance', ('s3://bucket/data', 'demo')),
+        ('hf://buckets/org/swm/demo.lance', ('hf://buckets/org/swm', 'demo')),
+    ],
+)
+@pytest.mark.parametrize(
+    'resolve',
+    [LanceDataset._resolve_uri_and_table, LanceVideoDataset._resolve],
+    ids=['LanceDataset', 'LanceVideoDataset'],
+)
+def test_resolve_lance_path(resolve, loc, expected):
+    """A ``.lance`` path splits into (database uri, table name) on ``/`` and
+    ``\\`` alike, without mangling URI schemes."""
+    assert resolve(loc, None) == expected
+
+
+def test_trailing_backslash_lance_path(tmp_path):
+    """Windows shells tab-complete a directory with a trailing ``\\``."""
+    loc = str(tmp_path / 'demo.lance') + '\\'
+    _write_demo(loc, ep_lengths=(3,))
+    assert detect_format(loc).name == 'lance'
+    assert len(LanceDataset(loc).lengths) == 1
 
 
 def test_writer_roundtrip(tmp_path):
