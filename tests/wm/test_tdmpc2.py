@@ -160,7 +160,7 @@ def test_collect_convention_reward_breaks_loss_until_realigned():
     cfg = _make_config()
     model = TDMPC2(cfg)
     batch = _make_batch(cfg)
-    batch_size, num_steps = batch['reward'].shape
+    batch_size = batch['reward'].shape[0]
 
     # Emulate World.collect: reward[t] = reward of row t-1, NaN on row 0.
     collect = batch['reward'].clone()
@@ -177,7 +177,10 @@ def test_collect_convention_reward_breaks_loss_until_realigned():
     # Fix: shift rewards one row back within each window (the fix applied by
     # scripts/train/tdmpc2.py for collect-recorded datasets, per sample).
     batch['reward'] = torch.stack(
-        [shift_reward_to_action_alignment(collect[b]) for b in range(collect.shape[0])]
+        [
+            shift_reward_to_action_alignment(collect[b])
+            for b in range(collect.shape[0])
+        ]
     )
     output = tdmpc2_forward(
         _ForwardContext(model), batch, stage='validate', cfg=cfg
