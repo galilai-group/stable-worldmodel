@@ -144,7 +144,7 @@ class Discrete(spaces.Discrete):
         Raises:
             RuntimeError: If no valid sample is found within max_tries.
         """
-        start = time.time()
+        start = time.perf_counter()
         for i in range(max_tries):
             sample = super().sample(mask=mask)
             if self.contains(sample):
@@ -153,7 +153,7 @@ class Discrete(spaces.Discrete):
                 return sample
             if (
                 warn_after_s is not None
-                and (time.time() - start) > warn_after_s
+                and (time.perf_counter() - start) > warn_after_s
             ):
                 logger.warning(
                     'rejection sampling: rejection sampling is taking a while...'
@@ -277,7 +277,7 @@ class MultiDiscrete(spaces.MultiDiscrete):
         Raises:
             RuntimeError: If no valid sample is found within max_tries.
         """
-        start = time.time()
+        start = time.perf_counter()
         for i in range(max_tries):
             sample = super().sample(mask=mask)
             if self.contains(sample):
@@ -286,7 +286,7 @@ class MultiDiscrete(spaces.MultiDiscrete):
                 return sample
             if (
                 warn_after_s is not None
-                and (time.time() - start) > warn_after_s
+                and (time.perf_counter() - start) > warn_after_s
             ):
                 logger.warning(
                     'rejection sampling: rejection sampling is taking a while...'
@@ -414,7 +414,7 @@ class Box(spaces.Box):
         Raises:
             RuntimeError: If no valid sample is found within max_tries.
         """
-        start = time.time()
+        start = time.perf_counter()
         for i in range(max_tries):
             sample = super().sample(mask=mask)
             if self.contains(sample):
@@ -423,7 +423,7 @@ class Box(spaces.Box):
                 return sample
             if (
                 warn_after_s is not None
-                and (time.time() - start) > warn_after_s
+                and (time.perf_counter() - start) > warn_after_s
             ):
                 logger.warning(
                     'rejection sampling: rejection sampling is taking a while...'
@@ -705,7 +705,7 @@ class Dict(spaces.Dict):
         Raises:
             RuntimeError: If no valid sample is found within max_tries.
         """
-        start = time.time()
+        start = time.perf_counter()
         for i in range(max_tries):
             sample: dict = {}
 
@@ -725,7 +725,7 @@ class Dict(spaces.Dict):
 
             if (
                 warn_after_s is not None
-                and (time.time() - start) > warn_after_s
+                and (time.perf_counter() - start) > warn_after_s
             ):
                 logger.warning('rejection sampling is taking a while...')
 
