@@ -82,11 +82,11 @@ Rendering MP4s needs the optional video stack; install it with `pip install "sta
 
 ## `swm convert <name> [output]`
 
-Convert a dataset to another storage format (e.g. HDF5 → video). The source format is auto-detected through the format registry — `lance`, `lance_video`, `hdf5`, `folder`, `video`, `lerobot` — and the converted copy is written next to the source in your cache directory.
+Convert a dataset to another storage format (e.g. HDF5 → video). The source format is auto-detected through the format registry — `lance`, `lance_video`, `hdf5`, `folder`, `video`, `lerobot` — and the converted copy is written next to the source in your cache directory. `hdf5` and `lance` outputs get their file suffix (`pusht_h5` → `pusht_h5.h5`), so the copy is found by name like any other dataset.
 
 ```bash
 swm convert pusht_expert_train                    # → pusht_expert_train-video
-swm convert pusht_expert_train pusht_h5 -f hdf5   # explicit output name
+swm convert pusht_expert_train pusht_h5 -f hdf5   # → pusht_h5.h5
 ```
 
 ```

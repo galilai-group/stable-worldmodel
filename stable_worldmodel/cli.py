@@ -215,6 +215,25 @@ def _format_label(path, fmt) -> str:
     return _FORMAT_LABELS.get(fmt.name, fmt.name)
 
 
+# A plain `lance` table must live at `<name>.lance` and hdf5 at `<name>.h5`
+# (the LanceWriter/HDF5Writer path contract, and what `inspect`/`datasets`
+# resolve). Other formats (lance_video, folder, video) take a directory.
+_OUTPUT_SUFFIX = {'lance': ('.lance',), 'hdf5': ('.h5', '.hdf5')}
+
+
+def _output_path(cache_dir, name, dest_format):
+    """Cache path for an output dataset *name* written in *dest_format*.
+
+    Adds the suffix the format's writer and the name resolution expect,
+    unless *name* already ends in one, so ``-o pusht`` and ``-o pusht.lance``
+    both give ``pusht.lance``.
+    """
+    suffixes = _OUTPUT_SUFFIX.get(dest_format, ())
+    if suffixes and not name.lower().endswith(suffixes):
+        name += suffixes[0]
+    return cache_dir / name
+
+
 def _resolve_dataset_path(cache_dir, name):
     """Resolve a dataset *name* to its on-disk entry via the format registry,
     or ``None`` if nothing recognizable exists.
@@ -832,7 +851,7 @@ def convert(
         raise typer.Exit(1)
 
     dest_name = output if output is not None else f'{name}-{dest_format}'
-    dest_path = cache_dir / dest_name
+    dest_path = _output_path(cache_dir, dest_name, dest_format)
 
     print(
         f'Converting [cyan]{name}[/cyan] → [magenta]{dest_format}[/magenta] as [cyan]{dest_name}[/cyan]'
@@ -912,11 +931,7 @@ def merge(
         dest_format = detect_format(source_paths[0]).name
 
     write_mode = mode or ('overwrite' if overwrite else 'error')
-    # A plain `lance` table must live at `<name>.lance` and hdf5 at `<name>.h5`
-    # (the LanceWriter/HDF5Writer path contract, and what `inspect`/`datasets`
-    # resolve). Other formats (lance_video, folder, video) take a directory.
-    suffix = {'lance': '.lance', 'hdf5': '.h5'}.get(dest_format, '')
-    dest_path = cache_dir / f'{output}{suffix}'
+    dest_path = _output_path(cache_dir, output, dest_format)
 
     names = ', '.join(f'[cyan]{n}[/cyan]' for n in sources)
     print(
