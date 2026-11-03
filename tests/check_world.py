@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 
 import gymnasium as gym
 import h5py
@@ -11,7 +12,8 @@ from datasets import load_from_disk
 import stable_worldmodel as swm
 
 
-os.environ['MUJOCO_GL'] = 'egl'
+if sys.platform.startswith('linux'):
+    os.environ.setdefault('MUJOCO_GL', 'egl')
 swm_env = [
     env_id for env_id in gym.envs.registry.keys() if env_id.startswith('swm/')
 ]

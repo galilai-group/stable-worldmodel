@@ -20,7 +20,8 @@ import stable_worldmodel as swm
 
 BASE_ASSET_ROOT_PATH = '~/robocasa/robocasa/models/assets/objects'
 
-os.environ['MUJOCO_GL'] = 'egl'
+if sys.platform.startswith('linux'):
+    os.environ.setdefault('MUJOCO_GL', 'egl')
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 RCASA_CONTROLLER_INPUT_LIMS = np.array([1.0, -1])

@@ -2,11 +2,12 @@
 
 import logging
 import os
+import sys
 
-os.environ['MUJOCO_GL'] = 'egl'
+if sys.platform.startswith('linux'):
+    os.environ.setdefault('MUJOCO_GL', 'egl')
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any
 

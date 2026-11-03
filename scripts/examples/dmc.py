@@ -1,6 +1,8 @@
 import os
+import sys
 
-os.environ['MUJOCO_GL'] = 'egl'
+if sys.platform.startswith('linux'):
+    os.environ.setdefault('MUJOCO_GL', 'egl')
 
 import stable_worldmodel as swm
 from stable_worldmodel.envs.dmcontrol import ExpertPolicy
