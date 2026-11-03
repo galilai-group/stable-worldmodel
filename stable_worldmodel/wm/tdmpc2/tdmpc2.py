@@ -361,9 +361,14 @@ def tdmpc2_forward(self, batch, stage, cfg):
     discount = cfg.wm.get('discount', 0.99)
     entropy_coef = cfg.wm.get('entropy_coef', 1e-4)
 
+    # Lance datasets give scalar columns a trailing dim of 1: (B, T, 1).
+    rewards = batch['reward']
+    if rewards.ndim == 3:
+        rewards = rewards.squeeze(-1)
+
     for t in range(cfg.wm.horizon):
         action = batch['action'][:, t]
-        reward = batch['reward'][:, t]
+        reward = rewards[:, t]
 
         next_z_pred, reward_pred = self.model.forward(z, action)
 
