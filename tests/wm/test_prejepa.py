@@ -7,6 +7,7 @@ convention that consumed the first ``n_obs`` optimizer candidates as
 past actions.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,9 @@ from stable_worldmodel.planning import (
 )
 from stable_worldmodel.protocols import Dynamics
 from stable_worldmodel.wm.prejepa.prejepa import PreJEPA
+
+# tests/wm/test_prejepa.py -> repo root, so file loads don't depend on the cwd
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Small dims: batch, samples, patches, pixel-embedding dim, action dim
 RB, RS, RP, RDP, RA = 2, 3, 2, 4, 2
@@ -342,7 +346,8 @@ def test_shipped_objective_configs_match_legacy_get_cost():
     info = _split_info()
 
     cfg = OmegaConf.load(
-        'scripts/plan/config/objective/goal_mse_pixels_proprio.yaml'
+        REPO_ROOT
+        / 'scripts/plan/config/objective/goal_mse_pixels_proprio.yaml'
     )
     objective = hydra.utils.instantiate(cfg)
 
