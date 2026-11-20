@@ -153,6 +153,29 @@ world = swm.World('swm/OGBCube-v0', num_envs=4, env_type='double', multiview=Tru
 obs = world.reset()
 ```
 
+### Custom cameras
+
+The Cube environment also accepts its cameras as a list of configurations. They replace the built-in ones (`DEFAULT_CAMERAS` in `stable_worldmodel.envs.ogbench.cube_env`). Each entry needs `name`, `pos` and `xyaxes`; other fields such as `fovy` are passed to the MJCF camera. With more than one camera, every view is rendered and stored under `pixels.<name>`, in the given order; `render()` uses the first.
+
+```python
+import numpy as np
+from stable_worldmodel.envs.ogbench.cube_env import DEFAULT_CAMERAS
+
+# a stereo pair: the default view and a copy 6 cm along its x axis
+front = DEFAULT_CAMERAS['front_pixels']
+right_pos = np.array(front['pos']) + 0.06 * np.array(front['xyaxes'][:3])
+cameras = [
+    {'name': 'left', **front},
+    {'name': 'right', 'pos': tuple(right_pos), 'xyaxes': front['xyaxes']},
+]
+
+world = swm.World('swm/OGBCube-v0', num_envs=4, image_shape=(224, 224), cameras=cameras)
+world.reset()
+world.infos['pixels.left'], world.infos['pixels.right']
+```
+
+The `camera.angle_delta` variation then has one row per configured camera.
+
 ## Expert Policy
 
 The Cube and Scene environments include a built-in expert policy for data collection:
