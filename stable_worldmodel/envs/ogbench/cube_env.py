@@ -46,6 +46,26 @@ DEFAULT_VARIATIONS = (
     'cube.goal_yaw',
 )
 
+# Cameras of the scene unless ``CubeEnv(cameras=...)`` overrides them.
+DEFAULT_CAMERAS = {
+    'front': {
+        'pos': (1.287, 0.000, 0.509),
+        'xyaxes': (0.000, 1.000, 0.000, -0.342, 0.000, 0.940),
+    },
+    'front_pixels': {
+        'pos': (1.053, -0.014, 0.639),
+        'xyaxes': (0.000, 1.000, 0.000, -0.628, 0.001, 0.778),
+    },
+    'side_pixels': {
+        'pos': (0.414, -0.753, 0.639),
+        'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
+    },
+    'side': {
+        'pos': (1.287, 0.000, 0.509),
+        'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
+    },
+}
+
 
 class CubeEnv(ManipSpaceEnv):
     """Robotic manipulation environment with cube objects and multiple task variants.
@@ -100,6 +120,7 @@ class CubeEnv(ManipSpaceEnv):
         multiview=False,
         height=224,
         width=224,
+        cameras=None,
         *args,
         **kwargs,
     ):
@@ -122,16 +143,36 @@ class CubeEnv(ManipSpaceEnv):
             multiview (bool, optional): Whether to render the scene from both front
                 and side camera views simultaneously. Returns stacked images when True.
                 Defaults to False.
+            cameras (list[dict], optional): Camera configurations that override
+                ``DEFAULT_CAMERAS``. Each entry has a ``name`` plus the MJCF
+                camera attributes (e.g. ``pos``, ``xyaxes``, ``fovy``). The first
+                one is the default view of ``render()``. Defaults to None.
             *args: Variable length argument list passed to parent ManipSpaceEnv.
             **kwargs: Arbitrary keyword arguments passed to parent ManipSpaceEnv.
 
         Raises:
-            ValueError: If env_type is not one of the supported values.
+            ValueError: If env_type is not one of the supported values, or a
+                camera configuration has no name or a repeated one.
 
         Note:
             The variation_space is automatically configured with appropriate ranges
             for all visual variations including colors, sizes, lighting, and cameras.
         """
+        if cameras is None:
+            self.cameras = {k: dict(v) for k, v in DEFAULT_CAMERAS.items()}
+            self._default_camera = 'front_pixels'
+        else:
+            self.cameras = {}
+            for config in cameras:
+                config = dict(config)
+                name = config.pop('name', None)
+                if name is None or name in self.cameras:
+                    raise ValueError(
+                        'each camera needs a unique `name`, got '
+                        f'{[c.get("name") for c in cameras]}.'
+                    )
+                self.cameras[name] = config
+            self._default_camera = next(iter(self.cameras))
         self._env_type = env_type
         self._permute_blocks = permute_blocks
         self._multiview = multiview
@@ -896,25 +937,6 @@ class CubeEnv(ManipSpaceEnv):
             )
 
         # Add cameras.
-        self.cameras = {
-            'front': {
-                'pos': (1.287, 0.000, 0.509),
-                'xyaxes': (0.000, 1.000, 0.000, -0.342, 0.000, 0.940),
-            },
-            'front_pixels': {
-                'pos': (1.053, -0.014, 0.639),
-                'xyaxes': (0.000, 1.000, 0.000, -0.628, 0.001, 0.778),
-            },
-            'side_pixels': {
-                'pos': (0.414, -0.753, 0.639),
-                'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
-            },
-            'side': {
-                'pos': (1.287, 0.000, 0.509),
-                'xyaxes': (1.000, 0.000, 0.000, -0.001, 0.628, 0.778),
-            },
-        }
-
         for camera_name, camera_kwargs in self.cameras.items():
             arena_mjcf.worldbody.add(
                 'camera', name=camera_name, **camera_kwargs
@@ -1036,6 +1058,8 @@ class CubeEnv(ManipSpaceEnv):
             else ['front_pixels']
         )
         for i, cam_name in enumerate(cameras_to_vary):
+            if cam_name not in self.cameras:  # overridden via `cameras`
+                continue
             cam = mjcf_model.find('camera', cam_name)
             cam.xyaxes = perturb_camera_angle(
                 self.cameras[cam_name]['xyaxes'],
@@ -1602,7 +1626,7 @@ class CubeEnv(ManipSpaceEnv):
 
     def render(
         self,
-        camera='front_pixels',
+        camera=None,
         *args,
         **kwargs,
     ):
@@ -1613,7 +1637,8 @@ class CubeEnv(ManipSpaceEnv):
 
         Args:
             camera (str, optional): Camera name to render from. Defaults to
-                'front_pixels'. Supports any camera defined in self.cameras
+                'front_pixels', or to the first camera when the cameras were
+                overridden. Supports any camera defined in self.cameras
                 (e.g., 'front_pixels', 'side_pixels').
             *args: Additional positional arguments passed to parent render method.
             **kwargs: Additional keyword arguments passed to parent render method.
@@ -1626,11 +1651,12 @@ class CubeEnv(ManipSpaceEnv):
             For rendering from multiple cameras simultaneously, use the
             `render_multiview()` method instead.
         """
+        camera = camera or self._default_camera
         return super().render(camera=camera, *args, **kwargs)
 
     def render_multiview(
         self,
-        camera='front_pixels',
+        camera=None,
         *args,
         **kwargs,
     ):

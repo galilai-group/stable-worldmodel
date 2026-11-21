@@ -606,6 +606,32 @@ class FakeEvalDataset:
         }
 
 
+class MultiViewEnv(CounterEnv):
+    """CounterEnv with two views and no plain ``pixels`` key."""
+
+    def _make_info(self, terminated):
+        info = super()._make_info(terminated)
+        frame = info.pop('pixels')
+        info.pop('goal')
+        info['pixels.left'] = frame
+        info['pixels.right'] = frame + 100
+        return info
+
+
+class MultiViewEvalDataset(FakeEvalDataset):
+    """FakeEvalDataset whose image columns are ``pixels.<view>``."""
+
+    column_names = ['pixels.left', 'pixels.right', 'proprio', 'states', 'seed']
+
+    def load_chunk(self, episodes_idx, start, end):
+        chunks = super().load_chunk(episodes_idx, start, end)
+        for chunk in chunks:
+            frames = chunk.pop('pixels')
+            chunk['pixels.left'] = frames
+            chunk['pixels.right'] = frames + 50
+        return chunks
+
+
 def _make_world_with(env_fns):
     pool = EnvPool(env_fns)
     world = object.__new__(World)
@@ -649,6 +675,40 @@ class TestExtractInitGoal:
         assert init_rows[0]['pixels'].shape == (3, 3, 3)
         assert len(videos) == 2
         assert videos[0].shape == (4, 3, 3, 3)
+
+
+class TestEvaluateFromMultiViewDataset:
+    def test_extract_rows_per_view(self):
+        init_rows, goal_rows, videos = _extract_init_goal(
+            MultiViewEvalDataset(), [0, 1], [0, 0], 3
+        )
+        # every view gets an init frame and a goal frame, HWC
+        assert init_rows[0]['pixels.left'].shape == (3, 3, 3)
+        assert goal_rows[0]['goal_pixels.right'].shape == (3, 3, 3)
+        assert 'goal' not in goal_rows[0]
+        # the panel video falls back to the first view
+        assert len(videos) == 2
+        assert int(videos[1].max()) == 2
+
+    def test_evaluate_without_plain_pixels(self, tmp_path):
+        world = _make_world_with([lambda: MultiViewEnv(3) for _ in range(2)])
+        results = world.evaluate(
+            dataset=MultiViewEvalDataset(),
+            episodes_idx=[0, 1],
+            start_steps=[0, 0],
+            goal_offset=3,
+            eval_budget=5,
+            video=tmp_path,
+        )
+
+        assert results['success_rate'] == 100.0
+        for view, shift in (('left', 0), ('right', 50)):
+            goal = world.infos[f'goal_pixels.{view}']
+            assert goal.shape == (2, 1, 3, 3, 3)
+            assert int(goal[0].max()) == 1 + shift
+            assert int(goal[1].max()) == 2 + shift
+        assert 'goal' not in world.infos
+        assert list(tmp_path.iterdir())
 
 
 class TestEvaluateFromDataset:

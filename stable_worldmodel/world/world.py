@@ -56,6 +56,21 @@ from ..wrapper import MegaWrapper
 RESET_MODES = ('auto', 'wait')
 
 
+def _pixels_key(keys) -> str:
+    """Name of the main image among ``keys``.
+
+    ``'pixels'`` when present; otherwise the first ``pixels.<view>`` key, as
+    produced by multi-view envs.
+    """
+    keys = list(keys)
+    if 'pixels' in keys:
+        return 'pixels'
+    for key in keys:
+        if key.startswith('pixels'):
+            return key
+    raise KeyError("no 'pixels' or 'pixels.<view>' key found.")
+
+
 def _make_env(
     env_name, max_episode_steps, wrappers, add_pixels=True, **kwargs
 ):
@@ -492,7 +507,7 @@ class World:
         def on_step(world, mask):
             if frames is not None:
                 for i in range(world.num_envs):
-                    f = world.infos['pixels'][i]
+                    f = world.infos[_pixels_key(world.infos)][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
 
@@ -584,7 +599,7 @@ class World:
         # by name and columns with per-episode shapes are skipped — those
         # exist for the env resets, not for the planner infos.
         goal_keys = set(goal_rows[0]) if goal_rows else set()
-        shape_prefix = self.infos['pixels'].shape[:2]
+        shape_prefix = self.infos[_pixels_key(self.infos)].shape[:2]
         for rows in (init_rows, goal_rows):
             if not rows:
                 continue
@@ -613,13 +628,17 @@ class World:
             'seeds': seeds,
         }
         frames: dict[int, list] = defaultdict(list) if video else None
+        # goal image shown in the panel video: 'goal' for a `pixels` column,
+        # 'goal_<col>' for the first view of a multi-view dataset
+        video_col = _pixels_key(dataset.column_names)
+        goal_view = 'goal' if video_col == 'pixels' else f'goal_{video_col}'
 
         def on_step(world, mask):
             world.infos.update(deepcopy(goal_snapshot))
             results['episode_successes'] |= world.terminateds
             if frames is not None:
                 for i in range(world.num_envs):
-                    f = world.infos['pixels'][i]
+                    f = world.infos[_pixels_key(world.infos)][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
 
@@ -634,7 +653,7 @@ class World:
                 {
                     'agent': frames,
                     'dataset': dataset_videos,
-                    'goal': [row['goal'] for row in goal_rows],
+                    'goal': [row[goal_view] for row in goal_rows],
                 },
             )
         return results
@@ -650,8 +669,11 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
       scene XML — reported by ``dataset.episode_column_names``).
     - ``goal_rows[i]``: the last chunk step per per-step column, remapped to
       ``'goal'`` for ``pixels`` and ``'goal_<col>'`` otherwise.
-    - ``dataset_videos[i]``: the ``pixels`` window, for the eval panel video.
+    - ``dataset_videos[i]``: the ``pixels`` window (or the first
+      ``pixels.<view>`` column of a multi-view dataset), for the eval panel
+      video.
     """
+    video_col = _pixels_key(dataset.column_names)
     ep_idx_arr = np.array(episodes_idx)
     start_arr = np.array(start_steps)
     data = dataset.load_chunk(
@@ -681,7 +703,7 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
             arr = val.numpy() if isinstance(val, torch.Tensor) else val
             init_row[col] = arr[0]
             goal_row['goal' if col == 'pixels' else f'goal_{col}'] = arr[-1]
-            if col == 'pixels':
+            if col == video_col:
                 dataset_videos.append(arr)
         for col in episode_cols:
             init_row[col] = episode_data[col][i]
