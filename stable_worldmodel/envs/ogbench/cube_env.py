@@ -46,7 +46,7 @@ DEFAULT_VARIATIONS = (
     'cube.goal_yaw',
 )
 
-# Built-in cameras, used when ``CubeEnv(cameras=None)``.
+# Cameras of the scene unless ``CubeEnv(cameras=...)`` overrides them.
 DEFAULT_CAMERAS = {
     'front': {
         'pos': (1.287, 0.000, 0.509),
@@ -84,7 +84,7 @@ class CubeEnv(ManipSpaceEnv):
             One of: 'single', 'double', 'triple', 'quadruple', 'octuple'.
         _num_cubes (int): Number of cubes in the environment (1, 2, 3, 4, or 8).
         _permute_blocks (bool): Whether to randomly permute cube order at task init.
-        _multiview (bool): Whether to render from every camera in `cameras`.
+        _multiview (bool): Whether to render from both front and side cameras.
         _ob_type (str): Observation type, either 'pixels' or state-based.
         _cube_colors (ndarray): Array of RGB colors for cubes.
         _target_task (str): Task type identifier, set to 'cube'.
@@ -117,7 +117,7 @@ class CubeEnv(ManipSpaceEnv):
         env_type='single',
         ob_type='states',
         permute_blocks=True,
-        multiview=None,
+        multiview=False,
         height=224,
         width=224,
         cameras=None,
@@ -140,51 +140,42 @@ class CubeEnv(ManipSpaceEnv):
             permute_blocks (bool, optional): Whether to randomly shuffle the order
                 of cubes at the start of each episode. Helps with generalization.
                 Defaults to True.
-            multiview (bool, optional): Whether to render the scene from every
-                camera, as a dict keyed by camera name. Defaults to False, or to
-                True when more than one camera is configured through ``cameras``.
-            cameras (list[dict], optional): Camera configurations that replace the
-                built-in ``DEFAULT_CAMERAS``. Each entry needs ``name``, ``pos`` and
-                ``xyaxes``; any other field is passed to the MJCF camera element
-                (e.g. ``fovy``). ``render()`` uses the first camera by default and
-                multiview rendering returns all of them in order. Defaults to None
-                (the built-in cameras, with ``front_pixels`` as the default view).
+            multiview (bool, optional): Whether to render the scene from both front
+                and side camera views simultaneously. Returns stacked images when True.
+                Defaults to False.
+            cameras (list[dict], optional): Camera configurations that override
+                ``DEFAULT_CAMERAS``. Each entry has a ``name`` plus the MJCF
+                camera attributes (e.g. ``pos``, ``xyaxes``, ``fovy``). The first
+                one is the default view of ``render()``. Defaults to None.
             *args: Variable length argument list passed to parent ManipSpaceEnv.
             **kwargs: Arbitrary keyword arguments passed to parent ManipSpaceEnv.
 
         Raises:
-            ValueError: If env_type is not one of the supported values, or if
-                ``cameras`` is malformed or conflicts with ``multiview``.
+            ValueError: If env_type is not one of the supported values, or a
+                camera configuration has no name or a repeated one.
 
         Note:
             The variation_space is automatically configured with appropriate ranges
             for all visual variations including colors, sizes, lighting, and cameras.
         """
-        self._env_type = env_type
-        self._permute_blocks = permute_blocks
         if cameras is None:
             self.cameras = {k: dict(v) for k, v in DEFAULT_CAMERAS.items()}
             self._default_camera = 'front_pixels'
-            self._multiview = bool(multiview)
-            # cameras whose angle the `camera.angle_delta` variation perturbs
-            self._cameras_to_vary = (
-                ['front_pixels', 'side_pixels']
-                if self._multiview
-                else ['front_pixels']
-            )
         else:
-            self.cameras = self._parse_cameras(cameras)
-            names = list(self.cameras)
-            self._default_camera = names[0]
-            if multiview is None:
-                multiview = len(names) > 1
-            if len(names) > 1 and not multiview:
-                raise ValueError(
-                    'multiview=False conflicts with more than one camera '
-                    'in `cameras`.'
-                )
-            self._multiview = bool(multiview)
-            self._cameras_to_vary = names if self._multiview else names[:1]
+            self.cameras = {}
+            for config in cameras:
+                config = dict(config)
+                name = config.pop('name', None)
+                if name is None or name in self.cameras:
+                    raise ValueError(
+                        'each camera needs a unique `name`, got '
+                        f'{[c.get("name") for c in cameras]}.'
+                    )
+                self.cameras[name] = config
+            self._default_camera = next(iter(self.cameras))
+        self._env_type = env_type
+        self._permute_blocks = permute_blocks
+        self._multiview = multiview
         self.env_name = 'Cube'
 
         if self._env_type == 'single':
@@ -348,11 +339,11 @@ class CubeEnv(ManipSpaceEnv):
                         'angle_delta': swm_spaces.Box(
                             low=-10.0,
                             high=10.0,
-                            shape=(len(self._cameras_to_vary), 2),
+                            shape=(2, 2) if self._multiview else (1, 2),
                             dtype=np.float64,
-                            init_value=np.zeros(
-                                [len(self._cameras_to_vary), 2]
-                            ),
+                            init_value=np.zeros([2, 2])
+                            if self._multiview
+                            else np.zeros([1, 2]),
                         ),
                     }
                 ),
@@ -905,8 +896,7 @@ class CubeEnv(ManipSpaceEnv):
         Note:
             - Cubes are positioned with 0.05m spacing along the y-axis
             - Each cube has both a physical object and a semi-transparent target marker
-            - The cameras in `self.cameras` are added (`DEFAULT_CAMERAS` unless
-              `cameras` was passed to the constructor)
+            - Three cameras are added: 'front', 'front_pixels', and 'side_pixels'
             - All cube geoms are stored for later color and property modifications
         """
         # Add cube scene.
@@ -946,7 +936,7 @@ class CubeEnv(ManipSpaceEnv):
                 arena_mjcf.find('body', f'object_target_{i}').find_all('geom')
             )
 
-        # Add cameras (the built-in ones, or those passed as `cameras`).
+        # Add cameras.
         for camera_name, camera_kwargs in self.cameras.items():
             arena_mjcf.worldbody.add(
                 'camera', name=camera_name, **camera_kwargs
@@ -1062,7 +1052,14 @@ class CubeEnv(ManipSpaceEnv):
 
         # Perturb camera angle
         camera_angle_changed = False
-        for i, cam_name in enumerate(self._cameras_to_vary):
+        cameras_to_vary = (
+            ['front_pixels', 'side_pixels']
+            if self._multiview
+            else ['front_pixels']
+        )
+        for i, cam_name in enumerate(cameras_to_vary):
+            if cam_name not in self.cameras:  # overridden via `cameras`
+                continue
             cam = mjcf_model.find('camera', cam_name)
             cam.xyaxes = perturb_camera_angle(
                 self.cameras[cam_name]['xyaxes'],
@@ -1627,39 +1624,6 @@ class CubeEnv(ManipSpaceEnv):
         reward = float(sum(successes) - len(successes))
         return reward
 
-    @staticmethod
-    def _parse_cameras(cameras):
-        """Validate a list of camera configurations.
-
-        Args:
-            cameras (list[dict]): One dict per camera with ``name``, ``pos``,
-                ``xyaxes`` and optional extra MJCF camera attributes.
-
-        Returns:
-            dict: Camera name to MJCF camera attributes, in the given order.
-
-        Raises:
-            ValueError: If the list is empty, an entry lacks a required field,
-                or a name is repeated.
-        """
-        if not cameras:
-            raise ValueError('`cameras` must list at least one camera.')
-        parsed = {}
-        for config in cameras:
-            config = dict(config)
-            missing = [k for k in ('name', 'pos', 'xyaxes') if k not in config]
-            if missing:
-                raise ValueError(
-                    f'camera config {config} is missing {missing}.'
-                )
-            name = config.pop('name')
-            if name in parsed:
-                raise ValueError(f"duplicate camera name '{name}'.")
-            config['pos'] = tuple(config['pos'])
-            config['xyaxes'] = tuple(config['xyaxes'])
-            parsed[name] = config
-        return parsed
-
     def render(
         self,
         camera=None,
@@ -1673,8 +1637,9 @@ class CubeEnv(ManipSpaceEnv):
 
         Args:
             camera (str, optional): Camera name to render from. Defaults to
-                the default view: 'front_pixels' for the built-in cameras, or
-                the first entry of ``cameras`` when custom cameras were given.
+                'front_pixels', or to the first camera when the cameras were
+                overridden. Supports any camera defined in self.cameras
+                (e.g., 'front_pixels', 'side_pixels').
             *args: Additional positional arguments passed to parent render method.
             **kwargs: Additional keyword arguments passed to parent render method.
 
@@ -1697,23 +1662,28 @@ class CubeEnv(ManipSpaceEnv):
     ):
         """Render the current scene from multiple camera views or a fallback single view.
 
-        When multiview mode is enabled (`_multiview=True`), renders the scene
-        from every camera in `self.cameras` and returns the images as a
+        When multiview mode is enabled (`_multiview=True`), renders the scene from
+        both 'front_pixels' and 'side_pixels' cameras and returns them as a
         dictionary. When multiview is disabled, falls back to rendering from a
         single camera.
 
         Args:
             camera (str, optional): Camera name to use for fallback rendering when
-                multiview is disabled. Defaults to the default view. Ignored when
+                multiview is disabled. Defaults to 'front_pixels'. Ignored when
                 multiview is enabled.
             *args: Additional positional arguments passed to the render method.
             **kwargs: Additional keyword arguments passed to the render method.
 
         Returns:
-            dict or ndarray: If multiview is enabled, a dictionary with camera
-                names as keys, in the order of `self.cameras`, and rendered
-                images of shape (H, W, C) as values. If multiview is disabled,
-                a single rendered image array with shape (H, W, C).
+            dict or ndarray: If multiview is enabled, returns a dictionary with camera
+                names as keys ('front_pixels', 'side_pixels') and rendered images as
+                values, where each image has shape (H, W, C). If multiview is disabled,
+                returns a single rendered image array with shape (H, W, C).
+
+        Note:
+            The multiview dictionary format is useful for policies that process
+            multiple viewpoints separately. The 'front_pixels' camera provides an
+            oblique view while 'side_pixels' shows a perpendicular side view.
         """
 
         if not self._multiview:
