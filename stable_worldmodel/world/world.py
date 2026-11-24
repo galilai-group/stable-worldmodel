@@ -216,7 +216,7 @@ class World:
 
         Args:
             episodes: Total episodes to roll out (episodic mode).
-            seed: Base seed. Per-env seeds are derived by offsetting it.
+            seed: Base seed. Episode ``k`` is reset with ``seed + k``.
             options: Reset options forwarded to ``envs.reset``.
             video: Directory to write one mp4 per episode/env (optional).
             reset_mode: ``'auto'`` (reset terminated envs) or ``'wait'``
@@ -385,7 +385,7 @@ class World:
     ) -> None:
         """Drive the policy. Thin wrapper around :meth:`_run_iter` that
         invokes ``on_done(env_idx, ep_idx, world)`` for each completion."""
-        for env_idx, ep_count in self._run_iter(
+        for env_idx, ep_idx in self._run_iter(
             episodes=episodes,
             max_steps=max_steps,
             seed=seed,
@@ -394,7 +394,7 @@ class World:
             on_step=on_step,
         ):
             if on_done:
-                on_done(env_idx, ep_count, self)
+                on_done(env_idx, ep_idx, self)
 
     def _run_iter(
         self,
@@ -405,9 +405,13 @@ class World:
         mode: str = 'auto',
         on_step=None,
     ):
-        """Drive the policy and yield ``(env_idx, ep_count)`` on each
+        """Drive the policy and yield ``(env_idx, ep_idx)`` on each
         episode completion. Letting callers consume completions as a
         generator is what makes streaming writes possible without threading.
+
+        ``ep_idx`` indexes episodes in the order they start, and only the
+        first ``episodes`` of them are yielded. With a ``seed``, episode
+        ``ep_idx`` is reset with ``seed + ep_idx``.
 
         ``on_step(world, mask)`` fires after every step and after every
         reset (initial and per-env auto-reset), so callers see the reset
@@ -428,8 +432,11 @@ class World:
                 on_step(self, mask=np.ones(self.num_envs, dtype=bool))
 
         alive = np.ones(self.num_envs, dtype=bool)
-        next_seed = seed + self.num_envs if seed is not None else None
-        ep_count = 0
+        # Index episodes by start order. Taking the first `episodes` to
+        # finish instead would favour short episodes (e.g. early successes)
+        # when num_envs > 1: the long ones are still running at the cutoff.
+        ep_idx = np.arange(self.num_envs)
+        budget = np.inf if episodes is None else episodes
 
         for t in range(max_steps if max_steps is not None else 2**63):
             actions = self._get_actions()
@@ -446,24 +453,19 @@ class World:
             if not done.any():
                 continue
 
-            budget_reached = False
-            for i in np.where(done)[0]:
-                yield int(i), ep_count
-                ep_count += 1
-                if episodes is not None and ep_count >= episodes:
-                    budget_reached = True
-                    break
+            for i in np.where(done & (ep_idx < budget))[0]:
+                yield int(i), int(ep_idx[i])
 
             # Always reset the done envs before stopping. Returning straight
             # from the loop above would leave the env that completed the final
             # episode in its terminal state, so the next _run_iter/collect call
             # steps a dead env and records a spurious length-1 episode.
             if mode == 'auto':
+                ep_idx[done] = ep_idx.max() + 1 + np.arange(done.sum())
                 seeds = [None] * self.num_envs
-                if next_seed is not None:
-                    base = ep_count - int(done.sum())
-                    for rank, i in enumerate(np.where(done)[0]):
-                        seeds[i] = next_seed + base + rank
+                if seed is not None:
+                    for i in np.where(done)[0]:
+                        seeds[i] = seed + int(ep_idx[i])
                 _, self.infos = self.envs.reset(
                     seed=seeds, options=options, mask=done
                 )
@@ -475,7 +477,8 @@ class World:
             elif mode == 'wait':
                 alive[done] = False
 
-            if budget_reached or (mode == 'wait' and not alive.any()):
+            # Stop once no live env holds one of the first `episodes` episodes.
+            if not (alive & (ep_idx < budget)).any():
                 return
 
     def _get_actions(self) -> np.ndarray:
