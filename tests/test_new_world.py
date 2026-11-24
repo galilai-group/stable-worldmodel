@@ -560,6 +560,17 @@ class DatasetResetEnv(CounterEnv):
         return {}
 
 
+class SeedOutcomeEnv(CounterEnv):
+    """CounterEnv whose outcome is set by the seed: even seeds succeed on
+    the first step, odd seeds never succeed and are truncated at max_steps."""
+
+    def step(self, action):
+        obs, reward, timeout, _, info = super().step(action)
+        success = self._seed_val % 2 == 0
+        info['terminated'] = success
+        return obs, reward, success, timeout, info
+
+
 class FakeEvalDataset:
     """Two-episode dataset with per-episode-varying ``states`` dims plus
     episode-scoped blobs, mimicking the robocasa lance layout."""
@@ -732,6 +743,51 @@ class TestEvaluateFromDataset:
         np.testing.assert_array_equal(received[0][1], [6.0, 7.0])
         np.testing.assert_array_equal(received[1][0], [10.0, 11.0])
         np.testing.assert_array_equal(received[1][1], [16.0, 17.0])
+
+
+class TestEpisodeBudget:
+    """Regression tests: ``episodes=E`` must cover the first ``E`` episodes
+    to start (seeds ``seed..seed+E-1``) for any ``num_envs``, not the first
+    ``E`` to finish, which over-samples short episodes."""
+
+    def _world(self, num_envs, max_steps=6):
+        return _make_world_with(
+            [lambda: SeedOutcomeEnv(max_steps) for _ in range(num_envs)]
+        )
+
+    @pytest.mark.parametrize('num_envs', [1, 2, 4, 8])
+    def test_evaluate_success_rate(self, num_envs):
+        """Successes finish first, so scoring by finish order inflates the
+        success rate (100% with 8 envs here instead of 50%)."""
+        results = self._world(num_envs).evaluate(episodes=8, seed=10)
+
+        assert results['seeds'].tolist() == list(range(10, 18))
+        assert results['episode_successes'].tolist() == [1, 0] * 4
+        assert results['success_rate'] == 50.0
+
+    @pytest.mark.parametrize('num_envs', [2, 4, 8])
+    def test_evaluate_wait_mode(self, num_envs):
+        """With fewer episodes than envs, the scored envs are the first
+        ``episodes`` ones, not the first to terminate."""
+        results = self._world(num_envs).evaluate(
+            episodes=2, seed=11, reset_mode='wait'
+        )
+
+        assert results['seeds'].tolist() == [11, 12]
+        assert results['episode_successes'].tolist() == [0, 1]
+
+    @pytest.mark.parametrize('num_envs', [1, 2, 4, 8])
+    def test_collect_episode_lengths(self, num_envs):
+        """Collected data keeps the long episodes: 4 one-step successes and
+        4 six-step failures, each with its reset frame."""
+        from stable_worldmodel.data import ReplayBuffer
+
+        buf = ReplayBuffer(max_steps=64)
+        self._world(num_envs).collect(
+            writer=buf, episodes=8, seed=10, progress=False
+        )
+
+        assert sorted(buf.lengths.tolist()) == [2] * 4 + [7] * 4
 
 
 class TestCollectEpisodeData:
